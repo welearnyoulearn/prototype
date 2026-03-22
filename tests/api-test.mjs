@@ -73,11 +73,9 @@ async function testSchoolCreation() {
   const r4 = await api('PUT', `/api/schools/${sid}`, { name: '__TEST__ Springfield Academy Updated', status: 'active' })
   log('PUT /api/schools/:id — update school', r4.status === 200 && r4.data?.name?.includes('Updated'))
 
-  // Subscription
-  const r5 = await api('POST', `/api/schools/${sid}/subscription`, {
-    plan_type: 'premium', plan_start_date: today(), plan_end_date: '2027-03-22', plan_amount: 9999
-  })
-  log('POST /api/schools/:id/subscription — set subscription', r5.status === 200 || r5.status === 201)
+  // Subscription — route uses PUT with { tier }
+  const r5 = await api('PUT', `/api/schools/${sid}/subscription`, { tier: 'premium' })
+  log('PUT /api/schools/:id/subscription — set subscription tier', r5.status === 200 || r5.status === 201, `status=${r5.status}`)
 }
 
 // ─── 2. Teacher Management ────────────────────────────────────────────────────
@@ -153,16 +151,16 @@ async function testStudentManagement() {
   log('GET /api/students?school_id — list students',
     Array.isArray(r2.data) && r2.data.some(s => s.name?.startsWith('__TEST__')))
 
-  // Bulk import
+  // Bulk import — route returns { inserted: N, students: [...], errors: [] }
   const r3 = await api('POST', '/api/students/bulk', {
     school_id: sid,
     students: [
-      { name: '__TEST__ Student Two', roll_number: 'S002', grade: '9', section: 'A', parent_name: 'Parent Two', parent_phone: '9999900002' },
-      { name: '__TEST__ Student Three', roll_number: 'S003', grade: '9', section: 'B', parent_name: 'Parent Three', parent_phone: '9999900003' },
+      { name: '__TEST__ Student Two', grade: '9', section: 'A', parent_name: 'Parent Two', parent_phone: '9999900002' },
+      { name: '__TEST__ Student Three', grade: '9', section: 'B', parent_name: 'Parent Three', parent_phone: '9999900003' },
     ]
   })
-  log('POST /api/students/bulk — bulk import 2 students', r3.status === 200 || r3.status === 201)
-  if (Array.isArray(r3.data?.inserted)) r3.data.inserted.forEach(s => s?.id && cleanup.studentIds.push(s.id))
+  log('POST /api/students/bulk — bulk import 2 students', r3.status === 201 && r3.data?.inserted === 2, `status=${r3.status} inserted=${r3.data?.inserted}`)
+  if (Array.isArray(r3.data?.students)) r3.data.students.forEach(s => s?.id && cleanup.studentIds.push(s.id))
 
   // Update
   if (cleanup.studentIds[0]) {
@@ -206,13 +204,22 @@ async function testClassManagement() {
     log('PUT /api/classes/:id — update class', r3.status === 200)
   }
 
-  // Subjects
-  if (cleanup.classIds[0]) {
-    const r4 = await api('POST', `/api/classes/${cleanup.classIds[0]}/subjects`, {
-      school_id: sid,
-      subjects: ['Mathematics', 'Physics', 'English', 'History', 'Biology', 'Hindi']
-    })
-    log('POST /api/classes/:id/subjects — assign subjects', r4.status === 200 || r4.status === 201)
+  // Add subjects one at a time (API takes single subject per POST)
+  if (cleanup.classIds[0] && cleanup.teacherIds.length >= 6) {
+    const subjects = [
+      { subject_name: 'Mathematics', teacher_id: cleanup.teacherIds[0], periods_per_week: 5 },
+      { subject_name: 'Physics',     teacher_id: cleanup.teacherIds[1], periods_per_week: 4 },
+      { subject_name: 'English',     teacher_id: cleanup.teacherIds[2], periods_per_week: 4 },
+      { subject_name: 'History',     teacher_id: cleanup.teacherIds[3], periods_per_week: 3 },
+      { subject_name: 'Biology',     teacher_id: cleanup.teacherIds[4], periods_per_week: 4 },
+      { subject_name: 'Hindi',       teacher_id: cleanup.teacherIds[5], periods_per_week: 4 },
+    ]
+    let subOk = true
+    for (const s of subjects) {
+      const r = await api('POST', `/api/classes/${cleanup.classIds[0]}/subjects`, s)
+      if (r.status !== 201) subOk = false
+    }
+    log(`POST /api/classes/:id/subjects — add 6 subjects (one-by-one)`, subOk)
   }
 }
 
@@ -223,16 +230,22 @@ async function testCurriculum() {
   const sid = cleanup.schoolId
   if (!sid || cleanup.classIds.length === 0) { log('Curriculum tests skipped', false); return }
 
+  // Assign CBSE curriculum to grade 9 (required before timetable generation)
   const r = await api('POST', '/api/curriculum', {
     school_id: sid,
-    class_id: cleanup.classIds[0],
-    subject_name: 'Mathematics',
-    total_periods: 40,
+    grade: '9',
+    curriculum_type: 'CBSE',
+    auto_assign_subjects: false,   // we already added subjects manually
   })
-  log('POST /api/curriculum — add curriculum entry', r.status === 201 || r.status === 200, `status=${r.status}`)
+  log('POST /api/curriculum — assign CBSE curriculum to grade 9',
+    r.status === 200 || r.status === 201, `status=${r.status}`)
 
-  const r2 = await api('GET', `/api/curriculum?school_id=${sid}&class_id=${cleanup.classIds[0]}`)
-  log('GET /api/curriculum?school_id&class_id — list curriculum', Array.isArray(r2.data))
+  // Also assign for grade 10
+  await api('POST', '/api/curriculum', { school_id: sid, grade: '10', curriculum_type: 'CBSE' })
+
+  const r2 = await api('GET', `/api/curriculum?school_id=${sid}`)
+  log('GET /api/curriculum?school_id — list curriculum assignments',
+    Array.isArray(r2.data) && r2.data.length >= 2)
 }
 
 // ─── 6. Timetable Generation ──────────────────────────────────────────────────
@@ -244,41 +257,25 @@ async function testTimetableGeneration() {
     log('Timetable tests skipped', false); return
   }
 
-  // Generate timetable for class 9-A
+  // Generate timetable — only needs school_id (+ optional class_id to limit scope)
+  // Curriculum must be assigned first (done in step 5), class subjects must be set (done in step 4)
   const r = await api('POST', '/api/class-timetable/generate', {
     school_id: sid,
-    class_id: cleanup.classIds[0],
-    periods_per_day: 6,
-    days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
-    assignments: [
-      { subject_name: 'Mathematics', teacher_id: cleanup.teacherIds[0], periods_per_week: 5 },
-      { subject_name: 'Physics',     teacher_id: cleanup.teacherIds[1], periods_per_week: 4 },
-      { subject_name: 'English',     teacher_id: cleanup.teacherIds[2], periods_per_week: 4 },
-      { subject_name: 'History',     teacher_id: cleanup.teacherIds[3], periods_per_week: 3 },
-      { subject_name: 'Biology',     teacher_id: cleanup.teacherIds[4], periods_per_week: 4 },
-      { subject_name: 'Hindi',       teacher_id: cleanup.teacherIds[5], periods_per_week: 4 },
-    ],
-    break_after_period: 3,
-    break_label: 'Lunch Break',
-    period_times: [
-      { period: 1, time_from: '08:00', time_to: '08:45' },
-      { period: 2, time_from: '08:50', time_to: '09:35' },
-      { period: 3, time_from: '09:40', time_to: '10:25' },
-      { period: 4, time_from: '10:45', time_to: '11:30' },
-      { period: 5, time_from: '11:35', time_to: '12:20' },
-      { period: 6, time_from: '12:25', time_to: '13:10' },
-    ],
+    class_id: cleanup.classIds[0],   // limit to just 9-A for speed
+    replace_existing: true,
   })
-  log('POST /api/class-timetable/generate — generate class timetable',
-    r.status === 200 || r.status === 201, `status=${r.status}`)
+  log('POST /api/class-timetable/generate — generate timetable (CBSE grade 9)',
+    r.status === 200 || r.status === 201, `status=${r.status} msg=${r.data?.error || r.data?.generated || 'ok'}`)
 
   // Fetch class timetable
   const r2 = await api('GET', `/api/class-timetable?class_id=${cleanup.classIds[0]}&school_id=${sid}`)
-  log('GET /api/class-timetable?class_id — fetch timetable slots', Array.isArray(r2.data) && r2.data.length > 0, `slots=${Array.isArray(r2.data)?r2.data.length:0}`)
+  log('GET /api/class-timetable?class_id — timetable slots exist',
+    Array.isArray(r2.data) && r2.data.length > 0, `slots=${Array.isArray(r2.data)?r2.data.length:0}`)
 
   // Teacher's personal timetable
   const r3 = await api('GET', `/api/timetable?teacher_id=${cleanup.teacherIds[0]}&school_id=${sid}`)
-  log('GET /api/timetable?teacher_id — fetch teacher timetable', Array.isArray(r3.data))
+  log('GET /api/timetable?teacher_id — fetch teacher timetable',
+    Array.isArray(r3.data), `periods=${Array.isArray(r3.data)?r3.data.length:0}`)
 }
 
 // ─── 7. Leave Requests ────────────────────────────────────────────────────────
@@ -428,23 +425,29 @@ async function testAttendance() {
 
   const todayStr = today()
 
-  // Mark attendance
+  // Mark attendance — requires session field ('morning' | 'afternoon')
   const r = await api('POST', '/api/attendance', {
     school_id: sid,
     class_id: cleanup.classIds[0],
     teacher_id: cleanup.teacherIds[2],
     date: todayStr,
+    session: 'morning',
     records: cleanup.studentIds.slice(0, 1).map(id => ({ student_id: id, status: 'present' })),
   })
-  log('POST /api/attendance — mark attendance', r.status === 200 || r.status === 201, `status=${r.status}`)
+  log('POST /api/attendance — mark attendance (morning)', r.status === 200 || r.status === 201, `status=${r.status}`)
 
-  // Fetch attendance for date
-  const r2 = await api('GET', `/api/attendance?school_id=${sid}&date=${todayStr}`)
-  log('GET /api/attendance?school_id&date — fetch by date', Array.isArray(r2.data))
+  // School-wide view: requires view=school&date
+  const r2 = await api('GET', `/api/attendance?school_id=${sid}&date=${todayStr}&view=school`)
+  log('GET /api/attendance?view=school&date — school-wide attendance', Array.isArray(r2.data) || r2.data?.classes, `status=${r2.status}`)
 
-  // Fetch by class
-  const r3 = await api('GET', `/api/attendance?school_id=${sid}&class_id=${cleanup.classIds[0]}`)
-  log('GET /api/attendance?class_id — fetch by class', Array.isArray(r3.data))
+  // Fetch by class + date + session
+  const r3 = await api('GET', `/api/attendance?school_id=${sid}&class_id=${cleanup.classIds[0]}&date=${todayStr}&session=morning`)
+  log('GET /api/attendance?class_id&date&session — fetch class attendance', r3.status === 200, `status=${r3.status}`)
+
+  // Fetch monthly
+  const month = todayStr.slice(0, 7) // YYYY-MM
+  const r4 = await api('GET', `/api/attendance?school_id=${sid}&class_id=${cleanup.classIds[0]}&month=${month}`)
+  log('GET /api/attendance?class_id&month — monthly attendance', r4.status === 200, `status=${r4.status}`)
 }
 
 // ─── 10. Notifications ────────────────────────────────────────────────────────
@@ -477,9 +480,9 @@ async function testNotifications() {
     log('PUT /api/notifications — mark as read (if supported)', r3.status === 200 || r3.status === 404 || r3.status === 405, `status=${r3.status}`)
   }
 
-  // Fetch school-level notifications
-  const r4 = await api('GET', `/api/notifications?school_id=${sid}`)
-  log('GET /api/notifications?school_id — school-level notifications', Array.isArray(r4.data))
+  // Fetch school-level admin notifications — use recipient_school_id not school_id
+  const r4 = await api('GET', `/api/notifications?recipient_school_id=${sid}`)
+  log('GET /api/notifications?recipient_school_id — school-admin notifications', Array.isArray(r4.data), `status=${r4.status}`)
 }
 
 // ─── 11. Edge Cases & Validation ─────────────────────────────────────────────

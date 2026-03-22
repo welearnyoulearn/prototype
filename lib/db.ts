@@ -59,7 +59,7 @@ export async function initDB() {
       email VARCHAR(255),
       grade VARCHAR(20),
       section VARCHAR(10),
-      roll_number VARCHAR(20),
+      roll_number VARCHAR(50),
       parent_name VARCHAR(255),
       parent_phone VARCHAR(50),
       phone VARCHAR(50),
@@ -260,6 +260,8 @@ export async function initDB() {
     `CREATE UNIQUE INDEX IF NOT EXISTS attendance_session_unique ON attendance(student_id, date, class_id, session)`,
     // Track when attendance was last marked/updated for "already marked by" feature
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS marked_at TIMESTAMPTZ DEFAULT NOW()`,
+    // Widen roll_number column to fit generated IDs like wlyl-stu-{slug}-{num}
+    `ALTER TABLE students ALTER COLUMN roll_number TYPE VARCHAR(50)`,
     // Substitute teacher assignments — when a teacher is on leave, admin assigns substitutes per period
     `CREATE TABLE IF NOT EXISTS substitute_assignments (
       id SERIAL PRIMARY KEY,
