@@ -39,7 +39,11 @@ export function signToken(payload: JWTPayload): string {
 
 export function verifyToken(token: string): JWTPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as JWTPayload
+    // Strip JWT standard claims (iat, exp, nbf) so they don't conflict
+    // when the payload is spread into a new signToken call
+    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload & { iat?: number; exp?: number; nbf?: number }
+    const { iat: _iat, exp: _exp, nbf: _nbf, ...payload } = decoded
+    return payload as JWTPayload
   } catch {
     return null
   }

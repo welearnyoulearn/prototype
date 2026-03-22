@@ -252,7 +252,7 @@ export async function initDB() {
       status VARCHAR(20) DEFAULT 'present',
       marked_by_teacher_id INTEGER REFERENCES teachers(id),
       created_at TIMESTAMPTZ DEFAULT NOW(),
-      UNIQUE(student_id, date, class_id, session)
+      UNIQUE(student_id, date, class_id, session)  -- per-session uniqueness
     )`,
     `ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_email VARCHAR(255)`,
     // If table already existed with old constraint, add session column + new unique index
@@ -262,6 +262,8 @@ export async function initDB() {
     `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS marked_at TIMESTAMPTZ DEFAULT NOW()`,
     // Widen roll_number column to fit generated IDs like wlyl-stu-{slug}-{num}
     `ALTER TABLE students ALTER COLUMN roll_number TYPE VARCHAR(50)`,
+    // Drop old attendance unique constraint that lacked session column (blocks afternoon attendance)
+    `ALTER TABLE attendance DROP CONSTRAINT IF EXISTS attendance_student_id_date_class_id_key`,
     // Substitute teacher assignments — when a teacher is on leave, admin assigns substitutes per period
     `CREATE TABLE IF NOT EXISTS substitute_assignments (
       id SERIAL PRIMARY KEY,
