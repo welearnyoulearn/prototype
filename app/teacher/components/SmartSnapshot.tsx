@@ -48,6 +48,8 @@ type ClassTimetableSlot = {
   break_label: string | null
   substitute_teacher_name: string | null
   substitute_teacher_id: number | null
+  substitute_teacher_subject?: string | null
+  substitute_teacher_department?: string | null
 }
 
 type SubstituteDuty = {
@@ -59,6 +61,8 @@ type SubstituteDuty = {
   original_teacher_name: string | null
   original_teacher_department: string | null
   substitute_teacher_name: string | null
+  substitute_teacher_subject?: string | null
+  substitute_teacher_department?: string | null
   time_from: string | null
   time_to: string | null
   date: string
@@ -117,6 +121,7 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
   const [loading, setLoading] = useState(true)
   const [nowMins, setNowMins] = useState(getNowMins())
   const [substituteDuties, setSubstituteDuties] = useState<SubstituteDuty[]>([])
+  const [upcomingSubDuties, setUpcomingSubDuties] = useState<SubstituteDuty[]>([])
   const [todayLeave, setTodayLeave] = useState<LeaveRecord | null>(null)
 
   // Timetable modal for non-class-teacher classes
@@ -141,13 +146,20 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
     Promise.all([
       fetch(`/api/timetable?teacher_id=${teacher.id}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
       fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()).catch(() => []),
-      fetch(`/api/substitutes?school_id=${schoolId}&substitute_teacher_id=${teacher.id}&date=${todayStr}`).then(r => r.json()).catch(() => []),
+      // Fetch all duties — we'll split into today vs upcoming client-side
+      fetch(`/api/substitutes?school_id=${schoolId}&substitute_teacher_id=${teacher.id}`).then(r => r.json()).catch(() => []),
       // active_date lets SQL do the date comparison server-side (avoids timezone issues)
       fetch(`/api/leave-requests?teacher_id=${teacher.id}&school_id=${schoolId}&status=approved&active_date=${todayStr}`).then(r => r.json()).catch(() => []),
     ]).then(([tt, cls, subs, leaves]) => {
       setTimetable(Array.isArray(tt) ? tt : [])
       setClasses(Array.isArray(cls) ? cls : [])
-      setSubstituteDuties(Array.isArray(subs) ? subs : [])
+      const allSubs: SubstituteDuty[] = Array.isArray(subs) ? subs : []
+      setSubstituteDuties(allSubs.filter(s => s.date?.slice(0, 10) === todayStr))
+      // Upcoming: duties after today, within next 14 days, sorted by date then period
+      const upcoming = allSubs
+        .filter(s => s.date && s.date.slice(0, 10) > todayStr)
+        .sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : a.period_number - b.period_number))
+      setUpcomingSubDuties(upcoming)
       // API already filters to leaves active on todayStr — first result (if any) is today's leave
       setTodayLeave(Array.isArray(leaves) && leaves.length > 0 ? leaves[0] : null)
     }).finally(() => setLoading(false))
@@ -315,6 +327,57 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
                     {duty.subject_name && <span className="opacity-80">{duty.subject_name}</span>}
                     <span className="opacity-70">Gr.{duty.grade}-{duty.section}</span>
                     {duty.time_from && <span className="opacity-60">{duty.time_from}</span>}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── Upcoming Substitute Duties ── */}
+      {upcomingSubDuties.length > 0 && !loading && (() => {
+        // Group by date
+        const grouped = new Map<string, SubstituteDuty[]>()
+        upcomingSubDuties.forEach(d => {
+          const key = d.date.slice(0, 10)
+          if (!grouped.has(key)) grouped.set(key, [])
+          grouped.get(key)!.push(d)
+        })
+        return (
+          <div className="rounded-2xl border border-amber-200 bg-white overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-amber-100 flex items-center justify-between bg-amber-50">
+              <div className="flex items-center gap-2">
+                <svg className="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <p className="font-bold text-amber-900 text-sm">Upcoming Substitute Duties</p>
+              </div>
+              <span className="text-xs bg-amber-200 text-amber-800 px-2.5 py-0.5 rounded-full font-semibold">
+                {upcomingSubDuties.length} period{upcomingSubDuties.length > 1 ? 's' : ''}
+              </span>
+            </div>
+            <div className="divide-y divide-amber-50">
+              {[...grouped.entries()].map(([date, duties]) => {
+                const d = new Date(date + 'T00:00:00')
+                const dayLabel = d.toLocaleDateString('en-US', { weekday: 'long' })
+                const dateLabel = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                return (
+                  <div key={date} className="px-5 py-3">
+                    <p className="text-xs font-semibold text-amber-700 mb-2">
+                      {dayLabel}, {dateLabel}
+                    </p>
+                    <div className="flex gap-2 flex-wrap">
+                      {duties.map(duty => (
+                        <div key={duty.id} className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs">
+                          <span className="font-bold text-amber-800">P{duty.period_number}</span>
+                          {duty.subject_name && <span className="text-amber-700">{duty.subject_name}</span>}
+                          <span className="text-amber-600 font-medium">Gr.{duty.grade}-{duty.section}</span>
+                          {duty.time_from && <span className="text-amber-400">{duty.time_from}–{duty.time_to}</span>}
+                          <span className="text-gray-400 text-[10px]">for {duty.original_teacher_name || 'absent teacher'}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )
               })}
@@ -625,13 +688,22 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
                                       'bg-gray-50 border border-gray-100'
                                     }`}>
                                       <div className="flex items-center gap-1">
-                                        <p className="font-semibold text-gray-800 text-xs truncate">
-                                          {slot?.subject_name || sub?.subject_name || sub?.original_teacher_department || '—'}
-                                        </p>
+                                        {hasSub ? (
+                                          <p className="font-semibold text-gray-400 line-through text-xs truncate">
+                                            {slot?.subject_name || sub?.subject_name || '—'}
+                                          </p>
+                                        ) : (
+                                          <p className="font-semibold text-gray-800 text-xs truncate">
+                                            {slot?.subject_name || '—'}
+                                          </p>
+                                        )}
                                         {hasSub && <span className="text-[8px] bg-amber-400 text-white px-1 py-0.5 rounded font-bold flex-shrink-0">SUB</span>}
                                       </div>
                                       {hasSub ? (
                                         <>
+                                          <p className="text-amber-600 font-semibold text-[9px] truncate">
+                                            {sub.substitute_teacher_subject || sub.substitute_teacher_department || sub.subject_name || '—'}
+                                          </p>
                                           <p className="text-gray-300 line-through text-[9px]">{slot?.teacher_name || sub?.original_teacher_name}</p>
                                           <p className="text-amber-600 font-semibold text-[10px] truncate">{sub.substitute_teacher_name || 'Substitute'}</p>
                                         </>

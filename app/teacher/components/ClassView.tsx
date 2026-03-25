@@ -43,6 +43,8 @@ type TimetableSlot = {
   day_of_week: string
   substitute_teacher_id: number | null
   substitute_teacher_name: string | null
+  substitute_teacher_subject?: string | null
+  substitute_teacher_department?: string | null
 }
 
 type AttendanceRecord = {
@@ -74,6 +76,8 @@ type ClassSubstitute = {
   subject_name: string | null
   substitute_teacher_id: number | null
   substitute_teacher_name: string | null
+  substitute_teacher_subject?: string | null
+  substitute_teacher_department?: string | null
   original_teacher_name: string | null
   original_teacher_department: string | null
   date: string
@@ -166,8 +170,6 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   const [attDate, setAttDate] = useState(new Date().toISOString().split('T')[0])
   const [attDayData, setAttDayData] = useState<AttendanceRecord[]>([])
   const [attDayLoading, setAttDayLoading] = useState(false)
-  const [expandedPeriod, setExpandedPeriod] = useState<number | null>(null)
-  const [attDaySlots, setAttDaySlots] = useState<TimetableSlot[]>([])
   const [attDaySummary, setAttDaySummary] = useState<SessionSummary>({})
 
   // Monthly attendance
@@ -243,17 +245,11 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   useEffect(() => {
     if (activeTab !== 'Attendance' || attView !== 'day') return
     setAttDayLoading(true)
-    const selectedDay = new Date(attDate + 'T00:00:00')
-      .toLocaleDateString('en-US', { weekday: 'long' })
     Promise.all([
       fetch(`/api/attendance?class_id=${classId}&date=${attDate}&school_id=${schoolId}`).then(r => r.json()),
-      // Pass attDate so substitute info is overlaid for the selected date
-      fetch(`/api/class-timetable?class_id=${classId}&school_id=${schoolId}&date=${attDate}`).then(r => r.json()),
       fetch(`/api/attendance?class_id=${classId}&school_id=${schoolId}&date=${attDate}&summary=true`).then(r => r.json()),
-    ]).then(([att, tt, summary]) => {
+    ]).then(([att, summary]) => {
       setAttDayData(Array.isArray(att) ? att : [])
-      const allSlots: TimetableSlot[] = Array.isArray(tt) ? tt : []
-      setAttDaySlots(allSlots.filter(s => s.day_of_week === selectedDay).sort((a, b) => a.period_number - b.period_number))
       setAttDaySummary(summary && typeof summary === 'object' && !Array.isArray(summary) ? summary : {})
     }).finally(() => setAttDayLoading(false))
   }, [activeTab, attView, attDate, classId, schoolId])
@@ -629,127 +625,100 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
             )}
           </div>
 
-          {/* Session marker info — who marked morning and afternoon */}
-          {attView === 'day' && (
-            <div className="grid grid-cols-2 gap-3">
-              {(['morning', 'afternoon'] as const).map(sess => {
-                const info = attDaySummary[sess]
-                const markedTime = info?.marked_at
-                  ? new Date(info.marked_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
-                  : null
-                return (
-                  <div key={sess} className={`rounded-xl border px-4 py-3 flex items-center gap-3 ${
-                    info ? (sess === 'morning' ? 'bg-orange-50 border-orange-200' : 'bg-purple-50 border-purple-200') : 'bg-gray-50 border-gray-200'
-                  }`}>
-                    <span className="text-xl flex-shrink-0">{sess === 'morning' ? '🌅' : '🌆'}</span>
-                    <div className="min-w-0">
-                      <p className={`text-xs font-semibold ${sess === 'morning' ? 'text-orange-700' : 'text-purple-700'}`}>
-                        {sess === 'morning' ? 'Morning Session' : 'Afternoon Session'}
-                      </p>
-                      {info && markedTime ? (
-                        <>
-                          <p className="text-xs text-gray-700 truncate">
-                            Marked by <span className="font-medium">{info.marked_by_name || 'Unknown'}</span> at {markedTime}
-                          </p>
-                          <p className="text-[10px] text-gray-400 mt-0.5">
-                            P:{info.present} · A:{info.absent} · L:{info.late} / {info.total} students
-                          </p>
-                        </>
-                      ) : (
-                        <p className="text-xs text-gray-400">Not marked yet</p>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {/* ── DAY-WISE VIEW ──────────────────────────────────────────────── */}
+          {/* ── DAY-WISE VIEW — Morning + Afternoon session cards ── */}
           {attView === 'day' && (
             attDayLoading ? (
               <div className="py-16 text-center text-gray-400 text-sm">Loading attendance data...</div>
             ) : (
-              <div className="space-y-3">
-                {attDaySlots.length === 0 ? (
-                  <div className="bg-white rounded-xl border border-gray-200 py-12 text-center text-sm text-gray-400">
-                    No timetable periods for this day
-                  </div>
-                ) : (
-                  attDaySlots.map(slot => {
-                    const present = attDayData.filter(a => a.status === 'present').length
-                    const absent  = attDayData.filter(a => a.status === 'absent').length
-                    const late    = attDayData.filter(a => a.status === 'late').length
-                    const total   = attDayData.length
-                    const isOpen  = expandedPeriod === slot.period_number
-                    return (
-                      <div key={slot.period_number} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                        <button
-                          onClick={() => setExpandedPeriod(isOpen ? null : slot.period_number)}
-                          className="w-full flex items-center px-5 py-4 hover:bg-gray-50 transition-colors text-left">
-                          <div className="flex items-center gap-4 flex-1">
-                            <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                              P{slot.period_number}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <p className="font-semibold text-gray-800">{slot.subject_name || `Period ${slot.period_number}`}</p>
-                                {slot.substitute_teacher_name && (
-                                  <span className="text-[9px] bg-amber-400 text-white px-1.5 py-0.5 rounded font-bold flex-shrink-0">SUB</span>
-                                )}
-                              </div>
-                              {slot.substitute_teacher_name ? (
-                                <p className="text-xs text-amber-700">
-                                  {slot.time_from} – {slot.time_to} ·
-                                  <span className="line-through text-gray-300 ml-1">{slot.teacher_name}</span>
-                                  <span className="ml-1 font-medium">{slot.substitute_teacher_name}</span>
-                                </p>
-                              ) : (
-                                <p className="text-xs text-gray-400">{slot.time_from} – {slot.time_to} · {slot.teacher_name || 'No teacher'}</p>
-                              )}
-                            </div>
-                          </div>
-                          {total > 0 ? (
-                            <div className="flex items-center gap-4 mr-4">
-                              <span className="text-sm font-semibold text-green-600">P:{present}</span>
-                              <span className="text-sm font-semibold text-red-500">A:{absent}</span>
-                              {late > 0 && <span className="text-sm font-semibold text-yellow-500">L:{late}</span>}
-                            </div>
-                          ) : (
-                            <span className="text-xs text-orange-500 font-medium mr-4">Not marked</span>
+              <div className="grid grid-cols-2 gap-4">
+                {(['morning', 'afternoon'] as const).map(sess => {
+                  const info = attDaySummary[sess]
+                  const sessAtt = sess === 'morning' ? morningAtt : afternoonAtt
+                  const markedTime = info?.marked_at
+                    ? new Date(info.marked_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+                    : null
+                  const isMarked = !!(info && markedTime)
+                  const isMorning = sess === 'morning'
+                  return (
+                    <div key={sess} className={`rounded-2xl border-2 overflow-hidden ${
+                      isMarked
+                        ? isMorning ? 'border-orange-200' : 'border-purple-200'
+                        : 'border-gray-200'
+                    }`}>
+                      {/* Session header */}
+                      <div className={`px-5 py-4 ${
+                        isMarked
+                          ? isMorning ? 'bg-orange-50 border-b border-orange-100' : 'bg-purple-50 border-b border-purple-100'
+                          : 'bg-gray-50 border-b border-gray-100'
+                      }`}>
+                        <div className="flex items-center gap-2.5 mb-2">
+                          <span className="text-xl">{isMorning ? '🌅' : '🌆'}</span>
+                          <p className={`font-bold text-sm ${isMorning ? 'text-orange-800' : 'text-purple-800'}`}>
+                            {isMorning ? 'Morning Session' : 'Afternoon Session'}
+                          </p>
+                          {isMarked && (
+                            <span className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                              isMorning ? 'bg-orange-200 text-orange-700' : 'bg-purple-200 text-purple-700'
+                            }`}>MARKED</span>
                           )}
-                          <svg className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-                        {isOpen && (
-                          <div className="border-t border-gray-100 px-5 py-3">
-                            {attDayData.length === 0 ? (
-                              <p className="text-sm text-gray-400 text-center py-4">No attendance recorded for this date</p>
-                            ) : (
-                              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                                {students.map(student => {
-                                  const rec = attDayData.find(a => a.student_id === student.id)
-                                  const status = rec?.status || null
-                                  return (
-                                    <div key={student.id} className={`flex items-center gap-2 px-3 py-2 rounded-lg ${
-                                      status === 'present' ? 'bg-green-50' :
-                                      status === 'absent'  ? 'bg-red-50' :
-                                      status === 'late'    ? 'bg-yellow-50' : 'bg-gray-50'
-                                    }`}>
-                                      <span className="text-base"><StatusSymbol status={status} /></span>
-                                      <span className="text-xs text-gray-700 font-medium truncate">{student.name}</span>
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                            )}
-                          </div>
+                        </div>
+                        {isMarked ? (
+                          <>
+                            <p className="text-sm text-gray-700">
+                              Marked by{' '}
+                              <span className="font-semibold text-gray-900">{info!.marked_by_name || 'Unknown'}</span>
+                              <span className="text-gray-400 mx-1">at</span>
+                              <span className={`font-bold ${isMorning ? 'text-orange-600' : 'text-purple-600'}`}>{markedTime}</span>
+                            </p>
+                            <div className="flex items-center gap-3 mt-2">
+                              <span className="text-sm font-semibold text-green-600">Present: {info!.present}</span>
+                              <span className="text-gray-200">|</span>
+                              <span className="text-sm font-semibold text-red-500">Absent: {info!.absent}</span>
+                              {info!.late > 0 && (
+                                <>
+                                  <span className="text-gray-200">|</span>
+                                  <span className="text-sm font-semibold text-yellow-500">Late: {info!.late}</span>
+                                </>
+                              )}
+                              <span className="text-xs text-gray-400 ml-auto">of {info!.total}</span>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="text-sm text-gray-400 mt-1">Attendance not marked yet</p>
                         )}
                       </div>
-                    )
-                  })
-                )}
+
+                      {/* Student list */}
+                      {isMarked && sessAtt.length > 0 ? (
+                        <div className="p-3 bg-white">
+                          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                            {students.map(student => {
+                              const rec = sessAtt.find(a => a.student_id === student.id)
+                              const status = rec?.status || null
+                              return (
+                                <div key={student.id} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs ${
+                                  status === 'present' ? 'bg-green-50 text-green-800' :
+                                  status === 'absent'  ? 'bg-red-50 text-red-700' :
+                                  status === 'late'    ? 'bg-yellow-50 text-yellow-700' :
+                                  'bg-gray-50 text-gray-400'
+                                }`}>
+                                  <span className="font-bold flex-shrink-0">
+                                    {status === 'present' ? '✓' : status === 'absent' ? '✗' : status === 'late' ? '↗' : '—'}
+                                  </span>
+                                  <span className="truncate font-medium">{student.name}</span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ) : !isMarked ? (
+                        <div className="px-5 py-8 text-center bg-white">
+                          <p className="text-xs text-gray-300">No data recorded for this date</p>
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
               </div>
             )
           )}
@@ -962,15 +931,24 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                             }`}>
                               <div className="min-w-0">
                                 <div className="flex items-center gap-1 mb-0.5">
-                                  <p className="font-semibold text-gray-800 truncate">
-                                    {slot.subject_name || (hasSub ? sub.subject_name || sub.original_teacher_department : null) || '—'}
-                                  </p>
+                                  {hasSub ? (
+                                    <p className="font-semibold text-gray-400 line-through truncate text-xs">
+                                      {slot.subject_name || sub.subject_name || '—'}
+                                    </p>
+                                  ) : (
+                                    <p className="font-semibold text-gray-800 truncate">
+                                      {slot.subject_name || '—'}
+                                    </p>
+                                  )}
                                   {hasSub && (
                                     <span className="flex-shrink-0 text-[9px] bg-amber-400 text-white px-1 py-0.5 rounded font-bold">SUB</span>
                                   )}
                                 </div>
                                 {hasSub ? (
                                   <>
+                                    <p className={`text-[10px] font-semibold truncate ${isMe ? 'text-amber-600' : 'text-blue-600'}`}>
+                                      {sub.substitute_teacher_subject || sub.substitute_teacher_department || sub.subject_name || '—'}
+                                    </p>
                                     <p className="text-gray-300 line-through text-[10px] truncate">{slot.teacher_name || sub.original_teacher_name || 'No teacher'}</p>
                                     <p className={`text-[10px] font-semibold truncate ${isMe ? 'text-amber-600' : 'text-blue-600'}`}>
                                       {isMe ? '★ You (Sub)' : `${sub.substitute_teacher_name || 'Substitute'}`}

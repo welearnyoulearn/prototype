@@ -1,4 +1,10 @@
-import { Pool } from 'pg'
+import { Pool, types } from 'pg'
+
+// Return DATE columns as plain "YYYY-MM-DD" strings instead of JS Date objects.
+// Without this, pg serialises dates as UTC midnight which JSON-stringifies to
+// e.g. "2026-03-30T18:30:00.000Z" in IST — .slice(0,10) then gives "2026-03-30"
+// instead of "2026-03-31", causing a persistent one-day-behind display bug.
+types.setTypeParser(types.builtins.DATE, (val: string) => val)
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,

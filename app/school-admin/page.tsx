@@ -13,6 +13,7 @@ import StudentsManagement from './components/StudentsManagement'
 import CurriculumManagement from './components/CurriculumManagement'
 import TimetableManagement from './components/TimetableManagement'
 import AttendanceDashboard from './components/AttendanceDashboard'
+import EmergencyCover from './components/EmergencyCover'
 import NotificationBell from '../components/NotificationBell'
 import { useRouter } from 'next/navigation'
 
@@ -62,6 +63,16 @@ const NAV_ITEMS: NavItem[] = [
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'emergency-cover',
+    label: 'Emergency Cover',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
       </svg>
     ),
   },
@@ -393,6 +404,7 @@ export default function SchoolAdmin() {
                 {activeNav === 'overview' && <Overview schoolId={selectedSchool.id} onNavigate={setActiveNav} />}
                 {activeNav === 'attendance' && <AttendanceDashboard schoolId={selectedSchool.id} />}
                 {activeNav === 'leave-requests' && <LeaveRequests schoolId={selectedSchool.id} />}
+                {activeNav === 'emergency-cover' && <EmergencyCover schoolId={selectedSchool.id} />}
                 {activeNav === 'staff-onboarding' && <StaffOnboarding schoolId={selectedSchool.id} />}
                 {activeNav === 'student-onboarding' && <StudentOnboarding schoolId={selectedSchool.id} />}
                 {activeNav === 'class-management' && <ClassManagement schoolId={selectedSchool.id} />}

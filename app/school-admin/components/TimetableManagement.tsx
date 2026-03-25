@@ -23,6 +23,8 @@ type ClassSubstitute = {
   original_teacher_name: string | null
   original_teacher_department: string | null
   substitute_teacher_name: string | null
+  substitute_teacher_subject?: string | null
+  substitute_teacher_department?: string | null
   date: string
 }
 
@@ -385,13 +387,22 @@ function ClassesTab({ schoolId }: { schoolId: number }) {
                                   {(slot?.subject_name || hasSub) ? (
                                     <div className={`rounded-lg px-2 py-2 min-h-[52px] ${hasSub ? 'border-2 border-amber-300 bg-amber-50' : 'bg-emerald-50 border border-emerald-200'}`}>
                                       <div className="flex items-center gap-1 flex-wrap">
-                                        <p className="font-semibold text-gray-800 leading-tight text-xs">
-                                          {slot?.subject_name || sub?.subject_name || sub?.original_teacher_department || '—'}
-                                        </p>
+                                        {hasSub ? (
+                                          <p className="font-semibold text-gray-400 line-through leading-tight text-xs">
+                                            {slot?.subject_name || sub?.subject_name || '—'}
+                                          </p>
+                                        ) : (
+                                          <p className="font-semibold text-gray-800 leading-tight text-xs">
+                                            {slot?.subject_name || '—'}
+                                          </p>
+                                        )}
                                         {hasSub && <span className="text-[9px] font-bold bg-amber-400 text-white px-1 py-0.5 rounded uppercase">SUB</span>}
                                       </div>
                                       {hasSub ? (
                                         <>
+                                          <p className="text-[10px] text-amber-700 font-semibold leading-tight">
+                                            {sub.substitute_teacher_subject || sub.substitute_teacher_department || sub.subject_name || '—'}
+                                          </p>
                                           <p className="text-[10px] text-gray-400 line-through mt-0.5">{slot?.teacher_name || sub?.original_teacher_name}</p>
                                           <p className="text-[10px] text-amber-700 font-medium">{sub.substitute_teacher_name}</p>
                                         </>

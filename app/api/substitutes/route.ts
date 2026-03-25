@@ -64,6 +64,8 @@ export async function GET(req: NextRequest) {
                       ot.name AS original_teacher_name,
                       ot.department AS original_teacher_department,
                       st.name AS substitute_teacher_name,
+                      st.subject AS substitute_teacher_subject,
+                      st.department AS substitute_teacher_department,
                       c.grade, c.section
                FROM substitute_assignments sa
                LEFT JOIN teachers ot ON ot.id = sa.original_teacher_id
@@ -83,6 +85,8 @@ export async function GET(req: NextRequest) {
                       ot.name AS original_teacher_name,
                       ot.department AS original_teacher_department,
                       st.name AS substitute_teacher_name,
+                      st.subject AS substitute_teacher_subject,
+                      st.department AS substitute_teacher_department,
                       c.grade, c.section
                FROM substitute_assignments sa
                LEFT JOIN teachers ot ON ot.id = sa.original_teacher_id
@@ -171,15 +175,16 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/substitutes — save substitute assignments for a leave request
-// Body: { school_id, leave_request_id, original_teacher_id, assignments: [{ class_id, date, day_of_week, period_number, subject_name, time_from, time_to, substitute_teacher_id }] }
+// POST /api/substitutes — save substitute assignments
+// Body: { school_id, leave_request_id (null for emergency), original_teacher_id, assignments: [...] }
 export async function POST(req: NextRequest) {
   await ensureDB()
   try {
     const { school_id, leave_request_id, original_teacher_id, assignments } = await req.json()
-    if (!school_id || !leave_request_id || !original_teacher_id || !Array.isArray(assignments)) {
-      return NextResponse.json({ error: 'school_id, leave_request_id, original_teacher_id, assignments required' }, { status: 400 })
+    if (!school_id || !original_teacher_id || !Array.isArray(assignments)) {
+      return NextResponse.json({ error: 'school_id, original_teacher_id, assignments required' }, { status: 400 })
     }
+    const isEmergency = !leave_request_id
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const savedRows: any[] = []
@@ -219,6 +224,9 @@ export async function POST(req: NextRequest) {
       const subTeacherMap = new Map<number, string>(subTeacherResult.rows.map((t: any) => [t.id, t.name]))
 
       // ── Notify each substitute teacher ──────────────────────────────────
+      const coverReason = isEmergency
+        ? `Emergency Cover — ${origName} is absent`
+        : `Substitute Assignment — Covering for ${origName}`
       const teacherGroups = new Map<number, typeof savedRows>()
       for (const r of savedRows) {
         if (!r.substitute_teacher_id) continue
@@ -237,9 +245,9 @@ export async function POST(req: NextRequest) {
           `INSERT INTO notifications (school_id, recipient_teacher_id, type, title, message, data)
            VALUES ($1, $2, 'substitute_assigned', $3, $4, $5)`,
           [school_id, subTeacherId,
-           `Substitute Assignment — Covering for ${origName}`,
+           coverReason,
            `You have been assigned as substitute teacher:\n${lines}`,
-           JSON.stringify({ leave_request_id, original_teacher_id, period_count: periods.length })]
+           JSON.stringify({ leave_request_id: leave_request_id || null, original_teacher_id, period_count: periods.length, emergency: isEmergency })]
         ).catch(() => {})
       }
 
@@ -264,8 +272,10 @@ export async function POST(req: NextRequest) {
            VALUES ($1, $2, 'substitute_info', $3, $4, $5)`,
           [school_id, ct.teacher_id,
            `Substitute arranged for Class ${ct.grade}-${ct.section}`,
-           `${origName} is on approved leave. Substitutes arranged:\n${lines}\nPlease inform your students.`,
-           JSON.stringify({ leave_request_id, original_teacher_id, class_id: ct.class_id })]
+           isEmergency
+             ? `${origName} is absent today. Emergency substitutes arranged:\n${lines}\nPlease inform your students.`
+             : `${origName} is on approved leave. Substitutes arranged:\n${lines}\nPlease inform your students.`,
+           JSON.stringify({ leave_request_id: leave_request_id || null, original_teacher_id, class_id: ct.class_id, emergency: isEmergency })]
         ).catch(() => {})
       }
     }

@@ -44,6 +44,26 @@ export async function POST(req: NextRequest) {
     if (!teacher_id || !school_id || !leave_type || !start_date || !end_date) {
       return NextResponse.json({ error: 'teacher_id, school_id, leave_type, start_date, end_date are required' }, { status: 400 })
     }
+
+    // Check for overlapping pending/approved leave
+    const overlap = await pool.query(
+      `SELECT id, status, start_date, end_date FROM leave_requests
+       WHERE teacher_id = $1
+         AND status IN ('pending', 'approved')
+         AND start_date::date <= $3::date
+         AND end_date::date >= $2::date`,
+      [teacher_id, start_date, end_date]
+    )
+    if (overlap.rows.length > 0) {
+      const ex = overlap.rows[0]
+      const s = ex.start_date?.toString().slice(0, 10)
+      const e = ex.end_date?.toString().slice(0, 10)
+      return NextResponse.json(
+        { error: `You already have a ${ex.status} leave request for overlapping dates (${s} – ${e})` },
+        { status: 409 }
+      )
+    }
+
     const result = await pool.query(
       `INSERT INTO leave_requests (teacher_id, school_id, leave_type, start_date, end_date, reason)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,

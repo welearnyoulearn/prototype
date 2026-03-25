@@ -16,6 +16,7 @@ type Period = {
 
 type SubDuty = {
   id: number
+  date: string
   period_number: number
   subject_name: string | null
   grade: string
@@ -44,6 +45,29 @@ type Props = {
 }
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+
+function localDateStr(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}
+
+function getWeekDates(): Record<string, string> {
+  const today = new Date()
+  const dow = today.getDay()
+  const monday = new Date(today)
+  if (dow === 0) monday.setDate(today.getDate() + 1)
+  else monday.setDate(today.getDate() - (dow - 1))
+  monday.setHours(0, 0, 0, 0)
+  const result: Record<string, string> = {}
+  DAYS.forEach((d, i) => {
+    const date = new Date(monday)
+    date.setDate(monday.getDate() + i)
+    result[d] = localDateStr(date)
+  })
+  return result
+}
 
 // Break is shown client-side after period 3
 const ALL_PERIODS = [1, 2, 3, 4, 5, 6]
@@ -103,14 +127,14 @@ export default function FullTimetable({ teacherId, schoolId }: Props) {
 
   useEffect(() => {
     async function load() {
-      const todayStr = new Date().toISOString().split('T')[0]
       try {
         const [tt, teacher, clsList, avail, subs] = await Promise.all([
           fetch(`/api/timetable?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()),
           fetch(`/api/teachers/${teacherId}`).then(r => r.json()),
           fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()),
           fetch(`/api/teacher-availability?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()),
-          fetch(`/api/substitutes?school_id=${schoolId}&substitute_teacher_id=${teacherId}&date=${todayStr}`).then(r => r.json()),
+          // Fetch all duties (no date filter) so we can show the whole week
+          fetch(`/api/substitutes?school_id=${schoolId}&substitute_teacher_id=${teacherId}`).then(r => r.json()),
         ])
         setTimetable(Array.isArray(tt) ? tt : [])
         setTeacherInfo(teacher || null)
@@ -128,6 +152,19 @@ export default function FullTimetable({ teacherId, schoolId }: Props) {
   DAYS.forEach(d => { byDay[d] = [] })
   timetable.forEach(p => { if (byDay[p.day_of_week]) byDay[p.day_of_week].push(p) })
   DAYS.forEach(d => byDay[d].sort((a, b) => a.period_number - b.period_number))
+
+  // Week dates for overlay: map day name → YYYY-MM-DD
+  const weekDates = getWeekDates()
+
+  // Sub duties indexed by "date-period" for fast lookup
+  const subByKey = new Map<string, SubDuty>()
+  substituteDuties.forEach(s => {
+    if (s.date) subByKey.set(`${s.date.slice(0, 10)}-${s.period_number}`, s)
+  })
+
+  // Today's sub duties (for stats + empty-timetable view)
+  const todayStr = localDateStr(new Date())
+  const todaySubDuties = substituteDuties.filter(s => s.date?.slice(0, 10) === todayStr)
 
   function isCurrentPeriod(timeFrom: string, timeTo: string) {
     return now >= timeToMinutes(timeFrom) && now < timeToMinutes(timeTo)
@@ -203,12 +240,12 @@ export default function FullTimetable({ teacherId, schoolId }: Props) {
   const ctClass = teacherInfo?.class_teacher_grade
     ? `${teacherInfo.class_teacher_grade}-${teacherInfo.class_teacher_section}`
     : null
-  const freeTodayCount = ALL_PERIODS.length - todayPeriods.length
+  const freeTodayCount = ALL_PERIODS.length - todayPeriods.length - todaySubDuties.length
 
   if (loading) return <div className="py-12 text-center text-gray-400">Loading timetable...</div>
 
   if (timetable.length === 0) {
-    if (substituteDuties.length === 0) {
+    if (todaySubDuties.length === 0) {
       return (
         <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
           <p className="text-gray-500 font-medium">No timetable assigned yet</p>
@@ -228,7 +265,7 @@ export default function FullTimetable({ teacherId, schoolId }: Props) {
             <span className="text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-medium">{substituteDuties.length} period{substituteDuties.length > 1 ? 's' : ''}</span>
           </div>
           <div className="px-5 py-4 flex gap-3 flex-wrap">
-            {substituteDuties.map(duty => {
+            {todaySubDuties.map(duty => {
               const fromMin = duty.time_from ? timeToMinutes(duty.time_from) : 0
               const toMin = duty.time_to ? timeToMinutes(duty.time_to) : 0
               const isCurrent = !!(duty.time_from && duty.time_to && now >= fromMin && now < toMin)
@@ -271,7 +308,7 @@ export default function FullTimetable({ teacherId, schoolId }: Props) {
           {substituteDuties.length > 0 && (
             <span className="flex items-center gap-1.5 text-amber-700 font-semibold">
               <span className="w-3 h-3 rounded bg-amber-200 border border-amber-400 inline-block"></span>
-              Substitute ({substituteDuties.length} period{substituteDuties.length > 1 ? 's' : ''} today)
+              Sub duty ({todaySubDuties.length} today{substituteDuties.length > todaySubDuties.length ? `, ${substituteDuties.length - todaySubDuties.length} upcoming` : ''})
             </span>
           )}
         </div>
@@ -307,9 +344,7 @@ export default function FullTimetable({ teacherId, schoolId }: Props) {
                       {DAYS.map(day => {
                         const period = byDay[day].find(p => p.period_number === pNum)
                         const isNowCell = day === today && isNowRow
-                        const subDuty = day === today
-                          ? substituteDuties.find(s => s.period_number === pNum)
-                          : undefined
+                        const subDuty = subByKey.get(`${weekDates[day]}-${pNum}`)
 
                         if (!period && subDuty) {
                           return (
@@ -377,7 +412,7 @@ export default function FullTimetable({ teacherId, schoolId }: Props) {
       </div>
 
       {/* Stats */}
-      <div className={`grid gap-3 mb-5 ${ctClass ? 'grid-cols-4' : 'grid-cols-3'}`}>
+      <div className={`grid gap-3 mb-5 grid-cols-${3 + (ctClass ? 1 : 0) + (substituteDuties.length > 0 ? 1 : 0)}`}>
         <div className="bg-white rounded-xl border border-gray-200 px-4 py-3 text-center">
           <p className="text-2xl font-bold text-gray-900">{ALL_PERIODS.length}</p>
           <p className="text-xs text-gray-500 mt-0.5">Periods/Day</p>
@@ -390,8 +425,17 @@ export default function FullTimetable({ teacherId, schoolId }: Props) {
         )}
         <div className="bg-emerald-50 rounded-xl border border-emerald-200 px-4 py-3 text-center">
           <p className="text-2xl font-bold text-emerald-700">{todayPeriods.length}</p>
-          <p className="text-xs text-emerald-500 mt-0.5">Today's Classes</p>
+          <p className="text-xs text-emerald-500 mt-0.5">Today&apos;s Classes</p>
         </div>
+        {substituteDuties.length > 0 && (
+          <div className="bg-amber-50 rounded-xl border border-amber-200 px-4 py-3 text-center">
+            <p className="text-2xl font-bold text-amber-600">{todaySubDuties.length}</p>
+            <p className="text-xs text-amber-500 mt-0.5">Sub Duties Today</p>
+            {substituteDuties.length > todaySubDuties.length && (
+              <p className="text-[10px] text-amber-400 mt-0.5">+{substituteDuties.length - todaySubDuties.length} upcoming</p>
+            )}
+          </div>
+        )}
         <div className="bg-gray-50 rounded-xl border border-gray-200 px-4 py-3 text-center">
           <p className="text-2xl font-bold text-gray-400">{Math.max(0, freeTodayCount)}</p>
           <p className="text-xs text-gray-400 mt-0.5">Free Periods Today</p>

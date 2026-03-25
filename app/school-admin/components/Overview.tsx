@@ -121,8 +121,8 @@ export default function Overview({ schoolId, onNavigate }: Props) {
                   <span className="text-xs text-red-500">{periods.length} period{periods.length > 1 ? 's' : ''} uncovered</span>
                 </div>
                 <div className="flex gap-2 flex-wrap ml-8">
-                  {periods.map(p => (
-                    <div key={`${p.class_id}-${p.period_number}`}
+                  {periods.map((p, i) => (
+                    <div key={`${p.class_id}-${p.period_number}-${i}`}
                       className="flex items-center gap-1.5 bg-white border border-red-200 rounded-lg px-3 py-1.5 text-xs">
                       <span className="font-bold text-gray-700">P{p.period_number}</span>
                       {p.subject_name && <span className="text-gray-600">{p.subject_name}</span>}

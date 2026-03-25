@@ -50,6 +50,28 @@ export default function TeacherLeave({ teacherId, schoolId }: Props) {
     e.preventDefault()
     setSubmitting(true)
     setError('')
+
+    // Client-side overlap check
+    const reqStart = new Date(form.start_date + 'T00:00:00')
+    const reqEnd = new Date(form.end_date + 'T00:00:00')
+    const overlap = leaveRequests.find(r => {
+      if (r.status === 'rejected') return false
+      const s = new Date(r.start_date.slice(0, 10) + 'T00:00:00')
+      const en = new Date(r.end_date.slice(0, 10) + 'T00:00:00')
+      return s <= reqEnd && en >= reqStart
+    })
+    if (overlap) {
+      const s = new Date(overlap.start_date.slice(0, 10) + 'T00:00:00').toLocaleDateString()
+      const en = new Date(overlap.end_date.slice(0, 10) + 'T00:00:00').toLocaleDateString()
+      setError(
+        overlap.status === 'approved'
+          ? `You already have an approved leave for overlapping dates (${s} – ${en}). Please contact admin to modify it.`
+          : `You already have a pending leave request for overlapping dates (${s} – ${en}). Please cancel it before submitting a new one.`
+      )
+      setSubmitting(false)
+      return
+    }
+
     try {
       const res = await fetch('/api/leave-requests', {
         method: 'POST',
@@ -193,7 +215,7 @@ export default function TeacherLeave({ teacherId, schoolId }: Props) {
                 <tr key={r.id} className="hover:bg-gray-50">
                   <td className="px-5 py-4 font-medium text-gray-900">{r.leave_type}</td>
                   <td className="px-5 py-4">
-                    <div className="text-gray-700 text-xs">{new Date(r.start_date).toLocaleDateString()} – {new Date(r.end_date).toLocaleDateString()}</div>
+                    <div className="text-gray-700 text-xs">{new Date(r.start_date.slice(0,10) + 'T00:00:00').toLocaleDateString()} – {new Date(r.end_date.slice(0,10) + 'T00:00:00').toLocaleDateString()}</div>
                     <div className="text-xs text-gray-400">{daysBetween(r.start_date, r.end_date)} day{daysBetween(r.start_date, r.end_date) !== 1 ? 's' : ''}</div>
                   </td>
                   <td className="px-5 py-4 text-gray-500 max-w-[180px] truncate text-xs">{r.reason || '—'}</td>
@@ -202,7 +224,7 @@ export default function TeacherLeave({ teacherId, schoolId }: Props) {
                       {r.status}
                     </span>
                   </td>
-                  <td className="px-5 py-4 text-gray-400 text-xs">{new Date(r.created_at).toLocaleDateString()}</td>
+                  <td className="px-5 py-4 text-gray-400 text-xs">{new Date(r.created_at.slice(0,10) + 'T00:00:00').toLocaleDateString()}</td>
                 </tr>
               ))}
             </tbody>

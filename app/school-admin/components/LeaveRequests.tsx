@@ -51,6 +51,8 @@ type SubstituteRow = {
   time_from: string
   time_to: string
   substitute_teacher_id: number | null
+  substitute_teacher_subject?: string | null
+  substitute_teacher_department?: string | null
 }
 
 // Normalise to YYYY-MM-DD regardless of whether Postgres sent a full ISO timestamp
@@ -62,7 +64,10 @@ function dateRange(start: string, end: string): string[] {
   const cur = new Date(toDateStr(start) + 'T00:00:00')
   const last = new Date(toDateStr(end) + 'T00:00:00')
   while (cur <= last) {
-    dates.push(cur.toISOString().split('T')[0])
+    const y = cur.getFullYear()
+    const m = String(cur.getMonth() + 1).padStart(2, '0')
+    const d = String(cur.getDate()).padStart(2, '0')
+    dates.push(`${y}-${m}-${d}`)
     cur.setDate(cur.getDate() + 1)
   }
   return dates
@@ -301,14 +306,25 @@ function SubstituteModal({
                                 <td key={date} className={`px-1.5 py-1.5 border-r border-gray-100 last:border-r-0 align-top`}>
                                   <div className={`rounded-lg px-2 py-2 min-h-[56px] ${assigned ? 'bg-amber-50 border-2 border-amber-300' : 'bg-red-50 border border-red-200'}`}>
                                     <div className="flex items-center gap-1 flex-wrap mb-0.5">
-                                      <p className="font-semibold text-gray-800 text-xs leading-tight">
-                                        {row.subject_name || '—'}
-                                      </p>
+                                      {assigned ? (
+                                        <p className="font-semibold text-gray-400 line-through text-xs leading-tight">
+                                          {row.subject_name || '—'}
+                                        </p>
+                                      ) : (
+                                        <p className="font-semibold text-gray-800 text-xs leading-tight">
+                                          {row.subject_name || '—'}
+                                        </p>
+                                      )}
                                       {assigned
                                         ? <span className="text-[8px] bg-amber-400 text-white px-1 py-0.5 rounded font-bold">ASSIGNED</span>
                                         : <span className="text-[8px] bg-red-400 text-white px-1 py-0.5 rounded font-bold">PENDING</span>
                                       }
                                     </div>
+                                    {assigned && (
+                                      <p className="text-[10px] text-amber-700 font-semibold leading-tight truncate">
+                                        {row.substitute_teacher_subject || row.substitute_teacher_department || row.subject_name || '—'}
+                                      </p>
+                                    )}
                                     <p className="text-[10px] text-gray-500">Class {row.grade}-{row.section}</p>
                                     <p className="text-[10px] text-gray-400">{row.time_from}–{row.time_to}</p>
                                     {assigned && (
@@ -358,9 +374,21 @@ function SubstituteModal({
                                 P{row.period_number}
                               </div>
                               <div className="min-w-0">
-                                <p className="text-sm font-semibold text-gray-800 truncate">
-                                  {row.subject_name || 'Free Period'} — Class {row.grade}-{row.section}
-                                </p>
+                                {row.substitute_teacher_id ? (
+                                  <div className="flex items-center gap-1.5 truncate">
+                                    <p className="text-sm font-semibold text-gray-400 line-through truncate">
+                                      {row.subject_name || 'Free Period'}
+                                    </p>
+                                    <p className="text-sm font-semibold text-amber-700 truncate">
+                                      {row.substitute_teacher_subject || row.substitute_teacher_department || row.subject_name || 'Free Period'}
+                                    </p>
+                                    <span className="text-xs text-gray-500 flex-shrink-0">— Class {row.grade}-{row.section}</span>
+                                  </div>
+                                ) : (
+                                  <p className="text-sm font-semibold text-gray-800 truncate">
+                                    {row.subject_name || 'Free Period'} — Class {row.grade}-{row.section}
+                                  </p>
+                                )}
                                 <p className="text-xs text-gray-400">{row.time_from} – {row.time_to}</p>
                               </div>
                             </div>

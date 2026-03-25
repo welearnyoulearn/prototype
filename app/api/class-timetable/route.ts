@@ -14,10 +14,10 @@ export async function GET(req: NextRequest) {
     const vals: (string | number)[] = [school_id]
 
     const selectExtra = date
-      ? `, sa.substitute_teacher_id, st.name AS substitute_teacher_name, sa.id AS substitute_assignment_id`
+      ? `, sa.substitute_teacher_id, st.name AS substitute_teacher_name, sa.id AS substitute_assignment_id, st.subject AS substitute_teacher_subject, st.department AS substitute_teacher_department`
       : ''
 
-    let fromClause = `FROM class_timetable ct LEFT JOIN teachers t ON ct.teacher_id = t.id`
+    let fromClause = `FROM class_timetable ct LEFT JOIN teachers t ON ct.teacher_id = t.id LEFT JOIN classes c ON c.id = ct.class_id`
     if (date) {
       vals.push(date) // $2 = date
       fromClause += `
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     if (class_id) { whereClause += ` AND ct.class_id = $${vals.length + 1}`; vals.push(class_id) }
     if (teacher_id) { whereClause += ` AND ct.teacher_id = $${vals.length + 1}`; vals.push(teacher_id) }
 
-    const q = `SELECT ct.*, t.name AS teacher_name, t.employee_id${selectExtra}
+    const q = `SELECT ct.*, t.name AS teacher_name, t.employee_id, c.grade, c.section${selectExtra}
              ${fromClause}${whereClause}
              ORDER BY CASE ct.day_of_week WHEN 'Monday' THEN 1 WHEN 'Tuesday' THEN 2 WHEN 'Wednesday' THEN 3 WHEN 'Thursday' THEN 4 WHEN 'Friday' THEN 5 ELSE 6 END, ct.period_number`
 
