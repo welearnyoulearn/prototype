@@ -362,11 +362,11 @@ function SubstituteModal({
                       </p>
                     </div>
                     <div className="divide-y divide-gray-50">
-                      {dayRows.map(row => {
+                      {dayRows.map((row, rowIdx) => {
                         const key = `${row.date}_${row.period_number}`
                         const freeList = freeTeacherCache[key] || []
                         return (
-                          <div key={`${row.date}_${row.period_number}`}
+                          <div key={`${row.date}_${row.period_number}_${row.class_id}_${rowIdx}`}
                             className="px-4 py-3 flex items-center gap-4 flex-wrap">
                             {/* Period info */}
                             <div className="flex items-center gap-3 min-w-0 flex-shrink-0">

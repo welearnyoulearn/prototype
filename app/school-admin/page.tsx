@@ -10,10 +10,10 @@ import ClassManagement from './components/ClassManagement'
 import StudentTeacherAnalysis from './components/StudentTeacherAnalysis'
 import TeachersManagement from './components/TeachersManagement'
 import StudentsManagement from './components/StudentsManagement'
-import CurriculumManagement from './components/CurriculumManagement'
 import TimetableManagement from './components/TimetableManagement'
 import AttendanceDashboard from './components/AttendanceDashboard'
 import EmergencyCover from './components/EmergencyCover'
+import ExamSchedule from './components/ExamSchedule'
 import NotificationBell from '../components/NotificationBell'
 import { useRouter } from 'next/navigation'
 
@@ -117,22 +117,22 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
-    key: 'curriculum',
-    label: 'Curriculum',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    ),
-  },
-  {
     key: 'timetable',
     label: 'Timetable',
     tier: ['basic', 'standard', 'premium'],
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'exam-schedule',
+    label: 'Exam Schedule',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l-3 3-1.5-1.5" />
       </svg>
     ),
   },
@@ -409,8 +409,8 @@ export default function SchoolAdmin() {
                 {activeNav === 'student-onboarding' && <StudentOnboarding schoolId={selectedSchool.id} />}
                 {activeNav === 'class-management' && <ClassManagement schoolId={selectedSchool.id} />}
                 {activeNav === 'analysis' && <StudentTeacherAnalysis schoolId={selectedSchool.id} />}
-                {activeNav === 'curriculum' && <CurriculumManagement schoolId={selectedSchool.id} />}
-                {activeNav === 'timetable' && <TimetableManagement schoolId={selectedSchool.id} />}
+{activeNav === 'timetable' && <TimetableManagement schoolId={selectedSchool.id} />}
+                {activeNav === 'exam-schedule' && <ExamSchedule schoolId={selectedSchool.id} />}
                 {activeNav === 'teachers' && <TeachersManagement schoolId={selectedSchool.id} />}
                 {activeNav === 'students' && <StudentsManagement schoolId={selectedSchool.id} />}
               </>

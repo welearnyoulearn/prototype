@@ -3,9 +3,18 @@ import pool from '@/lib/db'
 import { hashPassword, generateTempPassword, generateSchoolCode } from '@/lib/auth'
 import { sendOnboardingEmail } from '@/lib/email'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const result = await pool.query('SELECT * FROM schools ORDER BY created_at DESC')
+    const search = req.nextUrl.searchParams.get('search')
+    let result
+    if (search && search.trim()) {
+      result = await pool.query(
+        `SELECT id, name, city, country FROM schools WHERE name ILIKE $1 ORDER BY name LIMIT 20`,
+        [`%${search.trim()}%`]
+      )
+    } else {
+      result = await pool.query('SELECT * FROM schools ORDER BY created_at DESC')
+    }
     return NextResponse.json(result.rows)
   } catch (error) {
     console.error(error)

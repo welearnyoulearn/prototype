@@ -50,6 +50,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   try {
+    // Null out teacher assignments in timetable and subject assignments before deleting
+    await pool.query('UPDATE class_timetable SET teacher_id = NULL, is_manual = FALSE WHERE teacher_id = $1', [id])
+    await pool.query('UPDATE class_subjects SET teacher_id = NULL WHERE teacher_id = $1', [id])
     const result = await pool.query('DELETE FROM teachers WHERE id = $1', [id])
     if (result.rowCount === 0) return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
     return NextResponse.json({ message: 'Teacher deleted' })

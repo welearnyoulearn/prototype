@@ -257,7 +257,7 @@ export default function StudentsManagement({ schoolId }: Props) {
                     <div key={field}>
                       <label className="block text-xs text-gray-500 mb-1">{label}</label>
                       <input type={type} placeholder={placeholder}
-                        value={(editForm as Record<string, string>)[field] ?? (selected as Record<string, string>)[field] ?? ''}
+                        value={(editForm as Record<string, unknown>)[field] as string ?? (selected as Record<string, unknown>)[field] as string ?? ''}
                         onChange={e => setEditForm(f => ({ ...f, [field]: e.target.value }))}
                         className={inputCls + ' !text-xs !py-1.5'} />
                     </div>

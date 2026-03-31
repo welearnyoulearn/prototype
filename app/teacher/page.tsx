@@ -8,7 +8,13 @@ import FullTimetable from './components/FullTimetable'
 import TeacherLeave from './components/TeacherLeave'
 import TeacherProfile from './components/TeacherProfile'
 import Attendance from './components/Attendance'
+import TasksPage from './components/TasksPage'
+import MyStudents from './components/MyStudents'
+import MyClasses from './components/MyClasses'
+import DoubtsCenter from './components/DoubtsCenter'
+import TeacherSyllabus from './components/TeacherSyllabus'
 import NotificationBell from '../components/NotificationBell'
+import TestCalendar from '../components/TestCalendar'
 
 type School = { id: number; name: string; city: string; country: string; status: string }
 type TeacherBasic = { id: number; name: string; employee_id: string; subject: string; department: string }
@@ -27,6 +33,7 @@ type Teacher = {
   class_teacher_grade: string | null
   class_teacher_section: string | null
   status: string
+  school_id: number
 }
 
 type NavSection = {
@@ -38,66 +45,93 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'MAIN',
     items: [
-      {
-        key: 'snapshot',
-        label: 'Smart Snapshot',
-        icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>,
-      },
+      { key: 'snapshot', label: 'Smart Snapshot', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg> },
     ],
   },
   {
     label: 'MY CLASSES',
     items: [
-      {
-        key: 'timetable',
-        label: 'Timetable',
-        icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
-      },
-      {
-        key: 'my-students',
-        label: 'My Students',
-        comingSoon: true,
-        icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
-      },
-      {
-        key: 'attendance',
-        label: 'Attendance',
-        icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>,
-      },
+      { key: 'my-classes', label: 'My Classes', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg> },
+      { key: 'my-students', label: 'My Students', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg> },
+      { key: 'timetable', label: 'Timetable', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> },
+      { key: 'attendance', label: 'Attendance', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg> },
     ],
   },
   {
     label: 'TASKS & LEARNING',
     items: [
-      { key: 'daily-tasks', label: 'Daily Tasks', comingSoon: true, icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg> },
-      { key: 'task-review', label: 'Task Review', comingSoon: true, icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg> },
+      { key: 'tasks', label: 'Tasks', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l-3 3-1.5-1.5" /></svg> },
+      { key: 'doubts', label: 'Doubt Center', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> },
+      { key: 'syllabus', label: 'Syllabus', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg> },
+      { key: 'test-calendar', label: 'Test Calendar', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> },
       { key: 'performance', label: 'Performance', comingSoon: true, icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg> },
-    ],
-  },
-  {
-    label: 'COMMUNICATION',
-    items: [
-      { key: 'doubts', label: 'Doubt Center', comingSoon: true, icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> },
-      { key: 'suggestions', label: 'Suggestions', comingSoon: true, icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg> },
-      { key: 'messages', label: 'Messages', comingSoon: true, icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg> },
     ],
   },
   {
     label: 'MY ACCOUNT',
     items: [
-      {
-        key: 'profile',
-        label: 'My Profile',
-        icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
-      },
-      {
-        key: 'leave',
-        label: 'Teacher Attend.',
-        icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>,
-      },
+      { key: 'profile', label: 'My Profile', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg> },
+      { key: 'leave', label: 'Teacher Attend.', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> },
     ],
   },
 ]
+
+// Wrapper that picks class for TeacherSyllabus
+function SyllabusWrapper({
+  teacher, schoolId, selectedClass,
+}: {
+  teacher: Teacher
+  schoolId: number
+  selectedClass: { id: number; grade: string; section: string } | null
+}) {
+  const [classes, setClasses] = useState<{ id: number; grade: string; section: string }[]>([])
+  const [pickedClassId, setPickedClassId] = useState<string>(selectedClass ? String(selectedClass.id) : '')
+
+  useEffect(() => {
+    fetch(`/api/classes?school_id=${schoolId}`)
+      .then(r => r.json())
+      .then(data => {
+        const sorted = Array.isArray(data) ? data.sort((a: { grade: string; section: string }, b: { grade: string; section: string }) => {
+          const ga = parseInt(a.grade) || 0
+          const gb = parseInt(b.grade) || 0
+          return ga !== gb ? ga - gb : a.section.localeCompare(b.section)
+        }) : []
+        setClasses(sorted)
+        if (!pickedClassId && sorted.length > 0) {
+          // Auto-pick teacher's own class if they're a class teacher
+          const ownClass = sorted.find((c: { grade: string; section: string }) =>
+            c.grade === teacher.class_teacher_grade && c.section === teacher.class_teacher_section
+          )
+          setPickedClassId(String(ownClass?.id || sorted[0].id))
+        }
+      })
+  }, [schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const classId = parseInt(pickedClassId)
+
+  return (
+    <div>
+      <div className="flex items-center gap-3 mb-5">
+        <h2 className="font-bold text-gray-800 text-xl">Syllabus</h2>
+        <select
+          value={pickedClassId}
+          onChange={e => setPickedClassId(e.target.value)}
+          className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+        >
+          {classes.map(c => (
+            <option key={c.id} value={c.id}>Grade {c.grade}-{c.section}</option>
+          ))}
+        </select>
+      </div>
+      {classId > 0 && (
+        <TeacherSyllabus
+          teacher={{ id: teacher.id, name: teacher.name, school_id: schoolId }}
+          classId={classId}
+        />
+      )}
+    </div>
+  )
+}
 
 export default function TeacherPortal() {
   const [schools, setSchools] = useState<School[]>([])
@@ -107,9 +141,32 @@ export default function TeacherPortal() {
   const [teacher, setTeacher] = useState<Teacher | null>(null)
   const [activeNav, setActiveNav] = useState('snapshot')
   const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null } | null>(null)
+  const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
+  const [classViewOpenExamId, setClassViewOpenExamId] = useState<number | undefined>(undefined)
   const [loading, setLoading] = useState(true)
   const [profileLoading, setProfileLoading] = useState(false)
   const [error, setError] = useState('')
+
+  function handleNavigate(key: string, payload?: { examId?: number; classId?: number; tab?: string }) {
+    if (key === 'class-view' && payload?.classId) {
+      // Deep-link to a specific class + tab from notification
+      fetch(`/api/classes/${payload.classId}?school_id=${selectedSchoolId}`)
+        .then(r => r.json())
+        .then(data => {
+          if (data?.id) {
+            setSelectedClass({ id: data.id, grade: data.grade, section: data.section, class_teacher_name: null })
+            setClassViewInitialTab(payload.tab)
+            setClassViewOpenExamId(payload.examId)
+            setActiveNav('class-view')
+          }
+        })
+        .catch(() => {})
+    } else {
+      setClassViewInitialTab(undefined)
+      setClassViewOpenExamId(undefined)
+      setActiveNav(key)
+    }
+  }
 
   useEffect(() => {
     fetch('/api/init')
@@ -146,7 +203,6 @@ export default function TeacherPortal() {
     )
   }
 
-  // Selection screen — before teacher is selected
   if (!teacher) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -174,7 +230,6 @@ export default function TeacherPortal() {
             <h1 className="text-xl font-bold text-gray-900 mb-1">Teacher Portal</h1>
             <p className="text-sm text-gray-500">Select your school and name to continue</p>
           </div>
-
           <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">School</label>
@@ -200,12 +255,8 @@ export default function TeacherPortal() {
     )
   }
 
-  // Full portal with sidebar
-  const pendingLeaves = 0 // Could fetch this separately if needed
-
   return (
     <div className="min-h-screen flex flex-col bg-gray-100">
-      {/* Top bar */}
       <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0 z-30">
         <div className="flex items-center gap-3">
           <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Home</Link>
@@ -230,7 +281,7 @@ export default function TeacherPortal() {
           <p className="text-sm font-medium text-gray-800">
             Good {new Date().getHours() < 12 ? 'Morning' : new Date().getHours() < 17 ? 'Afternoon' : 'Evening'}, {teacher.name}
           </p>
-          <NotificationBell teacherId={teacher.id} onNavigate={setActiveNav} />
+          <NotificationBell teacherId={teacher.id} onNavigate={handleNavigate} />
           <button onClick={() => { setTeacher(null); setSelectedTeacherId('') }}
             className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-2 py-1 rounded">
             Switch
@@ -239,9 +290,7 @@ export default function TeacherPortal() {
       </div>
 
       <div className="flex flex-1 min-h-0">
-        {/* Sidebar */}
         <aside className="w-52 bg-slate-900 flex-shrink-0 flex flex-col">
-          {/* Logo */}
           <div className="px-4 py-4 border-b border-slate-700">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -254,35 +303,29 @@ export default function TeacherPortal() {
             )}
           </div>
 
-          {/* Nav */}
           <nav className="flex-1 py-3 overflow-y-auto">
             {NAV_SECTIONS.map(section => (
               <div key={section.label} className="mb-2">
                 <p className="px-4 py-1.5 text-[10px] font-semibold text-slate-500 uppercase tracking-widest">{section.label}</p>
                 {section.items.map(item => (
-                  <button
-                    key={item.key}
-                    onClick={() => !item.comingSoon && setActiveNav(item.key)}
+                  <button key={item.key} onClick={() => {
+                    if (item.comingSoon) return
+                    setActiveNav(item.key)
+                  }}
                     className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors text-left ${
-                      item.comingSoon
-                        ? 'text-slate-600 cursor-not-allowed'
-                        : activeNav === item.key
-                          ? 'bg-blue-600 text-white'
-                          : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                    }`}
-                  >
+                      item.comingSoon ? 'text-slate-600 cursor-not-allowed'
+                        : activeNav === item.key ? 'bg-blue-600 text-white'
+                        : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                    }`}>
                     {item.icon}
                     <span>{item.label}</span>
-                    {item.comingSoon && (
-                      <span className="ml-auto text-[9px] text-slate-600 font-medium">Soon</span>
-                    )}
+                    {item.comingSoon && <span className="ml-auto text-[9px] text-slate-600 font-medium">Soon</span>}
                   </button>
                 ))}
               </div>
             ))}
           </nav>
 
-          {/* Teacher info at bottom */}
           <div className="px-4 py-4 border-t border-slate-700 flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
               {teacher.name.charAt(0).toUpperCase()}
@@ -298,45 +341,53 @@ export default function TeacherPortal() {
           </div>
         </aside>
 
-        {/* Main content */}
         <main className="flex-1 overflow-y-auto p-6">
           {activeNav === 'snapshot' && (
-            <SmartSnapshot
-              teacher={teacher}
-              schoolId={parseInt(selectedSchoolId)}
-              onNavigate={setActiveNav}
-              onViewClass={cls => { setSelectedClass(cls); setActiveNav('class-view') }}
-            />
+            <SmartSnapshot teacher={teacher} schoolId={parseInt(selectedSchoolId)} onNavigate={setActiveNav}
+              onViewClass={cls => { setSelectedClass(cls); setActiveNav('class-view') }} />
           )}
           {activeNav === 'class-view' && selectedClass && (
             <ClassView
-              classId={selectedClass.id}
-              grade={selectedClass.grade}
-              section={selectedClass.section}
-              schoolId={parseInt(selectedSchoolId)}
-              teacherName={teacher.name}
-              teacherId={teacher.id}
-              isClassTeacher={
-                teacher.class_teacher_grade === selectedClass.grade &&
-                teacher.class_teacher_section === selectedClass.section
-              }
+              classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section}
+              schoolId={parseInt(selectedSchoolId)} teacherName={teacher.name} teacherId={teacher.id}
+              isClassTeacher={teacher.class_teacher_grade === selectedClass.grade && teacher.class_teacher_section === selectedClass.section}
+              teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }}
               onBack={() => setActiveNav('snapshot')}
+              initialTab={classViewInitialTab}
+              openExamId={classViewOpenExamId}
             />
           )}
-          {activeNav === 'timetable' && (
-            <FullTimetable teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} />
+          {activeNav === 'timetable' && <FullTimetable teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} />}
+          {activeNav === 'attendance' && <Attendance teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} />}
+          {activeNav === 'leave' && <TeacherLeave teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} />}
+          {activeNav === 'profile' && <TeacherProfile teacher={teacher} onUpdate={setTeacher} />}
+          {activeNav === 'tasks' && (
+            <TasksPage teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={parseInt(selectedSchoolId)} />
           )}
-          {activeNav === 'attendance' && (
-            <Attendance teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} />
+          {activeNav === 'my-classes' && (
+            <MyClasses
+              teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }}
+              schoolId={parseInt(selectedSchoolId)}
+              onViewClass={cls => { setSelectedClass(cls); setActiveNav('class-view') }}
+            />
           )}
-          {activeNav === 'leave' && (
-            <TeacherLeave teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} />
+          {activeNav === 'my-students' && (
+            <MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={parseInt(selectedSchoolId)} />
           )}
-          {activeNav === 'profile' && (
-            <TeacherProfile teacher={teacher} onUpdate={setTeacher} />
+          {activeNav === 'doubts' && (
+            <DoubtsCenter teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject }} schoolId={parseInt(selectedSchoolId)} />
           )}
-          {/* Coming soon screens */}
-          {['my-students', 'attendance', 'daily-tasks', 'task-review', 'performance', 'doubts', 'suggestions', 'messages'].includes(activeNav) && (
+          {activeNav === 'syllabus' && (
+            <SyllabusWrapper teacher={teacher} schoolId={parseInt(selectedSchoolId)} selectedClass={selectedClass} />
+          )}
+          {activeNav === 'test-calendar' && (
+            <TestCalendar
+              mode="teacher"
+              schoolId={parseInt(selectedSchoolId)}
+              teacherId={teacher.id}
+            />
+          )}
+          {['performance', 'messages'].includes(activeNav) && (
             <div className="flex items-center justify-center h-full min-h-[400px]">
               <div className="text-center">
                 <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">

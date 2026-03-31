@@ -5,10 +5,11 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const teacher_id = searchParams.get('teacher_id')
   const recipient_school_id = searchParams.get('recipient_school_id')
+  const student_id = searchParams.get('student_id')
   const unread_only = searchParams.get('unread_only')
 
-  if (!teacher_id && !recipient_school_id) {
-    return NextResponse.json({ error: 'teacher_id or recipient_school_id required' }, { status: 400 })
+  if (!teacher_id && !recipient_school_id && !student_id) {
+    return NextResponse.json({ error: 'teacher_id, recipient_school_id, or student_id required' }, { status: 400 })
   }
   try {
     let q = `SELECT n.*, t.name AS sender_name
@@ -20,6 +21,9 @@ export async function GET(req: NextRequest) {
     if (teacher_id) {
       vals.push(teacher_id)
       q += `n.recipient_teacher_id = $${vals.length}`
+    } else if (student_id) {
+      vals.push(student_id)
+      q += `n.recipient_student_id = $${vals.length}`
     } else {
       vals.push(recipient_school_id!)
       q += `n.recipient_school_id = $${vals.length}`
@@ -60,11 +64,13 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const { teacher_id, school_id, notification_id } = await req.json()
+    const { teacher_id, school_id, student_id, notification_id } = await req.json()
     if (notification_id) {
       await pool.query('UPDATE notifications SET is_read = TRUE WHERE id = $1', [notification_id])
     } else if (teacher_id) {
       await pool.query('UPDATE notifications SET is_read = TRUE WHERE recipient_teacher_id = $1', [teacher_id])
+    } else if (student_id) {
+      await pool.query('UPDATE notifications SET is_read = TRUE WHERE recipient_student_id = $1', [student_id])
     } else if (school_id) {
       await pool.query('UPDATE notifications SET is_read = TRUE WHERE recipient_school_id = $1', [school_id])
     }

@@ -1,6 +1,11 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import Tasks from './Tasks'
+import ClassDoubts from './ClassDoubts'
+import ClassPerformance from './ClassPerformance'
+import ExamMarks from './ExamMarks'
+import { SCHEDULE } from '@/lib/schedule'
 
 type Subject = {
   id: number
@@ -38,6 +43,7 @@ type TimetableSlot = {
   time_to: string
   subject_name: string | null
   teacher_name: string | null
+  room: string | null
   is_break: boolean
   break_label: string | null
   day_of_week: string
@@ -85,6 +91,15 @@ type ClassSubstitute = {
   time_to: string | null
 }
 
+type TeacherObj = {
+  id: number
+  name: string
+  subject: string
+  department: string
+  class_teacher_grade: string | null
+  class_teacher_section: string | null
+}
+
 type Props = {
   classId: number
   grade: string
@@ -93,10 +108,239 @@ type Props = {
   teacherName: string
   teacherId?: number
   isClassTeacher: boolean
+  teacher?: TeacherObj
   onBack: () => void
+  initialTab?: string
+  openExamId?: number
 }
 
-const TABS = ['Overview', 'Students', 'Attendance', 'Timetable', 'Marks & Results', 'Tasks', 'Doubts']
+const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Performance', 'Attendance', 'Timetable', 'Marks & Results', 'Tasks', 'Doubts']
+const SUBJECT_TEACHER_TABS = ['My Overview', 'Marks & Results', 'Tasks', 'Doubts', 'Timetable']
+const TABS = CLASS_TEACHER_TABS // kept for reference
+
+// API returns: { id, exam_name, exam_type, exam_date, status, subject_name, subject_status, max_marks, ... }
+type MyExamRow = {
+  id: number; exam_name: string; exam_type: string; exam_date: string | null
+  status: string; subject_name: string; subject_status: string; max_marks: number
+  total_subjects: number; submitted_subjects: number
+}
+type MyTask = { id: number; title: string; subject: string; task_type: string; due_date: string; submission_count: number; total_students: number }
+type MyDoubt = { id: number; question: string; student_name: string; created_at: string; subject: string; status: string }
+
+const EXAM_LABELS: Record<string, string> = { unit_test: 'Unit Test', mid_term: 'Mid Term', final_exam: 'Final Exam', practical: 'Practical' }
+const EXAM_COLORS: Record<string, string> = { unit_test: 'bg-red-100 text-red-700', mid_term: 'bg-orange-100 text-orange-700', final_exam: 'bg-purple-100 text-purple-700', practical: 'bg-blue-100 text-blue-700' }
+
+function SubjectTeacherOverview({
+  classId, schoolId, grade, section, teacher, onGoToMarks, onGoToTasks, onGoToDoubts,
+}: {
+  classId: number; schoolId: number; grade: string; section: string
+  teacher: TeacherObj
+  onGoToMarks: () => void; onGoToTasks: () => void; onGoToDoubts: () => void
+}) {
+  const [myExams, setMyExams]     = useState<MyExamRow[]>([])
+  const [myTasks, setMyTasks]     = useState<MyTask[]>([])
+  const [myDoubts, setMyDoubts]   = useState<MyDoubt[]>([])
+  const [loading, setLoading]     = useState(true)
+
+  useEffect(() => {
+    Promise.all([
+      // Exams where this teacher has a subject in this class
+      fetch(`/api/exams?school_id=${schoolId}&class_id=${classId}&teacher_id=${teacher.id}`)
+        .then(r => r.json()).catch(() => []),
+      // Tasks this teacher created for this class
+      fetch(`/api/tasks?school_id=${schoolId}&class_id=${classId}&teacher_id=${teacher.id}`)
+        .then(r => r.json()).catch(() => []),
+      // Open doubts from this class related to this teacher's subject
+      fetch(`/api/doubts?school_id=${schoolId}&class_id=${classId}&status=open&subject=${encodeURIComponent(teacher.subject || '')}`)
+        .then(r => r.json()).catch(() => []),
+    ]).then(([examsData, tasksData, doubtsData]) => {
+      setMyExams(Array.isArray(examsData) ? examsData : [])
+      setMyTasks(Array.isArray(tasksData) ? tasksData : [])
+      setMyDoubts(Array.isArray(doubtsData) ? doubtsData.slice(0, 5) : [])
+      setLoading(false)
+    })
+  }, [classId, schoolId, teacher.id, teacher.subject])
+
+  const pendingExams = myExams.filter(e => e.subject_status !== 'submitted')
+  const submittedExams = myExams.filter(e => e.subject_status === 'submitted')
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-16">
+      <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+
+  return (
+    <div className="space-y-4">
+      {/* Role banner */}
+      <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-xl p-4 text-white flex items-center justify-between">
+        <div>
+          <p className="text-indigo-200 text-xs font-semibold uppercase tracking-wide">Subject Teacher</p>
+          <p className="text-white font-bold text-base mt-0.5">{teacher.subject} · Grade {grade}-{section}</p>
+          <p className="text-indigo-200 text-xs mt-0.5">{teacher.department}</p>
+        </div>
+        <div className="grid grid-cols-3 gap-4 text-center">
+          <div>
+            <div className={`text-xl font-black ${pendingExams.length > 0 ? 'text-amber-300' : 'text-white'}`}>{pendingExams.length}</div>
+            <div className="text-indigo-200 text-[10px]">Pending Marks</div>
+          </div>
+          <div>
+            <div className="text-xl font-black">{myTasks.length}</div>
+            <div className="text-indigo-200 text-[10px]">Tasks</div>
+          </div>
+          <div>
+            <div className={`text-xl font-black ${myDoubts.length > 0 ? 'text-yellow-300' : 'text-white'}`}>{myDoubts.length}</div>
+            <div className="text-indigo-200 text-[10px]">Open Doubts</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Pending marks entry — urgent alert */}
+      {pendingExams.length > 0 && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                <p className="text-sm font-bold text-amber-900">
+                  {pendingExams.length} exam{pendingExams.length > 1 ? 's' : ''} waiting for your marks
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                {pendingExams.map(e => (
+                  <div key={`${e.id}-${e.subject_name}`} className="flex items-center gap-2">
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${EXAM_COLORS[e.exam_type] || 'bg-gray-100 text-gray-600'}`}>
+                      {EXAM_LABELS[e.exam_type] || e.exam_type}
+                    </span>
+                    <span className="text-xs text-amber-800 font-medium">{e.exam_name}</span>
+                    <span className="text-xs text-amber-600">— {e.subject_name}</span>
+                    {e.exam_date && <span className="text-[10px] text-amber-500 ml-auto">{e.exam_date}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <button onClick={onGoToMarks}
+              className="shrink-0 bg-amber-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-amber-700 whitespace-nowrap">
+              Enter Marks →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Quick action tiles */}
+      <div className="grid grid-cols-3 gap-3">
+        <button onClick={onGoToMarks}
+          className={`rounded-xl p-4 text-left transition-all group border ${pendingExams.length > 0 ? 'bg-amber-50 border-amber-200 hover:border-amber-400' : 'bg-white border-gray-200 hover:border-orange-300 hover:bg-orange-50'}`}>
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center mb-3 ${pendingExams.length > 0 ? 'bg-amber-100' : 'bg-orange-100'}`}>
+            <svg className={`w-5 h-5 ${pendingExams.length > 0 ? 'text-amber-700' : 'text-orange-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <p className="text-sm font-bold text-gray-800">Marks Entry</p>
+          <p className={`text-xs mt-0.5 font-medium ${pendingExams.length > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+            {pendingExams.length > 0 ? `${pendingExams.length} pending` : submittedExams.length > 0 ? 'All submitted ✓' : 'No exams yet'}
+          </p>
+        </button>
+
+        <button onClick={onGoToTasks}
+          className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-blue-300 hover:bg-blue-50 transition-all group">
+          <div className="w-9 h-9 bg-blue-100 rounded-lg flex items-center justify-center mb-3 group-hover:bg-blue-200">
+            <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+            </svg>
+          </div>
+          <p className="text-sm font-bold text-gray-800">Tasks</p>
+          <p className="text-xs text-gray-400 mt-0.5">{myTasks.length} assigned</p>
+        </button>
+
+        <button onClick={onGoToDoubts}
+          className={`rounded-xl p-4 text-left transition-all group border ${myDoubts.length > 0 ? 'bg-yellow-50 border-yellow-200 hover:border-yellow-400' : 'bg-white border-gray-200 hover:border-purple-300 hover:bg-purple-50'}`}>
+          <div className={`w-9 h-9 rounded-lg flex items-center justify-center mb-3 ${myDoubts.length > 0 ? 'bg-yellow-100' : 'bg-purple-100'}`}>
+            <svg className={`w-5 h-5 ${myDoubts.length > 0 ? 'text-yellow-700' : 'text-purple-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <p className="text-sm font-bold text-gray-800">Doubts</p>
+          <p className={`text-xs mt-0.5 font-medium ${myDoubts.length > 0 ? 'text-yellow-600' : 'text-gray-400'}`}>
+            {myDoubts.length > 0 ? `${myDoubts.length} open` : 'None open'}
+          </p>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Recent tasks */}
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">Recent Tasks</p>
+            <button onClick={onGoToTasks} className="text-xs text-blue-500 font-medium hover:underline">View all</button>
+          </div>
+          {myTasks.length === 0 ? (
+            <div className="py-6 text-center">
+              <p className="text-xs text-gray-400">No tasks assigned to this class yet</p>
+              <button onClick={onGoToTasks} className="mt-2 text-xs text-blue-600 font-semibold hover:underline">+ Create task</button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {myTasks.slice(0, 4).map(t => (
+                <div key={t.id} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-700 font-medium truncate">{t.title}</p>
+                    <p className="text-xs text-gray-400">{t.task_type} · {t.due_date}</p>
+                  </div>
+                  {t.total_students > 0 && (
+                    <span className="text-[10px] font-bold text-gray-500 ml-2">
+                      {t.submission_count}/{t.total_students}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Open doubts */}
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">Open Doubts</p>
+            <button onClick={onGoToDoubts} className="text-xs text-purple-500 font-medium hover:underline">View all</button>
+          </div>
+          {myDoubts.length === 0 ? (
+            <div className="py-6 text-center">
+              <p className="text-xs text-gray-400">No open doubts from this class</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {myDoubts.map(d => (
+                <div key={d.id} className="py-1.5 border-b border-gray-50 last:border-0">
+                  <p className="text-sm text-gray-700 line-clamp-2">{d.question}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{d.student_name} · {new Date(d.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Submitted exams */}
+      {submittedExams.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <p className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-3">Submitted Marks</p>
+          <div className="space-y-2">
+            {submittedExams.map(e => (
+              <div key={`${e.id}-sub`} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                <div>
+                  <p className="text-sm font-medium text-gray-700">{e.exam_name}</p>
+                  <p className="text-xs text-gray-400">{e.subject_name} · {EXAM_LABELS[e.exam_type] || e.exam_type}{e.exam_date ? ` · ${e.exam_date}` : ''}</p>
+                </div>
+                <span className="text-xs font-bold text-green-700 bg-green-50 px-2.5 py-1 rounded-full">✓ Submitted</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 function timeToMins(t: string) {
@@ -146,11 +390,12 @@ function getDaysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate()
 }
 
-export default function ClassView({ classId, grade, section, schoolId, teacherName, teacherId, isClassTeacher, onBack }: Props) {
+export default function ClassView({ classId, grade, section, schoolId, teacherName, teacherId, isClassTeacher, teacher, onBack, initialTab, openExamId }: Props) {
+  const tabs = isClassTeacher ? CLASS_TEACHER_TABS : SUBJECT_TEACHER_TABS
   const [classDetail, setClassDetail] = useState<ClassDetail | null>(null)
   const [students, setStudents] = useState<Student[]>([])
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState('Overview')
+  const [activeTab, setActiveTab] = useState(initialTab && tabs.includes(initialTab) ? initialTab : tabs[0])
 
   // Today's timetable (for 1st period card + day-wise view)
   const [todaySlots, setTodaySlots] = useState<TimetableSlot[]>([])
@@ -369,7 +614,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         </div>
         {/* Tabs */}
         <div className="flex gap-6 mt-5 border-b border-gray-100 -mb-5">
-          {TABS.map(tab => (
+          {tabs.map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               className={`pb-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === tab ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -377,6 +622,20 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           ))}
         </div>
       </div>
+
+      {/* ── SUBJECT TEACHER MY OVERVIEW ─────────────────────────────────────── */}
+      {activeTab === 'My Overview' && !isClassTeacher && (
+        <SubjectTeacherOverview
+          classId={classId}
+          schoolId={schoolId}
+          grade={grade}
+          section={section}
+          teacher={teacher!}
+          onGoToMarks={() => setActiveTab('Marks & Results')}
+          onGoToTasks={() => setActiveTab('Tasks')}
+          onGoToDoubts={() => setActiveTab('Doubts')}
+        />
+      )}
 
       {/* ── OVERVIEW TAB ─────────────────────────────────────────────────────── */}
       {activeTab === 'Overview' && (
@@ -596,6 +855,16 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
             </table>
           )}
         </div>
+      )}
+
+      {/* ── PERFORMANCE TAB ─────────────────────────────────────────────────── */}
+      {activeTab === 'Performance' && (
+        <ClassPerformance
+          classId={classId}
+          schoolId={schoolId}
+          grade={grade}
+          section={section}
+        />
       )}
 
       {/* ── ATTENDANCE TAB ──────────────────────────────────────────────────── */}
@@ -893,77 +1162,88 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
               <div className="overflow-x-auto">
                 <table className="text-xs border-collapse min-w-max w-full">
                   <thead>
-                    <tr className="bg-gray-50 border-b border-gray-200">
-                      <th className="sticky left-0 bg-gray-50 px-4 py-3 text-left font-semibold text-gray-500 min-w-[80px] border-r border-gray-200 uppercase tracking-wide">Period</th>
+                    <tr className="bg-slate-800">
+                      <th className="sticky left-0 bg-slate-800 px-3 py-3 text-left font-semibold text-slate-200 min-w-[100px] border-r border-slate-700">
+                        Slot / Time
+                      </th>
                       {DAYS.map(day => (
-                        <th key={day} className={`px-3 py-3 text-center font-semibold min-w-[130px] ${day === todayLabel ? 'text-orange-600 bg-orange-50' : 'text-gray-600'}`}>
+                        <th key={day} className={`px-3 py-3 text-center font-semibold min-w-[120px] border-r border-slate-700 last:border-r-0 ${day === todayLabel ? 'bg-orange-600 text-white' : 'text-slate-300'}`}>
                           <span className="block">{day.slice(0, 3)}</span>
-                          <span className="block text-[9px] font-normal text-gray-400">{weekDates[day]?.slice(5)}</span>
-                          {day === todayLabel && <span className="inline-block mt-0.5 text-[9px] bg-orange-500 text-white px-1 py-0.5 rounded">Today</span>}
+                          <span className="block text-[9px] font-normal opacity-70">{weekDates[day]?.slice(5)}</span>
+                          {day === todayLabel && <span className="block text-[9px] font-normal text-orange-200">Today</span>}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {periods.map(p => (
-                      <tr key={p} className="border-b border-gray-100 hover:bg-gray-50/50">
-                        <td className="sticky left-0 bg-white px-4 py-3 font-semibold text-gray-500 border-r border-gray-100 text-center">
-                          P{p}
-                        </td>
-                        {DAYS.map(day => {
-                          const slot = getSlot(day, p)
-                          const isToday = day === todayLabel
-                          const cellDate = weekDates[day]
-                          // Look up substitute by this specific calendar date + period
-                          const sub = cellDate ? subLookup.get(`${cellDate}-${p}`) : undefined
-                          const hasSub = !!sub
-                          const isMe = hasSub && teacherId && sub.substitute_teacher_id === teacherId
-
-                          if (!slot) return <td key={day} className="px-3 py-3 text-center text-gray-200">—</td>
-                          if (slot.is_break) return (
-                            <td key={day} className="px-3 py-3 text-center bg-gray-50">
-                              <span className="text-gray-400 text-[10px] font-medium">{slot.break_label || 'Break'}</span>
+                    {SCHEDULE.map(schedSlot => {
+                      if (schedSlot.is_break) {
+                        return (
+                          <tr key={schedSlot.slot} className="bg-amber-50 border-y border-amber-100">
+                            <td className="sticky left-0 bg-amber-50 px-3 py-2 border-r border-amber-100 z-10">
+                              <span className="font-semibold text-amber-600 text-[11px]">{schedSlot.break_label}</span>
+                              <span className="block text-amber-400 text-[10px]">{schedSlot.time_from}–{schedSlot.time_to}</span>
                             </td>
-                          )
-                          return (
-                            <td key={day} className={`px-3 py-2 ${
-                              hasSub ? 'bg-amber-50/60' : isToday ? 'bg-orange-50/40' : ''
-                            }`}>
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-1 mb-0.5">
-                                  {hasSub ? (
-                                    <p className="font-semibold text-gray-400 line-through truncate text-xs">
-                                      {slot.subject_name || sub.subject_name || '—'}
-                                    </p>
-                                  ) : (
-                                    <p className="font-semibold text-gray-800 truncate">
+                            <td colSpan={DAYS.length} className="text-center text-amber-400 italic py-2 text-[11px]">
+                              {schedSlot.break_label} · {schedSlot.time_from} – {schedSlot.time_to}
+                            </td>
+                          </tr>
+                        )
+                      }
+
+                      return (
+                        <tr key={schedSlot.slot} className="border-b border-gray-100 hover:bg-gray-50/50">
+                          <td className="sticky left-0 bg-gray-50 px-3 py-2 border-r border-gray-100 z-10">
+                            <span className="font-bold text-gray-700 text-[11px] block">{schedSlot.short}</span>
+                            <span className="text-gray-400 text-[10px]">{schedSlot.time_from}–{schedSlot.time_to}</span>
+                          </td>
+                          {DAYS.map(day => {
+                            const slot = allTimetableSlots.find(s =>
+                              s.day_of_week === day && Math.round(Number(s.period_number)) === schedSlot.slot && !s.is_break
+                            )
+                            const isToday = day === todayLabel
+                            const cellDate = weekDates[day]
+                            const sub = cellDate ? subLookup.get(`${cellDate}-${schedSlot.slot}`) : undefined
+                            const hasSub = !!sub
+                            const isMe = hasSub && teacherId && sub.substitute_teacher_id === teacherId
+
+                            if (!slot) {
+                              return (
+                                <td key={day} className="px-2 py-2 border-r border-gray-100 last:border-r-0">
+                                  <div className={`rounded min-h-[42px] flex items-center justify-center ${isToday ? 'bg-orange-50/30' : 'bg-gray-50'} border border-gray-100`}>
+                                    <span className="text-gray-200 text-[10px] italic">Free</span>
+                                  </div>
+                                </td>
+                              )
+                            }
+
+                            return (
+                              <td key={day} className={`px-2 py-2 border-r border-gray-100 last:border-r-0 ${isToday ? 'bg-orange-50/20' : ''}`}>
+                                <div className={`rounded px-2 py-1.5 min-h-[42px] ${hasSub ? 'bg-amber-50 border border-amber-200' : 'bg-blue-50 border border-blue-100'}`}>
+                                  <div className="flex items-start justify-between gap-1">
+                                    <p className={`font-semibold text-[11px] leading-tight ${hasSub ? 'line-through text-gray-400' : 'text-gray-800'}`}>
                                       {slot.subject_name || '—'}
                                     </p>
+                                    {hasSub && <span className="text-[9px] bg-amber-400 text-white px-1 py-0.5 rounded font-bold flex-shrink-0">SUB</span>}
+                                  </div>
+                                  {hasSub ? (
+                                    <>
+                                      <p className="text-gray-300 line-through text-[10px]">{slot.teacher_name || 'No teacher'}</p>
+                                      <p className={`text-[10px] font-semibold ${isMe ? 'text-amber-600' : 'text-blue-600'}`}>
+                                        {isMe ? '★ You (Sub)' : sub.substitute_teacher_name || 'Substitute'}
+                                      </p>
+                                    </>
+                                  ) : (
+                                    <p className="text-gray-400 text-[10px] mt-0.5">{slot.teacher_name || 'No teacher'}</p>
                                   )}
-                                  {hasSub && (
-                                    <span className="flex-shrink-0 text-[9px] bg-amber-400 text-white px-1 py-0.5 rounded font-bold">SUB</span>
-                                  )}
+                                  {slot.room && <p className="text-gray-300 text-[10px]">{slot.room}</p>}
                                 </div>
-                                {hasSub ? (
-                                  <>
-                                    <p className={`text-[10px] font-semibold truncate ${isMe ? 'text-amber-600' : 'text-blue-600'}`}>
-                                      {sub.substitute_teacher_subject || sub.substitute_teacher_department || sub.subject_name || '—'}
-                                    </p>
-                                    <p className="text-gray-300 line-through text-[10px] truncate">{slot.teacher_name || sub.original_teacher_name || 'No teacher'}</p>
-                                    <p className={`text-[10px] font-semibold truncate ${isMe ? 'text-amber-600' : 'text-blue-600'}`}>
-                                      {isMe ? '★ You (Sub)' : `${sub.substitute_teacher_name || 'Substitute'}`}
-                                    </p>
-                                  </>
-                                ) : (
-                                  <p className="text-gray-400 truncate">{slot.teacher_name || 'No teacher'}</p>
-                                )}
-                                {slot.time_from && <p className="text-gray-300 mt-0.5">{slot.time_from}–{slot.time_to}</p>}
-                              </div>
-                            </td>
-                          )
-                        })}
-                      </tr>
-                    ))}
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -972,16 +1252,52 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         )
       })()}
 
-      {/* ── OTHER TABS ──────────────────────────────────────────────────────── */}
-      {['Marks & Results', 'Tasks', 'Doubts'].includes(activeTab) && (
+      {/* ── TASKS TAB ───────────────────────────────────────────────────────── */}
+      {activeTab === 'Tasks' && teacher && (
+        <Tasks
+          classId={classId}
+          grade={grade}
+          section={section}
+          schoolId={schoolId}
+          teacher={teacher}
+        />
+      )}
+      {activeTab === 'Tasks' && !teacher && (
         <div className="bg-white rounded-xl border border-gray-200 py-20 text-center">
-          <div className="w-14 h-14 bg-orange-50 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-7 h-7 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <h3 className="text-base font-semibold text-gray-700 mb-1">{activeTab} — Coming Soon</h3>
-          <p className="text-sm text-gray-400">We&apos;re building this feature. Check back soon!</p>
+          <p className="text-sm text-gray-400">Loading teacher info...</p>
+        </div>
+      )}
+
+      {activeTab === 'Doubts' && teacher && (
+        <ClassDoubts
+          classId={classId}
+          grade={grade}
+          section={section}
+          schoolId={schoolId}
+          teacher={teacher}
+        />
+      )}
+      {activeTab === 'Doubts' && !teacher && (
+        <div className="bg-white rounded-xl border border-gray-200 py-20 text-center">
+          <p className="text-sm text-gray-400">Loading teacher info...</p>
+        </div>
+      )}
+
+      {/* ── OTHER TABS ──────────────────────────────────────────────────────── */}
+      {activeTab === 'Marks & Results' && teacher && (
+        <ExamMarks
+          classId={classId}
+          schoolId={schoolId}
+          grade={grade}
+          section={section}
+          teacher={teacher}
+          isClassTeacher={isClassTeacher}
+          openExamId={openExamId}
+        />
+      )}
+      {activeTab === 'Marks & Results' && !teacher && (
+        <div className="bg-white rounded-xl border border-gray-200 py-10 text-center">
+          <p className="text-sm text-gray-400">Loading teacher info...</p>
         </div>
       )}
     </div>

@@ -5,8 +5,10 @@ import { NextRequest } from 'next/server'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'wlyl-super-secret-key-change-in-production'
 const COOKIE_NAME = 'wlyl-auth'
+const TEACHER_COOKIE_NAME = 'wlyl-teacher'
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
 
+// ─── Admin/platform JWT payload ───────────────────────────────────────────────
 export type JWTPayload = {
   userId: number
   role: 'platform_admin' | 'school_admin'
@@ -14,6 +16,14 @@ export type JWTPayload = {
   schoolCode?: string
   firstLogin: boolean
   profileCompleted: boolean
+}
+
+// ─── Teacher JWT payload ───────────────────────────────────────────────────────
+export type TeacherJWTPayload = {
+  teacherId: number
+  schoolId: number
+  role: 'teacher'
+  passwordChanged: boolean
 }
 
 // ─── Password helpers ─────────────────────────────────────────────────────────
@@ -72,6 +82,51 @@ export async function getSession(): Promise<JWTPayload | null> {
   const token = cookieStore.get(COOKIE_NAME)?.value
   if (!token) return null
   return verifyToken(token)
+}
+
+// ─── Teacher cookie helpers ────────────────────────────────────────────────────
+export function signTeacherToken(payload: TeacherJWTPayload): string {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' })
+}
+
+export function verifyTeacherToken(token: string): TeacherJWTPayload | null {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as TeacherJWTPayload & { iat?: number; exp?: number }
+    const { iat: _iat, exp: _exp, ...payload } = decoded
+    return payload as TeacherJWTPayload
+  } catch {
+    return null
+  }
+}
+
+export async function setTeacherAuthCookie(payload: TeacherJWTPayload): Promise<void> {
+  const token = signTeacherToken(payload)
+  const cookieStore = await cookies()
+  cookieStore.set(TEACHER_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: COOKIE_MAX_AGE,
+    path: '/',
+  })
+}
+
+export async function clearTeacherAuthCookie(): Promise<void> {
+  const cookieStore = await cookies()
+  cookieStore.delete(TEACHER_COOKIE_NAME)
+}
+
+export async function getTeacherSession(): Promise<TeacherJWTPayload | null> {
+  const cookieStore = await cookies()
+  const token = cookieStore.get(TEACHER_COOKIE_NAME)?.value
+  if (!token) return null
+  return verifyTeacherToken(token)
+}
+
+export function getTeacherSessionFromRequest(req: NextRequest): TeacherJWTPayload | null {
+  const token = req.cookies.get(TEACHER_COOKIE_NAME)?.value
+  if (!token) return null
+  return verifyTeacherToken(token)
 }
 
 // ─── Middleware token extraction (Edge runtime) ───────────────────────────────

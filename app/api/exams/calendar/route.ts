@@ -1,0 +1,81 @@
+import { NextRequest, NextResponse } from 'next/server'
+import pool, { ensureDB } from '@/lib/db'
+
+export async function GET(req: NextRequest) {
+  await ensureDB()
+  const { searchParams } = new URL(req.url)
+  const school_id = searchParams.get('school_id')
+  const class_id = searchParams.get('class_id')
+  const teacher_id = searchParams.get('teacher_id')
+  const student_id = searchParams.get('student_id')
+  const from = searchParams.get('from')
+  const to = searchParams.get('to')
+  const include_draft = searchParams.get('include_draft') === 'true'
+
+  if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+
+  const currentYear = new Date().getFullYear()
+  const dateFrom = from || `${currentYear}-01-01`
+  const dateTo = to || `${currentYear}-12-31`
+
+  try {
+    let whereClause = ''
+    const vals: (string | number)[] = [parseInt(school_id), dateFrom, dateTo]
+
+    if (class_id) {
+      vals.push(parseInt(class_id))
+      whereClause = `e.class_id = $${vals.length} AND e.school_id = $1`
+    } else if (teacher_id) {
+      vals.push(parseInt(teacher_id))
+      whereClause = `e.school_id = $1 AND (
+        EXISTS (SELECT 1 FROM exam_subjects es WHERE es.exam_id = e.id AND es.teacher_id = $${vals.length})
+        OR e.created_by = $${vals.length}
+      )`
+    } else if (student_id) {
+      const { rows: [student] } = await pool.query(
+        `SELECT s.grade, s.section FROM students s WHERE s.id = $1 AND s.school_id = $2`,
+        [parseInt(student_id), parseInt(school_id)]
+      )
+      if (!student) return NextResponse.json({ error: 'Student not found' }, { status: 404 })
+      vals.push(student.grade, student.section)
+      whereClause = `c.grade = $${vals.length - 1} AND c.section = $${vals.length} AND e.school_id = $1`
+    } else {
+      whereClause = `e.school_id = $1`
+    }
+
+    if (!include_draft) {
+      whereClause += ` AND e.status != 'draft'`
+    }
+
+    const { rows } = await pool.query(`
+      SELECT
+        e.id,
+        e.exam_name,
+        e.exam_type,
+        TO_CHAR(e.exam_date, 'YYYY-MM-DD') AS exam_date,
+        e.status,
+        e.class_id,
+        c.grade,
+        c.section,
+        e.created_by,
+        COUNT(DISTINCT es.id)::int AS total_subjects,
+        COUNT(DISTINCT CASE WHEN es.status = 'submitted' THEN es.id END)::int AS submitted_subjects,
+        COALESCE(
+          ARRAY_AGG(es.subject_name ORDER BY es.subject_name) FILTER (WHERE es.subject_name IS NOT NULL),
+          '{}'
+        ) AS subjects
+      FROM exam_records e
+      JOIN classes c ON c.id = e.class_id
+      LEFT JOIN exam_subjects es ON es.exam_id = e.id
+      WHERE ${whereClause}
+        AND (e.exam_date IS NULL OR e.exam_date BETWEEN $2 AND $3)
+      GROUP BY e.id, c.grade, c.section
+      ORDER BY e.exam_date ASC
+    `, vals)
+
+    return NextResponse.json(rows)
+  } catch (err) {
+    console.error('GET /api/exams/calendar error:', err)
+    return NextResponse.json({ error: 'Failed to fetch exam calendar' }, { status: 500 })
+  }
+}

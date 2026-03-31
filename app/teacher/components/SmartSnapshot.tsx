@@ -124,6 +124,17 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
   const [upcomingSubDuties, setUpcomingSubDuties] = useState<SubstituteDuty[]>([])
   const [todayLeave, setTodayLeave] = useState<LeaveRecord | null>(null)
 
+  // Class health state — only fetched for class teachers
+  const [classHealthLoading, setClassHealthLoading] = useState(false)
+  const [classHealth, setClassHealth] = useState<{
+    total_students: number
+    attendance_rate: number | null
+    task_completion_rate: number | null
+    avg_score: number | null
+    doubts: { open: number; in_progress: number; resolved: number; total: number }
+    doubt_patterns: { subject: string; count: number }[]
+  } | null>(null)
+
   // Timetable modal for non-class-teacher classes
   const [modalClass, setModalClass] = useState<ClassInfo | null>(null)
   const [modalSlots, setModalSlots] = useState<ClassTimetableSlot[]>([])
@@ -164,6 +175,24 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
       setTodayLeave(Array.isArray(leaves) && leaves.length > 0 ? leaves[0] : null)
     }).finally(() => setLoading(false))
   }, [teacher.id, schoolId])
+
+  // Fetch class health for class teacher's own class (non-blocking, waits for classes to load)
+  useEffect(() => {
+    if (!teacher.class_teacher_grade || !teacher.class_teacher_section || classes.length === 0) return
+    const ownClass = classes.find(
+      c => c.grade === teacher.class_teacher_grade && c.section === teacher.class_teacher_section
+    )
+    if (!ownClass) return
+    setClassHealthLoading(true)
+    fetch(`/api/classes/${ownClass.id}/health?school_id=${schoolId}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data && !data.error) setClassHealth(data)
+        else console.warn('Class health API error:', data)
+      })
+      .catch(err => console.error('Class health fetch failed:', err))
+      .finally(() => setClassHealthLoading(false))
+  }, [classes, schoolId, teacher.class_teacher_grade, teacher.class_teacher_section])
 
   const ownTodayPeriods = (today ? timetable.filter(p => p.day_of_week === today) : [])
     .sort((a, b) => a.period_number - b.period_number)
@@ -558,12 +587,94 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
         </div>
       )}
 
+      {/* Class Health Summary — only for class teachers */}
+      {isClassTeacher && (classHealth || classHealthLoading) && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-base font-bold text-gray-900">
+              Class Health — {teacher.class_teacher_grade}-{teacher.class_teacher_section}
+            </h3>
+            <button onClick={() => onNavigate('doubts')} className="text-xs text-blue-500 hover:underline">view doubts →</button>
+          </div>
+
+          {classHealthLoading && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[1,2,3,4].map(i => (
+                <div key={i} className="bg-gray-100 rounded-xl p-4 animate-pulse h-20" />
+              ))}
+            </div>
+          )}
+
+          {/* Doubt pattern warning */}
+          {classHealth && classHealth.doubt_patterns.length > 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-3 flex items-start gap-2">
+              <svg className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <p className="text-xs font-semibold text-red-700">Doubt Pattern Alert</p>
+                <p className="text-xs text-red-500 mt-0.5">
+                  {classHealth.doubt_patterns.map(p => `${p.subject} (${p.count})`).join(', ')} — students struggling in last 7 days
+                </p>
+              </div>
+            </div>
+          )}
+
+          {classHealth && <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              {
+                label: 'Attendance',
+                value: classHealth.attendance_rate !== null ? `${classHealth.attendance_rate}%` : '—',
+                sub: 'This month',
+                color: classHealth.attendance_rate !== null
+                  ? classHealth.attendance_rate >= 75 ? 'text-green-600' : 'text-red-500'
+                  : 'text-gray-400',
+                bg: classHealth.attendance_rate !== null
+                  ? classHealth.attendance_rate >= 75 ? 'bg-green-50' : 'bg-red-50'
+                  : 'bg-gray-50',
+              },
+              {
+                label: 'Task Completion',
+                value: classHealth.task_completion_rate !== null ? `${classHealth.task_completion_rate}%` : '—',
+                sub: `${classHealth.total_students} students`,
+                color: classHealth.task_completion_rate !== null
+                  ? classHealth.task_completion_rate >= 60 ? 'text-blue-600' : 'text-amber-500'
+                  : 'text-gray-400',
+                bg: classHealth.task_completion_rate !== null
+                  ? classHealth.task_completion_rate >= 60 ? 'bg-blue-50' : 'bg-amber-50'
+                  : 'bg-gray-50',
+              },
+              {
+                label: 'Avg Score',
+                value: classHealth.avg_score !== null ? `${classHealth.avg_score}` : '—',
+                sub: 'Reviewed tasks',
+                color: 'text-purple-600',
+                bg: 'bg-purple-50',
+              },
+              {
+                label: 'Open Doubts',
+                value: classHealth.doubts.open + classHealth.doubts.in_progress,
+                sub: `${classHealth.doubts.resolved} resolved`,
+                color: (classHealth.doubts.open + classHealth.doubts.in_progress) > 5 ? 'text-orange-600' : 'text-gray-700',
+                bg: (classHealth.doubts.open + classHealth.doubts.in_progress) > 5 ? 'bg-orange-50' : 'bg-gray-50',
+              },
+            ].map(item => (
+              <div key={item.label} className={`${item.bg} rounded-xl p-4`}>
+                <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide mb-1">{item.label}</p>
+                <p className={`text-2xl font-bold ${item.color}`}>{item.value}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">{item.sub}</p>
+              </div>
+            ))}
+          </div>}
+        </div>
+      )}
+
       {/* My Classes */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-base font-bold text-gray-900">My Classes</h3>
           <p className="text-xs text-gray-400">
-            {isClassTeacher ? 'Your class → full view · Others → timetable' : 'Click to view timetable'}
+            {isClassTeacher ? 'Your class → full view · Others → class view' : 'Click to open class view'}
           </p>
         </div>
         {myClasses.length === 0 ? (
@@ -581,8 +692,7 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
                   key={`${cls.grade}-${cls.section}`}
                   onClick={() => {
                     if (!cls.classInfo) return
-                    if (isClassTeacherFor) onViewClass(cls.classInfo)
-                    else openTimetableModal(cls.classInfo)
+                    onViewClass(cls.classInfo)
                   }}
                   className="text-left bg-white rounded-xl border border-gray-200 p-4 transition-all hover:shadow-md hover:border-blue-200">
                   <div className="flex items-start justify-between mb-2">
@@ -600,7 +710,7 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
                     </div>
                   )}
                   <p className="text-xs text-gray-400 mt-2">
-                    {isClassTeacherFor ? '★ Class Teacher · click for full view' : 'Subject Teacher · click for timetable'}
+                    {isClassTeacherFor ? '★ Class Teacher · click for full view' : 'Subject Teacher · click for class view'}
                   </p>
                 </button>
               )

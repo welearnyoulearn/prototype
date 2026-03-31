@@ -32,7 +32,61 @@ export default function CurriculumManagement({ schoolId }: Props) {
   const [generatingTT, setGeneratingTT] = useState(false)
   const [ttMsg, setTtMsg] = useState('')
 
+  const [schedSettings, setSchedSettings] = useState<{
+    periods_per_day: number; start_time: string; end_time: string;
+    morning_break_after_period: number; morning_break_duration: number;
+    lunch_after_period: number; lunch_duration: number;
+    afternoon_break_after_period: number; afternoon_break_duration: number;
+  } | null>(null)
+  const [schedOpen, setSchedOpen] = useState(false)
+  const [schedSaving, setSchedSaving] = useState(false)
+  const [schedForm, setSchedForm] = useState({
+    periods_per_day: 8, start_time: '08:30', end_time: '17:00',
+    morning_break_after_period: 3, morning_break_duration: 15,
+    lunch_after_period: 5, lunch_duration: 45,
+    afternoon_break_after_period: 7, afternoon_break_duration: 10,
+  })
+
   useEffect(() => { loadAssignments() }, [schoolId])
+
+  useEffect(() => {
+    fetch(`/api/school-schedule?school_id=${schoolId}`)
+      .then(r => r.json())
+      .then(data => {
+        setSchedSettings(data)
+        setSchedForm({
+          periods_per_day: data.periods_per_day ?? 8,
+          start_time: data.start_time ?? '08:30',
+          end_time: data.end_time ?? '17:00',
+          morning_break_after_period: data.morning_break_after_period ?? 3,
+          morning_break_duration: data.morning_break_duration ?? 15,
+          lunch_after_period: data.lunch_after_period ?? 5,
+          lunch_duration: data.lunch_duration ?? 45,
+          afternoon_break_after_period: data.afternoon_break_after_period ?? 7,
+          afternoon_break_duration: data.afternoon_break_duration ?? 10,
+        })
+      })
+      .catch(() => {})
+  }, [schoolId])
+
+  async function saveSchedSettings() {
+    setSchedSaving(true)
+    try {
+      const res = await fetch('/api/school-schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, ...schedForm }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setSchedSettings(data)
+        setSchedOpen(false)
+        setSuccess('✓ School schedule saved')
+      } else {
+        setError(data.error || 'Failed to save schedule')
+      }
+    } finally { setSchedSaving(false) }
+  }
 
   async function loadAssignments() {
     setLoading(true)
@@ -78,31 +132,14 @@ export default function CurriculumManagement({ schoolId }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setSuccess(autoAssign
-        ? `✓ ${selectedCurriculum} assigned to Grade ${selectedGrade} — ${data.subjects_added} subjects added to class(es)`
+        ? `✓ ${selectedCurriculum} assigned to Grade ${selectedGrade} — ${data.subjects_added} subjects added. Go to Timetable tab to generate the timetable.`
         : `✓ Curriculum saved for Grade ${selectedGrade}`)
       setPreview(false)
       loadAssignments()
 
       if (autoAssign) {
-        // Load panel to let admin add extra subjects
+        // Load panel to let admin add/review subjects before generating timetable
         await loadPanelData(selectedGrade)
-
-        // Auto-generate timetable (clear all existing, regenerate with new schedule)
-        setGeneratingTT(true)
-        try {
-          const genRes = await fetch('/api/class-timetable/generate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ school_id: schoolId, replace_existing: true }),
-          })
-          const genData = await genRes.json()
-          if (genRes.ok) {
-            setTtMsg(`✓ Timetable auto-generated: ${genData.slots} slots across ${genData.classes} class(es)`)
-          } else {
-            setTtMsg(`Timetable generation: ${genData.error || 'failed'}`)
-          }
-        } catch { setTtMsg('Timetable generation failed') }
-        finally { setGeneratingTT(false) }
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to assign')
@@ -150,12 +187,7 @@ export default function CurriculumManagement({ schoolId }: Props) {
       setExtraForm({ subject_name: '', teacher_id: '' })
       setAddingExtraFor(null)
 
-      // Auto-regenerate timetable for this class
-      await fetch('/api/class-timetable/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, class_id: classId, replace_existing: true }),
-      })
+      // No auto-regeneration — admin generates timetable intentionally from Timetable tab
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to add subject')
     } finally { setAddingExtra(false) }
@@ -179,6 +211,95 @@ export default function CurriculumManagement({ schoolId }: Props) {
 
   return (
     <div>
+      {/* School Schedule Settings */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+        <button
+          onClick={() => setSchedOpen(v => !v)}
+          className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors text-left">
+          <div>
+            <p className="font-semibold text-gray-800">School Schedule Settings</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {schedSettings
+                ? `${schedSettings.periods_per_day} periods · ${schedSettings.start_time} – ${schedSettings.end_time}`
+                : 'Configure school timing before generating timetable'}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {!schedSettings && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">Setup required</span>}
+            <span className="text-gray-400">{schedOpen ? '▲' : '▼'}</span>
+          </div>
+        </button>
+        {schedOpen && (
+          <div className="border-t border-gray-100 px-5 py-5">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Start Time</label>
+                <input type="time" value={schedForm.start_time}
+                  onChange={e => setSchedForm(f => ({ ...f, start_time: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">End Time</label>
+                <input type="time" value={schedForm.end_time}
+                  onChange={e => setSchedForm(f => ({ ...f, end_time: e.target.value }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Periods per Day</label>
+                <input type="number" min={4} max={12} value={schedForm.periods_per_day}
+                  onChange={e => setSchedForm(f => ({ ...f, periods_per_day: parseInt(e.target.value) || 8 }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Morning Break After Period</label>
+                <input type="number" min={1} max={schedForm.periods_per_day - 2} value={schedForm.morning_break_after_period}
+                  onChange={e => setSchedForm(f => ({ ...f, morning_break_after_period: parseInt(e.target.value) || 3 }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Morning Break (minutes)</label>
+                <input type="number" min={5} max={30} value={schedForm.morning_break_duration}
+                  onChange={e => setSchedForm(f => ({ ...f, morning_break_duration: parseInt(e.target.value) || 15 }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Lunch After Period</label>
+                <input type="number" min={2} max={schedForm.periods_per_day - 1} value={schedForm.lunch_after_period}
+                  onChange={e => setSchedForm(f => ({ ...f, lunch_after_period: parseInt(e.target.value) || 5 }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Lunch Duration (minutes)</label>
+                <input type="number" min={20} max={90} value={schedForm.lunch_duration}
+                  onChange={e => setSchedForm(f => ({ ...f, lunch_duration: parseInt(e.target.value) || 45 }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Afternoon Break After Period</label>
+                <input type="number" min={schedForm.lunch_after_period + 1} max={schedForm.periods_per_day - 1} value={schedForm.afternoon_break_after_period}
+                  onChange={e => setSchedForm(f => ({ ...f, afternoon_break_after_period: parseInt(e.target.value) || 7 }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Afternoon Break (minutes)</label>
+                <input type="number" min={5} max={30} value={schedForm.afternoon_break_duration}
+                  onChange={e => setSchedForm(f => ({ ...f, afternoon_break_duration: parseInt(e.target.value) || 10 }))}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+              </div>
+            </div>
+            <div className="mt-4 flex items-center justify-between">
+              <p className="text-xs text-gray-400">
+                Period duration: ~{Math.floor(((schedForm.end_time ? parseInt(schedForm.end_time.split(':')[0])*60+parseInt(schedForm.end_time.split(':')[1]) : 1020) - (schedForm.start_time ? parseInt(schedForm.start_time.split(':')[0])*60+parseInt(schedForm.start_time.split(':')[1]) : 510) - schedForm.morning_break_duration - schedForm.lunch_duration - schedForm.afternoon_break_duration) / schedForm.periods_per_day)} min/period
+              </p>
+              <button onClick={saveSchedSettings} disabled={schedSaving}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                {schedSaving ? 'Saving...' : 'Save Schedule'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-bold text-gray-900">Curriculum Selection</h2>
@@ -377,18 +498,20 @@ export default function CurriculumManagement({ schoolId }: Props) {
               {assignments.length > 0 && (
                 <button
                   onClick={async () => {
-                    if (!confirm('Regenerate timetables for ALL grades? This will clear all existing class and teacher timetables.')) return
+                    if (!confirm('Regenerate timetables for ALL grades? This will replace all existing timetables.')) return
                     setGeneratingTT(true); setTtMsg('')
                     try {
                       const res = await fetch('/api/class-timetable/generate', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ school_id: schoolId, replace_existing: true }),
+                        body: JSON.stringify({ school_id: schoolId, force_replace: true }),
                       })
                       const data = await res.json()
-                      setTtMsg(res.ok
-                        ? `✓ Regenerated: ${data.slots} slots for ${data.classes} class(es)`
-                        : `Error: ${data.error}`)
+                      if (res.ok) {
+                        setTtMsg(`✓ Regenerated: ${data.slots} slots for ${data.classes_generated} class(es) — synced to all teachers & students`)
+                      } else {
+                        setTtMsg(`Error: ${data.error}`)
+                      }
                     } catch { setTtMsg('Generation failed') }
                     finally { setGeneratingTT(false) }
                   }}

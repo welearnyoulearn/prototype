@@ -4,6 +4,7 @@ import { useState } from 'react'
 
 type Teacher = {
   id: number
+  school_id: number
   name: string
   employee_id: string
   subject: string
@@ -24,12 +25,19 @@ type Props = {
   onUpdate: (updated: Teacher) => void
 }
 
+type PwForm = { current: string; next: string; confirm: string }
+
 export default function TeacherProfile({ teacher, onUpdate }: Props) {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<Partial<Teacher>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [pwSection, setPwSection] = useState(false)
+  const [pwForm, setPwForm] = useState<PwForm>({ current: '', next: '', confirm: '' })
+  const [pwError, setPwError] = useState('')
+  const [pwSuccess, setPwSuccess] = useState('')
+  const [pwSaving, setPwSaving] = useState(false)
 
   async function handleSave() {
     setSaving(true)
@@ -51,6 +59,41 @@ export default function TeacherProfile({ teacher, onUpdate }: Props) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handlePasswordChange() {
+    setPwError('')
+    if (!pwForm.current || !pwForm.next || !pwForm.confirm) {
+      setPwError('All fields are required'); return
+    }
+    if (pwForm.next.length < 8) {
+      setPwError('New password must be at least 8 characters'); return
+    }
+    if (pwForm.next !== pwForm.confirm) {
+      setPwError('Passwords do not match'); return
+    }
+    setPwSaving(true)
+    try {
+      const res = await fetch(`/api/teachers/${teacher.id}/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          current_password: pwForm.current,
+          new_password: pwForm.next,
+          school_id: teacher.school_id,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setPwSuccess('Password changed successfully')
+      setPwForm({ current: '', next: '', confirm: '' })
+      setPwSection(false)
+      setTimeout(() => setPwSuccess(''), 4000)
+    } catch (err: unknown) {
+      setPwError(err instanceof Error ? err.message : 'Failed to change password')
+    } finally {
+      setPwSaving(false)
     }
   }
 
@@ -153,6 +196,62 @@ export default function TeacherProfile({ teacher, onUpdate }: Props) {
                   className={inputCls} />
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* Password change section */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">Password</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Change your login password</p>
+          </div>
+          {!pwSection && (
+            <button onClick={() => { setPwSection(true); setPwError(''); setPwSuccess('') }}
+              className="border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg text-sm hover:bg-gray-50 transition-colors">
+              Change Password
+            </button>
+          )}
+        </div>
+
+        {pwSuccess && (
+          <div className="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm font-medium">✓ {pwSuccess}</div>
+        )}
+
+        {pwSection && (
+          <div className="space-y-3">
+            {pwError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm">{pwError}</div>
+            )}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Current Password</label>
+              <input type="password" value={pwForm.current}
+                onChange={e => setPwForm(f => ({ ...f, current: e.target.value }))}
+                className={inputCls} placeholder="Enter current password" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
+              <input type="password" value={pwForm.next}
+                onChange={e => setPwForm(f => ({ ...f, next: e.target.value }))}
+                className={inputCls} placeholder="Min 8 characters" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
+              <input type="password" value={pwForm.confirm}
+                onChange={e => setPwForm(f => ({ ...f, confirm: e.target.value }))}
+                className={inputCls} placeholder="Re-enter new password" />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button onClick={handlePasswordChange} disabled={pwSaving}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+                {pwSaving ? 'Saving...' : 'Update Password'}
+              </button>
+              <button onClick={() => { setPwSection(false); setPwForm({ current: '', next: '', confirm: '' }); setPwError('') }}
+                className="border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm hover:bg-gray-50">
+                Cancel
+              </button>
+            </div>
           </div>
         )}
       </div>

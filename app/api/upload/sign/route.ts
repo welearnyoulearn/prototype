@@ -1,0 +1,36 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { v2 as cloudinary } from 'cloudinary'
+import { ensureDB } from '@/lib/db'
+
+// AUTH DISABLED FOR TESTING — will be re-enabled when all features are complete
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+})
+
+export async function POST(req: NextRequest) {
+  await ensureDB()
+
+  if (!process.env.CLOUDINARY_API_SECRET) {
+    return NextResponse.json({ error: 'Cloudinary not configured' }, { status: 500 })
+  }
+
+  const { folder = 'task-submissions', public_id } = await req.json()
+
+  const timestamp = Math.round(Date.now() / 1000)
+  const params: Record<string, string | number> = { timestamp, folder }
+  if (public_id) params.public_id = public_id
+
+  const signature = cloudinary.utils.api_sign_request(params, process.env.CLOUDINARY_API_SECRET)
+
+  return NextResponse.json({
+    signature,
+    timestamp,
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    folder,
+    ...(public_id ? { public_id } : {}),
+  })
+}

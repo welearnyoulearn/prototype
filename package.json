@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -13,6 +13,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/nodemailer": "^7.0.11",
     "bcryptjs": "^3.0.3",
+    "cloudinary": "^2.9.0",
     "jsonwebtoken": "^9.0.3",
     "next": "16.1.7",
     "nodemailer": "^8.0.3",

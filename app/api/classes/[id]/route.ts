@@ -12,15 +12,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     )
     if (!classRes.rows[0]) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
+    // Get subjects from class_subjects (source of truth for what subjects are assigned)
     const subjectsRes = await pool.query(
-      `SELECT cs.*, t.name AS teacher_name
+      `SELECT cs.id, cs.subject_name, cs.teacher_id, cs.periods_per_week,
+              t.name AS teacher_name
        FROM class_subjects cs
-       LEFT JOIN teachers t ON cs.teacher_id = t.id
+       LEFT JOIN teachers t ON t.id = cs.teacher_id
        WHERE cs.class_id = $1
        ORDER BY cs.subject_name`,
       [id]
     )
-    return NextResponse.json({ ...classRes.rows[0], subjects: subjectsRes.rows })
+    const subjects = subjectsRes.rows
+
+    return NextResponse.json({ ...classRes.rows[0], subjects })
   } catch (error) {
     console.error(error)
     return NextResponse.json({ error: 'Failed to fetch class' }, { status: 500 })
@@ -46,6 +50,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   try {
+    // Cascade cleanup — delete all data associated with this class before deleting the class
+    await pool.query('DELETE FROM class_timetable WHERE class_id = $1', [id])
+    await pool.query('DELETE FROM class_subjects WHERE class_id = $1', [id])
+    await pool.query('DELETE FROM substitute_assignments WHERE class_id = $1', [id])
     await pool.query('DELETE FROM classes WHERE id = $1', [id])
     return NextResponse.json({ success: true })
   } catch (error) {
