@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { notifyTimetableChange } from '@/lib/notifyTimetable'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/class-timetable/swap
@@ -117,18 +116,9 @@ export async function POST(req: NextRequest) {
       [class_id, slot_a.day, slot_a.period_number, slot_b.day, slot_b.period_number]
     )
 
-    const { rows: [cls] } = await client.query('SELECT grade, section FROM classes WHERE id=$1', [class_id])
-
     await client.query('COMMIT')
 
-    // Notify both affected teachers + all class students
-    await notifyTimetableChange(pool, {
-      school_id: Number(school_id), class_id: Number(class_id),
-      grade: cls?.grade, section: cls?.section,
-      teacher_ids: [rowA.teacher_id, rowB.teacher_id],
-      title: 'Timetable Updated',
-      message: `Period slots have been swapped in your timetable for Grade ${cls?.grade}-${cls?.section}.`,
-    })
+    // Notifications are sent only on Circulate — not on individual swaps
     return NextResponse.json({ success: true, message: 'Slots swapped successfully' })
 
   } catch (err) {

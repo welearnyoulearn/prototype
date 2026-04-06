@@ -5,7 +5,7 @@ import { CURRICULA } from '@/lib/curricula'
 
 type Props = { schoolId: number }
 
-type ClassRow = { id: number; grade: string; section: string; class_teacher_id: number | null; class_teacher_name: string | null; student_count: number }
+type ClassRow = { id: number; grade: string; section: string; class_teacher_id: number | null; class_teacher_name: string | null; student_count: number; timetable_generated_at: string | null }
 type Teacher = { id: number; name: string; subject: string; employee_id: string; department: string }
 type Subject = { id: number; subject_name: string; teacher_id: number | null; teacher_name: string | null; periods_per_week: number }
 type TimetableSlot = { id: number; day_of_week: string; period_number: number; time_from: string; time_to: string; subject_name: string | null; teacher_id: number | null; teacher_name: string | null; is_break: boolean; break_label: string | null; room: string | null; has_conflict?: boolean; source?: string }
@@ -40,6 +40,7 @@ export default function ClassManagement({ schoolId }: Props) {
   const [showAdd, setShowAdd] = useState(false)
   const [newClass, setNewClass] = useState({ grade: '', section: '', class_teacher_id: '' })
   const [addingClass, setAddingClass] = useState(false)
+  const [setupMsg, setSetupMsg] = useState<string | null>(null)
 
   const inp = 'border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300'
 
@@ -66,18 +67,34 @@ export default function ClassManagement({ schoolId }: Props) {
     if (!/^[0-9]+$/.test(grade) || parseInt(grade) < 1 || parseInt(grade) > 12) { setError('Grade must be 1–12'); return }
     if (!/^[A-Z]$/.test(section)) { setError('Section must be a single letter A–Z'); return }
     setAddingClass(true)
+    setSetupMsg('Creating class...')
     try {
+      // Step 1: Create class — backend auto-assigns subjects + teachers
       const res = await fetch('/api/classes', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ school_id: schoolId, grade, section, class_teacher_id: newClass.class_teacher_id || null }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
+
+      // Step 2: Auto-generate timetable
+      const subCount = data.subjects_assigned ?? 0
+      setSetupMsg(`${subCount} subjects assigned · Generating timetable...`)
+      await fetch('/api/class-timetable/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, class_id: data.id }),
+      })
+
       setNewClass({ grade: '', section: '', class_teacher_id: '' })
       setShowAdd(false)
+      setSetupMsg(null)
       await loadData()
       setSelectedId(data.id)
-    } catch (err: unknown) { setError(err instanceof Error ? err.message : 'Failed to add class') }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to add class')
+      setSetupMsg(null)
+    }
     finally { setAddingClass(false) }
   }
 
@@ -143,7 +160,7 @@ export default function ClassManagement({ schoolId }: Props) {
             <div className="flex gap-1.5">
               <button type="submit" disabled={addingClass}
                 className="flex-1 bg-violet-600 text-white text-xs py-1.5 rounded-lg font-medium hover:bg-violet-700 disabled:opacity-50">
-                {addingClass ? '...' : 'Create'}
+                {addingClass ? (setupMsg ?? 'Setting up...') : 'Create & Setup'}
               </button>
               <button type="button" onClick={() => setShowAdd(false)}
                 className="flex-1 border border-gray-200 text-gray-500 text-xs py-1.5 rounded-lg hover:bg-gray-50">
@@ -173,6 +190,9 @@ export default function ClassManagement({ schoolId }: Props) {
                       <p className="text-[10px] text-gray-400 truncate">
                         {cls.student_count} students
                       </p>
+                      {cls.timetable_generated_at
+                        ? <p className="text-[10px] text-emerald-500 font-medium">Timetable ready</p>
+                        : <p className="text-[10px] text-amber-400">No timetable</p>}
                     </div>
                     <button onClick={e => deleteClass(e, cls.id)}
                       className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 text-xs p-0.5 transition-all flex-shrink-0">✕</button>

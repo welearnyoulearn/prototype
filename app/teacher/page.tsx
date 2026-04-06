@@ -140,6 +140,8 @@ export default function TeacherPortal() {
   const [selectedTeacherId, setSelectedTeacherId] = useState('')
   const [teacher, setTeacher] = useState<Teacher | null>(null)
   const [activeNav, setActiveNav] = useState('snapshot')
+  const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set(['snapshot']))
+  function navigateTo(key: string) { setActiveNav(key); setVisitedNav(prev => new Set([...prev, key])) }
   const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null } | null>(null)
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
   const [classViewOpenExamId, setClassViewOpenExamId] = useState<number | undefined>(undefined)
@@ -157,14 +159,14 @@ export default function TeacherPortal() {
             setSelectedClass({ id: data.id, grade: data.grade, section: data.section, class_teacher_name: null })
             setClassViewInitialTab(payload.tab)
             setClassViewOpenExamId(payload.examId)
-            setActiveNav('class-view')
+            navigateTo('class-view')
           }
         })
         .catch(() => {})
     } else {
       setClassViewInitialTab(undefined)
       setClassViewOpenExamId(undefined)
-      setActiveNav(key)
+      navigateTo(key)
     }
   }
 
@@ -266,7 +268,7 @@ export default function TeacherPortal() {
             <span>/</span>
             {activeNav === 'class-view' && selectedClass ? (
               <>
-                <button onClick={() => setActiveNav('snapshot')} className="hover:text-blue-600 transition-colors">Smart Snapshot</button>
+                <button onClick={() => navigateTo('snapshot')} className="hover:text-blue-600 transition-colors">Smart Snapshot</button>
                 <span>/</span>
                 <span className="text-gray-700 font-medium">Class {selectedClass.grade}{selectedClass.section}</span>
               </>
@@ -310,7 +312,7 @@ export default function TeacherPortal() {
                 {section.items.map(item => (
                   <button key={item.key} onClick={() => {
                     if (item.comingSoon) return
-                    setActiveNav(item.key)
+                    navigateTo(item.key)
                   }}
                     className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors text-left ${
                       item.comingSoon ? 'text-slate-600 cursor-not-allowed'
@@ -342,51 +344,19 @@ export default function TeacherPortal() {
         </aside>
 
         <main className="flex-1 overflow-y-auto p-6">
-          {activeNav === 'snapshot' && (
-            <SmartSnapshot teacher={teacher} schoolId={parseInt(selectedSchoolId)} onNavigate={setActiveNav}
-              onViewClass={cls => { setSelectedClass(cls); setActiveNav('class-view') }} />
-          )}
-          {activeNav === 'class-view' && selectedClass && (
-            <ClassView
-              classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section}
-              schoolId={parseInt(selectedSchoolId)} teacherName={teacher.name} teacherId={teacher.id}
-              isClassTeacher={teacher.class_teacher_grade === selectedClass.grade && teacher.class_teacher_section === selectedClass.section}
-              teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }}
-              onBack={() => setActiveNav('snapshot')}
-              initialTab={classViewInitialTab}
-              openExamId={classViewOpenExamId}
-            />
-          )}
-          {activeNav === 'timetable' && <FullTimetable teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} />}
-          {activeNav === 'attendance' && <Attendance teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} />}
-          {activeNav === 'leave' && <TeacherLeave teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} />}
-          {activeNav === 'profile' && <TeacherProfile teacher={teacher} onUpdate={setTeacher} />}
-          {activeNav === 'tasks' && (
-            <TasksPage teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={parseInt(selectedSchoolId)} />
-          )}
-          {activeNav === 'my-classes' && (
-            <MyClasses
-              teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }}
-              schoolId={parseInt(selectedSchoolId)}
-              onViewClass={cls => { setSelectedClass(cls); setActiveNav('class-view') }}
-            />
-          )}
-          {activeNav === 'my-students' && (
-            <MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={parseInt(selectedSchoolId)} />
-          )}
-          {activeNav === 'doubts' && (
-            <DoubtsCenter teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject }} schoolId={parseInt(selectedSchoolId)} />
-          )}
-          {activeNav === 'syllabus' && (
-            <SyllabusWrapper teacher={teacher} schoolId={parseInt(selectedSchoolId)} selectedClass={selectedClass} />
-          )}
-          {activeNav === 'test-calendar' && (
-            <TestCalendar
-              mode="teacher"
-              schoolId={parseInt(selectedSchoolId)}
-              teacherId={teacher.id}
-            />
-          )}
+          {visitedNav.has('snapshot') && <div hidden={activeNav !== 'snapshot'}><SmartSnapshot teacher={teacher} schoolId={parseInt(selectedSchoolId)} onNavigate={navigateTo} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} /></div>}
+          {/* class-view remounts on class change via key */}
+          {visitedNav.has('class-view') && selectedClass && <div hidden={activeNav !== 'class-view'}><ClassView key={selectedClass.id} classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section} schoolId={parseInt(selectedSchoolId)} teacherName={teacher.name} teacherId={teacher.id} isClassTeacher={teacher.class_teacher_grade === selectedClass.grade && teacher.class_teacher_section === selectedClass.section} teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} onBack={() => navigateTo('snapshot')} initialTab={classViewInitialTab} openExamId={classViewOpenExamId} /></div>}
+          {visitedNav.has('timetable')     && <div hidden={activeNav !== 'timetable'}><FullTimetable teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} /></div>}
+          {visitedNav.has('attendance')    && <div hidden={activeNav !== 'attendance'}><Attendance teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} /></div>}
+          {visitedNav.has('leave')         && <div hidden={activeNav !== 'leave'}><TeacherLeave teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} /></div>}
+          {visitedNav.has('profile')       && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher} /></div>}
+          {visitedNav.has('tasks')         && <div hidden={activeNav !== 'tasks'}><TasksPage teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={parseInt(selectedSchoolId)} /></div>}
+          {visitedNav.has('my-classes')    && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={parseInt(selectedSchoolId)} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} /></div>}
+          {visitedNav.has('my-students')   && <div hidden={activeNav !== 'my-students'}><MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={parseInt(selectedSchoolId)} /></div>}
+          {visitedNav.has('doubts')        && <div hidden={activeNav !== 'doubts'}><DoubtsCenter teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject }} schoolId={parseInt(selectedSchoolId)} /></div>}
+          {visitedNav.has('syllabus')      && <div hidden={activeNav !== 'syllabus'}><SyllabusWrapper teacher={teacher} schoolId={parseInt(selectedSchoolId)} selectedClass={selectedClass} /></div>}
+          {visitedNav.has('test-calendar') && <div hidden={activeNav !== 'test-calendar'}><TestCalendar mode="teacher" schoolId={parseInt(selectedSchoolId)} teacherId={teacher.id} /></div>}
           {['performance', 'messages'].includes(activeNav) && (
             <div className="flex items-center justify-center h-full min-h-[400px]">
               <div className="text-center">

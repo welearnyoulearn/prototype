@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { getSubjectsForGrade } from '@/lib/curricula'
+import { matchTeacher } from '@/lib/matchTeacher'
 
 export async function GET(req: NextRequest) {
   const school_id = req.nextUrl.searchParams.get('school_id')
@@ -28,12 +30,66 @@ export async function POST(req: NextRequest) {
     if (!school_id || !grade || !section) {
       return NextResponse.json({ error: 'school_id, grade, section required' }, { status: 400 })
     }
-    const result = await pool.query(
-      `INSERT INTO classes (school_id, grade, section, class_teacher_id)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [school_id, grade.trim(), section.trim(), class_teacher_id || null]
-    )
-    return NextResponse.json(result.rows[0], { status: 201 })
+
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+
+      // 1. Create the class
+      const { rows: [newClass] } = await client.query(
+        `INSERT INTO classes (school_id, grade, section, class_teacher_id)
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [school_id, grade.trim(), section.trim(), class_teacher_id || null]
+      )
+
+      // 2. Auto-assign subjects from curriculum
+      //    Check if a curriculum is assigned for this grade, else default to CBSE
+      const { rows: currRows } = await client.query(
+        'SELECT curriculum_type FROM curriculum_assignments WHERE school_id=$1 AND grade=$2',
+        [school_id, grade.trim()]
+      )
+      const curriculumType: string = currRows[0]?.curriculum_type ?? 'CBSE'
+      const subjects = getSubjectsForGrade(curriculumType, grade.trim())
+
+      let subjectsAssigned = 0
+      if (subjects.length > 0) {
+        // 3. Fetch active teaching staff for teacher auto-matching
+        const { rows: staff } = await client.query(
+          `SELECT id, subject, teaches_grades FROM teachers
+           WHERE school_id=$1 AND staff_type='teaching' AND status='active'
+             AND subject IS NOT NULL AND subject != ''`,
+          [school_id]
+        )
+        // Filter to teachers allowed for this grade
+        const eligible = staff.filter((t: { teaches_grades: string | null }) => {
+          if (!t.teaches_grades) return true
+          const allowed = t.teaches_grades.split(',').map((g: string) => g.trim().toUpperCase())
+          return allowed.includes(grade.trim().toUpperCase())
+        })
+        const pool4Match = eligible.length > 0 ? eligible : staff
+
+        for (const subj of subjects) {
+          const teacherId = matchTeacher(subj.name, pool4Match)
+          await client.query(
+            `INSERT INTO class_subjects (class_id, subject_name, teacher_id, periods_per_week)
+             VALUES ($1, $2, $3, 4)
+             ON CONFLICT (class_id, subject_name) DO NOTHING`,
+            [newClass.id, subj.name, teacherId]
+          )
+          subjectsAssigned++
+        }
+      }
+
+      await client.query('COMMIT')
+      return NextResponse.json({ ...newClass, subjects_assigned: subjectsAssigned }, { status: 201 })
+
+    } catch (err) {
+      await client.query('ROLLBACK')
+      throw err
+    } finally {
+      client.release()
+    }
+
   } catch (error: unknown) {
     if ((error as { code?: string }).code === '23505') {
       return NextResponse.json({ error: 'This class already exists' }, { status: 409 })

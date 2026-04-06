@@ -87,6 +87,8 @@ export default function StudentPortal() {
   const [selectedStudentId, setSelectedStudentId] = useState('')
   const [student, setStudent] = useState<Student | null>(null)
   const [activeNav, setActiveNav] = useState('dashboard')
+  const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set(['dashboard']))
+  function navigateTo(key: string) { setActiveNav(key); setVisitedNav(prev => new Set([...prev, key])) }
   const [loading, setLoading] = useState(true)
   const [studentLoading, setStudentLoading] = useState(false)
   const [error, setError] = useState('')
@@ -238,7 +240,7 @@ export default function StudentPortal() {
           </p>
           <NotificationBell
             studentId={student.id}
-            onNavigate={(key) => setActiveNav(key)}
+            onNavigate={navigateTo}
           />
           <button onClick={() => { setStudent(null); setSelectedStudentId('') }}
             className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-2 py-1 rounded">
@@ -269,7 +271,7 @@ export default function StudentPortal() {
             <p className="px-4 py-1.5 text-[10px] font-semibold text-slate-500 uppercase tracking-widest">STUDENT</p>
             {NAV_ITEMS.map(item => (
               <button key={item.key}
-                onClick={() => { if (!item.comingSoon) setActiveNav(item.key) }}
+                onClick={() => { if (!item.comingSoon) navigateTo(item.key) }}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors text-left ${
                   item.comingSoon
                     ? 'text-slate-600 cursor-not-allowed'
@@ -302,72 +304,16 @@ export default function StudentPortal() {
         {/* Main content */}
         <main className="flex-1 overflow-y-auto p-6">
           <div className="max-w-4xl mx-auto">
-            {activeNav === 'dashboard' && (
-              <StudentDashboard
-                student={student}
-                classId={parseInt(selectedClassId)}
-                schoolId={parseInt(selectedSchoolId)}
-              />
-            )}
-            {activeNav === 'tasks' && (
-              <StudentTasks
-                student={student}
-                classId={parseInt(selectedClassId)}
-                schoolId={parseInt(selectedSchoolId)}
-              />
-            )}
-            {activeNav === 'doubts' && (
-              <StudentDoubts
-                student={student}
-                classId={parseInt(selectedClassId)}
-                schoolId={parseInt(selectedSchoolId)}
-              />
-            )}
-            {activeNav === 'newspaper' && (
-              <StudentNewspaper
-                studentId={student.id}
-                schoolId={parseInt(selectedSchoolId)}
-              />
-            )}
-            {activeNav === 'rewards' && (
-              <StudentRewards
-                studentId={student.id}
-                schoolId={parseInt(selectedSchoolId)}
-                classId={parseInt(selectedClassId)}
-              />
-            )}
-            {activeNav === 'syllabus' && (
-              <StudentSyllabus
-                schoolId={parseInt(selectedSchoolId)}
-                classId={parseInt(selectedClassId)}
-              />
-            )}
-            {activeNav === 'my-marks' && (
-              <StudentMarks
-                studentId={student.id}
-                schoolId={parseInt(selectedSchoolId)}
-                classId={parseInt(selectedClassId)}
-              />
-            )}
-            {activeNav === 'weekly-test' && (
-              <TestCalendar
-                mode="student"
-                schoolId={parseInt(selectedSchoolId)}
-                classId={parseInt(selectedClassId)}
-                studentId={student.id}
-              />
-            )}
-            {activeNav === 'timetable' && (
-              <StudentTimetable
-                classId={parseInt(selectedClassId)}
-                schoolId={parseInt(selectedSchoolId)}
-                grade={student.grade}
-                section={student.section}
-              />
-            )}
-            {activeNav === 'profile' && (
-              <StudentProfile student={student} />
-            )}
+            {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={parseInt(selectedClassId)} schoolId={parseInt(selectedSchoolId)} /></div>}
+            {visitedNav.has('tasks')       && <div hidden={activeNav !== 'tasks'}><StudentTasks student={student} classId={parseInt(selectedClassId)} schoolId={parseInt(selectedSchoolId)} /></div>}
+            {visitedNav.has('doubts')      && <div hidden={activeNav !== 'doubts'}><StudentDoubts student={student} classId={parseInt(selectedClassId)} schoolId={parseInt(selectedSchoolId)} /></div>}
+            {visitedNav.has('newspaper')   && <div hidden={activeNav !== 'newspaper'}><StudentNewspaper studentId={student.id} schoolId={parseInt(selectedSchoolId)} /></div>}
+            {visitedNav.has('rewards')     && <div hidden={activeNav !== 'rewards'}><StudentRewards studentId={student.id} schoolId={parseInt(selectedSchoolId)} classId={parseInt(selectedClassId)} /></div>}
+            {visitedNav.has('syllabus')    && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={parseInt(selectedSchoolId)} classId={parseInt(selectedClassId)} /></div>}
+            {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={parseInt(selectedSchoolId)} classId={parseInt(selectedClassId)} /></div>}
+            {visitedNav.has('weekly-test') && <div hidden={activeNav !== 'weekly-test'}><TestCalendar mode="student" schoolId={parseInt(selectedSchoolId)} classId={parseInt(selectedClassId)} studentId={student.id} /></div>}
+            {visitedNav.has('timetable')   && <div hidden={activeNav !== 'timetable'}><StudentTimetable classId={parseInt(selectedClassId)} schoolId={parseInt(selectedSchoolId)} grade={student.grade} section={student.section} /></div>}
+            {visitedNav.has('profile')     && <div hidden={activeNav !== 'profile'}><StudentProfile student={student} /></div>}
           </div>
         </main>
       </div>

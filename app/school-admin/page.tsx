@@ -173,6 +173,12 @@ export default function SchoolAdmin() {
   const [selectedSchool, setSelectedSchool] = useState<School | null>(null)
   const [tier, setTier] = useState<Tier>('none')
   const [activeNav, setActiveNav] = useState('overview')
+  const [visited, setVisited] = useState<Set<string>>(new Set(['overview']))
+
+  function navigateTo(key: string) {
+    setActiveNav(key)
+    setVisited(prev => new Set([...prev, key]))
+  }
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -214,6 +220,7 @@ export default function SchoolAdmin() {
     setSelectedSchool(school)
     setDropdownOpen(false)
     setActiveNav('overview')
+    setVisited(new Set(['overview']))
   }
 
   const enabledNavItems = NAV_ITEMS.filter(item => tier !== 'none' && item.tier.includes(tier))
@@ -343,7 +350,7 @@ export default function SchoolAdmin() {
                   {enabledNavItems.map(item => (
                     <button
                       key={item.key}
-                      onClick={() => setActiveNav(item.key)}
+                      onClick={() => navigateTo(item.key)}
                       className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors text-left ${
                         activeNav === item.key
                           ? 'bg-blue-50 text-blue-700 font-medium border-r-2 border-blue-600'
@@ -401,18 +408,18 @@ export default function SchoolAdmin() {
               </div>
             ) : (
               <>
-                {activeNav === 'overview' && <Overview schoolId={selectedSchool.id} onNavigate={setActiveNav} />}
-                {activeNav === 'attendance' && <AttendanceDashboard schoolId={selectedSchool.id} />}
-                {activeNav === 'leave-requests' && <LeaveRequests schoolId={selectedSchool.id} />}
-                {activeNav === 'emergency-cover' && <EmergencyCover schoolId={selectedSchool.id} />}
-                {activeNav === 'staff-onboarding' && <StaffOnboarding schoolId={selectedSchool.id} />}
-                {activeNav === 'student-onboarding' && <StudentOnboarding schoolId={selectedSchool.id} />}
-                {activeNav === 'class-management' && <ClassManagement schoolId={selectedSchool.id} />}
-                {activeNav === 'analysis' && <StudentTeacherAnalysis schoolId={selectedSchool.id} />}
-{activeNav === 'timetable' && <TimetableManagement schoolId={selectedSchool.id} />}
-                {activeNav === 'exam-schedule' && <ExamSchedule schoolId={selectedSchool.id} />}
-                {activeNav === 'teachers' && <TeachersManagement schoolId={selectedSchool.id} />}
-                {activeNav === 'students' && <StudentsManagement schoolId={selectedSchool.id} />}
+                {visited.has('overview')         && <div hidden={activeNav !== 'overview'}><Overview schoolId={selectedSchool.id} onNavigate={navigateTo} /></div>}
+                {visited.has('attendance')       && <div hidden={activeNav !== 'attendance'}><AttendanceDashboard schoolId={selectedSchool.id} /></div>}
+                {visited.has('leave-requests')   && <div hidden={activeNav !== 'leave-requests'}><LeaveRequests schoolId={selectedSchool.id} /></div>}
+                {visited.has('emergency-cover')  && <div hidden={activeNav !== 'emergency-cover'}><EmergencyCover schoolId={selectedSchool.id} /></div>}
+                {visited.has('staff-onboarding') && <div hidden={activeNav !== 'staff-onboarding'}><StaffOnboarding schoolId={selectedSchool.id} /></div>}
+                {visited.has('student-onboarding') && <div hidden={activeNav !== 'student-onboarding'}><StudentOnboarding schoolId={selectedSchool.id} /></div>}
+                {visited.has('class-management') && <div hidden={activeNav !== 'class-management'}><ClassManagement schoolId={selectedSchool.id} /></div>}
+                {visited.has('analysis')         && <div hidden={activeNav !== 'analysis'}><StudentTeacherAnalysis schoolId={selectedSchool.id} /></div>}
+                {visited.has('timetable')        && <div hidden={activeNav !== 'timetable'}><TimetableManagement schoolId={selectedSchool.id} /></div>}
+                {visited.has('exam-schedule')    && <div hidden={activeNav !== 'exam-schedule'}><ExamSchedule schoolId={selectedSchool.id} /></div>}
+                {visited.has('teachers')         && <div hidden={activeNav !== 'teachers'}><TeachersManagement schoolId={selectedSchool.id} /></div>}
+                {visited.has('students')         && <div hidden={activeNav !== 'students'}><StudentsManagement schoolId={selectedSchool.id} /></div>}
               </>
             )}
           </main>

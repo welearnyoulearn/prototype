@@ -64,6 +64,8 @@ export default function ParentDashboard() {
   const [student, setStudent]         = useState<Student | null>(null)
   const [summary, setSummary]         = useState<Summary | null>(null)
   const [activeNav, setActiveNav]     = useState('overview')
+  const [visitedNav, setVisitedNav]   = useState<Set<string>>(new Set(['overview']))
+  function navigateTo(key: string) { setActiveNav(key); setVisitedNav(prev => new Set([...prev, key])) }
   const [ackingId, setAckingId]       = useState<number | null>(null)
   const [ackName, setAckName]         = useState('')
   const [ackSaving, setAckSaving]     = useState(false)
@@ -270,7 +272,7 @@ export default function ParentDashboard() {
           {NAV.map(item => (
             <button
               key={item.key}
-              onClick={() => setActiveNav(item.key)}
+              onClick={() => navigateTo(item.key)}
               className={`flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium transition-colors mx-2 rounded-lg ${
                 activeNav === item.key ? 'bg-pink-50 text-pink-700' : 'text-gray-600 hover:bg-gray-50'
               }`}
@@ -287,7 +289,8 @@ export default function ParentDashboard() {
         <main className="flex-1 overflow-y-auto p-6">
 
           {/* ── Overview ──────────────────────────────────────────────── */}
-          {activeNav === 'overview' && (
+          {visitedNav.has('overview') && (
+          <div hidden={activeNav !== 'overview'}>
             <div className="space-y-5 max-w-3xl">
               {/* Child card */}
               <div className="bg-gradient-to-r from-pink-500 to-purple-600 rounded-2xl p-5 text-white">
@@ -355,7 +358,7 @@ export default function ParentDashboard() {
                       )
                     })}
                   </div>
-                  <button onClick={() => setActiveNav('exams')} className="mt-3 text-xs text-pink-600 font-semibold hover:underline">
+                  <button onClick={() => navigateTo('exams')} className="mt-3 text-xs text-pink-600 font-semibold hover:underline">
                     View full calendar →
                   </button>
                 </div>
@@ -375,7 +378,7 @@ export default function ParentDashboard() {
                         </p>
                       </div>
                       <button
-                        onClick={() => { setAckingId(r.id); setActiveNav('results') }}
+                        onClick={() => { setAckingId(r.id); navigateTo('results') }}
                         className="shrink-0 bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-amber-700"
                       >
                         Sign now
@@ -407,10 +410,12 @@ export default function ParentDashboard() {
                 </div>
               )}
             </div>
+          </div>
           )}
 
           {/* ── Exam Calendar ─────────────────────────────────────────── */}
-          {activeNav === 'exams' && (
+          {visitedNav.has('exams') && (
+          <div hidden={activeNav !== 'exams'}>
             <div className="max-w-4xl">
               <h2 className="text-base font-bold text-gray-800 mb-4">Exam Calendar</h2>
               <TestCalendar
@@ -420,10 +425,12 @@ export default function ParentDashboard() {
                 studentId={student.id}
               />
             </div>
+          </div>
           )}
 
           {/* ── Results ───────────────────────────────────────────────── */}
-          {activeNav === 'results' && (
+          {visitedNav.has('results') && (
+          <div hidden={activeNav !== 'results'}>
             <div className="max-w-2xl space-y-4">
               <h2 className="text-base font-bold text-gray-800">Results & Sign-off</h2>
               {(!summary?.published_results || summary.published_results.length === 0) ? (
@@ -499,6 +506,7 @@ export default function ParentDashboard() {
                 })
               )}
             </div>
+          </div>
           )}
         </main>
       </div>

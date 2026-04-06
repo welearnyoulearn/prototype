@@ -8,6 +8,10 @@ types.setTypeParser(types.builtins.DATE, (val: string) => val)
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
+  max: 3,                // keep connection count low for Supabase pooler
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+  ssl: { rejectUnauthorized: false },
 })
 
 export default pool
@@ -605,6 +609,33 @@ export async function initDB() {
     `UPDATE class_timetable SET source = CASE WHEN is_manual = TRUE THEN 'manual' ELSE 'auto' END WHERE source IS NULL OR source = 'auto'`,
     // Index for fast conflict detection queries
     `CREATE INDEX IF NOT EXISTS idx_class_timetable_teacher_slot ON class_timetable(school_id, teacher_id, day_of_week, period_number) WHERE teacher_id IS NOT NULL AND is_break = FALSE`,
+
+    // ── Timetable version system ─────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS timetable_versions (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      name VARCHAR(200) NOT NULL DEFAULT 'Draft',
+      status VARCHAR(20) NOT NULL DEFAULT 'draft',
+      is_active BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      circulated_at TIMESTAMPTZ
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_timetable_versions_school ON timetable_versions(school_id)`,
+
+    // ── Class timetable mode tracking (master/slave/independent) ─────────────
+    `CREATE TABLE IF NOT EXISTS class_timetable_modes (
+      id SERIAL PRIMARY KEY,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      mode VARCHAR(20) NOT NULL DEFAULT 'slave',
+      master_source_id INTEGER REFERENCES classes(id) ON DELETE SET NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(class_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_class_timetable_modes_school ON class_timetable_modes(school_id)`,
+
+    // ── Extend class_timetable with lock support ─────────────────────────────
+    `ALTER TABLE class_timetable ADD COLUMN IF NOT EXISTS is_locked BOOLEAN DEFAULT FALSE`,
   ]
 
   for (const sql of migrations) {
