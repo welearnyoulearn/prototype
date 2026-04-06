@@ -123,6 +123,10 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   const [circulateMsg, setCirculateMsg]     = useState<{ text: string; ok: boolean } | null>(null)
   const [conflictCount, setConflictCount]   = useState(0)
 
+  // Named schedule templates — loaded once, used for template selector in Regenerate
+  const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>([])
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | 'default'>('default')
+
   const today = getToday()
 
   const loadHealth = useCallback(() => {
@@ -152,10 +156,12 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
       fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()),
       fetch(`/api/teachers?school_id=${schoolId}&staff_type=teaching`).then(r => r.json()),
       fetch(`/api/class-timetable?school_id=${schoolId}`).then(r => r.json()),
-    ]).then(([cls, tch, allSlots]) => {
+      fetch(`/api/schedule-templates?school_id=${schoolId}`).then(r => r.json()),
+    ]).then(([cls, tch, allSlots, tmpls]) => {
       setClasses(Array.isArray(cls) ? cls : [])
       setTeachers(Array.isArray(tch) ? tch : [])
       setAllSchoolSlots(Array.isArray(allSlots) ? allSlots : [])
+      setSavedTemplates(Array.isArray(tmpls) ? tmpls : [])
     }).finally(() => setLoading(false))
     loadHealth()
   }, [schoolId, loadHealth])
@@ -331,9 +337,16 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     if (!selected) return
     setRegenerating(true); setRegenMsg(null)
     try {
+      // Pass selected template's settings if not using school default
+      const templateSettings = selectedTemplateId !== 'default'
+        ? savedTemplates.find(t => t.id === selectedTemplateId)?.settings
+        : undefined
       const res = await fetch('/api/class-timetable/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, class_id: selected.id, force_replace: true }),
+        body: JSON.stringify({
+          school_id: schoolId, class_id: selected.id, force_replace: true,
+          ...(templateSettings ? { schedule_settings: templateSettings } : {}),
+        }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -479,6 +492,19 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
+                {/* Template selector — choose which schedule template to use when regenerating */}
+                {savedTemplates.length > 0 && (
+                  <select
+                    value={String(selectedTemplateId)}
+                    onChange={e => setSelectedTemplateId(e.target.value === 'default' ? 'default' : Number(e.target.value))}
+                    className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 max-w-[160px]"
+                    title="Select schedule template for generation">
+                    <option value="default">School Default</option>
+                    {savedTemplates.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                )}
                 <button onClick={regenerate} disabled={regenerating || editMode}
                   className="px-4 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors">
                   {regenerating ? 'Regenerating...' : 'Regenerate'}
@@ -964,10 +990,12 @@ function TeachersTab({ schoolId, schedule, academicSlots }: { schoolId: number; 
 // ─── Schedule Template Tab ────────────────────────────────────────────────────
 // Admin configures start/end time, periods per day, break timings, and working
 // days. A live preview grid updates instantly as settings change.
-// + button at the grid bottom adds a period; + at the right adds a working day.
+// Named templates can be saved and later selected when generating class timetables.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ALL_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] as const
+
+type SavedTemplate = { id: number; name: string; settings: SchoolScheduleSettings; created_at: string }
 
 function TemplateTab({
   schoolId,
@@ -981,6 +1009,57 @@ function TemplateTab({
   const [form, setForm]             = useState<SchoolScheduleSettings>(savedSettings)
   const [saving, setSaving]         = useState(false)
   const [saveMsg, setSaveMsg]       = useState<{ text: string; ok: boolean } | null>(null)
+
+  // Named templates
+  const [templates, setTemplates]         = useState<SavedTemplate[]>([])
+  const [templatesLoading, setTemplatesLoading] = useState(true)
+  const [saveAsName, setSaveAsName]       = useState('')
+  const [savingTemplate, setSavingTemplate] = useState(false)
+  const [showSaveAs, setShowSaveAs]       = useState(false)
+  const [deletingId, setDeletingId]       = useState<number | null>(null)
+
+  useEffect(() => {
+    fetch(`/api/schedule-templates?school_id=${schoolId}`)
+      .then(r => r.json())
+      .then(d => setTemplates(Array.isArray(d) ? d : []))
+      .catch(() => {})
+      .finally(() => setTemplatesLoading(false))
+  }, [schoolId])
+
+  async function saveAsTemplate() {
+    if (!saveAsName.trim()) return
+    setSavingTemplate(true)
+    try {
+      const res = await fetch('/api/schedule-templates', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, name: saveAsName.trim(), settings: form }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setTemplates(prev => {
+          const filtered = prev.filter(t => t.id !== data.id)
+          return [...filtered, data].sort((a, b) => a.created_at.localeCompare(b.created_at))
+        })
+        setSaveAsName(''); setShowSaveAs(false)
+        setSaveMsg({ text: `Template "${data.name}" saved`, ok: true })
+        setTimeout(() => setSaveMsg(null), 3000)
+      }
+    } finally { setSavingTemplate(false) }
+  }
+
+  async function deleteTemplate(id: number) {
+    setDeletingId(id)
+    try {
+      await fetch(`/api/schedule-templates?id=${id}&school_id=${schoolId}`, { method: 'DELETE' })
+      setTemplates(prev => prev.filter(t => t.id !== id))
+    } finally { setDeletingId(null) }
+  }
+
+  function loadTemplate(t: SavedTemplate) {
+    setForm(t.settings)
+    setSaveMsg({ text: `Loaded template: "${t.name}". Modify and save to school, or regenerate class timetables.`, ok: true })
+    setTimeout(() => setSaveMsg(null), 5000)
+  }
   // Working days stored in localStorage per school
   const wdKey = `wdays_${schoolId}`
   const [workingDays, setWorkingDays] = useState<string[]>(() => {
@@ -1067,8 +1146,68 @@ function TemplateTab({
 
   return (
     <div className="flex gap-5">
+      {/* ── Saved templates sidebar ── */}
+      <div className="w-52 flex-shrink-0">
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Templates</p>
+            <button onClick={() => setShowSaveAs(s => !s)}
+              className="text-xs text-blue-600 hover:text-blue-800 font-medium">+ Save as</button>
+          </div>
+          {showSaveAs && (
+            <div className="px-3 py-2 border-b border-gray-100 bg-blue-50 flex gap-1.5">
+              <input
+                value={saveAsName} onChange={e => setSaveAsName(e.target.value)}
+                placeholder="Template name..."
+                onKeyDown={e => e.key === 'Enter' && saveAsTemplate()}
+                className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+              />
+              <button onClick={saveAsTemplate} disabled={savingTemplate || !saveAsName.trim()}
+                className="px-2 py-1 bg-blue-600 text-white rounded text-xs font-medium disabled:opacity-40 hover:bg-blue-700">
+                {savingTemplate ? '...' : 'Save'}
+              </button>
+            </div>
+          )}
+          {templatesLoading ? (
+            <p className="text-xs text-gray-400 px-4 py-4 text-center">Loading...</p>
+          ) : templates.length === 0 ? (
+            <p className="text-xs text-gray-400 px-4 py-5 text-center leading-relaxed">
+              No templates yet.<br />Configure settings and click <strong>+ Save as</strong> to create one.
+            </p>
+          ) : (
+            <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
+              {templates.map(t => (
+                <div key={t.id} className="flex items-center justify-between px-3 py-2.5 hover:bg-gray-50 group">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-gray-800 truncate">{t.name}</p>
+                    <p className="text-[10px] text-gray-400">
+                      {t.settings.periods_per_day}p · {t.settings.start_time}–{t.settings.end_time}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 ml-2 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => loadTemplate(t)}
+                      title="Load this template into the editor"
+                      className="text-[10px] text-blue-600 hover:text-blue-800 font-medium px-1.5 py-0.5 rounded hover:bg-blue-50">
+                      Load
+                    </button>
+                    <button onClick={() => deleteTemplate(t.id)} disabled={deletingId === t.id}
+                      title="Delete template"
+                      className="text-[10px] text-red-400 hover:text-red-600 px-1 py-0.5 rounded hover:bg-red-50 disabled:opacity-40">
+                      {deletingId === t.id ? '...' : '×'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <p className="text-[10px] text-gray-400 mt-2 px-1 leading-relaxed">
+          Templates let you save different schedule layouts (e.g. Full Day, Half Day) and select one when generating each class timetable.
+        </p>
+      </div>
+
       {/* ── Settings panel ── */}
-      <div className="w-80 flex-shrink-0 space-y-4">
+      <div className="w-72 flex-shrink-0 space-y-4">
 
         {/* Working days */}
         <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -1156,7 +1295,7 @@ function TemplateTab({
           className="w-full py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors">
           {saving ? 'Saving...' : 'Save Template'}
         </button>
-        <p className="text-[10px] text-gray-400 text-center">After saving, go to Class Timetables → Regenerate each class</p>
+        <p className="text-[10px] text-gray-400 text-center">Saves as the school&apos;s default schedule. Or use <strong>+ Save as</strong> to create a named template.</p>
       </div>
 
       {/* ── Live preview grid ── */}

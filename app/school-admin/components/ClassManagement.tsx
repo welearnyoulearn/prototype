@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { CURRICULA } from '@/lib/curricula'
 
-type Props = { schoolId: number }
+type Props = { schoolId: number; onNavigate?: (tab: string) => void }
 
 type ClassRow = { id: number; grade: string; section: string; class_teacher_id: number | null; class_teacher_name: string | null; student_count: number; timetable_generated_at: string | null }
 type Teacher = { id: number; name: string; subject: string; employee_id: string; department: string }
@@ -26,7 +26,7 @@ function getSuggestedSubjects(grade: string): string[] {
   return Array.from(names)
 }
 
-export default function ClassManagement({ schoolId }: Props) {
+export default function ClassManagement({ schoolId, onNavigate }: Props) {
   const [classes, setClasses] = useState<ClassRow[]>([])
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [loading, setLoading] = useState(true)
@@ -212,6 +212,7 @@ export default function ClassManagement({ schoolId }: Props) {
             schoolId={schoolId}
             teachers={teachers}
             onClassUpdated={(updates) => setClasses(prev => prev.map(c => c.id === updates.id ? { ...c, ...updates } : c))}
+            onNavigate={onNavigate}
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full py-24 text-center px-8">
@@ -231,18 +232,21 @@ export default function ClassManagement({ schoolId }: Props) {
 
 // ─── Class Detail (right panel) ────────────────────────────────────────────────
 function ClassDetail({
-  cls, schoolId, teachers, onClassUpdated
+  cls, schoolId, teachers, onClassUpdated, onNavigate
 }: {
   cls: ClassRow
   schoolId: number
   teachers: Teacher[]
   onClassUpdated: (updates: Partial<ClassRow> & { id: number }) => void
+  onNavigate?: (tab: string) => void
 }) {
   const [tab, setTab] = useState<'subjects' | 'timetable' | 'students'>('subjects')
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [subLoading, setSubLoading] = useState(true)
   const [subjectMsg, setSubjectMsg] = useState<{ text: string; ok: boolean } | null>(null)
   const [addingSubject, setAddingSubject] = useState(false)
+  // Shown after adding a subject when timetable already exists — prompts admin to regenerate
+  const [ttPrompt, setTtPrompt] = useState<string | null>(null)
   const [removingId, setRemovingId] = useState<number | null>(null)
   const [newName, setNewName] = useState('')
   const [newPPW, setNewPPW] = useState('4')
@@ -323,6 +327,10 @@ function ClassDetail({
       setNewName(''); setNewPPW('4'); setNewTeacher('')
       setSubjectMsg({ text: `✓ ${subjectName} added${data.teacher_name ? ` · Teacher: ${data.teacher_name}` : ''}`, ok: true })
       setTimeout(() => setSubjectMsg(null), 4000)
+      // Prompt to regenerate timetable if it was already generated
+      if (cls.timetable_generated_at) {
+        setTtPrompt(subjectName)
+      }
     } catch (err: unknown) {
       setSubjectMsg({ text: err instanceof Error ? err.message : 'Failed to add subject', ok: false })
     } finally { setAddingSubject(false) }
@@ -450,6 +458,28 @@ function ClassDetail({
             {subjectMsg && (
               <div className={`rounded-lg px-4 py-2.5 text-sm border ${subjectMsg.ok ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
                 {subjectMsg.text}
+              </div>
+            )}
+
+            {/* Timetable regeneration prompt — shown after adding a subject when timetable already exists */}
+            {ttPrompt && (
+              <div className="rounded-lg px-4 py-3 bg-amber-50 border border-amber-200 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-amber-800">Timetable needs updating</p>
+                  <p className="text-xs text-amber-600 mt-0.5">
+                    <strong>{ttPrompt}</strong> was added. Regenerate the timetable to include it in the schedule.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {onNavigate && (
+                    <button
+                      onClick={() => { setTtPrompt(null); onNavigate('timetable') }}
+                      className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-semibold hover:bg-amber-700 transition-colors">
+                      Go to Timetable →
+                    </button>
+                  )}
+                  <button onClick={() => setTtPrompt(null)} className="text-amber-400 hover:text-amber-600 text-lg leading-none">×</button>
+                </div>
               </div>
             )}
 

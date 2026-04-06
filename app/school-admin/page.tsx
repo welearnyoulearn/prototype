@@ -414,7 +414,7 @@ export default function SchoolAdmin() {
                 {visited.has('emergency-cover')  && <div hidden={activeNav !== 'emergency-cover'}><EmergencyCover schoolId={selectedSchool.id} /></div>}
                 {visited.has('staff-onboarding') && <div hidden={activeNav !== 'staff-onboarding'}><StaffOnboarding schoolId={selectedSchool.id} /></div>}
                 {visited.has('student-onboarding') && <div hidden={activeNav !== 'student-onboarding'}><StudentOnboarding schoolId={selectedSchool.id} /></div>}
-                {visited.has('class-management') && <div hidden={activeNav !== 'class-management'}><ClassManagement schoolId={selectedSchool.id} /></div>}
+                {visited.has('class-management') && <div hidden={activeNav !== 'class-management'}><ClassManagement schoolId={selectedSchool.id} onNavigate={navigateTo} /></div>}
                 {visited.has('analysis')         && <div hidden={activeNav !== 'analysis'}><StudentTeacherAnalysis schoolId={selectedSchool.id} /></div>}
                 {visited.has('timetable')        && <div hidden={activeNav !== 'timetable'}><TimetableManagement schoolId={selectedSchool.id} /></div>}
                 {visited.has('exam-schedule')    && <div hidden={activeNav !== 'exam-schedule'}><ExamSchedule schoolId={selectedSchool.id} /></div>}

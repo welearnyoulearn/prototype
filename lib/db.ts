@@ -636,6 +636,19 @@ export async function initDB() {
 
     // ── Extend class_timetable with lock support ─────────────────────────────
     `ALTER TABLE class_timetable ADD COLUMN IF NOT EXISTS is_locked BOOLEAN DEFAULT FALSE`,
+
+    // ── Named schedule templates (multiple saved schedules per school) ─────────
+    // Admins can save multiple templates (e.g. "Full Day", "Half Day") and select
+    // one when generating a class timetable instead of always using the school default.
+    `CREATE TABLE IF NOT EXISTS schedule_templates (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      name VARCHAR(100) NOT NULL,
+      settings JSONB NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, name)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_schedule_templates_school ON schedule_templates(school_id)`,
   ]
 
   for (const sql of migrations) {

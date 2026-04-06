@@ -65,28 +65,34 @@ export async function POST(req: NextRequest) {
   try {
     await ensureDB()
     const body = await req.json()
-    const { school_id, class_id, force_replace = false } = body
+    const { school_id, class_id, force_replace = false, schedule_settings: bodySettings } = body
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 
-    // ── Fetch school schedule settings (dynamic schedule per school) ──────────
-    const { rows: schedRows } = await pool.query(
-      'SELECT * FROM school_schedule_settings WHERE school_id=$1',
-      [school_id]
-    )
-    const schedSettings: SchoolScheduleSettings = schedRows[0]
-      ? {
-          periods_per_day: schedRows[0].periods_per_day,
-          start_time: schedRows[0].start_time,
-          end_time: schedRows[0].end_time,
-          morning_break_after_period: schedRows[0].morning_break_after_period,
-          morning_break_duration: schedRows[0].morning_break_duration,
-          lunch_after_period: schedRows[0].lunch_after_period,
-          lunch_duration: schedRows[0].lunch_duration,
-          afternoon_break_after_period: schedRows[0].afternoon_break_after_period,
-          afternoon_break_duration: schedRows[0].afternoon_break_duration,
-        }
-      : DEFAULT_SCHEDULE_SETTINGS
+    // ── Schedule settings: use body override (named template) OR school default ─
+    let schedSettings: SchoolScheduleSettings
+    if (bodySettings && bodySettings.periods_per_day) {
+      // Template passed directly in request body (from named template selector)
+      schedSettings = bodySettings as SchoolScheduleSettings
+    } else {
+      const { rows: schedRows } = await pool.query(
+        'SELECT * FROM school_schedule_settings WHERE school_id=$1',
+        [school_id]
+      )
+      schedSettings = schedRows[0]
+        ? {
+            periods_per_day: schedRows[0].periods_per_day,
+            start_time: schedRows[0].start_time,
+            end_time: schedRows[0].end_time,
+            morning_break_after_period: schedRows[0].morning_break_after_period,
+            morning_break_duration: schedRows[0].morning_break_duration,
+            lunch_after_period: schedRows[0].lunch_after_period,
+            lunch_duration: schedRows[0].lunch_duration,
+            afternoon_break_after_period: schedRows[0].afternoon_break_after_period,
+            afternoon_break_duration: schedRows[0].afternoon_break_duration,
+          }
+        : DEFAULT_SCHEDULE_SETTINGS
+    }
 
     const DYNAMIC_SCHEDULE = buildScheduleFromSettings(schedSettings)
     const ACADEMIC_SLOTS = DYNAMIC_SCHEDULE.filter(s => !s.is_break)
