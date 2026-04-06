@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { notifyTimetableChange } from '@/lib/notifyTimetable'
+import { invalidateCache } from '@/lib/responseCache'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/class-timetable/circulate
@@ -79,6 +80,10 @@ export async function POST(req: NextRequest) {
       })
       totalNotified += teacherRows.length
     }
+
+    invalidateCache(`timetable:school:${school_id}`)
+    invalidateCache(`health:${school_id}`)
+    if (class_id) invalidateCache(`timetable:class:${class_id}`)
 
     return NextResponse.json({
       success: true,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { notifyTimetableChange } from '@/lib/notifyTimetable'
+import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
 
 export async function GET(req: NextRequest) {
   await ensureDB()
@@ -11,6 +12,17 @@ export async function GET(req: NextRequest) {
   const date = searchParams.get('date')
 
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+
+  // Cache class-level and school-level timetable fetches (no date filter = structural data)
+  if (!date) {
+    const cacheKey = class_id
+      ? `timetable:class:${class_id}`
+      : teacher_id
+        ? `timetable:teacher:${teacher_id}:school:${school_id}`
+        : `timetable:school:${school_id}`
+    const cached = getCache(cacheKey)
+    if (cached) return NextResponse.json(cached)
+  }
 
   try {
     const vals: (string | number)[] = [school_id]
@@ -59,6 +71,21 @@ export async function GET(req: NextRequest) {
              ORDER BY CASE ct.day_of_week WHEN 'Monday' THEN 1 WHEN 'Tuesday' THEN 2 WHEN 'Wednesday' THEN 3 WHEN 'Thursday' THEN 4 WHEN 'Friday' THEN 5 ELSE 6 END, ct.period_number`
 
     const result = await pool.query(q, vals)
+
+    // Store in cache if this is a cacheable query (no date, no special slot lookup)
+    if (!date) {
+      const day_of_week_param = searchParams.get('day_of_week')
+      const period_number_param = searchParams.get('period_number')
+      if (!day_of_week_param && !period_number_param) {
+        const cacheKey = class_id
+          ? `timetable:class:${class_id}`
+          : teacher_id
+            ? `timetable:teacher:${teacher_id}:school:${school_id}`
+            : `timetable:school:${school_id}`
+        setCache(cacheKey, result.rows, 30_000)
+      }
+    }
+
     return NextResponse.json(result.rows)
   } catch (error) {
     console.error(error)
@@ -117,6 +144,9 @@ export async function PUT(req: NextRequest) {
             message: `${subject_name} teacher has been updated for Grade ${clsInfo.grade}-${clsInfo.section}.`,
           })
         }
+        invalidateCache(`timetable:class:${class_id}`)
+        invalidateCache(`timetable:school:${school_id}`)
+        invalidateCache(`health:${school_id}`)
         return NextResponse.json({ updated: updatedSlots.length, subject_name })
       }
 
@@ -137,6 +167,9 @@ export async function PUT(req: NextRequest) {
         return NextResponse.json({ error: 'Slot not found' }, { status: 404 })
       }
       await client.query('COMMIT')
+      invalidateCache(`timetable:class:${class_id}`)
+      invalidateCache(`timetable:school:${school_id}`)
+      invalidateCache(`health:${school_id}`)
 
       const { rows: [clsPublished] } = await pool.query(
         'SELECT timetable_generated_at FROM classes WHERE id=$1', [class_id]

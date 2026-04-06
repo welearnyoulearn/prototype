@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { getCache, setCache } from '@/lib/responseCache'
 
 // GET /api/class-timetable/health?school_id=X
 //
@@ -9,12 +10,18 @@ import pool, { ensureDB } from '@/lib/db'
 // Per class:
 //   conflict_count      – slots where the assigned teacher is simultaneously in another class
 //   no_teacher_count    – academic slots that have a subject but no teacher
-//   subjects_unassigned – entries in class_subjects with no teacher_id
+//   subjects_unassigned – subjects in class_subjects that have NO timetable slot with a teacher
+//                         (fix: was counting class_subjects.teacher_id IS NULL which stayed NULL
+//                          even after auto-generation filled timetable slots with teachers)
 //   timetable_exists    – whether any timetable rows exist for this class
 export async function GET(req: NextRequest) {
   await ensureDB()
   const school_id = req.nextUrl.searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+
+  const cacheKey = `health:${school_id}`
+  const cached = getCache(cacheKey)
+  if (cached) return NextResponse.json(cached)
 
   try {
     const { rows } = await pool.query(
@@ -45,11 +52,20 @@ export async function GET(req: NextRequest) {
          GROUP BY ct.class_id
        ),
        subj_unassigned AS (
+         -- A subject is "unassigned" only if NONE of its timetable slots have a teacher.
+         -- Fixes the bug where class_subjects.teacher_id stayed NULL even after timetable
+         -- generation filled the actual period slots with teachers.
          SELECT cs.class_id, COUNT(*)::int AS subjects_unassigned
          FROM class_subjects cs
          JOIN classes c ON c.id = cs.class_id
-         WHERE c.school_id   = $1
-           AND cs.teacher_id IS NULL
+         WHERE c.school_id = $1
+           AND NOT EXISTS (
+             SELECT 1 FROM class_timetable ct
+             WHERE ct.class_id    = cs.class_id
+               AND ct.subject_name = cs.subject_name
+               AND ct.teacher_id  IS NOT NULL
+               AND ct.is_break    = FALSE
+           )
          GROUP BY cs.class_id
        ),
        tt_exists AS (
@@ -73,6 +89,7 @@ export async function GET(req: NextRequest) {
        ORDER BY c.grade, c.section`,
       [school_id]
     )
+    setCache(cacheKey, rows, 20_000)
     return NextResponse.json(rows)
   } catch (error) {
     console.error('[class-timetable/health]', error)

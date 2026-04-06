@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { invalidateCache } from '@/lib/responseCache'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -40,6 +41,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       [class_teacher_id || null, id]
     )
     if (!result.rows[0]) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    invalidateCache(`classes:${result.rows[0].school_id}`)
     return NextResponse.json(result.rows[0])
   } catch (error) {
     console.error(error)
@@ -50,11 +52,19 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   try {
+    const { rows: [cls] } = await pool.query('SELECT school_id FROM classes WHERE id=$1', [id])
     // Cascade cleanup — delete all data associated with this class before deleting the class
     await pool.query('DELETE FROM class_timetable WHERE class_id = $1', [id])
     await pool.query('DELETE FROM class_subjects WHERE class_id = $1', [id])
     await pool.query('DELETE FROM substitute_assignments WHERE class_id = $1', [id])
     await pool.query('DELETE FROM classes WHERE id = $1', [id])
+    if (cls?.school_id) {
+      invalidateCache(`classes:${cls.school_id}`)
+      invalidateCache(`timetable:school:${cls.school_id}`)
+      invalidateCache(`health:${cls.school_id}`)
+    }
+    invalidateCache(`timetable:class:${id}`)
+    invalidateCache(`subjects:class:${id}`)
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error(error)

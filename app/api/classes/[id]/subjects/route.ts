@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { matchTeacher } from '@/lib/matchTeacher'
+import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   await ensureDB()
   const { id } = await params
+
+  const cacheKey = `subjects:class:${id}`
+  const cached = getCache(cacheKey)
+  if (cached) return NextResponse.json(cached)
+
   try {
     const result = await pool.query(
       `SELECT cs.id, cs.subject_name, cs.teacher_id, cs.periods_per_week,
@@ -15,6 +21,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
        ORDER BY cs.subject_name`,
       [id]
     )
+    setCache(cacheKey, result.rows, 60_000)
     return NextResponse.json(result.rows)
   } catch (error) {
     console.error(error)
@@ -93,6 +100,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       ? (await pool.query('SELECT name FROM teachers WHERE id = $1', [resolvedTeacherId])).rows[0]?.name ?? null
       : null
 
+    invalidateCache(`subjects:class:${id}`)
+    invalidateCache(`timetable:class:${id}`)
+    invalidateCache(`health:${cls.school_id}`)
+
     return NextResponse.json({ ...result.rows[0], teacher_name: teacherName }, { status: 201 })
   } catch (error) {
     console.error(error)
@@ -108,7 +119,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   try {
     // Get the subject name before deleting
     const { rows: [sub] } = await pool.query(
-      'SELECT subject_name FROM class_subjects WHERE id = $1 AND class_id = $2',
+      'SELECT cs.subject_name, c.school_id FROM class_subjects cs JOIN classes c ON c.id = cs.class_id WHERE cs.id = $1 AND cs.class_id = $2',
       [subject_id, id]
     )
     await pool.query('DELETE FROM class_subjects WHERE id = $1 AND class_id = $2', [subject_id, id])
@@ -120,6 +131,12 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
          WHERE class_id = $1 AND subject_name = $2 AND is_break = FALSE`,
         [id, sub.subject_name]
       )
+    }
+    invalidateCache(`subjects:class:${id}`)
+    invalidateCache(`timetable:class:${id}`)
+    if (sub?.school_id) {
+      invalidateCache(`health:${sub.school_id}`)
+      invalidateCache(`timetable:school:${sub.school_id}`)
     }
     return NextResponse.json({ success: true })
   } catch (error) {

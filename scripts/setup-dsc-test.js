@@ -7,10 +7,16 @@
  * 4. Creates 30 students per class
  */
 
+require('dotenv').config({ path: require('path').join(__dirname, '../.env.local') })
 const { Pool } = require('pg')
 
+if (!process.env.DATABASE_URL) {
+  console.error('DATABASE_URL not set. Add it to .env.local')
+  process.exit(1)
+}
+
 const pool = new Pool({
-  connectionString: 'postgresql://postgres.kqumkvdreyxwlrpqhfph:ILvuIndia111%23%23%23@aws-1-ap-northeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1',
+  connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 })
 

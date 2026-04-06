@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { invalidateCache } from '@/lib/responseCache'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/class-timetable/swap
@@ -117,6 +118,9 @@ export async function POST(req: NextRequest) {
     )
 
     await client.query('COMMIT')
+    invalidateCache(`timetable:class:${class_id}`)
+    invalidateCache(`timetable:school:${school_id}`)
+    invalidateCache(`health:${school_id}`)
 
     // Notifications are sent only on Circulate — not on individual swaps
     return NextResponse.json({ success: true, message: 'Slots swapped successfully' })

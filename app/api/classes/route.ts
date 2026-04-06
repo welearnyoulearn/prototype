@@ -2,10 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { getSubjectsForGrade } from '@/lib/curricula'
 import { matchTeacher } from '@/lib/matchTeacher'
+import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
 
 export async function GET(req: NextRequest) {
   const school_id = req.nextUrl.searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+
+  const cacheKey = `classes:${school_id}`
+  const cached = getCache(cacheKey)
+  if (cached) return NextResponse.json(cached)
 
   try {
     const result = await pool.query(
@@ -17,6 +22,7 @@ export async function GET(req: NextRequest) {
        ORDER BY c.grade, c.section`,
       [school_id]
     )
+    setCache(cacheKey, result.rows, 60_000)
     return NextResponse.json(result.rows)
   } catch (error) {
     console.error(error)
@@ -81,6 +87,7 @@ export async function POST(req: NextRequest) {
       }
 
       await client.query('COMMIT')
+      invalidateCache(`classes:${school_id}`)
       return NextResponse.json({ ...newClass, subjects_assigned: subjectsAssigned }, { status: 201 })
 
     } catch (err) {

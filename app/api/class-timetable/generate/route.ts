@@ -5,6 +5,7 @@ import {
   buildScheduleFromSettings, DEFAULT_SCHEDULE_SETTINGS, SchoolScheduleSettings,
 } from '@/lib/schedule'
 import { notifyTimetableChange } from '@/lib/notifyTimetable'
+import { invalidateCache } from '@/lib/responseCache'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/class-timetable/generate
@@ -492,6 +493,13 @@ export async function POST(req: NextRequest) {
         }
       } catch (notifErr) {
         console.error('[generate-timetable] notification error (non-fatal):', notifErr)
+      }
+
+      // Bust cached timetable data so the UI gets fresh slots after generation
+      invalidateCache(`timetable:school:${school_id}`)
+      invalidateCache(`health:${school_id}`)
+      for (const cls of toGenerate) {
+        invalidateCache(`timetable:class:${cls.id}`)
       }
 
       return NextResponse.json({
