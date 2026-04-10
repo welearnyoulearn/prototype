@@ -30,31 +30,21 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       [id, tier]
     )
 
-    // Save plan dates on school record (1 year from today)
     if (tier !== 'none') {
       const startDate = new Date()
       const endDate = new Date()
       endDate.setFullYear(endDate.getFullYear() + 1)
-
       await pool.query(
         `UPDATE schools SET plan_start_date = $1, plan_end_date = $2 WHERE id = $3`,
         [startDate.toISOString().slice(0, 10), endDate.toISOString().slice(0, 10), id]
       )
-
-      // Send billing email
-      const schoolRes = await pool.query(
-        'SELECT name, email, school_code FROM schools WHERE id = $1', [id]
-      )
+      const schoolRes = await pool.query('SELECT name, email, school_code FROM schools WHERE id = $1', [id])
       const school = schoolRes.rows[0]
       if (school?.email && school?.school_code) {
         const fmt = (d: Date) => d.toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })
         sendPlanActivationEmail({
-          to: school.email,
-          schoolName: school.name,
-          schoolCode: school.school_code,
-          tier,
-          startDate: fmt(startDate),
-          endDate: fmt(endDate),
+          to: school.email, schoolName: school.name, schoolCode: school.school_code,
+          tier, startDate: fmt(startDate), endDate: fmt(endDate),
         }).catch(err => console.error('[email/plan]', err))
       }
     }

@@ -3,7 +3,7 @@ import pool, { ensureDB } from '@/lib/db'
 import { hashPassword, verifyPassword, setTeacherAuthCookie } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   try {
     const { school_code, employee_id, password } = await req.json()
 

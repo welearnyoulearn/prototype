@@ -15,7 +15,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; sid: string }> }
 ) {
-  await ensureDB()
+
   const { id: task_id, sid } = await params
   const body = await req.json()
   const { school_id, teacher_id, score, feedback, status, resubmission_requested,
@@ -107,7 +107,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; sid: string }> }
 ) {
-  await ensureDB()
+
   const { id: task_id, sid } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
   const teacher_id = req.nextUrl.searchParams.get('teacher_id')

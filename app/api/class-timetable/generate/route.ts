@@ -63,7 +63,7 @@ function buildRequiredCounts(subjects: { name: string; ppw: number }[], totalAca
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureDB()
+
     const body = await req.json()
     const { school_id, class_id, force_replace = false, schedule_settings: bodySettings } = body
 

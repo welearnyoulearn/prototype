@@ -15,7 +15,7 @@ import { getCache, setCache } from '@/lib/responseCache'
 //                          even after auto-generation filled timetable slots with teachers)
 //   timetable_exists    – whether any timetable rows exist for this class
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
   const school_id = req.nextUrl.searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 

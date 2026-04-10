@@ -8,7 +8,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  await ensureDB()
+
   const { id: student_id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
   const class_id = req.nextUrl.searchParams.get('class_id')

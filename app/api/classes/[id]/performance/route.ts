@@ -8,7 +8,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  await ensureDB()
+
   const { id: classId } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
   const days = parseInt(req.nextUrl.searchParams.get('days') ?? '30')

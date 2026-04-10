@@ -5,7 +5,7 @@ import pool, { ensureDB } from '@/lib/db'
 // POST /api/timetable-modes                       — set mode for a class
 
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
   const school_id = new URL(req.url).searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
   try {
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   try {
     const { school_id, class_id, mode, master_source_id } = await req.json()
     if (!school_id || !class_id || !mode) {

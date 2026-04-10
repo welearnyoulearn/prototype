@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
   const school_id = req.nextUrl.searchParams.get('school_id')
   const teacher_id = req.nextUrl.searchParams.get('teacher_id')
   const status = req.nextUrl.searchParams.get('status')

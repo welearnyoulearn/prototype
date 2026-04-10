@@ -5,7 +5,7 @@ import { hashPassword, verifyPassword } from '@/lib/auth'
 // Teacher self-service password change
 // POST /api/teachers/[id]/change-password { current_password, new_password, school_id }
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
   const body = await req.json()
   const { current_password, new_password, school_id } = body

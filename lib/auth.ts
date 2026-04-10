@@ -147,6 +147,21 @@ export function generateSchoolCode(schoolName: string, schoolId: number): string
   return `wlyl-schl-${slug}-${schoolId}`
 }
 
+// ─── Platform Admin API guard ─────────────────────────────────────────────────
+// Use in API route handlers to reject non-platform-admin requests.
+export async function requirePlatformAdmin(): Promise<JWTPayload | null> {
+  const session = await getSession()
+  if (!session || session.role !== 'platform_admin') return null
+  return session
+}
+
+// ─── School Admin API guard ───────────────────────────────────────────────────
+export async function requireSchoolAdmin(): Promise<JWTPayload | null> {
+  const session = await getSession()
+  if (!session || session.role !== 'school_admin') return null
+  return session
+}
+
 // ─── Reset token generator ────────────────────────────────────────────────────
 export function generateResetToken(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'

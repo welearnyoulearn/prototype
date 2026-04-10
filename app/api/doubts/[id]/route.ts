@@ -4,7 +4,7 @@ import pool, { ensureDB } from '@/lib/db'
 // AUTH DISABLED FOR TESTING — will be re-enabled when all features are complete
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
   const body = await req.json()
   const { school_id, teacher_id, teacher_answer, status } = body
@@ -68,7 +68,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
 // PATCH /api/doubts/[id] — toggle FAQ status (teacher only)
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
   const body = await req.json()
   const { school_id, teacher_id, is_class_faq } = body
@@ -96,7 +96,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
   const student_id = req.nextUrl.searchParams.get('student_id')

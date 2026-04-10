@@ -5,7 +5,7 @@ import { getTodaysTopic } from '@/lib/newspaper-topics'
 // GET /api/newspapers/today?school_id=&student_id=
 // Returns today's newspaper, auto-generating it from the topic bank if needed.
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
   const school_id = req.nextUrl.searchParams.get('school_id')
   const student_id = req.nextUrl.searchParams.get('student_id')
 

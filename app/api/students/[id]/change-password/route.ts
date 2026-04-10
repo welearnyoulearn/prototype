@@ -8,7 +8,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  await ensureDB()
+
   const { id } = await params
   const body = await req.json()
   const { current_password, new_password, school_id } = body

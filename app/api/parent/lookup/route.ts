@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   const body = await req.json()
   const { school_id, roll_number, parent_phone } = body
 

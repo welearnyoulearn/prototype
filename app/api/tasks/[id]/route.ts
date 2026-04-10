@@ -11,7 +11,7 @@ cloudinary.config({
 })
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
   const body = await req.json()
   const { school_id, teacher_id, title, subject, task_type, max_marks, instructions, assigned_to, status, due_date, due_time } = body
@@ -84,7 +84,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
   const teacher_id = req.nextUrl.searchParams.get('teacher_id')

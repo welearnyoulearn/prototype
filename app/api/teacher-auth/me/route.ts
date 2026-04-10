@@ -3,7 +3,7 @@ import pool, { ensureDB } from '@/lib/db'
 import { getTeacherSession } from '@/lib/auth'
 
 export async function GET() {
-  await ensureDB()
+
   const session = await getTeacherSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 

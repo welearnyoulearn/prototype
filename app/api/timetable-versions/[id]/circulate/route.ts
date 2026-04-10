@@ -9,7 +9,7 @@ import { notifyTimetableChange } from '@/lib/notifyTimetable'
 // Before circulating, the version must be confirmed (status = 'confirmed').
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
   const versionId = Number(id)
 

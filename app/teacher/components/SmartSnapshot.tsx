@@ -114,6 +114,7 @@ function getNowMins() {
 }
 
 type LeaveRecord = { id: number; leave_type: string; start_date: string; end_date: string; status: string }
+type AnnouncementItem = { id: number; title: string; content: string; announcement_type: string; target_audience: string; priority: string; created_by_name: string; expires_at: string | null; created_at: string }
 
 export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewClass }: Props) {
   const [timetable, setTimetable] = useState<Period[]>([])
@@ -123,6 +124,8 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
   const [substituteDuties, setSubstituteDuties] = useState<SubstituteDuty[]>([])
   const [upcomingSubDuties, setUpcomingSubDuties] = useState<SubstituteDuty[]>([])
   const [todayLeave, setTodayLeave] = useState<LeaveRecord | null>(null)
+  const [announcements, setAnnouncements] = useState<AnnouncementItem[]>([])
+  const [annExpanded, setAnnExpanded] = useState<number | null>(null)
 
   // Class health state — only fetched for class teachers
   const [classHealthLoading, setClassHealthLoading] = useState(false)
@@ -161,7 +164,8 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
       fetch(`/api/substitutes?school_id=${schoolId}&substitute_teacher_id=${teacher.id}`).then(r => r.json()).catch(() => []),
       // active_date lets SQL do the date comparison server-side (avoids timezone issues)
       fetch(`/api/leave-requests?teacher_id=${teacher.id}&school_id=${schoolId}&status=approved&active_date=${todayStr}`).then(r => r.json()).catch(() => []),
-    ]).then(([tt, cls, subs, leaves]) => {
+      fetch(`/api/announcements?school_id=${schoolId}&audience=teachers`).then(r => r.json()).catch(() => []),
+    ]).then(([tt, cls, subs, leaves, ann]) => {
       setTimetable(Array.isArray(tt) ? tt : [])
       setClasses(Array.isArray(cls) ? cls : [])
       const allSubs: SubstituteDuty[] = Array.isArray(subs) ? subs : []
@@ -173,6 +177,7 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
       setUpcomingSubDuties(upcoming)
       // API already filters to leaves active on todayStr — first result (if any) is today's leave
       setTodayLeave(Array.isArray(leaves) && leaves.length > 0 ? leaves[0] : null)
+      setAnnouncements(Array.isArray(ann) ? ann : [])
     }).finally(() => setLoading(false))
   }, [teacher.id, schoolId])
 
@@ -718,6 +723,72 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
           </div>
         )}
       </div>
+
+      {/* Announcements feed */}
+      {announcements.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
+              </svg>
+              <h3 className="font-bold text-gray-900 text-sm">School Announcements</h3>
+              {announcements.filter(a => a.priority === 'urgent').length > 0 && (
+                <span className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-full">
+                  {announcements.filter(a => a.priority === 'urgent').length} urgent
+                </span>
+              )}
+            </div>
+            <span className="text-xs text-gray-400">{announcements.length} notice{announcements.length > 1 ? 's' : ''}</span>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {announcements.slice(0, 5).map(a => {
+              const isUrgent = a.priority === 'urgent'
+              const isHigh = a.priority === 'high'
+              const isOpen = annExpanded === a.id
+              return (
+                <div key={a.id} className={`${isUrgent ? 'bg-red-50/50' : isHigh ? 'bg-amber-50/50' : ''}`}>
+                  <button
+                    onClick={() => setAnnExpanded(isOpen ? null : a.id)}
+                    className="w-full flex items-start gap-3 px-5 py-3.5 text-left hover:bg-gray-50/70 transition-colors"
+                  >
+                    <span className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${
+                      isUrgent ? 'bg-red-500' : isHigh ? 'bg-amber-400' : 'bg-gray-300'}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                        {isUrgent && <span className="text-[10px] bg-red-100 text-red-700 font-bold px-1.5 py-0.5 rounded uppercase">Urgent</span>}
+                        {isHigh && !isUrgent && <span className="text-[10px] bg-amber-100 text-amber-700 font-semibold px-1.5 py-0.5 rounded uppercase">High</span>}
+                        <span className="text-[10px] text-gray-400">
+                          {new Date(a.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                        </span>
+                      </div>
+                      <p className="text-sm font-semibold text-gray-800 truncate">{a.title}</p>
+                      {!isOpen && <p className="text-xs text-gray-400 mt-0.5 truncate">{a.content}</p>}
+                    </div>
+                    <svg className={`w-3.5 h-3.5 text-gray-300 flex-shrink-0 mt-1 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                      fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {isOpen && (
+                    <div className="px-5 pb-4 pl-10">
+                      <p className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">{a.content}</p>
+                      {a.expires_at && (
+                        <p className="text-xs text-amber-500 mt-2">Expires: {new Date(a.expires_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          {announcements.length > 5 && (
+            <div className="px-5 py-3 border-t border-gray-50 text-center">
+              <p className="text-xs text-gray-400">{announcements.length - 5} more announcement{announcements.length - 5 > 1 ? 's' : ''} not shown</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Timetable modal for non-class-teacher classes */}
       {modalClass && (

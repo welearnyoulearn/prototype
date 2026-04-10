@@ -3,7 +3,7 @@ import pool, { ensureDB } from '@/lib/db'
 
 // GET /api/exams?school_id=&class_id=&teacher_id= (teacher_id = get exams where this teacher has subjects)
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
   const { searchParams } = new URL(req.url)
   const school_id = searchParams.get('school_id')
   const class_id = searchParams.get('class_id')
@@ -76,7 +76,26 @@ export async function GET(req: NextRequest) {
       `, [parseInt(class_id), parseInt(school_id)])
       rows = r
     } else {
-      return NextResponse.json({ error: 'class_id or teacher_id required' }, { status: 400 })
+      // School-wide: all exams across all classes (admin view)
+      const { rows: r } = await pool.query(`
+        SELECT
+          e.id, e.exam_name, e.exam_type,
+          TO_CHAR(e.exam_date, 'YYYY-MM-DD') AS exam_date,
+          e.status, e.passing_pct,
+          e.class_id, e.created_by, e.created_at, e.published_at,
+          c.grade, c.section,
+          COALESCE(t.name, 'School Admin') AS created_by_name,
+          COUNT(DISTINCT es.id)::int AS total_subjects,
+          COUNT(DISTINCT CASE WHEN es.status = 'submitted' THEN es.id END)::int AS submitted_subjects
+        FROM exam_records e
+        JOIN classes c ON c.id = e.class_id
+        LEFT JOIN teachers t ON t.id = e.created_by
+        LEFT JOIN exam_subjects es ON es.exam_id = e.id
+        WHERE e.school_id = $1
+        GROUP BY e.id, c.grade, c.section, t.name
+        ORDER BY e.created_at DESC
+      `, [parseInt(school_id)])
+      rows = r
     }
 
     return NextResponse.json(rows)
@@ -88,7 +107,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/exams — class teacher creates an exam
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   const body = await req.json()
   const { school_id, class_id, teacher_id, exam_name, exam_type = 'unit_test', exam_date, passing_pct = 35 } = body
 

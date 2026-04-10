@@ -4,7 +4,7 @@ import { getSession, hashPassword } from '@/lib/auth'
 
 // School admin resets a teacher's password back to their employee_id
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   if (session.role !== 'school_admin' && session.role !== 'platform_admin') {

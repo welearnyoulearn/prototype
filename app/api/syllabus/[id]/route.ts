@@ -7,7 +7,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  await ensureDB()
+
   const { id } = await params
   const body = await req.json()
   const { school_id, status, covered_by, topic_name, chapter_name, chapter_order, topic_order } = body
@@ -64,7 +64,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  await ensureDB()
+
   const { id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
 

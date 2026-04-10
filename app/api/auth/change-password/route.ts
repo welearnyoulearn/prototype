@@ -4,7 +4,7 @@ import { getSession, verifyPassword, hashPassword, signToken } from '@/lib/auth'
 import { cookies } from 'next/headers'
 
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
 

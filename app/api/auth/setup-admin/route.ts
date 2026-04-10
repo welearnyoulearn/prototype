@@ -8,7 +8,7 @@ import { ensureDB } from '@/lib/db'
 // Protected by SETUP_SECRET env var.
 export async function POST(req: NextRequest) {
   try {
-    await ensureDB()
+
     const { email, password, secret } = await req.json()
 
     if (secret !== (process.env.SETUP_SECRET || 'wlyl-setup-2024')) {
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
 // GET — check if platform admin exists
 export async function GET() {
   try {
-    await ensureDB()
+
     const result = await pool.query(`SELECT id FROM users WHERE role = 'platform_admin' LIMIT 1`)
     return NextResponse.json({ exists: result.rows.length > 0 })
   } catch {

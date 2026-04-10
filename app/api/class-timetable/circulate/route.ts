@@ -13,7 +13,7 @@ import { invalidateCache } from '@/lib/responseCache'
 //   class_id — optional; if omitted, circulates all classes in the school
 // ─────────────────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   try {
     const { school_id, class_id } = await req.json()
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
@@ -61,9 +61,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No timetable data found to circulate' }, { status: 400 })
     }
 
-    // ── Send notifications ────────────────────────────────────────────────────
+    // ── Stamp circulation time + send notifications ───────────────────────────
+    const circulatedAt = new Date().toISOString()
     let totalNotified = 0
     for (const cls of classes) {
+      // Mark as circulated in classes table
+      await pool.query(
+        `UPDATE classes SET timetable_circulated_at = NOW() WHERE id = $1`,
+        [cls.class_id]
+      )
       const { rows: teacherRows } = await pool.query(
         `SELECT DISTINCT teacher_id FROM class_timetable
          WHERE class_id=$1 AND teacher_id IS NOT NULL AND is_break=FALSE`,
@@ -81,6 +87,8 @@ export async function POST(req: NextRequest) {
       totalNotified += teacherRows.length
     }
 
+    invalidateCache(`classes:${school_id}`)
+
     invalidateCache(`timetable:school:${school_id}`)
     invalidateCache(`health:${school_id}`)
     if (class_id) invalidateCache(`timetable:class:${class_id}`)
@@ -89,6 +97,7 @@ export async function POST(req: NextRequest) {
       success: true,
       classes_circulated: classes.length,
       staff_notified: totalNotified,
+      circulated_at: circulatedAt,
     })
   } catch (error) {
     console.error('[circulate]', error)

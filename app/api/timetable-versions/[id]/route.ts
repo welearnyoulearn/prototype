@@ -5,7 +5,7 @@ import pool, { ensureDB } from '@/lib/db'
 // DELETE /api/timetable-versions/[id] — delete a draft version
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
   try {
     const body = await req.json()
@@ -33,7 +33,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
   try {
     const { rows } = await pool.query(

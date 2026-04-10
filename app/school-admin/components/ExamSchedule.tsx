@@ -5,8 +5,33 @@ import TestCalendar from '../../components/TestCalendar'
 
 type ClassOption = { id: number; grade: string; section: string }
 type ClassDetail = { subjects: Array<{ subject_name: string; teacher_id: number | null; teacher_name: string | null }> }
-
 type SubjectRow = { subject_name: string; max_marks: number }
+
+// Results types
+type ExamListRow = {
+  id: number; exam_name: string; exam_type: string; exam_date: string
+  grade: string; section: string; status: string; passing_pct: number
+  total_subjects: number; submitted_subjects: number
+}
+type SubjectStat = {
+  subject_name: string; max_marks: number; teacher_name: string | null
+  avg_marks: number | null; pass_count: number; fail_count: number; absent_count: number; entries: number
+}
+type StudentResult = {
+  student_id: number; name: string; roll_number: string
+  subjects: Record<string, { marks_obtained: number | null; is_absent: boolean }>
+  total_obtained: number | null; total_max: number
+  percentage: number | null; pass: boolean | null; grade: string | null; all_entered: boolean
+}
+type MarksData = {
+  exam: ExamListRow; subjects: Array<{ subject_name: string; max_marks: number }>
+  students: StudentResult[]; subject_stats: SubjectStat[]
+  pass_count: number; fail_count: number; total_max: number
+}
+
+const EXAM_TYPE_LABELS: Record<string, string> = {
+  unit_test: 'Unit Test', mid_term: 'Mid Term', final_exam: 'Final Exam', practical: 'Practical'
+}
 
 const EXAM_TYPES = [
   { value: 'unit_test',   label: 'Unit Test' },
@@ -18,7 +43,7 @@ const EXAM_TYPES = [
 type Props = { schoolId: number }
 
 export default function ExamSchedule({ schoolId }: Props) {
-  const [view, setView]             = useState<'calendar' | 'create'>('calendar')
+  const [view, setView]             = useState<'calendar' | 'create' | 'results'>('calendar')
   const [classes, setClasses]       = useState<ClassOption[]>([])
   const [selectedClasses, setSelectedClasses] = useState<number[]>([])
   const [form, setForm] = useState({
@@ -33,6 +58,12 @@ export default function ExamSchedule({ schoolId }: Props) {
   const [saveError, setSaveError]   = useState('')
   const [saveSuccess, setSaveSuccess] = useState('')
   const [loadingSubjects, setLoadingSubjects] = useState(false)
+  // Results view state
+  const [examList, setExamList]         = useState<ExamListRow[]>([])
+  const [examsLoading, setExamsLoading] = useState(false)
+  const [selectedExam, setSelectedExam] = useState<ExamListRow | null>(null)
+  const [marksData, setMarksData]       = useState<MarksData | null>(null)
+  const [marksLoading, setMarksLoading] = useState(false)
 
   useEffect(() => {
     fetch(`/api/classes?school_id=${schoolId}`)
@@ -73,6 +104,22 @@ export default function ExamSchedule({ schoolId }: Props) {
 
   function updateSubject(i: number, field: keyof SubjectRow, value: string | number) {
     setSubjects(prev => prev.map((s, idx) => idx === i ? { ...s, [field]: value } : s))
+  }
+
+  async function loadExamList() {
+    setExamsLoading(true); setExamList([])
+    try {
+      const data = await fetch(`/api/exams?school_id=${schoolId}`).then(r => r.json())
+      setExamList(Array.isArray(data) ? data : [])
+    } finally { setExamsLoading(false) }
+  }
+
+  async function loadMarks(exam: ExamListRow) {
+    setSelectedExam(exam); setMarksLoading(true); setMarksData(null)
+    try {
+      const data = await fetch(`/api/exams/${exam.id}/marks?school_id=${schoolId}`).then(r => r.json())
+      if (data.exam) setMarksData(data)
+    } finally { setMarksLoading(false) }
   }
 
   async function handleCreate() {
@@ -125,18 +172,21 @@ export default function ExamSchedule({ schoolId }: Props) {
           <p className="text-sm text-gray-500">Schedule exams and automatically notify students, class teachers, and subject teachers</p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={() => setView('calendar')}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${view === 'calendar' ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-          >
-            Calendar View
-          </button>
-          <button
-            onClick={() => { setView('create'); setSaveSuccess(''); setSaveError('') }}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${view === 'create' ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}
-          >
-            + Schedule Exam
-          </button>
+          {([
+            { key: 'calendar', label: 'Calendar' },
+            { key: 'results',  label: 'Results & Analysis' },
+            { key: 'create',   label: '+ Schedule Exam' },
+          ] as const).map(({ key, label }) => (
+            <button key={key}
+              onClick={() => {
+                setView(key)
+                if (key === 'results' && examList.length === 0) loadExamList()
+                if (key !== 'create') { setSaveSuccess(''); setSaveError('') }
+              }}
+              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${view === key ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -148,6 +198,68 @@ export default function ExamSchedule({ schoolId }: Props) {
 
       {view === 'calendar' && (
         <TestCalendar mode="admin" schoolId={schoolId} />
+      )}
+
+      {view === 'results' && (
+        <div className="flex gap-5">
+          {/* Exam list sidebar */}
+          <div className="w-60 flex-shrink-0">
+            {examsLoading ? (
+              <div className="py-12 text-center text-gray-400 text-sm">Loading exams...</div>
+            ) : examList.length === 0 ? (
+              <div className="bg-white rounded-xl border border-gray-200 py-10 text-center">
+                <p className="text-sm text-gray-400">No exams scheduled yet.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {Object.entries(
+                  examList.reduce<Record<string, ExamListRow[]>>((acc, e) => {
+                    const k = EXAM_TYPE_LABELS[e.exam_type] ?? e.exam_type
+                    if (!acc[k]) acc[k] = []
+                    acc[k].push(e)
+                    return acc
+                  }, {})
+                ).map(([type, exams]) => (
+                  <div key={type} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div className="px-4 py-2 bg-indigo-50 border-b border-indigo-100">
+                      <span className="text-xs font-bold text-indigo-700 uppercase tracking-wide">{type}</span>
+                    </div>
+                    {exams.map(e => (
+                      <button key={e.id} onClick={() => loadMarks(e)}
+                        className={`w-full text-left px-3 py-2.5 border-b border-gray-50 last:border-b-0 transition-colors ${selectedExam?.id === e.id ? 'bg-indigo-50 border-l-2 border-l-indigo-500' : 'hover:bg-gray-50'}`}>
+                        <p className={`text-xs font-semibold truncate ${selectedExam?.id === e.id ? 'text-indigo-700' : 'text-gray-800'}`}>{e.exam_name}</p>
+                        <p className="text-[10px] text-gray-400 mt-0.5">Gr.{e.grade}-{e.section} · {new Date(e.exam_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${e.status === 'published' ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                            {e.status}
+                          </span>
+                          <span className="text-[9px] text-gray-400">{e.submitted_subjects}/{e.total_subjects} subjects</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Analysis panel */}
+          <div className="flex-1 min-w-0">
+            {!selectedExam ? (
+              <div className="bg-white rounded-xl border border-gray-200 py-24 text-center">
+                <p className="text-gray-400 text-sm">Select an exam to view results</p>
+              </div>
+            ) : marksLoading ? (
+              <div className="bg-white rounded-xl border border-gray-200 py-24 text-center">
+                <div className="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto" />
+              </div>
+            ) : !marksData ? (
+              <div className="bg-white rounded-xl border border-gray-200 py-24 text-center">
+                <p className="text-gray-400 text-sm">No marks entered yet for this exam.</p>
+              </div>
+            ) : <ExamAnalysisPanel data={marksData} />}
+          </div>
+        </div>
       )}
 
       {view === 'create' && (
@@ -324,6 +436,212 @@ export default function ExamSchedule({ schoolId }: Props) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Exam Analysis Panel ──────────────────────────────────────────────────────
+function ExamAnalysisPanel({ data }: { data: MarksData }) {
+  const { exam, subjects, students, subject_stats, pass_count, fail_count } = data
+  const entered = students.filter(s => s.all_entered)
+  const classAvg = entered.length > 0
+    ? Math.round(entered.reduce((s, st) => s + (st.percentage ?? 0), 0) / entered.length * 10) / 10
+    : null
+  const topper = entered.length > 0 ? [...entered].sort((a, b) => (b.percentage ?? 0) - (a.percentage ?? 0))[0] : null
+  const ranked = [...students]
+    .filter(s => s.percentage !== null)
+    .sort((a, b) => (b.percentage ?? 0) - (a.percentage ?? 0))
+
+  const gradeColor = (g: string | null) => {
+    if (!g) return 'text-gray-300'
+    if (['A1','A2'].includes(g)) return 'text-emerald-600'
+    if (['B1','B2'].includes(g)) return 'text-blue-600'
+    if (['C1','C2'].includes(g)) return 'text-amber-600'
+    return 'text-red-500'
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Exam header */}
+      <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="font-bold text-gray-900">{exam.exam_name}</h3>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Grade {exam.grade} – Section {exam.section} · {new Date(exam.exam_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })} · Passing: {exam.passing_pct}%
+            </p>
+          </div>
+          <span className={`text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0 ${exam.status === 'published' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+            {exam.status.toUpperCase()}
+          </span>
+        </div>
+      </div>
+
+      {/* Summary KPIs */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        {[
+          { label: 'Total Students', value: students.length, color: 'text-gray-800' },
+          { label: 'Passed', value: pass_count, color: 'text-emerald-600' },
+          { label: 'Failed', value: fail_count, color: 'text-red-500' },
+          { label: 'Class Avg', value: classAvg !== null ? `${classAvg}%` : '—', color: classAvg !== null ? (classAvg >= 60 ? 'text-emerald-600' : classAvg >= 40 ? 'text-amber-500' : 'text-red-500') : 'text-gray-300' },
+          { label: 'Topper', value: topper ? `${topper.percentage}%` : '—', color: 'text-indigo-600', sub: topper?.name },
+        ].map(({ label, value, color, sub }) => (
+          <div key={label} className="bg-white rounded-xl border border-gray-200 p-4 text-center">
+            <p className={`text-2xl font-black ${color}`}>{value}</p>
+            {sub && <p className="text-[10px] text-gray-500 truncate mt-0.5">{sub}</p>}
+            <p className="text-[10px] text-gray-400 mt-1">{label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Pass rate bar */}
+      {pass_count + fail_count > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-3">
+          <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
+            <span>Pass Rate</span>
+            <span className="font-semibold">{Math.round(pass_count / (pass_count + fail_count) * 100)}%</span>
+          </div>
+          <div className="h-2.5 bg-red-100 rounded-full overflow-hidden">
+            <div className="h-full bg-emerald-500 rounded-full transition-all"
+              style={{ width: `${Math.round(pass_count / (pass_count + fail_count) * 100)}%` }} />
+          </div>
+          <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+            <span>{pass_count} passed</span>
+            <span>{fail_count} failed</span>
+          </div>
+        </div>
+      )}
+
+      {/* Subject stats */}
+      {subject_stats.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100">
+            <p className="font-bold text-gray-800 text-sm">Subject-wise Analysis</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">Subject</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500">Teacher</th>
+                  <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500">Max</th>
+                  <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500">Avg</th>
+                  <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500">Pass</th>
+                  <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500">Fail</th>
+                  <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500">Absent</th>
+                  <th className="text-center px-4 py-2.5 text-xs font-semibold text-gray-500">Pass%</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {subject_stats.map(s => {
+                  const total = s.pass_count + s.fail_count
+                  const passPct = total > 0 ? Math.round(s.pass_count / total * 100) : null
+                  const avgPct = s.avg_marks !== null ? Math.round(s.avg_marks / s.max_marks * 100) : null
+                  return (
+                    <tr key={s.subject_name} className="hover:bg-gray-50/50">
+                      <td className="px-4 py-2.5 font-semibold text-gray-800">{s.subject_name}</td>
+                      <td className="px-4 py-2.5 text-xs text-gray-500">{s.teacher_name ?? '—'}</td>
+                      <td className="px-4 py-2.5 text-center text-xs text-gray-600">{s.max_marks}</td>
+                      <td className="px-4 py-2.5 text-center">
+                        {avgPct !== null ? (
+                          <span className={`text-xs font-semibold ${avgPct >= 60 ? 'text-emerald-600' : avgPct >= 40 ? 'text-amber-500' : 'text-red-500'}`}>
+                            {s.avg_marks} ({avgPct}%)
+                          </span>
+                        ) : <span className="text-xs text-gray-300">—</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-center text-xs font-semibold text-emerald-600">{s.pass_count}</td>
+                      <td className="px-4 py-2.5 text-center text-xs font-semibold text-red-500">{s.fail_count}</td>
+                      <td className="px-4 py-2.5 text-center text-xs text-gray-400">{s.absent_count}</td>
+                      <td className="px-4 py-2.5 text-center">
+                        {passPct !== null ? (
+                          <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${passPct >= 80 ? 'bg-emerald-100 text-emerald-700' : passPct >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
+                            {passPct}%
+                          </span>
+                        ) : <span className="text-xs text-gray-300">—</span>}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Student results table */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+          <p className="font-bold text-gray-800 text-sm">Student Results</p>
+          <span className="text-xs text-gray-400">{students.length} students</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 sticky left-0 bg-gray-50">Student</th>
+                {subjects.map(s => (
+                  <th key={s.subject_name} className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500 whitespace-nowrap">
+                    {s.subject_name}<br/><span className="text-[9px] font-normal text-gray-400">/{s.max_marks}</span>
+                  </th>
+                ))}
+                <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500">Total</th>
+                <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500">%</th>
+                <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500">Grade</th>
+                <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500">Result</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {students.map((s, idx) => {
+                const rank = ranked.findIndex(r => r.student_id === s.student_id) + 1
+                return (
+                  <tr key={s.student_id} className={`hover:bg-gray-50/40 ${s.pass === false ? 'bg-red-50/20' : ''}`}>
+                    <td className="px-4 py-2.5 sticky left-0 bg-white">
+                      <div className="flex items-center gap-2">
+                        {rank > 0 && <span className="text-[10px] text-gray-300 w-4">#{rank}</span>}
+                        <div>
+                          <p className="text-xs font-semibold text-gray-800">{s.name}</p>
+                          <p className="text-[10px] text-gray-400">{s.roll_number}</p>
+                        </div>
+                      </div>
+                    </td>
+                    {subjects.map(sub => {
+                      const m = s.subjects[sub.subject_name]
+                      if (!m) return <td key={sub.subject_name} className="px-3 py-2.5 text-center text-xs text-gray-200">—</td>
+                      if (m.is_absent) return <td key={sub.subject_name} className="px-3 py-2.5 text-center"><span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">AB</span></td>
+                      const subPct = m.marks_obtained !== null ? (m.marks_obtained / sub.max_marks) * 100 : null
+                      return (
+                        <td key={sub.subject_name} className="px-3 py-2.5 text-center">
+                          <span className={`text-xs font-semibold ${subPct === null ? 'text-gray-300' : subPct >= exam.passing_pct ? 'text-gray-700' : 'text-red-500'}`}>
+                            {m.marks_obtained ?? '—'}
+                          </span>
+                        </td>
+                      )
+                    })}
+                    <td className="px-3 py-2.5 text-center text-xs font-semibold text-gray-700">
+                      {s.total_obtained !== null ? `${s.total_obtained}/${s.total_max}` : '—'}
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      {s.percentage !== null ? (
+                        <span className={`text-xs font-bold ${s.percentage >= 60 ? 'text-emerald-600' : s.percentage >= exam.passing_pct ? 'text-amber-500' : 'text-red-500'}`}>
+                          {s.percentage}%
+                        </span>
+                      ) : <span className="text-xs text-gray-300">—</span>}
+                    </td>
+                    <td className={`px-3 py-2.5 text-center text-xs font-black ${gradeColor(s.grade)}`}>{s.grade ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-center">
+                      {s.pass === null
+                        ? <span className="text-[10px] text-gray-300">Pending</span>
+                        : <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.pass ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                            {s.pass ? 'PASS' : 'FAIL'}
+                          </span>}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   )
 }

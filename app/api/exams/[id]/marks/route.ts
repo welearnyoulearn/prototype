@@ -7,7 +7,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  await ensureDB()
+
   const { id: exam_id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
   const student_id = req.nextUrl.searchParams.get('student_id') // optional: only this student
@@ -144,7 +144,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  await ensureDB()
+
   const { id: exam_id } = await params
   const body = await req.json()
   const { school_id, teacher_id, entries, submit_subjects = [] } = body

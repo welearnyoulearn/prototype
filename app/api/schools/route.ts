@@ -6,15 +6,24 @@ import { sendOnboardingEmail } from '@/lib/email'
 export async function GET(req: NextRequest) {
   try {
     const search = req.nextUrl.searchParams.get('search')
-    let result
     if (search && search.trim()) {
-      result = await pool.query(
+      const result = await pool.query(
         `SELECT id, name, city, country FROM schools WHERE name ILIKE $1 ORDER BY name LIMIT 20`,
         [`%${search.trim()}%`]
       )
-    } else {
-      result = await pool.query('SELECT * FROM schools ORDER BY created_at DESC')
+      return NextResponse.json(result.rows)
     }
+
+    const result = await pool.query(`
+      SELECT
+        s.*,
+        sub.tier,
+        (SELECT COUNT(*) FROM teachers t WHERE t.school_id = s.id AND t.status = 'active') AS teacher_count,
+        (SELECT COUNT(*) FROM students st WHERE st.school_id = s.id) AS student_count
+      FROM schools s
+      LEFT JOIN school_subscriptions sub ON sub.school_id = s.id
+      ORDER BY s.created_at DESC
+    `)
     return NextResponse.json(result.rows)
   } catch (error) {
     console.error(error)
@@ -27,7 +36,6 @@ export async function POST(req: NextRequest) {
   try {
     const { name, type, city, country, phone, email, address } = await req.json()
 
-    // ── Validation ────────────────────────────────────────────────────────────
     if (!name) return NextResponse.json({ error: 'School name is required' }, { status: 400 })
     if (phone && !/^\d{7,15}$/.test(phone.replace(/[\s\-\+\(\)]/g, ''))) {
       return NextResponse.json({ error: 'Phone number must be 7–15 digits' }, { status: 400 })
@@ -38,7 +46,6 @@ export async function POST(req: NextRequest) {
 
     await client.query('BEGIN')
 
-    // ── Insert school ─────────────────────────────────────────────────────────
     const schoolRes = await client.query(
       `INSERT INTO schools (name, type, city, country, phone, email, address)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
@@ -46,12 +53,10 @@ export async function POST(req: NextRequest) {
     )
     const school = schoolRes.rows[0]
 
-    // ── Generate school code (needs the ID) ───────────────────────────────────
     const schoolCode = generateSchoolCode(school.name, school.id)
     await client.query('UPDATE schools SET school_code = $1 WHERE id = $2', [schoolCode, school.id])
     school.school_code = schoolCode
 
-    // ── Create school admin user ──────────────────────────────────────────────
     const tempPassword = generateTempPassword()
     const passwordHash = await hashPassword(tempPassword)
 
@@ -62,23 +67,19 @@ export async function POST(req: NextRequest) {
       [email || null, schoolCode, passwordHash, school.id]
     )
 
+    await client.query(
+      `INSERT INTO school_subscriptions (school_id, tier) VALUES ($1, 'none') ON CONFLICT DO NOTHING`,
+      [school.id]
+    )
+
     await client.query('COMMIT')
 
-    // ── Send onboarding email (non-blocking) ──────────────────────────────────
     if (email) {
       const loginUrl = `${process.env.APP_URL || 'http://localhost:3000'}/login`
-      sendOnboardingEmail({
-        to: email,
-        schoolName: school.name,
-        schoolCode,
-        tempPassword,
-        loginUrl,
-      }).catch(err => console.error('[email/onboarding]', err))
+      sendOnboardingEmail({ to: email, schoolName: school.name, schoolCode, tempPassword, loginUrl })
+        .catch(err => console.error('[email/onboarding]', err))
     } else {
-      // Log credentials to console when no email is configured
-      console.log(`\n[SCHOOL CREATED] ${school.name}`)
-      console.log(`  School Code: ${schoolCode}`)
-      console.log(`  Temp Password: ${tempPassword}\n`)
+      console.log(`\n[SCHOOL CREATED] ${school.name}\n  School Code: ${schoolCode}\n  Temp Password: ${tempPassword}\n`)
     }
 
     return NextResponse.json({ ...school, school_code: schoolCode, temp_password: tempPassword }, { status: 201 })

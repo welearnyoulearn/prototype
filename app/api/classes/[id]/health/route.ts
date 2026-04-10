@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id: class_id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })

@@ -6,7 +6,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  await ensureDB()
+
   const { id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
@@ -67,7 +67,7 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  await ensureDB()
+
   const { id } = await params
   const body = await req.json()
   const { school_id, teacher_id, exam_name, exam_type, exam_date, passing_pct } = body
@@ -104,7 +104,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  await ensureDB()
+
   const { id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
   const teacher_id = req.nextUrl.searchParams.get('teacher_id')

@@ -9,7 +9,7 @@ import nodemailer from 'nodemailer'
 //   ?class_id=X&school_id=X&previous=true&session=morning|afternoon    → last recorded date for that session
 //   ?class_id=X&school_id=X&date=YYYY-MM-DD&summary=true               → per-session summary (who marked, counts)
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
   const { searchParams } = req.nextUrl
   const class_id  = searchParams.get('class_id')
   const date      = searchParams.get('date')
@@ -199,7 +199,7 @@ export async function GET(req: NextRequest) {
 // POST /api/attendance
 // Body: { school_id, class_id, teacher_id, date, session: 'morning'|'afternoon', records: [{ student_id, status }] }
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   try {
     const { school_id, class_id, teacher_id, date, session, records } = await req.json()
 

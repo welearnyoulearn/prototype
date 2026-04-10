@@ -11,7 +11,7 @@ function generateStudentId(schoolName: string): string {
 }
 
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   try {
     const { school_id, students } = await req.json()
     if (!school_id || !Array.isArray(students) || students.length === 0) {

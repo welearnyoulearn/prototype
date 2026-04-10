@@ -18,7 +18,7 @@ import { invalidateCache } from '@/lib/responseCache'
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   const body = await req.json()
   const { school_id, class_id, slot_a, slot_b } = body
 

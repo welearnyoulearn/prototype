@@ -4,7 +4,7 @@ import pool, { ensureDB } from '@/lib/db'
 // GET /api/syllabus?school_id=&class_id=&subject=
 // Returns syllabus topics grouped by subject > chapter > topics with coverage stats.
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
   const school_id = req.nextUrl.searchParams.get('school_id')
   const class_id = req.nextUrl.searchParams.get('class_id')
   const subject = req.nextUrl.searchParams.get('subject')
@@ -85,7 +85,7 @@ export async function GET(req: NextRequest) {
 // Body: { school_id, class_id, subject, chapter_name, chapter_order, topic_name, topic_order }
 // or body: { topics: [...] } for bulk
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   const body = await req.json()
 
   try {

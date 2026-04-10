@@ -4,7 +4,7 @@ import pool, { ensureDB } from '@/lib/db'
 // AUTH DISABLED FOR TESTING — will be re-enabled when all features are complete
 
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
   const { searchParams } = req.nextUrl
   const school_id  = searchParams.get('school_id')
   const class_id   = searchParams.get('class_id')
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   const body = await req.json()
   const { school_id, class_id, student_id, subject, question, task_id } = body
 

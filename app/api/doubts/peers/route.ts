@@ -8,7 +8,7 @@ import pool, { ensureDB } from '@/lib/db'
 // - has_upvoted: true if student already upvoted
 // - Excludes resolved doubts (they are surfaced as FAQs instead)
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
   const { searchParams } = req.nextUrl
   const school_id  = searchParams.get('school_id')
   const class_id   = searchParams.get('class_id')

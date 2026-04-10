@@ -4,7 +4,7 @@ import { matchTeacher } from '@/lib/matchTeacher'
 import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
 
   const cacheKey = `subjects:class:${id}`
@@ -30,7 +30,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
   try {
     const { subject_name, teacher_id, periods_per_week } = await req.json()
@@ -112,7 +112,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
   const subject_id = req.nextUrl.searchParams.get('subject_id')
   if (!subject_id) return NextResponse.json({ error: 'subject_id required' }, { status: 400 })

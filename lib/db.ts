@@ -649,6 +649,250 @@ export async function initDB() {
       UNIQUE(school_id, name)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_schedule_templates_school ON schedule_templates(school_id)`,
+
+    // ── Circulation tracking — records when each class timetable was last published ─
+    `ALTER TABLE classes ADD COLUMN IF NOT EXISTS timetable_circulated_at TIMESTAMPTZ`,
+
+    // ── Announcements / circulars board ──────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS announcements (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      title VARCHAR(200) NOT NULL,
+      content TEXT NOT NULL,
+      announcement_type VARCHAR(30) NOT NULL DEFAULT 'general',
+      target_audience VARCHAR(20) NOT NULL DEFAULT 'all',
+      priority VARCHAR(20) NOT NULL DEFAULT 'normal',
+      created_by_name VARCHAR(100),
+      expires_at DATE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_announcements_school ON announcements(school_id, created_at DESC)`,
+
+    // ── Academic calendar (holidays, events, meetings) ───────────────────────
+    `CREATE TABLE IF NOT EXISTS school_calendar (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      title VARCHAR(200) NOT NULL,
+      event_date DATE NOT NULL,
+      end_date DATE,
+      event_type VARCHAR(30) NOT NULL DEFAULT 'event',
+      color VARCHAR(20) DEFAULT 'blue',
+      description TEXT,
+      all_day BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_calendar_school ON school_calendar(school_id, event_date)`,
+
+    // ── Schools: branding + grading scheme ───────────────────────────────────
+    `ALTER TABLE schools ADD COLUMN IF NOT EXISTS logo_url VARCHAR(500)`,
+    `ALTER TABLE schools ADD COLUMN IF NOT EXISTS grading_scheme JSONB DEFAULT '[]'`,
+
+    // ── Academic years ────────────────────────────────────────────────────────
+    // Tracks each academic year for a school. is_current=true marks the active year.
+    `CREATE TABLE IF NOT EXISTS academic_years (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      label VARCHAR(20) NOT NULL,        -- e.g. "2024-25"
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      is_current BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, label)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_academic_years_school ON academic_years(school_id)`,
+
+    // ── Student class history ─────────────────────────────────────────────────
+    // Immutable snapshot: which grade+section a student was in for each academic year.
+    // Written once per year during rollover. Never updated — permanent audit trail.
+    `CREATE TABLE IF NOT EXISTS student_class_history (
+      id SERIAL PRIMARY KEY,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL,
+      academic_year_id INTEGER NOT NULL REFERENCES academic_years(id) ON DELETE CASCADE,
+      grade VARCHAR(20) NOT NULL,
+      section VARCHAR(10) NOT NULL,
+      promoted_to_grade VARCHAR(20),     -- NULL if graduated, grade+1 if promoted
+      promoted_at TIMESTAMPTZ,
+      UNIQUE(student_id, academic_year_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_student_class_history_student ON student_class_history(student_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_student_class_history_year ON student_class_history(academic_year_id, school_id)`,
+
+    // ── Platform audit log ────────────────────────────────────────────────────
+    // Permanent record of every create/update/delete action taken by platform admins.
+    `CREATE TABLE IF NOT EXISTS platform_audit_log (
+      id SERIAL PRIMARY KEY,
+      actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      actor_email VARCHAR(200),
+      action VARCHAR(50) NOT NULL,          -- e.g. 'create_school', 'update_subscription', 'delete_school', 'reset_password'
+      entity_type VARCHAR(50) NOT NULL,     -- 'school', 'subscription', 'user'
+      entity_id INTEGER,
+      entity_name VARCHAR(200),
+      details JSONB DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON platform_audit_log(actor_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON platform_audit_log(entity_type, entity_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_audit_log_created ON platform_audit_log(created_at DESC)`,
+
+    // ── Plan feature assignments ───────────────────────────────────────────────
+    // Stores which features are enabled for each plan tier.
+    // Platform admin configures this; school admin sidebar reflects it.
+    `CREATE TABLE IF NOT EXISTS plan_features (
+      id SERIAL PRIMARY KEY,
+      feature_key VARCHAR(50) NOT NULL,
+      tier VARCHAR(20) NOT NULL,
+      enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(feature_key, tier)
+    )`,
+
+    // ── Fee Management ────────────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS fee_categories (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      name VARCHAR(100) NOT NULL,
+      description TEXT,
+      frequency VARCHAR(20) NOT NULL DEFAULT 'annual',  -- monthly|quarterly|annual|one_time
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, name)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_fee_categories_school ON fee_categories(school_id)`,
+
+    `CREATE TABLE IF NOT EXISTS fee_structures (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      fee_category_id INTEGER NOT NULL REFERENCES fee_categories(id) ON DELETE CASCADE,
+      grade VARCHAR(20) NOT NULL,
+      amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+      due_day INTEGER DEFAULT 10,           -- day of month due (for monthly fees)
+      academic_year VARCHAR(10) NOT NULL,   -- e.g. "2025-26"
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, fee_category_id, grade, academic_year)
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS student_fee_ledger (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      fee_category_id INTEGER NOT NULL REFERENCES fee_categories(id),
+      fee_structure_id INTEGER REFERENCES fee_structures(id),
+      academic_year VARCHAR(10) NOT NULL,
+      period_label VARCHAR(50),             -- e.g. "April 2026", "Q1 2026", "2025-26"
+      amount_due NUMERIC(10,2) NOT NULL DEFAULT 0,
+      amount_paid NUMERIC(10,2) NOT NULL DEFAULT 0,
+      due_date DATE,
+      status VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending|paid|partial|overdue|waived
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_fee_ledger_student ON student_fee_ledger(student_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_fee_ledger_school ON student_fee_ledger(school_id, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_fee_ledger_year ON student_fee_ledger(school_id, academic_year)`,
+
+    `CREATE TABLE IF NOT EXISTS fee_payments (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      ledger_id INTEGER NOT NULL REFERENCES student_fee_ledger(id) ON DELETE CASCADE,
+      amount NUMERIC(10,2) NOT NULL,
+      payment_mode VARCHAR(20) NOT NULL DEFAULT 'cash',  -- cash|cheque|dd|online|upi
+      payment_status VARCHAR(20) NOT NULL DEFAULT 'completed', -- completed|pending_verification
+      receipt_number VARCHAR(50) UNIQUE,
+      transaction_ref VARCHAR(200),         -- cheque no / UTR / UPI ref
+      paid_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      collected_by_name VARCHAR(100),
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_fee_payments_student ON fee_payments(student_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_fee_payments_school ON fee_payments(school_id, paid_date DESC)`,
+
+    `CREATE TABLE IF NOT EXISTS fee_waivers (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      ledger_id INTEGER REFERENCES student_fee_ledger(id) ON DELETE CASCADE,
+      waiver_type VARCHAR(30) NOT NULL DEFAULT 'percentage', -- percentage|fixed_amount|full
+      waiver_value NUMERIC(10,2) DEFAULT 0,
+      waiver_amount NUMERIC(10,2) DEFAULT 0,
+      reason TEXT NOT NULL,
+      granted_by_name VARCHAR(100),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) DEFAULT 0`,
+    `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS granted_by_name VARCHAR(100)`,
+
+    // ── Receipt number sequence ───────────────────────────────────────────────
+    `CREATE SEQUENCE IF NOT EXISTS receipt_number_seq START 1000`,
+
+    // ── Report Cards ──────────────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS report_card_config (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE UNIQUE,
+      show_attendance BOOLEAN DEFAULT TRUE,
+      show_rank BOOLEAN DEFAULT TRUE,
+      show_remarks BOOLEAN DEFAULT TRUE,
+      show_grade_points BOOLEAN DEFAULT TRUE,
+      grading_scheme JSONB DEFAULT '[
+        {"min":90,"max":100,"grade":"A+","points":10,"label":"Outstanding"},
+        {"min":75,"max":89,"grade":"A","points":9,"label":"Excellent"},
+        {"min":60,"max":74,"grade":"B","points":8,"label":"Very Good"},
+        {"min":50,"max":59,"grade":"C","points":7,"label":"Good"},
+        {"min":40,"max":49,"grade":"D","points":6,"label":"Satisfactory"},
+        {"min":0,"max":39,"grade":"F","points":0,"label":"Needs Improvement"}
+      ]',
+      header_text TEXT DEFAULT 'Progress Report',
+      footer_text TEXT,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS report_card_remarks (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      exam_id INTEGER NOT NULL REFERENCES exam_records(id) ON DELETE CASCADE,
+      class_teacher_remark TEXT,
+      conduct VARCHAR(30) DEFAULT 'Good',    -- Excellent|Good|Satisfactory|Needs Improvement
+      attendance_remark TEXT,
+      next_term_advice TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(student_id, exam_id)
+    )`,
+
+    // ── Student portal activity tracking ──────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS student_portal_sessions (
+      id SERIAL PRIMARY KEY,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL,
+      started_at TIMESTAMPTZ DEFAULT NOW(),
+      ended_at TIMESTAMPTZ,
+      duration_minutes INTEGER
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_portal_sessions_student ON student_portal_sessions(student_id, started_at DESC)`,
+
+    `CREATE TABLE IF NOT EXISTS student_portal_activity (
+      id SERIAL PRIMARY KEY,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL,
+      session_id INTEGER REFERENCES student_portal_sessions(id) ON DELETE CASCADE,
+      action_type VARCHAR(50) NOT NULL,   -- page_view|task_view|task_submit|test_start|test_submit|doubt_ask|marks_view|fee_view
+      action_detail VARCHAR(200),         -- e.g. "Math Assignment", "Weekly Science Test"
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_portal_activity_student ON student_portal_activity(student_id, created_at DESC)`,
+
+    // ── TV/Kiosk Display Tokens ───────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS display_tokens (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      token VARCHAR(64) NOT NULL UNIQUE,
+      label VARCHAR(100),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      last_used_at TIMESTAMPTZ
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_display_tokens_school ON display_tokens(school_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_display_tokens_token ON display_tokens(token)`,
   ]
 
   for (const sql of migrations) {

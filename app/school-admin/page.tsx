@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { FeaturesProvider } from './features-context'
 import Overview from './components/Overview'
+import ClassAnalytics from './components/ClassAnalytics'
 import LeaveRequests from './components/LeaveRequests'
 import StaffOnboarding from './components/StaffOnboarding'
 import StudentOnboarding from './components/StudentOnboarding'
@@ -14,6 +16,19 @@ import TimetableManagement from './components/TimetableManagement'
 import AttendanceDashboard from './components/AttendanceDashboard'
 import EmergencyCover from './components/EmergencyCover'
 import ExamSchedule from './components/ExamSchedule'
+import AcademicAnalytics from './components/AcademicAnalytics'
+import AnnouncementBoard from './components/AnnouncementBoard'
+import AcademicCalendar from './components/AcademicCalendar'
+import SchoolSettings from './components/SchoolSettings'
+import StudentLeaderboard from './components/StudentLeaderboard'
+import ExportCenter from './components/ExportCenter'
+import ParentEngagement from './components/ParentEngagement'
+import YearRollover from './components/YearRollover'
+import NotificationCenter from './components/NotificationCenter'
+import DailyBriefing from './components/DailyBriefing'
+import FeeManagement from './components/FeeManagement'
+import YearReview from './components/YearReview'
+import CommandBar from './components/CommandBar'
 import NotificationBell from '../components/NotificationBell'
 import { useRouter } from 'next/navigation'
 
@@ -32,8 +47,19 @@ type NavItem = {
   key: string
   label: string
   icon: React.ReactNode
-  tier: Tier[]
+  tier?: Tier[]  // kept for reference only — actual visibility driven by platform feature config
 }
+
+// Section grouping for sidebar
+const NAV_SECTIONS = [
+  { label: 'OVERVIEW', keys: ['overview', 'briefing'] },
+  { label: 'PEOPLE', keys: ['teachers', 'students', 'staff-onboarding', 'student-onboarding'] },
+  { label: 'SCHEDULING', keys: ['timetable', 'attendance', 'leave-requests', 'emergency-cover', 'exam-schedule'] },
+  { label: 'MANAGEMENT', keys: ['class-management', 'fee-management', 'parent-engagement', 'year-rollover'] },
+  { label: 'ANALYTICS', keys: ['class-analytics', 'academic-analytics', 'analysis', 'year-review'] },
+  { label: 'COMMUNICATION', keys: ['announcements', 'notifications', 'leaderboard'] },
+  { label: 'TOOLS', keys: ['calendar', 'export', 'settings'] },
+]
 
 const NAV_ITEMS: NavItem[] = [
   {
@@ -156,22 +182,145 @@ const NAV_ITEMS: NavItem[] = [
       </svg>
     ),
   },
+  {
+    key: 'class-analytics',
+    label: 'Class Analytics',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'academic-analytics',
+    label: 'Academic Analytics',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+      </svg>
+    ),
+  },
+  {
+    key: 'announcements',
+    label: 'Announcements',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'calendar',
+    label: 'Academic Calendar',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'leaderboard',
+    label: 'Leaderboard',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'export',
+    label: 'Export & Reports',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'settings',
+    label: 'School Settings',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'briefing',
+    label: 'Daily Briefing',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'notifications',
+    label: 'Notifications',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+      </svg>
+    ),
+  },
+  {
+    key: 'parent-engagement',
+    label: 'Parent Engagement',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'year-rollover',
+    label: 'Year Rollover',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+      </svg>
+    ),
+  },
+  {
+    key: 'fee-management',
+    label: 'Fee Management',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'year-review',
+    label: 'Year-in-Review',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+    ),
+  },
 ]
 
-const LOCKED_FEATURES = [
-  { label: 'Parent Communication', tier: 'Standard' },
-  { label: 'Fee Management', tier: 'Standard' },
-  { label: 'Exam & Marks Management', tier: 'Standard' },
-  { label: 'Report Card Generation', tier: 'Standard' },
-  { label: 'AI-Powered Analytics', tier: 'Premium' },
-  { label: 'Multi-Branch Management', tier: 'Premium' },
-]
 
 export default function SchoolAdmin() {
   const router = useRouter()
   const [schools, setSchools] = useState<School[]>([])
   const [selectedSchool, setSelectedSchool] = useState<School | null>(null)
   const [tier, setTier] = useState<Tier>('none')
+  const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
   const [activeNav, setActiveNav] = useState('overview')
   const [visited, setVisited] = useState<Set<string>>(new Set(['overview']))
 
@@ -212,7 +361,17 @@ export default function SchoolAdmin() {
     if (!selectedSchool) return
     fetch(`/api/schools/${selectedSchool.id}/subscription`)
       .then(r => r.json())
-      .then(data => setTier(data.tier || 'none'))
+      .then(data => {
+        const t = data.tier || 'none'
+        setTier(t)
+        if (t !== 'none') {
+          // Fetch which features are enabled for this plan from platform config
+          fetch(`/api/platform/features?tier=${t}`)
+            .then(r => r.json())
+            .then(fd => setEnabledFeatures(new Set(fd.enabled || [])))
+            .catch(() => setEnabledFeatures(new Set(NAV_ITEMS.map(n => n.key))))
+        }
+      })
       .catch(() => setTier('none'))
   }, [selectedSchool])
 
@@ -223,7 +382,10 @@ export default function SchoolAdmin() {
     setVisited(new Set(['overview']))
   }
 
-  const enabledNavItems = NAV_ITEMS.filter(item => tier !== 'none' && item.tier.includes(tier))
+  // Only show nav items that are enabled in platform feature config for this tier
+  const enabledNavItems = NAV_ITEMS.filter(item =>
+    tier !== 'none' && enabledFeatures.has(item.key)
+  )
 
   if (loading) {
     return (
@@ -295,6 +457,16 @@ export default function SchoolAdmin() {
           {selectedSchool && (
             <NotificationBell schoolId={selectedSchool.id} onNavigate={setActiveNav} />
           )}
+          <button
+            onClick={() => { const e = new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }); window.dispatchEvent(e) }}
+            className="hidden md:flex items-center gap-2 text-xs text-gray-400 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            Search
+            <kbd className="text-[10px] bg-gray-100 px-1 rounded font-mono">Ctrl K</kbd>
+          </button>
           <span className="bg-blue-100 text-blue-700 text-xs font-medium px-3 py-1 rounded-full">School Admin</span>
           <button onClick={handleLogout}
             className="text-sm text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition-colors">
@@ -336,7 +508,7 @@ export default function SchoolAdmin() {
             </div>
 
             {/* Nav */}
-            <nav className="flex-1 py-3 overflow-y-auto">
+            <nav className="flex-1 py-2 overflow-y-auto">
               {tier === 'none' ? (
                 <div className="px-4 py-3">
                   <p className="text-xs text-gray-400 leading-relaxed">No plan enabled for this school.</p>
@@ -346,38 +518,71 @@ export default function SchoolAdmin() {
                 </div>
               ) : (
                 <>
-                  <p className="px-4 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Basic Features</p>
-                  {enabledNavItems.map(item => (
-                    <button
-                      key={item.key}
-                      onClick={() => navigateTo(item.key)}
-                      className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors text-left ${
-                        activeNav === item.key
-                          ? 'bg-blue-50 text-blue-700 font-medium border-r-2 border-blue-600'
-                          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-800'
-                      }`}
-                    >
-                      {item.icon}
-                      {item.label}
-                    </button>
-                  ))}
+                  {NAV_SECTIONS.map(section => {
+                    const sectionEnabled = enabledNavItems.filter(i => section.keys.includes(i.key))
+                    if (sectionEnabled.length === 0) return null
+                    return (
+                      <div key={section.label} className="mb-1">
+                        <p className="px-4 pt-3 pb-1 text-[10px] font-bold text-gray-300 uppercase tracking-widest">{section.label}</p>
+                        {sectionEnabled.map(item => (
+                          <button
+                            key={item.key}
+                            onClick={() => navigateTo(item.key)}
+                            className={`w-full flex items-center gap-2.5 px-4 py-2 text-sm transition-all text-left rounded-none ${
+                              activeNav === item.key
+                                ? 'bg-blue-50 text-blue-700 font-semibold border-r-[3px] border-blue-600'
+                                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+                            }`}
+                          >
+                            <span className={activeNav === item.key ? 'text-blue-600' : 'text-gray-400'}>
+                              {item.icon}
+                            </span>
+                            <span className="truncate">{item.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  })}
+
+                  {/* Items with no section mapping — fallback flat list */}
+                  {(() => {
+                    const allSectioned = NAV_SECTIONS.flatMap(s => s.keys)
+                    const unsectioned = enabledNavItems.filter(i => !allSectioned.includes(i.key))
+                    if (unsectioned.length === 0) return null
+                    return (
+                      <div className="mb-1">
+                        <p className="px-4 pt-3 pb-1 text-[10px] font-bold text-gray-300 uppercase tracking-widest">MORE</p>
+                        {unsectioned.map(item => (
+                          <button
+                            key={item.key}
+                            onClick={() => navigateTo(item.key)}
+                            className={`w-full flex items-center gap-2.5 px-4 py-2 text-sm transition-all text-left ${
+                              activeNav === item.key
+                                ? 'bg-blue-50 text-blue-700 font-semibold border-r-[3px] border-blue-600'
+                                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+                            }`}
+                          >
+                            <span className={activeNav === item.key ? 'text-blue-600' : 'text-gray-400'}>{item.icon}</span>
+                            <span className="truncate">{item.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )
+                  })()}
 
                   {/* Locked features */}
-                  {(tier === 'basic' || tier === 'standard') && (
-                    <>
-                      <div className="px-4 pt-4 pb-1">
-                        <p className="text-[10px] font-semibold text-gray-300 uppercase tracking-widest">Locked Features</p>
-                      </div>
-                      {LOCKED_FEATURES.filter(f => tier === 'basic' || f.tier === 'Premium').map(f => (
-                        <div key={f.label} className="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 cursor-not-allowed select-none">
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {NAV_ITEMS.filter(item => !enabledFeatures.has(item.key)).length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-gray-50">
+                      <p className="px-4 pt-2 pb-1 text-[10px] font-bold text-gray-200 uppercase tracking-widest">Not in Plan</p>
+                      {NAV_ITEMS.filter(item => !enabledFeatures.has(item.key)).map(item => (
+                        <div key={item.key} className="flex items-center gap-2.5 px-4 py-2 text-sm text-gray-300 cursor-not-allowed select-none">
+                          <svg className="w-4 h-4 flex-shrink-0 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                           </svg>
-                          <span>{f.label}</span>
-                          <span className="ml-auto text-[10px] bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded font-medium">{f.tier}</span>
+                          <span className="truncate text-gray-300">{item.label}</span>
                         </div>
                       ))}
-                    </>
+                    </div>
                   )}
                 </>
               )}
@@ -407,7 +612,8 @@ export default function SchoolAdmin() {
                 </div>
               </div>
             ) : (
-              <>
+              <FeaturesProvider value={enabledFeatures}>
+                <CommandBar schoolId={selectedSchool.id} onNavigate={navigateTo} />
                 {visited.has('overview')         && <div hidden={activeNav !== 'overview'}><Overview schoolId={selectedSchool.id} onNavigate={navigateTo} /></div>}
                 {visited.has('attendance')       && <div hidden={activeNav !== 'attendance'}><AttendanceDashboard schoolId={selectedSchool.id} /></div>}
                 {visited.has('leave-requests')   && <div hidden={activeNav !== 'leave-requests'}><LeaveRequests schoolId={selectedSchool.id} /></div>}
@@ -420,7 +626,20 @@ export default function SchoolAdmin() {
                 {visited.has('exam-schedule')    && <div hidden={activeNav !== 'exam-schedule'}><ExamSchedule schoolId={selectedSchool.id} /></div>}
                 {visited.has('teachers')         && <div hidden={activeNav !== 'teachers'}><TeachersManagement schoolId={selectedSchool.id} /></div>}
                 {visited.has('students')         && <div hidden={activeNav !== 'students'}><StudentsManagement schoolId={selectedSchool.id} /></div>}
-              </>
+                {visited.has('class-analytics')    && <div hidden={activeNav !== 'class-analytics'}><ClassAnalytics schoolId={selectedSchool.id} /></div>}
+                {visited.has('academic-analytics') && <div hidden={activeNav !== 'academic-analytics'}><AcademicAnalytics schoolId={selectedSchool.id} /></div>}
+                {visited.has('announcements')      && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} /></div>}
+                {visited.has('calendar')           && <div hidden={activeNav !== 'calendar'}><AcademicCalendar schoolId={selectedSchool.id} /></div>}
+                {visited.has('leaderboard')        && <div hidden={activeNav !== 'leaderboard'}><StudentLeaderboard schoolId={selectedSchool.id} /></div>}
+                {visited.has('export')             && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}
+                {visited.has('settings')           && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} /></div>}
+                {visited.has('briefing')           && <div hidden={activeNav !== 'briefing'}><DailyBriefing schoolId={selectedSchool.id} onNavigate={navigateTo} /></div>}
+                {visited.has('notifications')      && <div hidden={activeNav !== 'notifications'}><NotificationCenter schoolId={selectedSchool.id} /></div>}
+                {visited.has('parent-engagement')  && <div hidden={activeNav !== 'parent-engagement'}><ParentEngagement schoolId={selectedSchool.id} /></div>}
+                {visited.has('year-rollover')       && <div hidden={activeNav !== 'year-rollover'}><YearRollover schoolId={selectedSchool.id} /></div>}
+                {visited.has('fee-management')      && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} /></div>}
+                {visited.has('year-review')         && <div hidden={activeNav !== 'year-review'}><YearReview schoolId={selectedSchool.id} /></div>}
+              </FeaturesProvider>
             )}
           </main>
         </div>

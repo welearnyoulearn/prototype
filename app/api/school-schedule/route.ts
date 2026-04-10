@@ -3,7 +3,7 @@ import pool, { ensureDB } from '@/lib/db'
 import { DEFAULT_SCHEDULE_SETTINGS } from '@/lib/schedule'
 
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
   const school_id = new URL(req.url).searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
   try {
@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   const body = await req.json()
   const {
     school_id, periods_per_day, start_time, end_time,

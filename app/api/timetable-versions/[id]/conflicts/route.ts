@@ -10,7 +10,7 @@ import pool, { ensureDB } from '@/lib/db'
 // For INDEPENDENT classes: conflicts are flagged but non-blocking.
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   await params // version id available if needed for future version-scoped conflicts
   const school_id = new URL(req.url).searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })

@@ -19,7 +19,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  await ensureDB()
+
   const { id: exam_id } = await params
   const body = await req.json()
   const { school_id, teacher_id } = body

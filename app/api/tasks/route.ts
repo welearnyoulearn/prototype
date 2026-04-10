@@ -4,7 +4,7 @@ import pool, { ensureDB } from '@/lib/db'
 // AUTH DISABLED FOR TESTING — will be re-enabled when all features are complete
 
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
 
   const { searchParams } = new URL(req.url)
   const school_id = searchParams.get('school_id')
@@ -12,8 +12,8 @@ export async function GET(req: NextRequest) {
   const teacher_id = searchParams.get('teacher_id')
   const status_filter = searchParams.get('status') // optional: 'published' | 'draft' etc.
 
-  if (!school_id || (!class_id && !teacher_id)) {
-    return NextResponse.json({ error: 'school_id and (class_id or teacher_id) required' }, { status: 400 })
+  if (!school_id) {
+    return NextResponse.json({ error: 'school_id required' }, { status: 400 })
   }
 
   // Build WHERE clause dynamically
@@ -66,7 +66,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
 
   const body = await req.json()
   const {

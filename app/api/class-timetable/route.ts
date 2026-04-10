@@ -4,7 +4,7 @@ import { notifyTimetableChange } from '@/lib/notifyTimetable'
 import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
 
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
   const { searchParams } = new URL(req.url)
   const school_id = searchParams.get('school_id')
   const class_id = searchParams.get('class_id')
@@ -202,7 +202,7 @@ export async function PATCH(req: NextRequest) {
     if (!school_id || period_number == null || !time_from || !time_to) {
       return NextResponse.json({ error: 'school_id, period_number, time_from, time_to required' }, { status: 400 })
     }
-    await ensureDB()
+
     await pool.query(
       'UPDATE class_timetable SET time_from=$1, time_to=$2 WHERE school_id=$3 AND period_number=$4',
       [time_from, time_to, school_id, period_number]

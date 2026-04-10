@@ -5,7 +5,7 @@ import pool, { ensureDB } from '@/lib/db'
 // Propagates teacher assignments from class_subjects → class_timetable (conflict-safe).
 // Teacher timetable is now derived live from class_timetable — no separate table to rebuild.
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   const { school_id } = await req.json()
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 

@@ -4,7 +4,7 @@ import pool, { ensureDB } from '@/lib/db'
 // AUTH DISABLED FOR TESTING — will be re-enabled when all features are complete
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id: task_id } = await params
   const { school_id, teacher_id, student_ids, target_type = 'all' } = await req.json()
 

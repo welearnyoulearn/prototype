@@ -5,7 +5,7 @@ import pool, { ensureDB } from '@/lib/db'
 // Toggle upvote — adds if not upvoted, removes if already upvoted.
 // Students cannot upvote their own doubts.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id } = await params
   const body = await req.json()
   const { school_id, student_id } = body

@@ -14,7 +14,7 @@ function formatDate(dateStr: string): string {
 }
 
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   const body = await req.json()
   const {
     school_id,

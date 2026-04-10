@@ -1,0 +1,53 @@
+import { NextRequest, NextResponse } from 'next/server'
+import pool from '@/lib/db'
+
+// GET /api/fees/ledger?school_id=X&academic_year=2025-26&grade=8&status=overdue&student_id=Y
+export async function GET(req: NextRequest) {
+  const p = req.nextUrl.searchParams
+  const school_id    = p.get('school_id')
+  const academic_year = p.get('academic_year')
+  const grade        = p.get('grade')
+  const status       = p.get('status')
+  const student_id   = p.get('student_id')
+
+  if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+
+  const conditions = ['l.school_id = $1']
+  const values: (string | number)[] = [school_id]
+
+  if (academic_year) { values.push(academic_year); conditions.push(`l.academic_year = $${values.length}`) }
+  if (grade)         { values.push(grade);          conditions.push(`s.grade = $${values.length}`) }
+  if (status)        { values.push(status);          conditions.push(`l.status = $${values.length}`) }
+  if (student_id)    { values.push(student_id);      conditions.push(`l.student_id = $${values.length}`) }
+
+  try {
+    // Auto-update overdue status first
+    if (academic_year) {
+      await pool.query(
+        `UPDATE student_fee_ledger SET status = 'overdue'
+         WHERE school_id = $1 AND academic_year = $2 AND status = 'pending' AND due_date < CURRENT_DATE`,
+        [school_id, academic_year]
+      )
+    }
+
+    const { rows } = await pool.query(
+      `SELECT
+         l.*,
+         s.name AS student_name, s.roll_number, s.grade, s.section,
+         fc.name AS category_name, fc.frequency,
+         COALESCE(
+           (SELECT SUM(fp.amount) FROM fee_payments fp WHERE fp.ledger_id = l.id AND fp.payment_status = 'completed'),
+           0
+         ) AS total_paid_confirmed,
+         (l.amount_due - l.amount_paid) AS balance,
+         (CURRENT_DATE - l.due_date) AS days_overdue
+       FROM student_fee_ledger l
+       JOIN students s ON s.id = l.student_id
+       JOIN fee_categories fc ON fc.id = l.fee_category_id
+       WHERE ${conditions.join(' AND ')}
+       ORDER BY l.due_date, s.grade, s.section, s.name`,
+      values
+    )
+    return NextResponse.json(rows)
+  } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
+}

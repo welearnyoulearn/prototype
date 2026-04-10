@@ -7,7 +7,7 @@ import pool, { ensureDB } from '@/lib/db'
 // GET /api/substitutes?school_id=X&substitute_teacher_id=Y  → get this teacher's substitute duties (optionally &date=)
 // GET /api/substitutes?school_id=X&day=Monday&period=N      → get free teachers for a day+period slot
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
   const { searchParams } = req.nextUrl
   const school_id = searchParams.get('school_id')
   const leave_request_id = searchParams.get('leave_request_id')
@@ -178,7 +178,7 @@ export async function GET(req: NextRequest) {
 // POST /api/substitutes — save substitute assignments
 // Body: { school_id, leave_request_id (null for emergency), original_teacher_id, assignments: [...] }
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   try {
     const { school_id, leave_request_id, original_teacher_id, assignments } = await req.json()
     if (!school_id || !original_teacher_id || !Array.isArray(assignments)) {
@@ -289,7 +289,7 @@ export async function POST(req: NextRequest) {
 
 // DELETE /api/substitutes?leave_request_id=X&school_id=Y
 export async function DELETE(req: NextRequest) {
-  await ensureDB()
+
   const { searchParams } = req.nextUrl
   const leave_request_id = searchParams.get('leave_request_id')
   const school_id = searchParams.get('school_id')

@@ -5,7 +5,7 @@ import { awardPoints } from '@/lib/rewards'
 // AUTH DISABLED FOR TESTING — will be re-enabled when all features are complete
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id: doubt_id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id: doubt_id } = await params
   const body = await req.json()
   const { school_id, sender_type, sender_id, sender_name, message, is_final_answer = false } = body
@@ -123,7 +123,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id: doubt_id } = await params
   const body = await req.json()
   const { school_id, action, student_id, student_name, teacher_id, teacher_name } = body

@@ -4,7 +4,7 @@ import pool, { ensureDB } from '@/lib/db'
 // GET /api/students/[id]/submissions?school_id=&class_id=
 // Batch-fetches all task submissions for a student in a class (fixes N+1 pattern)
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  await ensureDB()
+
   const { id: student_id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
   const class_id = req.nextUrl.searchParams.get('class_id')

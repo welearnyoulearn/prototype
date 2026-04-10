@@ -82,6 +82,12 @@ export default function TeachersManagement({ schoolId }: Props) {
   const [unavailableSlots, setUnavailableSlots] = useState<UnavailableSlot[]>([])
   const [availLoading, setAvailLoading] = useState(false)
   const [togglingSlot, setTogglingSlot] = useState<string | null>(null)
+  // 360° profile panel
+  const [detailTab, setDetailTab] = useState<'info' | 'analytics'>('info')
+  const [teacherAnalytics, setTeacherAnalytics] = useState<{
+    taskCount: number; pendingLeaves: number; totalLeaves: number; subDutyCount: number; periodsPerWeek: number
+  } | null>(null)
+  const [analyticsLoading, setAnalyticsLoading] = useState(false)
 
   useEffect(() => { loadTeachers() }, [schoolId])
 
@@ -195,6 +201,29 @@ export default function TeachersManagement({ schoolId }: Props) {
     finally { setTogglingSlot(null) }
   }
 
+  async function loadTeacherAnalytics(teacherId: number) {
+    setAnalyticsLoading(true); setTeacherAnalytics(null)
+    try {
+      const [tasks, leaves, tt] = await Promise.all([
+        fetch(`/api/tasks?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
+        fetch(`/api/leave-requests?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
+        fetch(`/api/timetable?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
+      ])
+      const taskArr = Array.isArray(tasks) ? tasks : []
+      const leaveArr = Array.isArray(leaves) ? leaves : []
+      const ttArr = Array.isArray(tt) ? tt : []
+      const periodsPerWeek = ttArr.length
+      const pendingLeaves = leaveArr.filter((l: { status: string }) => l.status === 'pending').length
+      setTeacherAnalytics({
+        taskCount: taskArr.length,
+        pendingLeaves,
+        totalLeaves: leaveArr.length,
+        subDutyCount: teacherSubDuties.length,
+        periodsPerWeek,
+      })
+    } finally { setAnalyticsLoading(false) }
+  }
+
   async function handleDelete(teacher: Teacher) {
     if (!confirm(`Remove ${teacher.name} from this school?`)) return
     try {
@@ -286,7 +315,7 @@ export default function TeachersManagement({ schoolId }: Props) {
                 <div className="divide-y divide-gray-100">
                   {members.map(t => (
                     <TeacherRow key={t.id} teacher={t} selected={selected?.id === t.id}
-                      onClick={() => { setSelected(t); setEditing(false) }}
+                      onClick={() => { setSelected(t); setEditing(false); setDetailTab('info'); setShowTimetable(false); setShowAvailability(false) }}
                       onToggle={() => handleToggleStatus(t)} onDelete={() => handleDelete(t)} />
                   ))}
                 </div>
@@ -299,7 +328,7 @@ export default function TeachersManagement({ schoolId }: Props) {
             <div className="divide-y divide-gray-100">
               {filtered.map(t => (
                 <TeacherRow key={t.id} teacher={t} selected={selected?.id === t.id}
-                  onClick={() => { setSelected(t); setEditing(false) }}
+                  onClick={() => { setSelected(t); setEditing(false); setDetailTab('info'); setShowTimetable(false); setShowAvailability(false) }}
                   onToggle={() => handleToggleStatus(t)} onDelete={() => handleDelete(t)} />
               ))}
             </div>
@@ -311,8 +340,18 @@ export default function TeachersManagement({ schoolId }: Props) {
       {selected && (
         <div className="w-80 flex-shrink-0">
           <div className="bg-white rounded-xl border border-gray-200 sticky top-6">
-            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-              <span className="font-semibold text-gray-800 text-sm">Staff Details</span>
+            <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex gap-1">
+                {(['info', 'analytics'] as const).map(t => (
+                  <button key={t} onClick={() => {
+                    setDetailTab(t)
+                    if (t === 'analytics' && !teacherAnalytics) loadTeacherAnalytics(selected.id)
+                  }}
+                    className={`px-3 py-1 rounded-md text-xs font-semibold capitalize transition-colors ${detailTab === t ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
+                    {t === 'info' ? 'Profile' : '360° View'}
+                  </button>
+                ))}
+              </div>
               <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
             </div>
 
@@ -431,7 +470,7 @@ export default function TeachersManagement({ schoolId }: Props) {
             </div>
 
             {/* Timetable view */}
-            {showTimetable && (
+            {detailTab === 'info' && showTimetable && (
               <div className="border-t border-gray-100">
                 <TeacherTimetableView
                   timetable={teacherTimetable}
@@ -443,7 +482,7 @@ export default function TeachersManagement({ schoolId }: Props) {
             )}
 
             {/* Availability grid */}
-            {showAvailability && (
+            {detailTab === 'info' && showAvailability && (
               <div className="border-t border-gray-100">
                 <AvailabilityGrid
                   teacherId={selected.id}
@@ -452,6 +491,60 @@ export default function TeachersManagement({ schoolId }: Props) {
                   togglingSlot={togglingSlot}
                   onToggle={(day, pNum) => toggleSlot(selected.id, day, pNum)}
                 />
+              </div>
+            )}
+
+            {/* 360° Analytics */}
+            {detailTab === 'analytics' && (
+              <div className="px-5 py-5 space-y-4">
+                {analyticsLoading ? (
+                  <div className="py-8 text-center">
+                    <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto" />
+                  </div>
+                ) : !teacherAnalytics ? null : (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { label: 'Periods/Week', value: teacherAnalytics.periodsPerWeek, color: 'text-blue-600', bg: 'bg-blue-50' },
+                        { label: 'Tasks Assigned', value: teacherAnalytics.taskCount, color: 'text-violet-600', bg: 'bg-violet-50' },
+                        { label: 'Total Leaves', value: teacherAnalytics.totalLeaves, color: 'text-orange-600', bg: 'bg-orange-50' },
+                        { label: 'Pending Leaves', value: teacherAnalytics.pendingLeaves, color: 'text-red-600', bg: 'bg-red-50' },
+                      ].map(({ label, value, color, bg }) => (
+                        <div key={label} className={`${bg} rounded-xl p-3 text-center`}>
+                          <p className={`text-2xl font-black ${color}`}>{value}</p>
+                          <p className="text-[10px] text-gray-500 mt-0.5">{label}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="bg-gray-50 rounded-xl p-3">
+                      <p className="text-xs font-semibold text-gray-600 mb-2">Quick Info</p>
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500">Subject</span>
+                          <span className="font-medium text-gray-700">{selected.subject || '—'}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500">Department</span>
+                          <span className="font-medium text-gray-700">{selected.department || '—'}</span>
+                        </div>
+                        {selected.class_grade && (
+                          <div className="flex justify-between text-xs">
+                            <span className="text-gray-500">Class Teacher</span>
+                            <span className="font-medium text-emerald-600">Grade {selected.class_grade}-{selected.class_section}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500">Status</span>
+                          <span className={`font-medium ${selected.status === 'active' ? 'text-emerald-600' : 'text-gray-400'}`}>{selected.status}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <button onClick={() => { setDetailTab('info'); setTimeout(() => { setShowTimetable(true); loadTeacherTimetable(selected.id) }, 100) }}
+                      className="w-full border border-purple-200 text-purple-600 py-2 rounded-lg text-xs font-medium hover:bg-purple-50 transition-colors">
+                      View Full Timetable →
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>

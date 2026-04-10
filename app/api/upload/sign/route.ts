@@ -11,7 +11,7 @@ cloudinary.config({
 })
 
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
 
   if (!process.env.CLOUDINARY_API_SECRET) {
     return NextResponse.json({ error: 'Cloudinary not configured' }, { status: 500 })

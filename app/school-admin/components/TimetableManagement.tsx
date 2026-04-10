@@ -8,6 +8,7 @@ type ClassRow = {
   id: number; grade: string; section: string
   class_teacher_name: string | null
   timetable_generated_at: string | null
+  timetable_circulated_at: string | null
 }
 type ClassHealth = {
   class_id: number
@@ -99,6 +100,21 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   const [loading, setLoading]       = useState(true)
   const [ttLoading, setTtLoading]   = useState(false)
 
+  // Named schedule templates — loaded once, used for template selector in Regenerate
+  const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>([])
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | 'default'>('default')
+
+  // Active schedule — starts as school default, switches to selected template live
+  const [activeSchedule, setActiveSchedule]           = useState<ScheduleSlot[]>(schedule)
+  const [activeAcademicSlots, setActiveAcademicSlots] = useState<ScheduleSlot[]>(academicSlots)
+  // Keep in sync with school default when parent rebuilds it (e.g. after schedule save)
+  useEffect(() => {
+    if (selectedTemplateId === 'default') {
+      setActiveSchedule(schedule)
+      setActiveAcademicSlots(academicSlots)
+    }
+  }, [schedule, academicSlots, selectedTemplateId])
+
   // Edit mode
   const [editMode, setEditMode]     = useState(false)
   const [selectedSlot, setSelectedSlot] = useState<TimetableSlot | null>(null)
@@ -122,11 +138,10 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   const [circulating, setCirculating]       = useState(false)
   const [circulateMsg, setCirculateMsg]     = useState<{ text: string; ok: boolean } | null>(null)
   const [conflictCount, setConflictCount]   = useState(0)
+  // Track unsaved changes made after last circulation (swap / teacher edit / regenerate)
+  const [hasChanges, setHasChanges]         = useState(false)
 
   // Named schedule templates — loaded once, used for template selector in Regenerate
-  const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>([])
-  const [selectedTemplateId, setSelectedTemplateId] = useState<number | 'default'>('default')
-
   const today = getToday()
 
   const loadHealth = useCallback(() => {
@@ -169,7 +184,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   const selectClass = useCallback(async (cls: ClassRow) => {
     setSelected(cls); setTtLoading(true)
     setEditSlot(null); setSelectedSlot(null); setSwapMsg(null)
-    setRegenMsg(null); setCirculateMsg(null); setEditMode(false); setConflictCount(0)
+    setRegenMsg(null); setCirculateMsg(null); setEditMode(false); setConflictCount(0); setHasChanges(false)
     const data = await fetch(`/api/class-timetable?class_id=${cls.id}&school_id=${schoolId}`).then(r => r.json())
     const slots: TimetableSlot[] = Array.isArray(data) ? data : []
     setTimetable(slots)
@@ -235,7 +250,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     const freshSlots: TimetableSlot[] = Array.isArray(freshData) ? freshData : []
     setTimetable(freshSlots)
     setConflictCount(freshSlots.filter(s => (s as TimetableSlot & { has_conflict?: boolean }).has_conflict).length)
-    setSaving(false); setEditSlot(null)
+    setSaving(false); setEditSlot(null); setHasChanges(true)
     // Refresh cached school slots + health
     refreshAllSlots(); loadHealth()
   }
@@ -267,7 +282,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
       if (bMatch) return { ...s, subject_name: slotA.subject_name, teacher_name: slotA.teacher_name, teacher_id: slotA.teacher_id, room: slotA.room }
       return s
     }))
-    setSelectedSlot(null)
+    setSelectedSlot(null); setHasChanges(true)
     setSwapMsg({ text: 'Periods swapped', ok: true })
     setTimeout(() => setSwapMsg(null), 3000)
     // Fire-and-forget save; revert on failure, refresh health on success
@@ -358,6 +373,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
         setTimetable(slots)
         setConflictCount(0)
         setClasses(prev => prev.map(c => c.id === selected.id ? { ...c, timetable_generated_at: new Date().toISOString() } : c))
+        setHasChanges(true)
         refreshAllSlots(); loadHealth()
         setTimeout(() => setRegenMsg(null), 4000)
       }
@@ -377,8 +393,15 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
       if (!res.ok) {
         setCirculateMsg({ text: data.error || 'Circulation failed', ok: false })
       } else {
-        setCirculateMsg({ text: `Timetable circulated — ${data.staff_notified} staff and all students notified`, ok: true })
-        setEditMode(false)
+        const circulatedAt = data.circulated_at ?? new Date().toISOString()
+        setCirculateMsg({ text: `Timetable is now LIVE — ${data.staff_notified} staff and all students notified`, ok: true })
+        setEditMode(false); setHasChanges(false)
+        // Stamp circulation time locally so LIVE badge appears immediately
+        setClasses(prev => prev.map(c => c.id === selected.id
+          ? { ...c, timetable_circulated_at: circulatedAt }
+          : c
+        ))
+        setSelected(prev => prev ? { ...prev, timetable_circulated_at: circulatedAt } : prev)
         loadHealth()
         setTimeout(() => setCirculateMsg(null), 6000)
       }
@@ -412,10 +435,12 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                 const hasUnassigned = h && (h.no_teacher_count > 0 || h.subjects_unassigned > 0)
                 const noTimetable   = h ? !h.timetable_exists : !c.timetable_generated_at
                 const allGood       = h && h.timetable_exists && !hasConflict && !hasUnassigned
+                const isLive        = !!c.timetable_circulated_at
 
                 const statusDot = hasConflict   ? 'bg-red-500'
                                 : noTimetable   ? 'bg-gray-300'
                                 : hasUnassigned ? 'bg-amber-400'
+                                : isLive        ? 'bg-emerald-500'
                                 : allGood       ? 'bg-emerald-400'
                                 : 'bg-gray-300'
 
@@ -426,12 +451,17 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                         ? 'bg-blue-50 border-l-[3px] border-l-blue-500'
                         : hasConflict ? 'hover:bg-red-50' : 'hover:bg-gray-50'
                     }`}>
-                    {/* Row 1: section name + status dot */}
+                    {/* Row 1: section name + LIVE badge + status dot */}
                     <div className="flex items-center justify-between mb-1">
-                      <p className={`text-sm font-semibold ${selected?.id === c.id ? 'text-blue-700' : 'text-gray-800'}`}>
-                        Section {c.section}
-                      </p>
-                      <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${statusDot}`} />
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <p className={`text-sm font-semibold truncate ${selected?.id === c.id ? 'text-blue-700' : 'text-gray-800'}`}>
+                          Section {c.section}
+                        </p>
+                        {isLive && (
+                          <span className="flex-shrink-0 text-[9px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full tracking-wide">LIVE</span>
+                        )}
+                      </div>
+                      <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ml-1 ${statusDot}`} />
                     </div>
                     {/* Row 2: health glimpse points */}
                     {!h ? (
@@ -455,7 +485,12 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                             <span>·</span> {h.subjects_unassigned} subject{h.subjects_unassigned > 1 ? 's' : ''} unassigned
                           </p>
                         )}
-                        {allGood && (
+                        {isLive && !hasConflict && !hasUnassigned && (
+                          <p className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
+                            <span>●</span> Live &amp; circulated
+                          </p>
+                        )}
+                        {!isLive && allGood && (
                           <p className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
                             <span>✓</span> Ready to circulate
                           </p>
@@ -485,20 +520,43 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
             {/* ── Header ── */}
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-wrap gap-3">
               <div>
-                <h3 className="font-semibold text-gray-800">Grade {selected.grade} – Section {selected.section}</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold text-gray-800">Grade {selected.grade} – Section {selected.section}</h3>
+                  {selected.timetable_circulated_at && !hasChanges && (
+                    <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full tracking-wide">● LIVE</span>
+                  )}
+                  {selected.timetable_circulated_at && hasChanges && (
+                    <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full tracking-wide">Changes pending</span>
+                  )}
+                </div>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {timetable.filter(s => !s.is_break && s.subject_name).length} of {academicSlots.length * DAYS.length} slots filled
+                  {timetable.filter(s => !s.is_break && s.subject_name).length} of {activeAcademicSlots.length * DAYS.length} slots filled
                   {conflictCount > 0 && <span className="ml-2 text-red-500 font-medium">· {conflictCount} conflict(s)</span>}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                {/* Template selector — choose which schedule template to use when regenerating */}
+                {/* Template selector — switches grid preview + generation settings live */}
                 {savedTemplates.length > 0 && (
                   <select
                     value={String(selectedTemplateId)}
-                    onChange={e => setSelectedTemplateId(e.target.value === 'default' ? 'default' : Number(e.target.value))}
-                    className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-600 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 max-w-[160px]"
-                    title="Select schedule template for generation">
+                    onChange={e => {
+                      const val = e.target.value
+                      if (val === 'default') {
+                        setSelectedTemplateId('default')
+                        setActiveSchedule(schedule)
+                        setActiveAcademicSlots(academicSlots)
+                      } else {
+                        const tmpl = savedTemplates.find(t => t.id === Number(val))
+                        setSelectedTemplateId(Number(val))
+                        if (tmpl) {
+                          const built = buildScheduleFromSettings(tmpl.settings)
+                          setActiveSchedule(built)
+                          setActiveAcademicSlots(built.filter(s => !s.is_break))
+                        }
+                      }
+                    }}
+                    className="border border-blue-200 rounded-lg px-2 py-1.5 text-xs text-blue-700 bg-blue-50 font-medium focus:outline-none focus:ring-2 focus:ring-blue-300 max-w-[160px]"
+                    title="Select schedule template — grid updates instantly">
                     <option value="default">School Default</option>
                     {savedTemplates.map(t => (
                       <option key={t.id} value={t.id}>{t.name}</option>
@@ -510,19 +568,33 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                   {regenerating ? 'Regenerating...' : 'Regenerate'}
                 </button>
                 {!editMode ? (
-                  <button onClick={() => { setEditMode(true); setSwapMsg(null); setCirculateMsg(null) }}
-                    className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
-                    ✏ Edit Timetable
-                  </button>
+                  <>
+                    <button onClick={() => { setEditMode(true); setSwapMsg(null); setCirculateMsg(null) }}
+                      className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
+                      ✏ Edit Timetable
+                    </button>
+                    {/* Circulate always visible when timetable exists — highlighted when changes pending */}
+                    {timetable.length > 0 && (
+                      <button onClick={circulate} disabled={circulating || conflictCount > 0}
+                        title={conflictCount > 0 ? 'Resolve all conflicts before circulating' : 'Publish timetable to staff and students'}
+                        className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-40 ${
+                          hasChanges
+                            ? 'bg-emerald-600 text-white hover:bg-emerald-700 ring-2 ring-emerald-300'
+                            : 'border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                        }`}>
+                        {circulating ? 'Circulating...' : selected.timetable_circulated_at && !hasChanges ? '✓ Circulated' : 'Circulate'}
+                      </button>
+                    )}
+                  </>
                 ) : (
                   <>
                     <button onClick={() => { setEditMode(false); setSwapMsg(null) }}
                       className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors">
-                      Save
+                      Done Editing
                     </button>
                     <button onClick={circulate} disabled={circulating || conflictCount > 0}
                       title={conflictCount > 0 ? 'Resolve all conflicts before circulating' : ''}
-                      className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 transition-colors">
+                      className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 transition-colors ring-2 ring-emerald-300">
                       {circulating ? 'Circulating...' : 'Circulate'}
                     </button>
                   </>
@@ -534,7 +606,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
             {editMode && (
               <div className="mx-4 mt-3 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg text-xs text-orange-700 flex items-center gap-2">
                 <span className="font-semibold">Edit Mode ON</span>
-                <span>— <strong>Click a period to select it</strong>, then click another to swap · Click a selected period again to deselect · Press <kbd className="bg-orange-100 px-1 rounded">Esc</kbd> to cancel · Hit <strong>Circulate</strong> when done.</span>
+                <span>— <strong>Click a period to select it</strong>, then click another to swap · Click a selected period again to deselect · Press <kbd className="bg-orange-100 px-1 rounded">Esc</kbd> to exit · Hit <strong>Circulate</strong> to publish when done.</span>
               </div>
             )}
             {!editMode && timetable.length > 0 && (
@@ -576,7 +648,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                     </tr>
                   </thead>
                   <tbody>
-                    {schedule.map(s => {
+                    {activeSchedule.map(s => {
                       if (s.is_break) {
                         return (
                           <tr key={s.slot} className="bg-amber-50 border-y border-amber-100">
@@ -701,7 +773,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
               <div className="flex flex-wrap gap-1.5 mb-4">
                 <span className="text-[11px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{editSlot.day_of_week}</span>
                 <span className="text-[11px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
-                  {schedule.find(s => s.slot === Math.round(Number(editSlot.period_number)))?.label}
+                  {activeSchedule.find(s => s.slot === Math.round(Number(editSlot.period_number)))?.label}
                 </span>
                 {subj && <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{subj}</span>}
                 {editSlot.teacher_name && <span className="text-[11px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Current: {editSlot.teacher_name}</span>}
@@ -1151,21 +1223,34 @@ function TemplateTab({
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Templates</p>
-            <button onClick={() => setShowSaveAs(s => !s)}
+            <button onClick={() => { setSaveAsName(''); setShowSaveAs(true) }}
               className="text-xs text-blue-600 hover:text-blue-800 font-medium">+ Save as</button>
           </div>
+
+          {/* Save-as modal */}
           {showSaveAs && (
-            <div className="px-3 py-2 border-b border-gray-100 bg-blue-50 flex gap-1.5">
-              <input
-                value={saveAsName} onChange={e => setSaveAsName(e.target.value)}
-                placeholder="Template name..."
-                onKeyDown={e => e.key === 'Enter' && saveAsTemplate()}
-                className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
-              />
-              <button onClick={saveAsTemplate} disabled={savingTemplate || !saveAsName.trim()}
-                className="px-2 py-1 bg-blue-600 text-white rounded text-xs font-medium disabled:opacity-40 hover:bg-blue-700">
-                {savingTemplate ? '...' : 'Save'}
-              </button>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+              <div className="bg-white rounded-2xl shadow-xl p-6 w-80 mx-4">
+                <h3 className="text-sm font-bold text-gray-800 mb-1">Save as Template</h3>
+                <p className="text-xs text-gray-500 mb-4">Current settings will be saved under this name.</p>
+                <input
+                  autoFocus
+                  value={saveAsName} onChange={e => setSaveAsName(e.target.value)}
+                  placeholder="e.g. Full Day, Half Day, Lower Classes…"
+                  onKeyDown={e => { if (e.key === 'Enter') saveAsTemplate(); if (e.key === 'Escape') setShowSaveAs(false) }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 mb-4"
+                />
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setShowSaveAs(false)}
+                    className="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 transition-colors">
+                    Cancel
+                  </button>
+                  <button onClick={saveAsTemplate} disabled={savingTemplate || !saveAsName.trim()}
+                    className="px-4 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">
+                    {savingTemplate ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
           {templatesLoading ? (

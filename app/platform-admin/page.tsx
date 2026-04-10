@@ -16,34 +16,49 @@ type School = {
   address?: string
   school_code?: string
   created_at: string
+  tier?: string
+  teacher_count?: number
+  student_count?: number
+}
+
+type PlatformStats = {
+  schools:       { total: number; active: number; inactive: number }
+  teachers:      { total: number }
+  students:      { total: number }
+  subscriptions: { basic: number; standard: number; premium: number; none: number }
 }
 
 type FormData = {
-  name: string
-  type: string
-  city: string
-  country: string
-  phone: string
-  email: string
-  address: string
+  name: string; type: string; city: string; country: string
+  phone: string; email: string; address: string
+}
+
+const TIER_BADGE: Record<string, string> = {
+  basic:    'bg-green-100 text-green-700',
+  standard: 'bg-blue-100 text-blue-700',
+  premium:  'bg-purple-100 text-purple-700',
+  none:     'bg-gray-100 text-gray-500',
 }
 
 export default function PlatformAdmin() {
   const router = useRouter()
-  const [schools, setSchools]     = useState<School[]>([])
-  const [loading, setLoading]     = useState(true)
-  const [error, setError]         = useState('')
-  const [showModal, setShowModal] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [search, setSearch]       = useState('')
+  const [schools, setSchools]         = useState<School[]>([])
+  const [stats, setStats]             = useState<PlatformStats | null>(null)
+  const [loading, setLoading]         = useState(true)
+  const [error, setError]             = useState('')
+  const [showModal, setShowModal]     = useState(false)
+  const [submitting, setSubmitting]   = useState(false)
+  const [search, setSearch]           = useState('')
+  const [filterTier, setFilterTier]   = useState<string>('all')
+  const [filterStatus, setFilterStatus] = useState<string>('all')
   const [createdSchool, setCreatedSchool] = useState<{ name: string; code: string; pass: string } | null>(null)
-  const [form, setForm]           = useState<FormData>({
+  const [form, setForm] = useState<FormData>({
     name: '', type: 'Private', city: '', country: '', phone: '', email: '', address: '',
   })
 
   useEffect(() => {
     fetch('/api/init')
-      .then(() => fetchSchools())
+      .then(() => Promise.all([fetchSchools(), fetchStats()]))
       .catch(() => setError('Cannot connect to database.'))
   }, [])
 
@@ -56,6 +71,13 @@ export default function PlatformAdmin() {
       setSchools(data)
     } catch { setError('Failed to load schools') }
     finally { setLoading(false) }
+  }
+
+  async function fetchStats() {
+    try {
+      const res = await fetch('/api/platform/stats')
+      if (res.ok) setStats(await res.json())
+    } catch { /* non-critical */ }
   }
 
   async function handleCreate(e: React.FormEvent) {
@@ -72,8 +94,8 @@ export default function PlatformAdmin() {
       setSchools(prev => [data, ...prev])
       setShowModal(false)
       setForm({ name: '', type: 'Private', city: '', country: '', phone: '', email: '', address: '' })
-      // Show credentials modal
       setCreatedSchool({ name: data.name, code: data.school_code, pass: data.temp_password })
+      fetchStats()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to create school')
     } finally { setSubmitting(false) }
@@ -89,16 +111,18 @@ export default function PlatformAdmin() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setSchools(prev => prev.map(s => s.id === school.id ? data : s))
+      setSchools(prev => prev.map(s => s.id === school.id ? { ...s, status: newStatus } : s))
+      fetchStats()
     } catch { setError('Failed to update school status') }
   }
 
-  async function handleDelete(id: number) {
-    if (!confirm('Delete this school? All its data (teachers, students, timetables) will be removed.')) return
+  async function handleDelete(id: number, name: string) {
+    if (!confirm(`Delete "${name}"? All its data (teachers, students, timetables) will be permanently removed.`)) return
     try {
       const res = await fetch(`/api/schools/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
       setSchools(prev => prev.filter(s => s.id !== id))
+      fetchStats()
     } catch { setError('Failed to delete school') }
   }
 
@@ -107,11 +131,16 @@ export default function PlatformAdmin() {
     router.push('/login')
   }
 
-  const filtered = schools.filter(s =>
-    s.name.toLowerCase().includes(search.toLowerCase()) ||
-    (s.city || '').toLowerCase().includes(search.toLowerCase()) ||
-    (s.school_code || '').toLowerCase().includes(search.toLowerCase())
-  )
+  const filtered = schools.filter(s => {
+    const matchSearch = !search || (
+      s.name.toLowerCase().includes(search.toLowerCase()) ||
+      (s.city || '').toLowerCase().includes(search.toLowerCase()) ||
+      (s.school_code || '').toLowerCase().includes(search.toLowerCase())
+    )
+    const matchTier   = filterTier === 'all'   || (s.tier || 'none') === filterTier
+    const matchStatus = filterStatus === 'all' || s.status === filterStatus
+    return matchSearch && matchTier && matchStatus
+  })
 
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-purple-300'
 
@@ -130,6 +159,14 @@ export default function PlatformAdmin() {
           <h1 className="text-sm font-semibold text-gray-700">Platform Admin</h1>
         </div>
         <div className="flex items-center gap-3">
+          <Link href="/platform-admin/features"
+            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors font-medium">
+            Feature Plans
+          </Link>
+          <Link href="/platform-admin/audit"
+            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors">
+            Audit Log
+          </Link>
           <span className="bg-purple-100 text-purple-700 text-xs font-medium px-3 py-1 rounded-full">Platform Admin</span>
           <button onClick={handleLogout}
             className="text-sm text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition-colors">
@@ -138,7 +175,7 @@ export default function PlatformAdmin() {
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-6 py-8">
         {error && (
           <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between items-center text-sm">
             <span>{error}</span>
@@ -146,11 +183,60 @@ export default function PlatformAdmin() {
           </div>
         )}
 
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        {/* Platform-wide stats */}
+        {stats && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Schools</p>
+              <p className="text-3xl font-black text-gray-900 mt-1">{stats.schools.total}</p>
+              <p className="text-xs text-gray-400 mt-1">
+                <span className="text-green-600 font-medium">{stats.schools.active} active</span>
+                {stats.schools.inactive > 0 && ` · ${stats.schools.inactive} inactive`}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Teachers</p>
+              <p className="text-3xl font-black text-gray-900 mt-1">{stats.teachers.total}</p>
+              <p className="text-xs text-gray-400 mt-1">active across all schools</p>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Students</p>
+              <p className="text-3xl font-black text-gray-900 mt-1">{stats.students.total}</p>
+              <p className="text-xs text-gray-400 mt-1">enrolled across all schools</p>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Subscriptions</p>
+              <div className="flex gap-2 mt-2 flex-wrap">
+                {stats.subscriptions.premium > 0 && (
+                  <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+                    {stats.subscriptions.premium} Premium
+                  </span>
+                )}
+                {stats.subscriptions.standard > 0 && (
+                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                    {stats.subscriptions.standard} Standard
+                  </span>
+                )}
+                {stats.subscriptions.basic > 0 && (
+                  <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                    {stats.subscriptions.basic} Basic
+                  </span>
+                )}
+                {stats.subscriptions.none > 0 && (
+                  <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium">
+                    {stats.subscriptions.none} No Plan
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Header + Add */}
+        <div className="flex items-center justify-between mb-4">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">Schools</h2>
-            <p className="text-gray-500 text-sm mt-1">{schools.length} school{schools.length !== 1 ? 's' : ''} registered</p>
+            <h2 className="text-xl font-bold text-gray-900">Schools</h2>
+            <p className="text-gray-400 text-sm">{filtered.length} of {schools.length} shown</p>
           </div>
           <button onClick={() => setShowModal(true)}
             className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">
@@ -158,33 +244,37 @@ export default function PlatformAdmin() {
           </button>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          {[
-            { label: 'Total Schools', value: schools.length, color: 'text-gray-900' },
-            { label: 'Active', value: schools.filter(s => s.status === 'active').length, color: 'text-green-600' },
-            { label: 'Inactive', value: schools.filter(s => s.status === 'inactive').length, color: 'text-gray-400' },
-          ].map(s => (
-            <div key={s.label} className="bg-white rounded-xl border border-gray-200 p-4">
-              <p className="text-sm text-gray-500">{s.label}</p>
-              <p className={`text-2xl font-bold mt-1 ${s.color}`}>{s.value}</p>
-            </div>
-          ))}
+        {/* Filters */}
+        <div className="flex gap-3 mb-4">
+          <input type="text" placeholder="Search by name, city, school code…" value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="flex-1 border border-gray-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 bg-white" />
+          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300 text-gray-700">
+            <option value="all">All Status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          <select value={filterTier} onChange={e => setFilterTier(e.target.value)}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300 text-gray-700">
+            <option value="all">All Plans</option>
+            <option value="none">No Plan</option>
+            <option value="basic">Basic</option>
+            <option value="standard">Standard</option>
+            <option value="premium">Premium</option>
+          </select>
         </div>
-
-        {/* Search */}
-        <input type="text" placeholder="Search by name, city, or school code..." value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-purple-300 bg-white" />
 
         {/* Table */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           {loading ? (
-            <div className="py-16 text-center text-gray-400">Loading schools...</div>
+            <div className="py-16 text-center text-gray-400">Loading schools…</div>
           ) : filtered.length === 0 ? (
             <div className="py-16 text-center">
-              <p className="text-gray-400 text-lg">{search ? 'No schools match your search' : 'No schools yet'}</p>
-              {!search && <p className="text-gray-300 text-sm mt-1">Click &quot;Add School&quot; to register the first school</p>}
+              <p className="text-gray-400 text-lg">{search || filterTier !== 'all' || filterStatus !== 'all' ? 'No schools match your filters' : 'No schools yet'}</p>
+              {!search && filterTier === 'all' && filterStatus === 'all' && (
+                <p className="text-gray-300 text-sm mt-1">Click &quot;Add School&quot; to register the first school</p>
+              )}
             </div>
           ) : (
             <table className="w-full text-sm">
@@ -192,7 +282,8 @@ export default function PlatformAdmin() {
                 <tr>
                   <th className="text-left px-5 py-3 font-medium text-gray-500">School</th>
                   <th className="text-left px-5 py-3 font-medium text-gray-500">School ID</th>
-                  <th className="text-left px-5 py-3 font-medium text-gray-500">Contact</th>
+                  <th className="text-left px-5 py-3 font-medium text-gray-500">Plan</th>
+                  <th className="text-left px-5 py-3 font-medium text-gray-500">Staff / Students</th>
                   <th className="text-left px-5 py-3 font-medium text-gray-500">Location</th>
                   <th className="text-left px-5 py-3 font-medium text-gray-500">Status</th>
                   <th className="text-left px-5 py-3 font-medium text-gray-500">Actions</th>
@@ -211,9 +302,14 @@ export default function PlatformAdmin() {
                         <code className="text-xs bg-purple-50 text-purple-700 border border-purple-200 px-2 py-1 rounded font-mono">{school.school_code}</code>
                       ) : <span className="text-gray-300 text-xs">—</span>}
                     </td>
+                    <td className="px-5 py-3.5">
+                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full capitalize ${TIER_BADGE[school.tier || 'none']}`}>
+                        {school.tier === 'none' || !school.tier ? 'No Plan' : school.tier}
+                      </span>
+                    </td>
                     <td className="px-5 py-3.5 text-gray-600 text-xs">
-                      {school.email && <div>{school.email}</div>}
-                      {school.phone && <div className="text-gray-400">{school.phone}</div>}
+                      <div><span className="font-medium text-gray-800">{school.teacher_count ?? '—'}</span> teachers</div>
+                      <div><span className="font-medium text-gray-800">{school.student_count ?? '—'}</span> students</div>
                     </td>
                     <td className="px-5 py-3.5 text-gray-600">
                       {[school.city, school.country].filter(Boolean).join(', ') || '—'}
@@ -233,7 +329,7 @@ export default function PlatformAdmin() {
                           className="text-xs px-2.5 py-1 rounded border border-gray-200 hover:bg-gray-50 text-gray-600 transition-colors">
                           {school.status === 'active' ? 'Deactivate' : 'Activate'}
                         </button>
-                        <button onClick={() => handleDelete(school.id)}
+                        <button onClick={() => handleDelete(school.id, school.name)}
                           className="text-xs px-2.5 py-1 rounded border border-red-200 hover:bg-red-50 text-red-500 transition-colors">
                           Delete
                         </button>
@@ -295,7 +391,7 @@ export default function PlatformAdmin() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
                 <input type="tel" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-                  placeholder="+91 98765 43210 (7–15 digits)" className={inputCls} />
+                  placeholder="+91 98765 43210" className={inputCls} />
               </div>
 
               <div>
@@ -311,7 +407,7 @@ export default function PlatformAdmin() {
                 </button>
                 <button type="submit" disabled={submitting}
                   className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
-                  {submitting ? 'Creating...' : 'Create School'}
+                  {submitting ? 'Creating…' : 'Create School'}
                 </button>
               </div>
             </form>
@@ -319,7 +415,7 @@ export default function PlatformAdmin() {
         </div>
       )}
 
-      {/* Credentials Modal — shown after school creation */}
+      {/* Credentials Modal */}
       {createdSchool && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
@@ -338,10 +434,8 @@ export default function PlatformAdmin() {
             </div>
             <div className="px-6 py-5">
               <p className="text-sm text-gray-600 mb-4">
-                The school admin credentials have been generated.
-                {form.email ? ' An onboarding email has been sent.' : ' Copy these credentials and share them manually.'}
+                School admin credentials have been generated. Copy and share them with the school.
               </p>
-
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
                 <div>
                   <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">School ID (Login)</p>
@@ -352,11 +446,9 @@ export default function PlatformAdmin() {
                   <code className="text-sm font-mono text-amber-900 bg-white border border-amber-200 rounded px-3 py-2 block">{createdSchool.pass}</code>
                 </div>
               </div>
-
               <p className="text-xs text-gray-400 mt-3 bg-gray-50 rounded-lg px-3 py-2">
                 ⚠️ The school admin will be asked to change this password on first login.
               </p>
-
               <button onClick={() => setCreatedSchool(null)}
                 className="w-full mt-4 bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-xl text-sm font-medium transition-colors">
                 Done

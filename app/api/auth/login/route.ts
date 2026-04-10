@@ -4,7 +4,7 @@ import { verifyPassword, signToken, JWTPayload } from '@/lib/auth'
 import { cookies } from 'next/headers'
 
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   try {
     const { identifier, password } = await req.json()
     // identifier = email (platform admin) OR school_code (school admin)

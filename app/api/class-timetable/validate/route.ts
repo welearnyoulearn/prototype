@@ -5,7 +5,7 @@ import pool, { ensureDB } from '@/lib/db'
 // Pre-generation readiness check. No curriculum dependency.
 // A class is ready when it has subjects assigned (with or without curriculum template).
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
   const { searchParams } = new URL(req.url)
   const school_id = searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })

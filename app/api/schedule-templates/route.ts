@@ -7,7 +7,7 @@ import pool, { ensureDB } from '@/lib/db'
 // DELETE /api/schedule-templates?id=X&school_id=X — delete
 
 export async function GET(req: NextRequest) {
-  await ensureDB()
+
   const school_id = req.nextUrl.searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
   try {
@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  await ensureDB()
+
   try {
     const { school_id, name, settings } = await req.json()
     if (!school_id || !name?.trim() || !settings) {
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  await ensureDB()
+
   const id = req.nextUrl.searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
   try {
@@ -71,7 +71,7 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  await ensureDB()
+
   const id = req.nextUrl.searchParams.get('id')
   const school_id = req.nextUrl.searchParams.get('school_id')
   if (!id || !school_id) return NextResponse.json({ error: 'id and school_id required' }, { status: 400 })
