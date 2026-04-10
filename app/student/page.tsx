@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import StudentDashboard from './components/StudentDashboard'
 import StudentTasks from './components/StudentTasks'
@@ -78,11 +78,27 @@ export default function StudentPortal() {
   const [studentLoading, setStudentLoading] = useState(false)
   const [error, setError] = useState('')
 
+  const LS_KEY = 'wlyl_student_session'
+  const pendingRestore = useRef<{ schoolId: string; classId: string; studentId: string } | null>(null)
+
   useEffect(() => {
     fetch('/api/init')
       .then(() => fetch('/api/schools'))
       .then(r => r.json())
-      .then((data: School[]) => setSchools(data.filter(s => s.status === 'active')))
+      .then((data: School[]) => {
+        const active = data.filter((s: School) => s.status === 'active')
+        setSchools(active)
+        try {
+          const saved = localStorage.getItem(LS_KEY)
+          if (saved) {
+            const sess = JSON.parse(saved)
+            if (active.find((s: School) => s.id === parseInt(sess.schoolId))) {
+              pendingRestore.current = sess
+              setSelectedSchoolId(String(sess.schoolId))
+            }
+          }
+        } catch { }
+      })
       .catch(() => setError('Cannot connect to database'))
       .finally(() => setLoading(false))
   }, [])
@@ -99,7 +115,12 @@ export default function StudentPortal() {
           return a.section.localeCompare(b.section)
         }) : []
         setClasses(sorted)
-        setSelectedClassId('')
+        const pr = pendingRestore.current
+        if (pr && pr.schoolId === selectedSchoolId && sorted.find((c: ClassOption) => c.id === parseInt(pr.classId))) {
+          setSelectedClassId(pr.classId)
+        } else {
+          setSelectedClassId('')
+        }
       })
   }, [selectedSchoolId])
 
@@ -116,7 +137,12 @@ export default function StudentPortal() {
           return ra - rb
         }) : []
         setStudents(sorted)
-        setSelectedStudentId('')
+        const pr = pendingRestore.current
+        if (pr && pr.classId === selectedClassId && sorted.find((s: StudentBasic) => s.id === parseInt(pr.studentId))) {
+          setSelectedStudentId(pr.studentId)
+        } else {
+          setSelectedStudentId('')
+        }
       })
   }, [selectedSchoolId, selectedClassId, classes])
 
@@ -125,9 +151,15 @@ export default function StudentPortal() {
     setStudentLoading(true)
     fetch(`/api/students/${selectedStudentId}`)
       .then(r => r.json())
-      .then(data => setStudent({ ...data, school_id: parseInt(selectedSchoolId) }))
+      .then(data => {
+        setStudent({ ...data, school_id: parseInt(selectedSchoolId) })
+        pendingRestore.current = null
+        try {
+          localStorage.setItem(LS_KEY, JSON.stringify({ schoolId: selectedSchoolId, classId: selectedClassId, studentId: selectedStudentId }))
+        } catch { }
+      })
       .finally(() => setStudentLoading(false))
-  }, [selectedStudentId, selectedSchoolId])
+  }, [selectedStudentId, selectedSchoolId, selectedClassId])
 
   const selectedSchool = schools.find(s => s.id === parseInt(selectedSchoolId))
   const selectedClass = classes.find(c => c.id === parseInt(selectedClassId))

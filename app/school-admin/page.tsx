@@ -2,35 +2,53 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import { FeaturesProvider } from './features-context'
-import Overview from './components/Overview'
-import ClassAnalytics from './components/ClassAnalytics'
-import LeaveRequests from './components/LeaveRequests'
-import StaffOnboarding from './components/StaffOnboarding'
-import StudentOnboarding from './components/StudentOnboarding'
-import ClassManagement from './components/ClassManagement'
-import StudentTeacherAnalysis from './components/StudentTeacherAnalysis'
-import TeachersManagement from './components/TeachersManagement'
-import StudentsManagement from './components/StudentsManagement'
-import TimetableManagement from './components/TimetableManagement'
-import AttendanceDashboard from './components/AttendanceDashboard'
-import EmergencyCover from './components/EmergencyCover'
-import ExamSchedule from './components/ExamSchedule'
-import AcademicAnalytics from './components/AcademicAnalytics'
-import AnnouncementBoard from './components/AnnouncementBoard'
-import AcademicCalendar from './components/AcademicCalendar'
-import SchoolSettings from './components/SchoolSettings'
-import StudentLeaderboard from './components/StudentLeaderboard'
-import ExportCenter from './components/ExportCenter'
-import ParentEngagement from './components/ParentEngagement'
-import YearRollover from './components/YearRollover'
-import NotificationCenter from './components/NotificationCenter'
-import DailyBriefing from './components/DailyBriefing'
-import FeeManagement from './components/FeeManagement'
-import YearReview from './components/YearReview'
-import CommandBar from './components/CommandBar'
 import NotificationBell from '../components/NotificationBell'
 import { useRouter } from 'next/navigation'
+
+// Always-loaded (small, needed immediately)
+import Overview from './components/Overview'
+import CommandBar from './components/CommandBar'
+
+// Lazy-loaded — only downloaded when first opened
+function ModuleSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      <div className="h-8 bg-gray-100 rounded-xl w-48" />
+      <div className="grid grid-cols-3 gap-4">
+        {[1,2,3].map(i => <div key={i} className="h-28 bg-gray-100 rounded-2xl" />)}
+      </div>
+      <div className="h-64 bg-gray-100 rounded-2xl" />
+    </div>
+  )
+}
+const opts = { loading: () => <ModuleSkeleton /> }
+
+const AttendanceDashboard   = dynamic(() => import('./components/AttendanceDashboard'),   opts)
+const LeaveRequests         = dynamic(() => import('./components/LeaveRequests'),          opts)
+const EmergencyCover        = dynamic(() => import('./components/EmergencyCover'),         opts)
+const StaffOnboarding       = dynamic(() => import('./components/StaffOnboarding'),        opts)
+const StudentOnboarding     = dynamic(() => import('./components/StudentOnboarding'),      opts)
+const ClassManagement       = dynamic(() => import('./components/ClassManagement'),        opts)
+const StudentTeacherAnalysis= dynamic(() => import('./components/StudentTeacherAnalysis'), opts)
+const TimetableManagement   = dynamic(() => import('./components/TimetableManagement'),    opts)
+const ExamSchedule          = dynamic(() => import('./components/ExamSchedule'),           opts)
+const TeachersManagement    = dynamic(() => import('./components/TeachersManagement'),     opts)
+const StudentsManagement    = dynamic(() => import('./components/StudentsManagement'),     opts)
+const ClassAnalytics        = dynamic(() => import('./components/ClassAnalytics'),         opts)
+const AcademicAnalytics     = dynamic(() => import('./components/AcademicAnalytics'),      opts)
+const AnnouncementBoard     = dynamic(() => import('./components/AnnouncementBoard'),      opts)
+const AcademicCalendar      = dynamic(() => import('./components/AcademicCalendar'),       opts)
+const StudentLeaderboard    = dynamic(() => import('./components/StudentLeaderboard'),     opts)
+const ExportCenter          = dynamic(() => import('./components/ExportCenter'),           opts)
+const SchoolSettings        = dynamic(() => import('./components/SchoolSettings'),         opts)
+const DailyBriefing         = dynamic(() => import('./components/DailyBriefing'),          opts)
+const NotificationCenter    = dynamic(() => import('./components/NotificationCenter'),     opts)
+const ParentEngagement      = dynamic(() => import('./components/ParentEngagement'),       opts)
+const YearRollover          = dynamic(() => import('./components/YearRollover'),           opts)
+const FeeManagement         = dynamic(() => import('./components/FeeManagement'),          opts)
+const YearReview            = dynamic(() => import('./components/YearReview'),             opts)
 
 type School = {
   id: number

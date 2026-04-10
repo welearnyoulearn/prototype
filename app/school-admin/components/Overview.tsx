@@ -71,65 +71,40 @@ export default function Overview({ schoolId, onNavigate }: Props) {
     const todayStr = new Date().toISOString().split('T')[0]
     const currentYear = '2025-26'
 
+    // Build features list for batched API — only request what's enabled
+    const featuresList = [
+      hasLeave       && 'leave',
+      hasCover       && 'cover',
+      hasAttendance  && 'attendance',
+      hasTimetable   && 'timetable',
+      hasExams       && 'exams',
+      hasFeeManagement && 'fees',
+    ].filter(Boolean).join(',')
+
     try {
-      // Always fetch core stats
-      const [t, s, c] = await Promise.all([
-        fetch(`/api/teachers?school_id=${schoolId}`).then(r => r.json()),
-        fetch(`/api/students?school_id=${schoolId}`).then(r => r.json()),
-        fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()),
-      ])
-      setStats(prev => ({
-        ...prev,
-        teachers: Array.isArray(t) ? t.length : 0,
-        students: Array.isArray(s) ? s.length : 0,
-        classes:  Array.isArray(c) ? c.length : 0,
-      }))
+      const res = await fetch(
+        `/api/admin/overview?school_id=${schoolId}&features=${featuresList}&date=${todayStr}&year=${currentYear}`
+      )
+      if (!res.ok) throw new Error('overview fetch failed')
+      const d = await res.json()
 
-      // Conditionally fetch feature-gated data in parallel
-      await Promise.all([
-        hasLeave
-          ? fetch(`/api/leave-requests?school_id=${schoolId}&status=pending`)
-              .then(r => r.json())
-              .then(l => setStats(prev => ({ ...prev, pendingLeaves: Array.isArray(l) ? l.length : 0 })))
-          : Promise.resolve(),
+      // Core
+      setStats({
+        teachers:     d.core?.teachers     ?? 0,
+        students:     d.core?.students     ?? 0,
+        classes:      d.core?.classes      ?? 0,
+        pendingLeaves: d.leaves?.count     ?? 0,
+      })
 
-        hasCover
-          ? fetch(`/api/substitutes?school_id=${schoolId}&date=${todayStr}&uncovered=true`)
-              .then(r => r.json())
-              .then(unc => setUncovered(Array.isArray(unc) ? unc : []))
-          : Promise.resolve(),
-
-        hasAttendance
-          ? fetch(`/api/attendance?school_id=${schoolId}&date=${todayStr}&view=school`)
-              .then(r => r.json())
-              .then(att => setAttendance(Array.isArray(att) ? att : []))
-          : Promise.resolve(),
-
-        hasTimetable
-          ? fetch(`/api/class-timetable/health?school_id=${schoolId}`)
-              .then(r => r.json())
-              .then(h => setTimetableHealth(Array.isArray(h) ? h : []))
-          : Promise.resolve(),
-
-        hasExams
-          ? fetch(`/api/exams/calendar?school_id=${schoolId}&days=7`)
-              .then(r => r.json())
-              .then(e => setUpcomingExams(Array.isArray(e) ? e.slice(0, 5) : []))
-              .catch(() => setUpcomingExams([]))
-          : Promise.resolve(),
-
-        hasFeeManagement
-          ? fetch(`/api/fees/stats?school_id=${schoolId}&academic_year=${currentYear}`)
-              .then(r => r.ok ? r.json() : null)
-              .then(d => {
-                if (d?.summary) {
-                  setFeeOverdue(Number(d.summary.overdue_count) || 0)
-                  setFeeOutstanding(Number(d.summary.total_outstanding) || 0)
-                }
-              })
-              .catch(() => {})
-          : Promise.resolve(),
-      ])
+      // Feature-gated
+      if (d.uncovered  !== null) setUncovered(Array.isArray(d.uncovered) ? d.uncovered : [])
+      if (d.attendance !== null) setAttendance(Array.isArray(d.attendance) ? d.attendance : [])
+      if (d.timetable  !== null) setTimetableHealth(Array.isArray(d.timetable) ? d.timetable : [])
+      if (d.exams      !== null) setUpcomingExams(Array.isArray(d.exams) ? d.exams : [])
+      if (d.fees       !== null) {
+        setFeeOverdue(Number(d.fees?.overdue_count) || 0)
+        setFeeOutstanding(Number(d.fees?.total_outstanding) || 0)
+      }
     } finally {
       setLoading(false)
     }

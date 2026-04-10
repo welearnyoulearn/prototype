@@ -133,6 +133,8 @@ function SyllabusWrapper({
   )
 }
 
+const LS_KEY = 'wlyl_teacher_session'
+
 export default function TeacherPortal() {
   const [schools, setSchools] = useState<School[]>([])
   const [selectedSchoolId, setSelectedSchoolId] = useState('')
@@ -151,7 +153,6 @@ export default function TeacherPortal() {
 
   function handleNavigate(key: string, payload?: { examId?: number; classId?: number; tab?: string }) {
     if (key === 'class-view' && payload?.classId) {
-      // Deep-link to a specific class + tab from notification
       fetch(`/api/classes/${payload.classId}?school_id=${selectedSchoolId}`)
         .then(r => r.json())
         .then(data => {
@@ -170,11 +171,26 @@ export default function TeacherPortal() {
     }
   }
 
+  // Load schools, then auto-restore saved session from localStorage
   useEffect(() => {
     fetch('/api/init')
       .then(() => fetch('/api/schools'))
       .then(r => r.json())
-      .then((data: School[]) => setSchools(data.filter(s => s.status === 'active')))
+      .then((data: School[]) => {
+        const active = data.filter(s => s.status === 'active')
+        setSchools(active)
+        // Try to restore previous session
+        try {
+          const saved = localStorage.getItem(LS_KEY)
+          if (saved) {
+            const { schoolId, teacherId } = JSON.parse(saved)
+            if (active.find(s => s.id === parseInt(schoolId))) {
+              setSelectedSchoolId(String(schoolId))
+              setSelectedTeacherId(String(teacherId))
+            }
+          }
+        } catch { /* ignore */ }
+      })
       .catch(() => setError('Cannot connect to database'))
       .finally(() => setLoading(false))
   }, [])
@@ -183,7 +199,7 @@ export default function TeacherPortal() {
     if (!selectedSchoolId) { setTeachers([]); setSelectedTeacherId(''); return }
     fetch(`/api/teachers?school_id=${selectedSchoolId}&staff_type=teaching`)
       .then(r => r.json())
-      .then(data => { setTeachers(Array.isArray(data) ? data : []); setSelectedTeacherId('') })
+      .then(data => { setTeachers(Array.isArray(data) ? data : []) })
   }, [selectedSchoolId])
 
   useEffect(() => {
@@ -191,9 +207,13 @@ export default function TeacherPortal() {
     setProfileLoading(true)
     fetch(`/api/teachers/${selectedTeacherId}`)
       .then(r => r.json())
-      .then(data => setTeacher(data))
+      .then(data => {
+        setTeacher(data)
+        // Persist session
+        try { localStorage.setItem(LS_KEY, JSON.stringify({ schoolId: selectedSchoolId, teacherId: selectedTeacherId })) } catch { /* ignore */ }
+      })
       .finally(() => setProfileLoading(false))
-  }, [selectedTeacherId])
+  }, [selectedTeacherId, selectedSchoolId])
 
   const selectedSchool = schools.find(s => s.id === parseInt(selectedSchoolId))
 
