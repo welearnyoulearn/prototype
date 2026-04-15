@@ -28,8 +28,13 @@ const DEFAULT_GRADING: GradeRow[] = [
   { grade: 'F',  min: 0,  max: 34  },
 ]
 
+type SubjectEntry = { name: string; periods_per_week: number }
+type SubjectTemplate = {
+  id: number; name: string; from_grade: number; to_grade: number; subjects: SubjectEntry[]
+}
+
 export default function SchoolSettings({ schoolId }: { schoolId: number }) {
-  const [tab, setTab]         = useState<'profile' | 'grading'>('profile')
+  const [tab, setTab]         = useState<'profile' | 'grading' | 'subjects'>('profile')
   const [data, setData]       = useState<SchoolData | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
@@ -44,7 +49,90 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   // Grading scheme form
   const [scheme, setScheme]   = useState<GradeRow[]>(DEFAULT_GRADING)
 
-  useEffect(() => { loadSchool() }, [schoolId])
+  // Subject templates
+  const [templates, setTemplates]       = useState<SubjectTemplate[]>([])
+  const [tmplLoading, setTmplLoading]   = useState(false)
+  const [editingTmpl, setEditingTmpl]   = useState<SubjectTemplate | null>(null)
+  const [newTmpl, setNewTmpl]           = useState({ name: '', from_grade: '1', to_grade: '5' })
+  const [newSubjectName, setNewSubjectName] = useState('')
+  const [newSubjectPPW, setNewSubjectPPW]   = useState('4')
+  const [showAddTmpl, setShowAddTmpl]   = useState(false)
+  const [tmplMsg, setTmplMsg]           = useState<{ text: string; ok: boolean } | null>(null)
+
+  useEffect(() => { loadSchool() }, [schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (tab === 'subjects') loadTemplates() }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function loadTemplates() {
+    setTmplLoading(true)
+    try {
+      const r = await fetch(`/api/schools/subject-templates?school_id=${schoolId}`)
+      const data = await r.json()
+      setTemplates(Array.isArray(data) ? data : [])
+    } finally { setTmplLoading(false) }
+  }
+
+  async function createTemplate() {
+    if (!newTmpl.name.trim()) return
+    try {
+      const r = await fetch('/api/schools/subject-templates', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId,
+          name: newTmpl.name.trim(),
+          from_grade: parseInt(newTmpl.from_grade),
+          to_grade: parseInt(newTmpl.to_grade),
+          subjects: [],
+        }),
+      })
+      const data = await r.json()
+      if (!r.ok) throw new Error(data.error)
+      setTemplates(prev => [...prev, data])
+      setEditingTmpl(data)
+      setNewTmpl({ name: '', from_grade: '1', to_grade: '5' })
+      setShowAddTmpl(false)
+    } catch (e: unknown) {
+      setTmplMsg({ text: e instanceof Error ? e.message : 'Failed to create', ok: false })
+    }
+  }
+
+  async function saveTemplate(tmpl: SubjectTemplate) {
+    try {
+      const r = await fetch(`/api/schools/subject-templates?id=${tmpl.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subjects: tmpl.subjects }),
+      })
+      if (!r.ok) throw new Error()
+      setTemplates(prev => prev.map(t => t.id === tmpl.id ? tmpl : t))
+      setTmplMsg({ text: '✓ Template saved', ok: true })
+      setTimeout(() => setTmplMsg(null), 3000)
+    } catch {
+      setTmplMsg({ text: 'Failed to save', ok: false })
+    }
+  }
+
+  async function deleteTemplate(id: number) {
+    if (!confirm('Delete this template?')) return
+    try {
+      await fetch(`/api/schools/subject-templates?id=${id}`, { method: 'DELETE' })
+      setTemplates(prev => prev.filter(t => t.id !== id))
+      if (editingTmpl?.id === id) setEditingTmpl(null)
+    } catch {
+      setTmplMsg({ text: 'Failed to delete', ok: false })
+    }
+  }
+
+  function addSubjectToTemplate(tmpl: SubjectTemplate) {
+    const name = newSubjectName.trim()
+    if (!name) return
+    if (tmpl.subjects.some(s => s.name.toLowerCase() === name.toLowerCase())) {
+      setTmplMsg({ text: `"${name}" already in this template`, ok: false })
+      return
+    }
+    const updated = { ...tmpl, subjects: [...tmpl.subjects, { name, periods_per_week: parseInt(newSubjectPPW) || 4 }] }
+    setEditingTmpl(updated)
+    setNewSubjectName('')
+    setNewSubjectPPW('4')
+  }
 
   async function loadSchool() {
     setLoading(true)
@@ -139,7 +227,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
-        {([['profile', 'School Profile'], ['grading', 'Grading Scheme']] as const).map(([key, label]) => (
+        {([['profile', 'School Profile'], ['grading', 'Grading Scheme'], ['subjects', 'Default Subjects']] as const).map(([key, label]) => (
           <button key={key} onClick={() => { setTab(key); setError('') }}
             className={`px-5 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === key ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
             {label}
@@ -347,6 +435,176 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
             </div>
           </div>
         </form>
+      )}
+
+      {/* ── DEFAULT SUBJECTS TAB ───────────────────────────────────── */}
+      {tab === 'subjects' && (
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm text-gray-500">Define subject sets for grade ranges. These are auto-applied when creating or managing classes.</p>
+            </div>
+            <button onClick={() => setShowAddTmpl(v => !v)}
+              className="flex-shrink-0 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors">
+              + New Set
+            </button>
+          </div>
+
+          {tmplMsg && (
+            <div className={`px-4 py-3 rounded-xl text-sm border ${tmplMsg.ok ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-100 text-red-600'}`}>
+              {tmplMsg.text}
+            </div>
+          )}
+
+          {/* New template form */}
+          {showAddTmpl && (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 space-y-3">
+              <p className="text-sm font-semibold text-indigo-800">New Subject Set</p>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-1">
+                  <label className="block text-xs text-gray-500 mb-1">Set Name *</label>
+                  <input value={newTmpl.name} onChange={e => setNewTmpl(f => ({ ...f, name: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    placeholder='e.g. "Primary Subjects"' />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">From Grade</label>
+                  <select value={newTmpl.from_grade} onChange={e => setNewTmpl(f => ({ ...f, from_grade: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map(g => <option key={g} value={g}>Grade {g}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">To Grade</label>
+                  <select value={newTmpl.to_grade} onChange={e => setNewTmpl(f => ({ ...f, to_grade: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map(g => <option key={g} value={g}>Grade {g}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={createTemplate} disabled={!newTmpl.name.trim()}
+                  className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                  Create & Add Subjects
+                </button>
+                <button onClick={() => setShowAddTmpl(false)}
+                  className="px-4 py-2 border border-gray-200 text-gray-600 text-sm rounded-lg hover:bg-gray-50">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {tmplLoading ? (
+            <div className="py-10 text-center text-gray-400 text-sm">Loading...</div>
+          ) : templates.length === 0 ? (
+            <div className="bg-white border border-dashed border-gray-200 rounded-xl py-12 text-center">
+              <p className="text-gray-400 font-medium">No subject sets yet</p>
+              <p className="text-gray-300 text-sm mt-1">Create a set to auto-apply subjects when adding classes</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3">
+              {templates.map(tmpl => {
+                const isEditing = editingTmpl?.id === tmpl.id
+                const current = isEditing ? editingTmpl! : tmpl
+                return (
+                  <div key={tmpl.id} className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                    {/* Template header */}
+                    <div className="flex items-center justify-between px-5 py-3 bg-gray-50 border-b border-gray-100">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
+                          <svg className="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                          </svg>
+                        </div>
+                        <div>
+                          <p className="font-semibold text-gray-800 text-sm">{tmpl.name}</p>
+                          <p className="text-xs text-gray-400">Grade {tmpl.from_grade} – {tmpl.to_grade} · {tmpl.subjects.length} subjects</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setEditingTmpl(isEditing ? null : { ...tmpl })}
+                          className="text-xs px-3 py-1.5 border border-indigo-200 text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium transition-colors">
+                          {isEditing ? 'Collapse' : 'Edit'}
+                        </button>
+                        <button onClick={() => deleteTemplate(tmpl.id)}
+                          className="text-xs px-3 py-1.5 border border-red-200 text-red-500 hover:bg-red-50 rounded-lg font-medium transition-colors">
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Subject list */}
+                    {isEditing ? (
+                      <div className="p-4 space-y-3">
+                        {/* Existing subjects */}
+                        <div className="space-y-1.5">
+                          {current.subjects.length === 0 ? (
+                            <p className="text-sm text-gray-400 text-center py-3">No subjects yet. Add below.</p>
+                          ) : current.subjects.map((s, idx) => (
+                            <div key={idx} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <div className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                                <span className="text-sm font-medium text-gray-800">{s.name}</span>
+                                <span className="text-xs text-gray-400">{s.periods_per_week}/week</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <input type="number" min={1} max={12} value={s.periods_per_week}
+                                  onChange={e => {
+                                    const updated = { ...current, subjects: current.subjects.map((sub, i) => i === idx ? { ...sub, periods_per_week: parseInt(e.target.value) || 4 } : sub) }
+                                    setEditingTmpl(updated)
+                                  }}
+                                  className="w-14 border border-gray-200 rounded px-2 py-0.5 text-xs text-center" />
+                                <span className="text-xs text-gray-400">/wk</span>
+                                <button onClick={() => setEditingTmpl({ ...current, subjects: current.subjects.filter((_, i) => i !== idx) })}
+                                  className="text-red-300 hover:text-red-500 text-sm leading-none">✕</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Add subject row */}
+                        <div className="flex gap-2 pt-1 border-t border-gray-100">
+                          <input value={newSubjectName} onChange={e => setNewSubjectName(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addSubjectToTemplate(current) } }}
+                            placeholder="Subject name (e.g. Mathematics)"
+                            className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                          <input type="number" min={1} max={12} value={newSubjectPPW} onChange={e => setNewSubjectPPW(e.target.value)}
+                            className="w-20 border border-gray-200 rounded-lg px-3 py-2 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-300" placeholder="Periods" />
+                          <button onClick={() => addSubjectToTemplate(current)} disabled={!newSubjectName.trim()}
+                            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                            Add
+                          </button>
+                        </div>
+
+                        <div className="flex gap-2 pt-1">
+                          <button onClick={() => saveTemplate(current)}
+                            className="px-5 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors">
+                            Save Template
+                          </button>
+                          <button onClick={() => setEditingTmpl(null)}
+                            className="px-5 py-2 border border-gray-200 text-gray-600 text-sm rounded-lg hover:bg-gray-50">
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="px-5 py-3 flex flex-wrap gap-2">
+                        {tmpl.subjects.length === 0 ? (
+                          <p className="text-xs text-gray-400">No subjects — click Edit to add</p>
+                        ) : tmpl.subjects.map((s, i) => (
+                          <span key={i} className="text-xs bg-indigo-50 border border-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full font-medium">
+                            {s.name} <span className="text-indigo-400 font-normal">·{s.periods_per_week}/wk</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
       )}
     </div>
   )

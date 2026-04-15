@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 
@@ -16,6 +16,7 @@ type School = {
   address?: string
   school_code?: string
   created_at: string
+  deleted_at?: string
   tier?: string
   teacher_count?: number
   student_count?: number
@@ -40,37 +41,52 @@ const TIER_BADGE: Record<string, string> = {
   none:     'bg-gray-100 text-gray-500',
 }
 
+type Tab = 'active' | 'inactive' | 'deleted'
+
 export default function PlatformAdmin() {
   const router = useRouter()
-  const [schools, setSchools]         = useState<School[]>([])
-  const [stats, setStats]             = useState<PlatformStats | null>(null)
-  const [loading, setLoading]         = useState(true)
-  const [error, setError]             = useState('')
-  const [showModal, setShowModal]     = useState(false)
-  const [submitting, setSubmitting]   = useState(false)
-  const [search, setSearch]           = useState('')
-  const [filterTier, setFilterTier]   = useState<string>('all')
-  const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [tab, setTab]                   = useState<Tab>('active')
+  const [schools, setSchools]           = useState<School[]>([])
+  const [stats, setStats]               = useState<PlatformStats | null>(null)
+  const [loading, setLoading]           = useState(true)
+  const [error, setError]               = useState('')
+  const [showModal, setShowModal]       = useState(false)
+  const [submitting, setSubmitting]     = useState(false)
+  const [search, setSearch]             = useState('')
+  const [filterTier, setFilterTier]     = useState<string>('all')
   const [createdSchool, setCreatedSchool] = useState<{ name: string; code: string; pass: string } | null>(null)
   const [form, setForm] = useState<FormData>({
     name: '', type: 'Private', city: '', country: '', phone: '', email: '', address: '',
   })
 
-  useEffect(() => {
-    fetch('/api/init')
-      .then(() => Promise.all([fetchSchools(), fetchStats()]))
-      .catch(() => setError('Cannot connect to database.'))
-  }, [])
+  const scopeForTab: Record<Tab, string> = {
+    active:   'active',
+    inactive: 'inactive',
+    deleted:  'deleted',
+  }
 
-  async function fetchSchools() {
+  const fetchSchools = useCallback(async (t: Tab = tab) => {
     setLoading(true)
     try {
-      const res = await fetch('/api/schools')
+      const res = await fetch(`/api/schools?scope=${scopeForTab[t]}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setSchools(data)
     } catch { setError('Failed to load schools') }
     finally { setLoading(false) }
+  }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    fetch('/api/init')
+      .then(() => Promise.all([fetchSchools(tab), fetchStats()]))
+      .catch(() => setError('Cannot connect to database.'))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function switchTab(t: Tab) {
+    setTab(t)
+    setSearch('')
+    setFilterTier('all')
+    fetchSchools(t)
   }
 
   async function fetchStats() {
@@ -91,10 +107,10 @@ export default function PlatformAdmin() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setSchools(prev => [data, ...prev])
       setShowModal(false)
       setForm({ name: '', type: 'Private', city: '', country: '', phone: '', email: '', address: '' })
       setCreatedSchool({ name: data.name, code: data.school_code, pass: data.temp_password })
+      fetchSchools('active')
       fetchStats()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to create school')
@@ -111,19 +127,33 @@ export default function PlatformAdmin() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setSchools(prev => prev.map(s => s.id === school.id ? { ...s, status: newStatus } : s))
+      setSchools(prev => prev.filter(s => s.id !== school.id))
       fetchStats()
     } catch { setError('Failed to update school status') }
   }
 
   async function handleDelete(id: number, name: string) {
-    if (!confirm(`Delete "${name}"? All its data (teachers, students, timetables) will be permanently removed.`)) return
+    if (!confirm(`Delete "${name}"?\n\nThe school will be soft-deleted — all data is preserved and can be restored later.`)) return
     try {
       const res = await fetch(`/api/schools/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
       setSchools(prev => prev.filter(s => s.id !== id))
       fetchStats()
     } catch { setError('Failed to delete school') }
+  }
+
+  async function handleRestore(id: number, name: string) {
+    if (!confirm(`Restore "${name}"? It will become active again.`)) return
+    try {
+      const res = await fetch(`/api/schools/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ restore: true }),
+      })
+      if (!res.ok) throw new Error()
+      setSchools(prev => prev.filter(s => s.id !== id))
+      fetchStats()
+    } catch { setError('Failed to restore school') }
   }
 
   async function handleLogout() {
@@ -137,12 +167,18 @@ export default function PlatformAdmin() {
       (s.city || '').toLowerCase().includes(search.toLowerCase()) ||
       (s.school_code || '').toLowerCase().includes(search.toLowerCase())
     )
-    const matchTier   = filterTier === 'all'   || (s.tier || 'none') === filterTier
-    const matchStatus = filterStatus === 'all' || s.status === filterStatus
-    return matchSearch && matchTier && matchStatus
+    const matchTier = filterTier === 'all' || (s.tier || 'none') === filterTier
+    return matchSearch && matchTier
   })
 
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-purple-300'
+
+  const tabCls = (t: Tab) =>
+    `px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+      tab === t
+        ? 'bg-white text-gray-900 shadow-sm border border-gray-200'
+        : 'text-gray-500 hover:text-gray-700'
+    }`
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -244,26 +280,37 @@ export default function PlatformAdmin() {
           </button>
         </div>
 
+        {/* Tabs */}
+        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl mb-4 w-fit">
+          <button onClick={() => switchTab('active')}   className={tabCls('active')}>Active Schools</button>
+          <button onClick={() => switchTab('inactive')} className={tabCls('inactive')}>Inactive</button>
+          <button onClick={() => switchTab('deleted')}  className={tabCls('deleted')}>Deleted</button>
+        </div>
+
         {/* Filters */}
         <div className="flex gap-3 mb-4">
-          <input type="text" placeholder="Search by name, city, school code…" value={search}
-            onChange={e => setSearch(e.target.value)}
+          <input type="text"
+            placeholder={tab === 'deleted' ? 'Search deleted schools…' : 'Search by name, city, school code…'}
+            value={search} onChange={e => setSearch(e.target.value)}
             className="flex-1 border border-gray-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 bg-white" />
-          <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-            className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300 text-gray-700">
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
-          <select value={filterTier} onChange={e => setFilterTier(e.target.value)}
-            className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300 text-gray-700">
-            <option value="all">All Plans</option>
-            <option value="none">No Plan</option>
-            <option value="basic">Basic</option>
-            <option value="standard">Standard</option>
-            <option value="premium">Premium</option>
-          </select>
+          {tab !== 'deleted' && (
+            <select value={filterTier} onChange={e => setFilterTier(e.target.value)}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300 text-gray-700">
+              <option value="all">All Plans</option>
+              <option value="none">No Plan</option>
+              <option value="basic">Basic</option>
+              <option value="standard">Standard</option>
+              <option value="premium">Premium</option>
+            </select>
+          )}
         </div>
+
+        {/* Deleted tab notice */}
+        {tab === 'deleted' && (
+          <div className="mb-4 bg-amber-50 border border-amber-200 text-amber-700 px-4 py-3 rounded-lg text-sm">
+            Soft-deleted schools — all data is preserved. Use <strong>Restore</strong> to reactivate.
+          </div>
+        )}
 
         {/* Table */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -271,12 +318,66 @@ export default function PlatformAdmin() {
             <div className="py-16 text-center text-gray-400">Loading schools…</div>
           ) : filtered.length === 0 ? (
             <div className="py-16 text-center">
-              <p className="text-gray-400 text-lg">{search || filterTier !== 'all' || filterStatus !== 'all' ? 'No schools match your filters' : 'No schools yet'}</p>
-              {!search && filterTier === 'all' && filterStatus === 'all' && (
+              <p className="text-gray-400 text-lg">
+                {search || filterTier !== 'all'
+                  ? 'No schools match your filters'
+                  : tab === 'deleted'   ? 'No deleted schools'
+                  : tab === 'inactive' ? 'No inactive schools'
+                  : 'No active schools yet'}
+              </p>
+              {!search && filterTier === 'all' && tab === 'active' && (
                 <p className="text-gray-300 text-sm mt-1">Click &quot;Add School&quot; to register the first school</p>
               )}
             </div>
+          ) : tab === 'deleted' ? (
+            /* ── Deleted schools table ── */
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-5 py-3 font-medium text-gray-500">School</th>
+                  <th className="text-left px-5 py-3 font-medium text-gray-500">School ID</th>
+                  <th className="text-left px-5 py-3 font-medium text-gray-500">Staff / Students</th>
+                  <th className="text-left px-5 py-3 font-medium text-gray-500">Deleted On</th>
+                  <th className="text-left px-5 py-3 font-medium text-gray-500">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filtered.map(school => (
+                  <tr key={school.id} className="hover:bg-red-50/30 transition-colors opacity-75">
+                    <td className="px-5 py-3.5">
+                      <span className="font-medium text-gray-600 line-through">{school.name}</span>
+                      <div className="text-gray-400 text-xs mt-0.5">{school.type}</div>
+                    </td>
+                    <td className="px-5 py-3.5">
+                      {school.school_code
+                        ? <code className="text-xs bg-gray-50 text-gray-500 border border-gray-200 px-2 py-1 rounded font-mono">{school.school_code}</code>
+                        : <span className="text-gray-300 text-xs">—</span>}
+                    </td>
+                    <td className="px-5 py-3.5 text-gray-500 text-xs">
+                      <div><span className="font-medium">{school.teacher_count ?? '—'}</span> teachers</div>
+                      <div><span className="font-medium">{school.student_count ?? '—'}</span> students</div>
+                    </td>
+                    <td className="px-5 py-3.5 text-gray-400 text-xs">
+                      {school.deleted_at ? new Date(school.deleted_at).toLocaleDateString() : '—'}
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-2">
+                        <Link href={`/platform-admin/schools/${school.id}`}
+                          className="text-xs px-2.5 py-1 rounded border border-gray-200 hover:bg-gray-50 text-gray-500 transition-colors">
+                          View Data
+                        </Link>
+                        <button onClick={() => handleRestore(school.id, school.name)}
+                          className="text-xs px-2.5 py-1 rounded border border-green-200 hover:bg-green-50 text-green-600 font-medium transition-colors">
+                          Restore
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           ) : (
+            /* ── Active / Inactive schools table ── */
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
@@ -326,7 +427,11 @@ export default function PlatformAdmin() {
                           Manage
                         </Link>
                         <button onClick={() => toggleStatus(school)}
-                          className="text-xs px-2.5 py-1 rounded border border-gray-200 hover:bg-gray-50 text-gray-600 transition-colors">
+                          className={`text-xs px-2.5 py-1 rounded border transition-colors ${
+                            school.status === 'active'
+                              ? 'border-gray-200 hover:bg-gray-50 text-gray-600'
+                              : 'border-green-200 hover:bg-green-50 text-green-600 font-medium'
+                          }`}>
                           {school.status === 'active' ? 'Deactivate' : 'Activate'}
                         </button>
                         <button onClick={() => handleDelete(school.id, school.name)}
@@ -368,23 +473,23 @@ export default function PlatformAdmin() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
-                  <input type="text" value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))}
+                  <label className="block text-sm font-medium text-gray-700 mb-1">City <span className="text-red-500">*</span></label>
+                  <input type="text" required value={form.city} onChange={e => setForm(f => ({ ...f, city: e.target.value }))}
                     placeholder="Mumbai" className={inputCls} />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
-                <input type="text" value={form.country} onChange={e => setForm(f => ({ ...f, country: e.target.value }))}
+                <label className="block text-sm font-medium text-gray-700 mb-1">Country <span className="text-red-500">*</span></label>
+                <input type="text" required value={form.country} onChange={e => setForm(f => ({ ...f, country: e.target.value }))}
                   placeholder="India" className={inputCls} />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  School Email <span className="text-gray-400 font-normal text-xs">(login credentials sent here)</span>
+                  School Email <span className="text-red-500">*</span> <span className="text-gray-400 font-normal text-xs">(login credentials sent here)</span>
                 </label>
-                <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                <input type="email" required value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
                   placeholder="admin@schoolname.edu" className={inputCls} />
               </div>
 
@@ -415,7 +520,7 @@ export default function PlatformAdmin() {
         </div>
       )}
 
-      {/* Credentials Modal */}
+      {/* School Created Credentials Modal */}
       {createdSchool && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
@@ -447,7 +552,7 @@ export default function PlatformAdmin() {
                 </div>
               </div>
               <p className="text-xs text-gray-400 mt-3 bg-gray-50 rounded-lg px-3 py-2">
-                ⚠️ The school admin will be asked to change this password on first login.
+                The school admin will be asked to change this password on first login.
               </p>
               <button onClick={() => setCreatedSchool(null)}
                 className="w-full mt-4 bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-xl text-sm font-medium transition-colors">

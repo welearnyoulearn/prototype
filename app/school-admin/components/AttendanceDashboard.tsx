@@ -45,6 +45,14 @@ type ClassAttendance = {
   afternoon_marked_at: string | null
 }
 
+type StudentRecord = {
+  student_id: number
+  student_name: string
+  roll_number: string
+  session: string
+  status: 'present' | 'absent' | 'late'
+}
+
 function fmt(t: string | null) {
   if (!t) return null
   return new Date(t).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
@@ -121,6 +129,10 @@ export default function AttendanceDashboard({ schoolId }: Props) {
   const [analyticsDays, setAnalyticsDays]   = useState(30)
   const [analytics, setAnalytics]           = useState<{ chronic_absentees: ChronicAbsentee[]; weekly_trend: WeeklyTrend[]; class_summary: ClassSummary[] } | null>(null)
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
+  // Class detail modal
+  const [modalClass, setModalClass]         = useState<ClassAttendance | null>(null)
+  const [modalRecords, setModalRecords]     = useState<StudentRecord[]>([])
+  const [modalLoading, setModalLoading]     = useState(false)
 
   const load = useCallback(async (d: string) => {
     setLoading(true)
@@ -152,6 +164,18 @@ export default function AttendanceDashboard({ schoolId }: Props) {
     } finally { setAnalyticsLoading(false) }
   }
 
+  async function openClassDetail(cls: ClassAttendance) {
+    setModalClass(cls)
+    setModalRecords([])
+    setModalLoading(true)
+    try {
+      const res = await fetch(`/api/attendance?class_id=${cls.id}&school_id=${schoolId}&date=${date}`)
+      const rows = await res.json()
+      setModalRecords(Array.isArray(rows) ? rows : [])
+    } catch { /* ignore */ }
+    finally { setModalLoading(false) }
+  }
+
   const totalClasses = data.length
   const morningDone = data.filter(c => !!c.morning_total).length
   const afternoonDone = data.filter(c => !!c.afternoon_total).length
@@ -164,7 +188,7 @@ export default function AttendanceDashboard({ schoolId }: Props) {
   return (
     <div>
       {/* Offline banner */}
-      {!isOnline && (
+      {!isOnline && !modalClass && (
         <div className="mb-4 bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="text-amber-600 text-lg">📶</span>
@@ -177,7 +201,7 @@ export default function AttendanceDashboard({ schoolId }: Props) {
           </div>
         </div>
       )}
-      {isOnline && queue.length > 0 && (
+      {isOnline && queue.length > 0 && !modalClass && (
         <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
           <div>
             <p className="text-sm font-semibold text-blue-800">Back online — syncing queued attendance</p>
@@ -198,8 +222,8 @@ export default function AttendanceDashboard({ schoolId }: Props) {
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+      {/* Header — hidden when viewing class detail */}
+      <div className={`flex items-center justify-between mb-5 flex-wrap gap-3 ${modalClass ? 'hidden' : ''}`}>
         <div>
           <h2 className="text-xl font-bold text-gray-900">Attendance</h2>
           <p className="text-sm text-gray-500 mt-0.5">Daily register and attendance analytics</p>
@@ -234,7 +258,7 @@ export default function AttendanceDashboard({ schoolId }: Props) {
         </div>
       </div>
 
-      {tab === 'daily' && <p className="text-sm text-gray-500 mb-4">{dateFormatted}</p>}
+      {tab === 'daily' && !modalClass && <p className="text-sm text-gray-500 mb-4">{dateFormatted}</p>}
 
       {tab === 'analytics' && (
         <AttendanceAnalyticsPanel
@@ -244,7 +268,153 @@ export default function AttendanceDashboard({ schoolId }: Props) {
         />
       )}
 
-      {tab === 'daily' && <>
+      {/* ── Class Detail Full Page View ── */}
+      {tab === 'daily' && modalClass && (
+        <div>
+          {/* Back header */}
+          <div className="flex items-center gap-3 mb-5">
+            <button onClick={() => setModalClass(null)}
+              className="flex items-center justify-center w-9 h-9 rounded-xl bg-gray-100 hover:bg-gray-200 transition-colors text-gray-600">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <div>
+              <h3 className="text-xl font-bold text-gray-900">Class {modalClass.grade}-{modalClass.section}</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                {modalClass.class_teacher_name && ` · CT: ${modalClass.class_teacher_name}`}
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-5">
+            {/* Session summary */}
+            <div className="grid grid-cols-2 gap-3">
+              {/* Morning */}
+              <div className={`rounded-xl border p-4 ${modalClass.morning_total ? 'bg-orange-50 border-orange-200' : 'bg-gray-50 border-gray-200'}`}>
+                <p className="text-sm font-bold text-gray-700 mb-2">🌅 Morning Session</p>
+                {modalClass.morning_total ? (
+                  <>
+                    <div className="flex gap-4 mb-2">
+                      <div><p className="text-2xl font-black text-green-600">{modalClass.morning_present ?? 0}</p><p className="text-[10px] text-gray-400">Present</p></div>
+                      <div><p className="text-2xl font-black text-red-500">{modalClass.morning_absent ?? 0}</p><p className="text-[10px] text-gray-400">Absent</p></div>
+                      <div><p className="text-2xl font-black text-yellow-500">{modalClass.morning_late ?? 0}</p><p className="text-[10px] text-gray-400">Late</p></div>
+                      <div><p className="text-2xl font-black text-gray-700">{modalClass.morning_total}</p><p className="text-[10px] text-gray-400">Total</p></div>
+                    </div>
+                    {modalClass.morning_marked_by && (
+                      <p className="text-xs text-gray-500">Marked by <span className="font-semibold text-gray-800">{modalClass.morning_marked_by}</span>
+                        {modalClass.morning_marked_at && <span className="text-gray-400"> · {fmt(modalClass.morning_marked_at)}</span>}
+                      </p>
+                    )}
+                  </>
+                ) : <p className="text-xs text-gray-400">Not marked yet</p>}
+              </div>
+              {/* Afternoon */}
+              <div className={`rounded-xl border p-4 ${modalClass.afternoon_total ? 'bg-purple-50 border-purple-200' : 'bg-gray-50 border-gray-200'}`}>
+                <p className="text-sm font-bold text-gray-700 mb-2">🌆 Afternoon Session</p>
+                {modalClass.afternoon_total ? (
+                  <>
+                    <div className="flex gap-4 mb-2">
+                      <div><p className="text-2xl font-black text-green-600">{modalClass.afternoon_present ?? 0}</p><p className="text-[10px] text-gray-400">Present</p></div>
+                      <div><p className="text-2xl font-black text-red-500">{modalClass.afternoon_absent ?? 0}</p><p className="text-[10px] text-gray-400">Absent</p></div>
+                      <div><p className="text-2xl font-black text-yellow-500">{modalClass.afternoon_late ?? 0}</p><p className="text-[10px] text-gray-400">Late</p></div>
+                      <div><p className="text-2xl font-black text-gray-700">{modalClass.afternoon_total}</p><p className="text-[10px] text-gray-400">Total</p></div>
+                    </div>
+                    {modalClass.afternoon_marked_by && (
+                      <p className="text-xs text-gray-500">Marked by <span className="font-semibold text-gray-800">{modalClass.afternoon_marked_by}</span>
+                        {modalClass.afternoon_marked_at && <span className="text-gray-400"> · {fmt(modalClass.afternoon_marked_at)}</span>}
+                      </p>
+                    )}
+                  </>
+                ) : <p className="text-xs text-gray-400">Not marked yet</p>}
+              </div>
+            </div>
+
+            {/* Student list */}
+            {modalLoading ? (
+              <div className="py-10 text-center text-gray-400 text-sm">Loading student records...</div>
+            ) : modalRecords.length === 0 ? (
+              <div className="py-10 text-center bg-gray-50 rounded-xl border border-gray-200">
+                <p className="text-gray-400 text-sm">No attendance marked for this class on this date</p>
+              </div>
+            ) : (() => {
+              const studentMap = new Map<number, { name: string; roll: string; morning: string | null; afternoon: string | null }>()
+              modalRecords.forEach(r => {
+                if (!studentMap.has(r.student_id)) {
+                  studentMap.set(r.student_id, { name: r.student_name, roll: r.roll_number, morning: null, afternoon: null })
+                }
+                const entry = studentMap.get(r.student_id)!
+                if (r.session === 'morning') entry.morning = r.status
+                if (r.session === 'afternoon') entry.afternoon = r.status
+              })
+              const students = Array.from(studentMap.values())
+              const absent = students.filter(s => s.morning === 'absent' || s.afternoon === 'absent')
+              const late   = students.filter(s => (s.morning === 'late' || s.afternoon === 'late') && s.morning !== 'absent' && s.afternoon !== 'absent')
+
+              const statusBadge = (st: string | null) => {
+                if (!st) return <span className="text-[10px] text-gray-300">—</span>
+                return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                  st === 'present' ? 'bg-green-100 text-green-700' :
+                  st === 'absent'  ? 'bg-red-100 text-red-700' :
+                  'bg-yellow-100 text-yellow-700'
+                }`}>{st.charAt(0).toUpperCase() + st.slice(1)}</span>
+              }
+
+              return (
+                <div className="space-y-3">
+                  {(absent.length > 0 || late.length > 0) && (
+                    <div className="flex gap-3">
+                      {absent.length > 0 && (
+                        <div className="flex-1 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                          <p className="text-xs font-bold text-red-700 mb-2">Absent · {absent.length}</p>
+                          <div className="space-y-1">
+                            {absent.map((s, i) => (
+                              <p key={i} className="text-xs text-gray-700">{s.name} <span className="text-gray-400">#{s.roll}</span></p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {late.length > 0 && (
+                        <div className="flex-1 bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3">
+                          <p className="text-xs font-bold text-yellow-700 mb-2">Late · {late.length}</p>
+                          <div className="space-y-1">
+                            {late.map((s, i) => (
+                              <p key={i} className="text-xs text-gray-700">{s.name} <span className="text-gray-400">#{s.roll}</span></p>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 grid grid-cols-[1fr_80px_80px] text-[10px] font-semibold text-gray-500 uppercase">
+                      <span>Student</span>
+                      <span className="text-center">Morning</span>
+                      <span className="text-center">Afternoon</span>
+                    </div>
+                    <div className="divide-y divide-gray-50">
+                      {students.map((s, i) => (
+                        <div key={i} className="grid grid-cols-[1fr_80px_80px] items-center px-4 py-2.5">
+                          <div>
+                            <p className="text-sm font-medium text-gray-800">{s.name}</p>
+                            {s.roll && <p className="text-[10px] text-gray-400">#{s.roll}</p>}
+                          </div>
+                          <div className="text-center">{statusBadge(s.morning)}</div>
+                          <div className="text-center">{statusBadge(s.afternoon)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
+          </div>
+        </div>
+      )}
+
+      {tab === 'daily' && !modalClass && <>
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
           {error}
@@ -343,20 +513,17 @@ export default function AttendanceDashboard({ schoolId }: Props) {
             const bothMarked = !!cls.morning_total && !!cls.afternoon_total
             const noneMarked = !cls.morning_total && !cls.afternoon_total
             return (
-              <div key={cls.id} className={`bg-white rounded-xl border p-4 ${
-                bothMarked ? 'border-green-200' :
-                noneMarked ? 'border-red-200' :
-                'border-orange-200'
-              }`}>
+              <button key={cls.id} onClick={() => openClassDetail(cls)}
+                className={`text-left bg-white rounded-xl border p-4 hover:shadow-md transition-all cursor-pointer w-full ${
+                  bothMarked ? 'border-green-200 hover:border-green-400' :
+                  noneMarked ? 'border-red-200 hover:border-red-400' :
+                  'border-orange-200 hover:border-orange-400'
+                }`}>
                 {/* Class header */}
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <p className="text-lg font-bold text-gray-900">
-                      Class {cls.grade}-{cls.section}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5 truncate">
-                      CT: {cls.class_teacher_name || 'Not assigned'}
-                    </p>
+                    <p className="text-lg font-bold text-gray-900">Class {cls.grade}-{cls.section}</p>
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">CT: {cls.class_teacher_name || 'Not assigned'}</p>
                   </div>
                   <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
                     bothMarked ? 'bg-green-100 text-green-700' :
@@ -366,34 +533,19 @@ export default function AttendanceDashboard({ schoolId }: Props) {
                     {bothMarked ? 'Complete' : noneMarked ? 'Pending' : 'Partial'}
                   </span>
                 </div>
-
                 {/* Morning + Afternoon side by side */}
                 <div className="grid grid-cols-2 gap-2">
-                  <SessionCell
-                    session="morning"
-                    total={cls.morning_total}
-                    present={cls.morning_present}
-                    absent={cls.morning_absent}
-                    late={cls.morning_late}
-                    markedBy={cls.morning_marked_by}
-                    markedAt={cls.morning_marked_at}
-                  />
-                  <SessionCell
-                    session="afternoon"
-                    total={cls.afternoon_total}
-                    present={cls.afternoon_present}
-                    absent={cls.afternoon_absent}
-                    late={cls.afternoon_late}
-                    markedBy={cls.afternoon_marked_by}
-                    markedAt={cls.afternoon_marked_at}
-                  />
+                  <SessionCell session="morning" total={cls.morning_total} present={cls.morning_present} absent={cls.morning_absent} late={cls.morning_late} markedBy={cls.morning_marked_by} markedAt={cls.morning_marked_at} />
+                  <SessionCell session="afternoon" total={cls.afternoon_total} present={cls.afternoon_present} absent={cls.afternoon_absent} late={cls.afternoon_late} markedBy={cls.afternoon_marked_by} markedAt={cls.afternoon_marked_at} />
                 </div>
-              </div>
+                <p className="text-[10px] text-gray-300 mt-2 text-right">Click for details →</p>
+              </button>
             )
           })}
         </div>
       )}
       </> /* end daily tab */}
+
     </div>
   )
 }

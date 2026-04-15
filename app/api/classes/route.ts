@@ -15,11 +15,11 @@ export async function GET(req: NextRequest) {
   try {
     const result = await pool.query(
       `SELECT c.*, t.name AS class_teacher_name,
-              (SELECT COUNT(*) FROM students s WHERE s.grade = c.grade AND s.section = c.section AND s.school_id = c.school_id) AS student_count
+              (SELECT COUNT(*) FROM students s WHERE s.grade = c.grade AND s.section = c.section AND s.school_id = c.school_id AND s.status = 'active') AS student_count
        FROM classes c
        LEFT JOIN teachers t ON c.class_teacher_id = t.id
        WHERE c.school_id = $1
-       ORDER BY c.grade, c.section`,
+       ORDER BY (NULLIF(regexp_replace(c.grade,'[^0-9]','','g'),''))::int NULLS LAST, c.section`,
       [school_id]
     )
     setCache(cacheKey, result.rows, 60_000)

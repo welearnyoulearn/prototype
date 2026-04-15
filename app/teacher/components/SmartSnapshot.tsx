@@ -247,7 +247,10 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
     const cls = classSet.get(key)!
     if (p.subject && !cls.subjects.includes(p.subject)) cls.subjects.push(p.subject)
   })
-  const myClasses = Array.from(classSet.values())
+  const myClasses = Array.from(classSet.values()).sort((a, b) => {
+    const ga = parseInt(a.grade) || 0, gb = parseInt(b.grade) || 0
+    return ga !== gb ? ga - gb : a.section.localeCompare(b.section)
+  })
 
   const dateStr = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })
 

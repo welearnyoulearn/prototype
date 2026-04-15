@@ -13,15 +13,19 @@ type Student = { id: number; name: string; roll_number: string; email: string; p
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
-function getSuggestedSubjects(grade: string): string[] {
+function getSuggestedSubjects(grade: string, curriculum: 'CBSE' | 'APSSC' | 'SSC' | 'both'): string[] {
   const g = String(grade)
-  const cbse = CURRICULA['CBSE']?.find(x => x.grade === g)
-  const apssc = CURRICULA['APSSC']?.find(x => x.grade === g)
   const names = new Set<string>()
-  cbse?.subjects.forEach(s => names.add(s.name))
-  apssc?.subjects.forEach(s => names.add(s.name))
+
+  if (curriculum === 'CBSE' || curriculum === 'both') {
+    CURRICULA['CBSE']?.find(x => x.grade === g)?.subjects.forEach(s => names.add(s.name))
+  }
+  if (curriculum === 'APSSC' || curriculum === 'SSC' || curriculum === 'both') {
+    // SSC and APSSC use the same curriculum data
+    CURRICULA['APSSC']?.find(x => x.grade === g)?.subjects.forEach(s => names.add(s.name))
+  }
   if (names.size === 0) {
-    ['English', 'Mathematics', 'Science', 'Social Science', 'Hindi', 'Physical Education'].forEach(s => names.add(s))
+    ;['English', 'Mathematics', 'Science', 'Social Science', 'Telugu', 'Physical Education'].forEach(s => names.add(s))
   }
   return Array.from(names)
 }
@@ -38,13 +42,27 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
 
   // Add class form
   const [showAdd, setShowAdd] = useState(false)
-  const [newClass, setNewClass] = useState({ grade: '', section: '', class_teacher_id: '' })
+  const [newClass, setNewClass] = useState({ grade: '', section: '' })
   const [addingClass, setAddingClass] = useState(false)
   const [setupMsg, setSetupMsg] = useState<string | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
+  // Default subject sets panel (replaces school settings)
+  const [showDefaultSets, setShowDefaultSets] = useState(false)
+  const [allTemplates, setAllTemplates] = useState<{ id: number; name: string; from_grade: number; to_grade: number; subjects: { name: string; periods_per_week: number }[] }[]>([])
+  const [loadingTemplates, setLoadingTemplates] = useState(false)
+  const [newSetName, setNewSetName] = useState('')
+  const [newSetFrom, setNewSetFrom] = useState('1')
+  const [newSetTo, setNewSetTo] = useState('5')
+  const [newSetSubjects, setNewSetSubjects] = useState<{ name: string }[]>([{ name: '' }])
+  const [newSetCurriculum, setNewSetCurriculum] = useState<'CBSE' | 'APSSC' | 'SSC' | 'both'>('both')
+  const [showSetSuggestions, setShowSetSuggestions] = useState(true)
+  const [savingSet, setSavingSet] = useState(false)
+  const [setMsg, setSetMsg] = useState<string | null>(null)
 
   const inp = 'border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300'
 
-  useEffect(() => { loadData() }, [schoolId])
+  useEffect(() => { loadData(); autoSync() }, [schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadData() {
     setLoading(true)
@@ -54,7 +72,10 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
         fetch(`/api/teachers?school_id=${schoolId}`).then(r => r.json()),
       ])
       setClasses(Array.isArray(cls) ? cls : [])
-      setTeachers(Array.isArray(tch) ? tch : [])
+      if (Array.isArray(tch)) {
+        const seen = new Set<number>()
+        setTeachers(tch.filter((t: Teacher) => { if (seen.has(t.id)) return false; seen.add(t.id); return true }))
+      } else { setTeachers([]) }
     } catch { setError('Failed to load') }
     finally { setLoading(false) }
   }
@@ -72,7 +93,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
       // Step 1: Create class — backend auto-assigns subjects + teachers
       const res = await fetch('/api/classes', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, grade, section, class_teacher_id: newClass.class_teacher_id || null }),
+        body: JSON.stringify({ school_id: schoolId, grade, section }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
@@ -86,7 +107,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
         body: JSON.stringify({ school_id: schoolId, class_id: data.id }),
       })
 
-      setNewClass({ grade: '', section: '', class_teacher_id: '' })
+      setNewClass({ grade: '', section: '' })
       setShowAdd(false)
       setSetupMsg(null)
       await loadData()
@@ -108,6 +129,74 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
     } catch { setError('Failed to delete class') }
   }
 
+  async function autoSync() {
+    try {
+      const res = await fetch('/api/classes/sync', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId }),
+      })
+      const data = await res.json()
+      if (res.ok && (data.created > 0 || data.removed > 0)) await loadData()
+    } catch { /* silent */ }
+  }
+
+  async function loadAllTemplates() {
+    setLoadingTemplates(true)
+    try {
+      const data = await fetch(`/api/schools/subject-templates?school_id=${schoolId}`).then(r => r.json())
+      setAllTemplates(Array.isArray(data) ? data : [])
+    } finally { setLoadingTemplates(false) }
+  }
+
+  async function saveDefaultSet(e: React.FormEvent) {
+    e.preventDefault()
+    const validSubjects = newSetSubjects.filter(s => s.name.trim())
+    if (!newSetName.trim() || validSubjects.length === 0) return
+    setSavingSet(true); setSetMsg(null)
+    try {
+      const res = await fetch('/api/schools/subject-templates', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId, name: newSetName.trim(),
+          from_grade: parseInt(newSetFrom), to_grade: parseInt(newSetTo),
+          subjects: validSubjects.map(s => ({ name: s.name.trim(), periods_per_week: 4 })),
+        }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error)
+      setSetMsg('✓ Default set saved')
+      setNewSetName(''); setNewSetFrom('1'); setNewSetTo('5'); setNewSetSubjects([{ name: '' }])
+      await loadAllTemplates()
+    } catch (err: unknown) {
+      setSetMsg(err instanceof Error ? err.message : 'Failed to save')
+    } finally { setSavingSet(false) }
+  }
+
+  async function deleteDefaultSet(id: number) {
+    if (!confirm('Delete this default subject set?')) return
+    await fetch(`/api/schools/subject-templates?id=${id}`, { method: 'DELETE' })
+    setAllTemplates(prev => prev.filter(t => t.id !== id))
+  }
+
+  async function syncFromStudents() {
+    setSyncing(true); setSyncMsg(null)
+    try {
+      const res = await fetch('/api/classes/sync', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      const parts: string[] = []
+      if (data.created > 0) parts.push(`+${data.created} added (${data.created_classes.join(', ')})`)
+      if (data.removed > 0) parts.push(`−${data.removed} removed (${data.removed_classes.join(', ')})`)
+      setSyncMsg(parts.length > 0 ? `✓ ${parts.join(' · ')}` : '✓ Already in sync')
+      if (data.created > 0 || data.removed > 0) await loadData()
+      setTimeout(() => setSyncMsg(null), 5000)
+    } catch (err: unknown) {
+      setSyncMsg(err instanceof Error ? err.message : 'Sync failed')
+    } finally { setSyncing(false) }
+  }
+
   // Group by grade
   const byGrade: Record<string, ClassRow[]> = {}
   for (const c of classes) {
@@ -119,7 +208,12 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
     return isNaN(na) || isNaN(nb) ? a.localeCompare(b) : na - nb
   })
 
-  if (loading) return <div className="py-12 text-center text-gray-400 text-sm">Loading classes...</div>
+  if (loading) return (
+    <div className="py-16 flex flex-col items-center justify-center gap-3">
+      <div className="w-10 h-10 rounded-full border-3 border-gray-200 border-t-violet-600 animate-spin" style={{ borderWidth: 3 }} />
+      <p className="text-gray-400 text-sm">Loading classes…</p>
+    </div>
+  )
 
   return (
     <div className="flex gap-0 h-full min-h-[600px]">
@@ -127,9 +221,31 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
       <div className="w-56 flex-shrink-0 border-r border-gray-200 flex flex-col bg-white rounded-l-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
           <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Classes</span>
-          <button onClick={() => setShowAdd(v => !v)}
-            className="w-6 h-6 flex items-center justify-center bg-violet-600 hover:bg-violet-700 text-white rounded-md text-sm font-bold transition-colors">+</button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => { setShowDefaultSets(v => !v); setSelectedId(null); if (!allTemplates.length) loadAllTemplates() }}
+              title="Default Subject Sets"
+              className={`w-6 h-6 flex items-center justify-center rounded-md text-xs transition-colors ${showDefaultSets ? 'bg-indigo-600 text-white' : 'bg-gray-100 hover:bg-gray-200 text-gray-500'}`}>
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+              </svg>
+            </button>
+            <button onClick={syncFromStudents} disabled={syncing} title="Sync classes from student data"
+              className="w-6 h-6 flex items-center justify-center bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-md text-xs transition-colors disabled:opacity-50">
+              <svg className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+            <button onClick={() => setShowAdd(v => !v)}
+              className="w-6 h-6 flex items-center justify-center bg-violet-600 hover:bg-violet-700 text-white rounded-md text-sm font-bold transition-colors">+</button>
+          </div>
         </div>
+
+        {syncMsg && (
+          <div className={`mx-3 mt-2 px-3 py-2 rounded-lg text-xs ${syncMsg.startsWith('✓') ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+            {syncMsg}
+          </div>
+        )}
 
         {error && (
           <div className="mx-3 mt-2 bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-xs flex justify-between">
@@ -152,11 +268,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
                   className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-violet-300 w-full" placeholder="A" />
               </div>
             </div>
-            <select value={newClass.class_teacher_id} onChange={e => setNewClass(f => ({ ...f, class_teacher_id: e.target.value }))}
-              className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-900 bg-white focus:outline-none w-full">
-              <option value="">No class teacher</option>
-              {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
+            <p className="text-[10px] text-gray-400">Assign class teacher after creating from the class overview</p>
             <div className="flex gap-1.5">
               <button type="submit" disabled={addingClass}
                 className="flex-1 bg-violet-600 text-white text-xs py-1.5 rounded-lg font-medium hover:bg-violet-700 disabled:opacity-50">
@@ -183,16 +295,19 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
                     className={`group flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${
                       selectedId === cls.id ? 'bg-violet-50 border-r-2 border-violet-500' : 'hover:bg-gray-50'
                     }`}>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className={`text-sm font-semibold ${selectedId === cls.id ? 'text-violet-700' : 'text-gray-800'}`}>
                         {cls.grade}-{cls.section}
                       </p>
                       <p className="text-[10px] text-gray-400 truncate">
-                        {cls.student_count} students
+                        {cls.student_count} student{cls.student_count !== 1 ? 's' : ''}
                       </p>
+                      {cls.class_teacher_name
+                        ? <p className="text-[10px] text-indigo-500 font-medium truncate">CT: {cls.class_teacher_name}</p>
+                        : <p className="text-[10px] text-amber-400">No class teacher</p>}
                       {cls.timetable_generated_at
                         ? <p className="text-[10px] text-emerald-500 font-medium">Timetable ready</p>
-                        : <p className="text-[10px] text-amber-400">No timetable</p>}
+                        : <p className="text-[10px] text-gray-300">No timetable</p>}
                     </div>
                     <button onClick={e => deleteClass(e, cls.id)}
                       className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 text-xs p-0.5 transition-all flex-shrink-0">✕</button>
@@ -204,9 +319,217 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
         </div>
       </div>
 
-      {/* ── Right panel: class detail ── */}
-      <div className="flex-1 min-w-0 bg-white rounded-r-xl overflow-hidden">
-        {selectedClass ? (
+      {/* ── Right panel: class detail or default sets ── */}
+      <div className="flex-1 min-w-0 bg-white rounded-r-xl overflow-hidden overflow-y-auto">
+        {showDefaultSets ? (
+          /* Default Subject Sets Panel */
+          <div className="p-6 space-y-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-gray-900">Default Subject Sets</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Define default subjects per grade range — apply them with one click on any class</p>
+              </div>
+              <button onClick={() => setShowDefaultSets(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+            </div>
+
+            {/* Existing sets */}
+            {loadingTemplates ? (
+              <div className="py-6 text-center text-gray-400 text-sm flex items-center justify-center gap-2">
+                <div className="w-4 h-4 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />Loading…
+              </div>
+            ) : allTemplates.length > 0 ? (
+              <div className="space-y-2">
+                {allTemplates.map(t => (
+                  <div key={t.id} className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold text-gray-800">{t.name}</p>
+                        <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">
+                          Grade {t.from_grade}–{t.to_grade}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {t.subjects.map((s, i) => (
+                          <span key={i} className="text-xs bg-white border border-gray-200 text-gray-600 px-2 py-0.5 rounded-full">{s.name}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <button onClick={() => deleteDefaultSet(t.id)}
+                      className="text-red-300 hover:text-red-500 flex-shrink-0 mt-0.5">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400 text-center py-4">No default sets yet. Create one below.</p>
+            )}
+
+            {/* Create new set */}
+            <form onSubmit={saveDefaultSet} className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 space-y-4">
+              <p className="text-xs font-semibold text-indigo-800 uppercase tracking-wide">Create New Default Set</p>
+
+              {setMsg && (
+                <div className={`text-xs px-3 py-2 rounded-lg ${setMsg.startsWith('✓') ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-700'}`}>
+                  {setMsg}
+                </div>
+              )}
+
+              <input value={newSetName} onChange={e => setNewSetName(e.target.value)} required
+                className="w-full border border-indigo-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                placeholder="Set name (e.g. Primary – Grades 1 to 5)" />
+
+              {/* Grade range */}
+              <div className="flex gap-4 items-center flex-wrap">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-gray-600">From Grade</span>
+                  <select value={newSetFrom} onChange={e => setNewSetFrom(e.target.value)}
+                    className="border border-indigo-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-gray-600">To Grade</span>
+                  <select value={newSetTo} onChange={e => setNewSetTo(e.target.value)}
+                    className="border border-indigo-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* Curriculum-based suggestions — collapsible */}
+              {(() => {
+                const from = parseInt(newSetFrom), to = parseInt(newSetTo)
+                const names = new Set<string>()
+                for (let g = from; g <= to; g++) {
+                  if (newSetCurriculum === 'CBSE' || newSetCurriculum === 'both') {
+                    CURRICULA['CBSE']?.find(x => x.grade === String(g))?.subjects.forEach(s => names.add(s.name))
+                  }
+                  if (newSetCurriculum === 'APSSC' || newSetCurriculum === 'SSC' || newSetCurriculum === 'both') {
+                    CURRICULA['APSSC']?.find(x => x.grade === String(g))?.subjects.forEach(s => names.add(s.name))
+                  }
+                }
+                const added = new Set(newSetSubjects.map(s => s.name.trim().toLowerCase()).filter(Boolean))
+                const available = Array.from(names).filter(n => !added.has(n.toLowerCase()))
+                return (
+                  <div className="bg-white border border-indigo-100 rounded-xl overflow-hidden">
+                    {/* Header — always visible, toggle suggestions */}
+                    <button type="button"
+                      onClick={() => setShowSetSuggestions(v => !v)}
+                      className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-indigo-50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <svg className="w-3.5 h-3.5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                        <span className="text-xs font-semibold text-indigo-700">
+                          Suggested Subjects
+                          {names.size > 0 && <span className="ml-1.5 text-indigo-400 font-normal">· {available.length} available for Grade {newSetFrom}–{newSetTo}</span>}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-indigo-400">{showSetSuggestions ? 'hide' : 'show'}</span>
+                        <svg className={`w-3.5 h-3.5 text-indigo-400 transition-transform ${showSetSuggestions ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </div>
+                    </button>
+
+                    {/* Collapsible body */}
+                    {showSetSuggestions && (
+                      <div className="px-3 pb-3 space-y-2.5 border-t border-indigo-50">
+                        {/* Curriculum selector */}
+                        <div className="flex items-center gap-1.5 pt-2.5 flex-wrap">
+                          <span className="text-[10px] font-medium text-gray-500 mr-1">Curriculum:</span>
+                          {(['CBSE', 'APSSC', 'SSC', 'both'] as const).map(c => (
+                            <button key={c} type="button" onClick={() => setNewSetCurriculum(c)}
+                              className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-colors border ${
+                                newSetCurriculum === c
+                                  ? 'bg-indigo-600 text-white border-indigo-600'
+                                  : 'bg-white text-gray-500 border-gray-200 hover:border-indigo-300'
+                              }`}>
+                              {c === 'both' ? 'All' : c === 'APSSC' ? 'AP SSC' : c}
+                            </button>
+                          ))}
+                        </div>
+
+                        {names.size === 0 ? (
+                          <p className="text-xs text-gray-400 italic">No curriculum data for this grade range.</p>
+                        ) : available.length > 0 ? (
+                          <>
+                            <div className="flex flex-wrap gap-1.5">
+                              {available.map(name => (
+                                <button key={name} type="button"
+                                  onClick={() => {
+                                    const emptyIdx = newSetSubjects.findIndex(s => !s.name.trim())
+                                    if (emptyIdx >= 0) {
+                                      setNewSetSubjects(prev => prev.map((x, i) => i === emptyIdx ? { name } : x))
+                                    } else {
+                                      setNewSetSubjects(prev => [...prev, { name }])
+                                    }
+                                  }}
+                                  className="text-xs px-2.5 py-1 rounded-lg border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 hover:border-indigo-400 transition-colors flex items-center gap-1">
+                                  <span className="text-indigo-400 font-bold text-[10px]">+</span> {name}
+                                </button>
+                              ))}
+                            </div>
+                            {available.length > 1 && (
+                              <button type="button"
+                                onClick={() => {
+                                  const current = newSetSubjects.filter(s => s.name.trim())
+                                  setNewSetSubjects([...current, ...available.map(n => ({ name: n }))])
+                                }}
+                                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium underline underline-offset-2">
+                                Add all {available.length} →
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <p className="text-xs text-gray-400 italic">All suggestions already added.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* Added subjects list */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-medium text-gray-600">
+                    Subjects to include
+                    {newSetSubjects.filter(s => s.name.trim()).length > 0 &&
+                      <span className="ml-1.5 text-indigo-600 font-semibold">{newSetSubjects.filter(s => s.name.trim()).length} added</span>
+                    }
+                  </p>
+                  {newSetSubjects.filter(s => s.name.trim()).length > 0 && (
+                    <button type="button" onClick={() => setNewSetSubjects([{ name: '' }])}
+                      className="text-[10px] text-red-400 hover:text-red-600">Clear all</button>
+                  )}
+                </div>
+                {newSetSubjects.map((s, i) => (
+                  <div key={i} className="flex gap-2">
+                    <input value={s.name} onChange={e => setNewSetSubjects(prev => prev.map((x, j) => j === i ? { name: e.target.value } : x))}
+                      className="flex-1 border border-indigo-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                      placeholder={`Subject ${i + 1}`} />
+                    {newSetSubjects.length > 1 && (
+                      <button type="button" onClick={() => setNewSetSubjects(prev => prev.filter((_, j) => j !== i))}
+                        className="text-red-300 hover:text-red-500 text-sm px-1">×</button>
+                    )}
+                  </div>
+                ))}
+                <button type="button" onClick={() => setNewSetSubjects(prev => [...prev, { name: '' }])}
+                  className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ Add custom subject</button>
+              </div>
+
+              <button type="submit" disabled={savingSet || !newSetName.trim() || newSetSubjects.every(s => !s.name.trim())}
+                className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50">
+                {savingSet ? 'Saving…' : `Save Default Set${newSetSubjects.filter(s => s.name.trim()).length > 0 ? ` (${newSetSubjects.filter(s => s.name.trim()).length} subjects)` : ''}`}
+              </button>
+            </form>
+          </div>
+        ) : selectedClass ? (
           <ClassDetail
             cls={selectedClass}
             schoolId={schoolId}
@@ -223,6 +546,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
             </div>
             <p className="text-gray-500 font-medium">Select a class</p>
             <p className="text-gray-400 text-sm mt-1">Choose a class from the left to manage subjects, timetable and students</p>
+            <p className="text-gray-300 text-xs mt-3">Use the <span className="font-medium text-indigo-400">📋 icon</span> in the sidebar to manage default subject sets</p>
           </div>
         )}
       </div>
@@ -240,7 +564,9 @@ function ClassDetail({
   onClassUpdated: (updates: Partial<ClassRow> & { id: number }) => void
   onNavigate?: (tab: string) => void
 }) {
-  const [tab, setTab] = useState<'subjects' | 'timetable' | 'students'>('subjects')
+  const [tab, setTab] = useState<'overview' | 'subjects' | 'timetable' | 'students'>('overview')
+  const [attSummary, setAttSummary] = useState<{ date: string; present: number; absent: number; late: number }[]>([])
+  const [attLoading, setAttLoading] = useState(false)
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [subLoading, setSubLoading] = useState(true)
   const [subjectMsg, setSubjectMsg] = useState<{ text: string; ok: boolean } | null>(null)
@@ -249,7 +575,6 @@ function ClassDetail({
   const [ttPrompt, setTtPrompt] = useState<string | null>(null)
   const [removingId, setRemovingId] = useState<number | null>(null)
   const [newName, setNewName] = useState('')
-  const [newPPW, setNewPPW] = useState('4')
   const [newTeacher, setNewTeacher] = useState('')
   const [editingClassTeacher, setEditingClassTeacher] = useState(false)
   const [ctId, setCtId] = useState(String(cls.class_teacher_id || ''))
@@ -263,6 +588,12 @@ function ClassDetail({
   const [editTeacher, setEditTeacher] = useState('')
   const [students, setStudents] = useState<Student[]>([])
   const [studLoading, setStudLoading] = useState(false)
+  const [assigningTeacherId, setAssigningTeacherId] = useState<number | null>(null) // subject id being inline-assigned
+  const [inlineTeacher, setInlineTeacher] = useState('')
+  const [templates, setTemplates] = useState<{ id: number; name: string; from_grade: number; to_grade: number; subjects: { name: string; periods_per_week: number }[] }[]>([])
+  const [applyingDefaults, setApplyingDefaults] = useState(false)
+  const [defaultsMsg, setDefaultsMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const [selectedCurriculum, setSelectedCurriculum] = useState<'CBSE' | 'APSSC' | 'SSC' | 'both'>('both')
 
   const inp = 'border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300'
 
@@ -282,20 +613,50 @@ function ClassDetail({
     } finally { setTtLoading(false) }
   }, [cls.id, schoolId])
 
+  async function loadAttendanceSummary() {
+    setAttLoading(true)
+    try {
+      const rows: { date: string; present: number; absent: number; late: number }[] = []
+      const today = new Date()
+      const promises = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(today)
+        d.setDate(today.getDate() - i)
+        const dateStr = d.toISOString().split('T')[0]
+        return fetch(`/api/attendance?class_id=${cls.id}&school_id=${schoolId}&date=${dateStr}&summary=true`)
+          .then(r => r.json())
+          .then(data => {
+            const m = data.morning
+            if (m && m.total > 0) rows.push({ date: dateStr, present: m.present, absent: m.absent, late: m.late || 0 })
+          })
+          .catch(() => {})
+      })
+      await Promise.all(promises)
+      rows.sort((a, b) => a.date.localeCompare(b.date))
+      setAttSummary(rows)
+    } finally { setAttLoading(false) }
+  }
+
   // Reset state when class changes
   useEffect(() => {
-    setTab('subjects')
+    setTab('overview')
     setSubjectMsg(null)
     setGenMsg(null)
     setEditSlotId(null)
     setEditingClassTeacher(false)
     setCtId(String(cls.class_teacher_id || ''))
     loadSubjects()
+    loadAttendanceSummary()
   }, [cls.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (tab === 'timetable') loadTimetable()
     if (tab === 'students') loadStudents()
+    if (tab === 'subjects' && templates.length === 0) {
+      fetch(`/api/schools/subject-templates?school_id=${schoolId}`)
+        .then(r => r.json())
+        .then(data => setTemplates(Array.isArray(data) ? data : []))
+        .catch(() => {})
+    }
   }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadStudents() {
@@ -324,7 +685,7 @@ function ClassDetail({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       await loadSubjects()
-      setNewName(''); setNewPPW('4'); setNewTeacher('')
+      setNewName(''); setNewTeacher('')
       setSubjectMsg({ text: `✓ ${subjectName} added${data.teacher_name ? ` · Teacher: ${data.teacher_name}` : ''}`, ok: true })
       setTimeout(() => setSubjectMsg(null), 4000)
       // Prompt to regenerate timetable if it was already generated
@@ -376,6 +737,50 @@ function ClassDetail({
     } finally { setGenerating(false) }
   }
 
+  async function applyDefaults() {
+    const gradeNum = parseInt(cls.grade)
+    const applicable = templates.filter(t => !isNaN(gradeNum) && gradeNum >= t.from_grade && gradeNum <= t.to_grade)
+    if (applicable.length === 0) {
+      setDefaultsMsg({ text: 'No default subject set applies to Grade ' + cls.grade + '. Create one in School Settings → Default Subjects.', ok: false })
+      setTimeout(() => setDefaultsMsg(null), 5000)
+      return
+    }
+    setApplyingDefaults(true); setDefaultsMsg(null)
+    let added = 0; const skipped: string[] = []
+    for (const tmpl of applicable) {
+      for (const subj of tmpl.subjects) {
+        if (subjects.some(s => s.subject_name.toLowerCase() === subj.name.toLowerCase())) {
+          skipped.push(subj.name); continue
+        }
+        try {
+          await fetch(`/api/classes/${cls.id}/subjects`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subject_name: subj.name, periods_per_week: subj.periods_per_week }),
+          })
+          added++
+        } catch { /* skip */ }
+      }
+    }
+    await loadSubjects()
+    const msg = added > 0 ? `✓ Added ${added} subject${added > 1 ? 's' : ''}${skipped.length ? ` · ${skipped.length} already existed` : ''}` : 'All subjects from the default set already exist'
+    setDefaultsMsg({ text: msg, ok: added > 0 })
+    setApplyingDefaults(false)
+    setTimeout(() => setDefaultsMsg(null), 5000)
+    if (cls.timetable_generated_at && added > 0) setTtPrompt('default subjects')
+  }
+
+  async function assignTeacherInline(subjectId: number) {
+    if (!inlineTeacher) return
+    try {
+      await fetch(`/api/classes/${cls.id}/subjects`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject_id: subjectId, teacher_id: parseInt(inlineTeacher) }),
+      })
+      await loadSubjects()
+      setAssigningTeacherId(null); setInlineTeacher('')
+    } catch { /* silent */ }
+  }
+
   async function saveSlotEdit(slotId: number) {
     try {
       await fetch('/api/class-timetable', {
@@ -389,8 +794,8 @@ function ClassDetail({
 
   const hasTimetable = timetable.length > 0
   const totalPPW = subjects.reduce((a, s) => a + s.periods_per_week, 0)
-  const suggestions = getSuggestedSubjects(cls.grade)
   const existingNames = new Set(subjects.map(s => s.subject_name.toLowerCase()))
+  const suggestions = getSuggestedSubjects(cls.grade, selectedCurriculum)
   const availableSuggestions = suggestions.filter(s => !existingNames.has(s.toLowerCase()))
 
   const ttByDay: Record<string, TimetableSlot[]> = {}
@@ -408,27 +813,44 @@ function ClassDetail({
             <h2 className="text-lg font-bold text-gray-900">Grade {cls.grade} – {cls.section}</h2>
             <div className="flex items-center gap-3 mt-1 flex-wrap">
               {editingClassTeacher ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <select value={ctId} onChange={e => setCtId(e.target.value)}
-                    className="border border-gray-200 rounded-lg px-2 py-1 text-xs text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-violet-300">
+                    className="border border-violet-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 min-w-[200px]">
                     <option value="">— No class teacher —</option>
-                    {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    {teachers.filter(t => (t as Teacher & { staff_type?: string }).staff_type !== 'non_teaching').map(t => {
+                      const tExt = t as Teacher & { staff_type?: string; subject?: string }
+                      return (
+                        <option key={t.id} value={t.id}>
+                          {t.name}{tExt.subject ? ` · ${tExt.subject}` : ''}
+                        </option>
+                      )
+                    })}
                   </select>
                   <button onClick={saveClassTeacher} disabled={savingCT}
-                    className="text-xs bg-violet-600 text-white px-2.5 py-1 rounded-lg hover:bg-violet-700 disabled:opacity-50">
-                    {savingCT ? '...' : 'Save'}
+                    className="text-sm bg-violet-600 text-white px-3 py-1.5 rounded-lg hover:bg-violet-700 disabled:opacity-50 font-medium">
+                    {savingCT ? 'Saving...' : 'Save'}
                   </button>
-                  <button onClick={() => setEditingClassTeacher(false)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                  <button onClick={() => { setEditingClassTeacher(false); setCtId(String(cls.class_teacher_id || '')) }}
+                    className="text-sm text-gray-500 hover:text-gray-700 px-2 py-1.5">Cancel</button>
                 </div>
               ) : (
-                <button onClick={() => setEditingClassTeacher(true)}
-                  className="flex items-center gap-1 text-xs text-gray-500 hover:text-violet-600 transition-colors">
-                  <span className="text-gray-400">CT:</span>
-                  {cls.class_teacher_name
-                    ? <span className="font-medium">{cls.class_teacher_name}</span>
-                    : <span className="text-amber-500 italic">Not assigned</span>}
-                  <span className="text-gray-300 ml-0.5">✎</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  {cls.class_teacher_name ? (
+                    <span className="inline-flex items-center gap-1.5 bg-violet-100 text-violet-800 text-sm px-3 py-1 rounded-full font-medium">
+                      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"/></svg>
+                      {cls.class_teacher_name}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 bg-amber-50 border border-amber-200 text-amber-700 text-sm px-3 py-1 rounded-full font-medium">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                      No class teacher assigned
+                    </span>
+                  )}
+                  <button onClick={() => setEditingClassTeacher(true)}
+                    className="text-xs text-violet-500 hover:text-violet-700 underline underline-offset-2">
+                    {cls.class_teacher_name ? 'Change' : 'Assign'}
+                  </button>
+                </div>
               )}
               <span className="text-xs text-gray-400">{subjects.length} subjects · {totalPPW} periods/week</span>
               {hasTimetable && <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Timetable Active</span>}
@@ -438,12 +860,12 @@ function ClassDetail({
 
         {/* Tabs */}
         <div className="flex gap-0 mt-3 -mb-4">
-          {(['subjects', 'timetable', 'students'] as const).map(t => (
+          {(['overview', 'subjects', 'timetable', 'students'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
                 tab === t ? 'border-violet-600 text-violet-700' : 'border-transparent text-gray-500 hover:text-gray-800'
               }`}>
-              {t === 'subjects' ? `Subjects (${subjects.length})` : t === 'timetable' ? 'Timetable' : 'Students'}
+              {t === 'overview' ? 'Overview' : t === 'subjects' ? `Subjects (${subjects.length})` : t === 'timetable' ? 'Timetable' : `Students (${cls.student_count})`}
             </button>
           ))}
         </div>
@@ -451,6 +873,142 @@ function ClassDetail({
 
       {/* Tab content */}
       <div className="flex-1 overflow-y-auto px-6 py-5">
+
+        {/* ── OVERVIEW ── */}
+        {tab === 'overview' && (
+          <div className="space-y-5">
+            {/* Class Teacher Banner */}
+            <div className={`rounded-xl border p-4 flex items-center justify-between gap-4 ${
+              cls.class_teacher_name ? 'bg-violet-50 border-violet-200' : 'bg-amber-50 border-amber-200'
+            }`}>
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 ${
+                  cls.class_teacher_name ? 'bg-violet-600 text-white' : 'bg-amber-200 text-amber-700'
+                }`}>
+                  {cls.class_teacher_name ? cls.class_teacher_name.charAt(0).toUpperCase() : '?'}
+                </div>
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Class Teacher</p>
+                  {cls.class_teacher_name
+                    ? <p className="font-bold text-gray-900 text-sm">{cls.class_teacher_name}</p>
+                    : <p className="font-semibold text-amber-700 text-sm">Not assigned yet</p>}
+                </div>
+              </div>
+              <button onClick={() => setEditingClassTeacher(true)}
+                className={`text-xs font-medium px-3 py-1.5 rounded-lg border transition-colors ${
+                  cls.class_teacher_name
+                    ? 'border-violet-300 text-violet-700 hover:bg-violet-100'
+                    : 'border-amber-300 text-amber-700 hover:bg-amber-100'
+                }`}>
+                {cls.class_teacher_name ? 'Change' : 'Assign Now'}
+              </button>
+            </div>
+
+            {/* Summary cards */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 text-center">
+                <p className="text-3xl font-black text-violet-700">{cls.student_count}</p>
+                <p className="text-xs text-violet-600 mt-1">Students</p>
+              </div>
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
+                <p className="text-3xl font-black text-blue-700">{subjects.length}</p>
+                <p className="text-xs text-blue-600 mt-1">Subjects</p>
+              </div>
+              <div className={`border rounded-xl p-4 text-center ${cls.timetable_generated_at ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+                <p className={`text-xs font-bold mt-1 ${cls.timetable_generated_at ? 'text-green-700' : 'text-amber-600'}`}>
+                  {cls.timetable_generated_at ? 'Timetable Ready' : 'No Timetable'}
+                </p>
+                {cls.timetable_generated_at && (
+                  <p className="text-[10px] text-green-500 mt-0.5">
+                    {new Date(cls.timetable_generated_at).toLocaleDateString()}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Teachers & Subjects */}
+            {subjects.length > 0 && (
+              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50">
+                  <p className="text-xs font-semibold text-gray-600">Teachers & Subjects</p>
+                </div>
+                <div className="divide-y divide-gray-50">
+                  {subjects.map(s => (
+                    <div key={s.id} className="flex items-center justify-between px-4 py-2.5">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-violet-400" />
+                        <span className="text-sm font-medium text-gray-800">{s.subject_name}</span>
+                        <span className="text-xs text-gray-400">{s.periods_per_week}/wk</span>
+                      </div>
+                      {s.teacher_name
+                        ? <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">{s.teacher_name}</span>
+                        : <span className="text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full border border-amber-200">No teacher</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Attendance last 7 days */}
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                <p className="text-xs font-semibold text-gray-600">Attendance — Last 7 Days</p>
+                <button onClick={loadAttendanceSummary} className="text-xs text-gray-400 hover:text-gray-600">Refresh</button>
+              </div>
+              {attLoading ? (
+                <div className="py-6 text-center text-gray-400 text-xs">Loading...</div>
+              ) : attSummary.length === 0 ? (
+                <div className="py-6 text-center text-gray-400 text-xs">No attendance marked in the last 7 days</div>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {attSummary.map(row => {
+                    const total = row.present + row.absent + row.late
+                    const pct = total > 0 ? Math.round((row.present / total) * 100) : 0
+                    const d = new Date(row.date + 'T00:00:00')
+                    return (
+                      <div key={row.date} className="flex items-center gap-4 px-4 py-2.5">
+                        <div className="w-20 flex-shrink-0">
+                          <p className="text-xs font-semibold text-gray-700">
+                            {d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
+                          </p>
+                        </div>
+                        <div className="flex-1">
+                          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full ${pct >= 80 ? 'bg-green-400' : pct >= 60 ? 'bg-yellow-400' : 'bg-red-400'}`}
+                              style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                        <div className="text-right w-24 flex-shrink-0">
+                          <span className={`text-xs font-bold ${pct >= 80 ? 'text-green-600' : pct >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>{pct}%</span>
+                          <span className="text-xs text-gray-400 ml-2">{row.present}/{total}</span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Quick actions */}
+            <div className="grid grid-cols-3 gap-3">
+              <button onClick={() => setTab('subjects')}
+                className="border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors">
+                <p className="text-sm font-semibold text-gray-700">Manage Subjects</p>
+                <p className="text-xs text-gray-400 mt-0.5">{subjects.length} assigned</p>
+              </button>
+              <button onClick={() => setTab('timetable')}
+                className="border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors">
+                <p className="text-sm font-semibold text-gray-700">View Timetable</p>
+                <p className="text-xs text-gray-400 mt-0.5">{cls.timetable_generated_at ? 'Generated' : 'Not generated'}</p>
+              </button>
+              <button onClick={() => setTab('students')}
+                className="border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors">
+                <p className="text-sm font-semibold text-gray-700">Student List</p>
+                <p className="text-xs text-gray-400 mt-0.5">{cls.student_count} enrolled</p>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── SUBJECTS ── */}
         {tab === 'subjects' && (
@@ -483,6 +1041,33 @@ function ClassDetail({
               </div>
             )}
 
+            {/* Apply defaults banner */}
+            {(() => {
+              const gradeNum = parseInt(cls.grade)
+              const applicable = templates.filter(t => !isNaN(gradeNum) && gradeNum >= t.from_grade && gradeNum <= t.to_grade)
+              if (applicable.length === 0) return null
+              return (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-indigo-800">Default subject set available</p>
+                    <p className="text-xs text-indigo-500 mt-0.5">
+                      {applicable.map(t => t.name).join(', ')} · {applicable.reduce((a, t) => a + t.subjects.length, 0)} subjects
+                    </p>
+                  </div>
+                  <button onClick={applyDefaults} disabled={applyingDefaults}
+                    className="flex-shrink-0 px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                    {applyingDefaults ? 'Applying...' : 'Apply Defaults'}
+                  </button>
+                </div>
+              )
+            })()}
+
+            {defaultsMsg && (
+              <div className={`px-4 py-2.5 rounded-xl text-sm ${defaultsMsg.ok ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-amber-50 border border-amber-200 text-amber-700'}`}>
+                {defaultsMsg.text}
+              </div>
+            )}
+
             {/* Current subjects */}
             <div className="bg-gray-50 rounded-xl border border-gray-100 overflow-hidden">
               <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
@@ -492,7 +1077,7 @@ function ClassDetail({
               {subLoading ? (
                 <div className="py-6 text-center text-gray-400 text-xs">Loading...</div>
               ) : subjects.length === 0 ? (
-                <div className="py-8 text-center text-gray-400 text-sm">No subjects yet. Add from suggestions below.</div>
+                <div className="py-8 text-center text-gray-400 text-sm">No subjects yet. Apply defaults or add from suggestions below.</div>
               ) : (
                 <div className="divide-y divide-gray-100">
                   {subjects.map(s => (
@@ -505,9 +1090,34 @@ function ClassDetail({
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        {s.teacher_name
-                          ? <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">{s.teacher_name}</span>
-                          : <span className="text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full border border-amber-200">No teacher</span>}
+                        {assigningTeacherId === s.id ? (
+                          <div className="flex items-center gap-1.5">
+                            <select value={inlineTeacher} onChange={e => setInlineTeacher(e.target.value)}
+                              autoFocus
+                              className="border border-violet-300 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-violet-400 max-w-[160px]">
+                              <option value="">Select teacher...</option>
+                              {teachers.filter(t => (t as Teacher & { staff_type?: string }).staff_type !== 'non_teaching').map(t => {
+                                const tExt = t as Teacher & { subject?: string }
+                                return <option key={t.id} value={t.id}>{t.name}{tExt.subject ? ` · ${tExt.subject}` : ''}</option>
+                              })}
+                            </select>
+                            <button onClick={() => assignTeacherInline(s.id)} disabled={!inlineTeacher}
+                              className="text-xs px-2 py-1 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">✓</button>
+                            <button onClick={() => { setAssigningTeacherId(null); setInlineTeacher('') }}
+                              className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+                          </div>
+                        ) : s.teacher_name ? (
+                          <button onClick={() => { setAssigningTeacherId(s.id); setInlineTeacher('') }}
+                            className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200 hover:bg-emerald-100 transition-colors">
+                            {s.teacher_name}
+                          </button>
+                        ) : (
+                          <button onClick={() => { setAssigningTeacherId(s.id); setInlineTeacher('') }}
+                            className="text-xs bg-amber-50 text-amber-600 px-2.5 py-1 rounded-full border border-amber-200 hover:bg-amber-100 transition-colors font-medium flex items-center gap-1">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4"/></svg>
+                            Assign Teacher
+                          </button>
+                        )}
                         <button onClick={() => removeSubject(s.id, s.subject_name)} disabled={removingId === s.id}
                           className="text-red-300 hover:text-red-500 text-xs p-1 transition-colors disabled:opacity-40">✕</button>
                       </div>
@@ -517,37 +1127,53 @@ function ClassDetail({
               )}
             </div>
 
-            {/* Suggestions */}
-            {availableSuggestions.length > 0 && (
-              <div className="bg-white rounded-xl border border-gray-200 p-4">
-                <p className="text-xs font-semibold text-gray-700 mb-0.5">Suggested for Grade {cls.grade}</p>
-                <p className="text-xs text-gray-400 mb-3">Click to add · teacher auto-assigned</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {availableSuggestions.map(name => (
-                    <button key={name} onClick={() => addSubject(name)} disabled={addingSubject}
-                      className="text-xs px-2.5 py-1.5 rounded-lg border border-violet-200 text-violet-700 bg-violet-50 hover:bg-violet-100 hover:border-violet-400 transition-colors disabled:opacity-50 flex items-center gap-1">
-                      <span className="text-violet-400">+</span> {name}
+            {/* Curriculum picker + Suggestions */}
+            <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <p className="text-xs font-semibold text-gray-700">Suggested Subjects — Grade {cls.grade}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Pick curriculum · click subject to add · teacher auto-assigned</p>
+                </div>
+                <div className="flex gap-1.5 flex-wrap">
+                  {(['CBSE', 'APSSC', 'SSC', 'both'] as const).map(c => (
+                    <button key={c} onClick={() => setSelectedCurriculum(c)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors border ${
+                        selectedCurriculum === c
+                          ? 'bg-violet-600 text-white border-violet-600'
+                          : 'bg-white text-gray-600 border-gray-200 hover:border-violet-300 hover:text-violet-600'
+                      }`}>
+                      {c === 'both' ? 'All' : c === 'APSSC' ? 'AP SSC' : c}
                     </button>
                   ))}
                 </div>
               </div>
-            )}
+              {availableSuggestions.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {availableSuggestions.map(name => (
+                    <button key={name} onClick={() => addSubject(name)} disabled={addingSubject}
+                      className="text-xs px-2.5 py-1.5 rounded-lg border border-violet-200 text-violet-700 bg-violet-50 hover:bg-violet-100 hover:border-violet-400 transition-colors disabled:opacity-50 flex items-center gap-1">
+                      <span className="text-violet-400 font-bold">+</span> {name}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">All suggested subjects for this curriculum are already added.</p>
+              )}
+            </div>
 
             {/* Custom add */}
             <div className="bg-white rounded-xl border border-gray-200 p-4">
               <p className="text-xs font-semibold text-gray-700 mb-3">Add Custom Subject</p>
               <div className="flex gap-2 flex-wrap">
                 <input value={newName} onChange={e => setNewName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && addSubject(newName, newPPW, newTeacher)}
+                  onKeyDown={e => e.key === 'Enter' && addSubject(newName, '4', newTeacher)}
                   className={inp + ' flex-1 min-w-36 text-sm'} placeholder="Subject name" />
-                <input type="number" min={1} max={12} value={newPPW} onChange={e => setNewPPW(e.target.value)}
-                  className={inp + ' w-20 text-sm'} placeholder="Periods" />
                 <select value={newTeacher} onChange={e => setNewTeacher(e.target.value)}
-                  className={inp + ' w-44 text-sm'}>
+                  className={inp + ' w-48 text-sm'}>
                   <option value="">Auto-assign teacher</option>
                   {teachers.filter(t => t.subject).map(t => <option key={t.id} value={t.id}>{t.name} – {t.subject}</option>)}
                 </select>
-                <button onClick={() => addSubject(newName, newPPW, newTeacher)}
+                <button onClick={() => addSubject(newName, '4', newTeacher)}
                   disabled={addingSubject || !newName.trim()}
                   className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors">
                   {addingSubject ? 'Adding...' : 'Add'}

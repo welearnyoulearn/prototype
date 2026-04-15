@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
          LEFT JOIN teachers mm ON mm.id = lmm.marked_by_teacher_id
          LEFT JOIN teachers am ON am.id = lma.marked_by_teacher_id
          WHERE c.school_id = $1
-         ORDER BY c.grade::integer, c.section`,
+         ORDER BY (NULLIF(regexp_replace(c.grade,'[^0-9]','','g'),''))::int NULLS LAST, c.section`,
         [school_id, date]
       )
       return NextResponse.json(result.rows)

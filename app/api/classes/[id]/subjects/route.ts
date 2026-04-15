@@ -111,6 +111,53 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 }
 
+// PATCH /api/classes/[id]/subjects — assign teacher to a specific subject
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  try {
+    const { subject_id, teacher_id } = await req.json()
+    if (!subject_id) return NextResponse.json({ error: 'subject_id required' }, { status: 400 })
+
+    const { rows: [sub] } = await pool.query(
+      `SELECT cs.subject_name, c.school_id FROM class_subjects cs
+       JOIN classes c ON c.id = cs.class_id WHERE cs.id = $1 AND cs.class_id = $2`,
+      [subject_id, id]
+    )
+    if (!sub) return NextResponse.json({ error: 'Subject not found' }, { status: 404 })
+
+    const tid = teacher_id ? Number(teacher_id) : null
+    await pool.query('UPDATE class_subjects SET teacher_id = $1 WHERE id = $2', [tid, subject_id])
+
+    // Propagate to timetable slots (conflict-safe)
+    if (tid) {
+      await pool.query(
+        `UPDATE class_timetable ct SET teacher_id = $1
+         WHERE ct.class_id = $2 AND ct.subject_name = $3 AND ct.is_break = FALSE
+           AND ct.teacher_id IS DISTINCT FROM $1
+           AND NOT EXISTS (
+             SELECT 1 FROM class_timetable o
+             WHERE o.school_id = ct.school_id AND o.class_id != ct.class_id
+               AND o.day_of_week = ct.day_of_week AND o.period_number = ct.period_number
+               AND o.teacher_id = $1 AND o.is_break = FALSE
+           )`,
+        [tid, id, sub.subject_name]
+      )
+    }
+
+    invalidateCache(`subjects:class:${id}`)
+    invalidateCache(`timetable:class:${id}`)
+    invalidateCache(`health:${sub.school_id}`)
+
+    const teacherName = tid
+      ? (await pool.query('SELECT name FROM teachers WHERE id = $1', [tid])).rows[0]?.name ?? null
+      : null
+    return NextResponse.json({ subject_id, teacher_id: tid, teacher_name: teacherName })
+  } catch (error) {
+    console.error(error)
+    return NextResponse.json({ error: 'Failed to assign teacher' }, { status: 500 })
+  }
+}
+
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
 
   const { id } = await params

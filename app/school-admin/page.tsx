@@ -67,15 +67,15 @@ type NavItem = {
   tier?: Tier[]  // kept for reference only — actual visibility driven by platform feature config
 }
 
-// Section grouping for sidebar
+// Section grouping for sidebar — Management first, then Scheduling
 const NAV_SECTIONS = [
-  { label: 'OVERVIEW', keys: ['overview', 'briefing'] },
-  { label: 'PEOPLE', keys: ['teachers', 'students', 'staff-onboarding', 'student-onboarding'] },
-  { label: 'SCHEDULING', keys: ['timetable', 'attendance', 'leave-requests', 'emergency-cover', 'exam-schedule'] },
-  { label: 'MANAGEMENT', keys: ['class-management', 'fee-management', 'parent-engagement', 'year-rollover'] },
-  { label: 'ANALYTICS', keys: ['class-analytics', 'academic-analytics', 'analysis', 'year-review'] },
+  { label: 'OVERVIEW',    keys: ['overview', 'briefing'] },
+  { label: 'PEOPLE',      keys: ['staff', 'students', 'class-management'] },
+  { label: 'MANAGEMENT',  keys: ['fee-management', 'parent-engagement', 'year-rollover'] },
+  { label: 'SCHEDULING',  keys: ['timetable', 'attendance', 'leave-requests', 'emergency-cover', 'exam-schedule'] },
+  { label: 'ANALYTICS',   keys: ['class-analytics', 'academic-analytics', 'analysis', 'year-review'] },
   { label: 'COMMUNICATION', keys: ['announcements', 'notifications', 'leaderboard'] },
-  { label: 'TOOLS', keys: ['calendar', 'export', 'settings'] },
+  { label: 'TOOLS',       keys: ['calendar', 'export', 'settings'] },
 ]
 
 const NAV_ITEMS: NavItem[] = [
@@ -119,26 +119,7 @@ const NAV_ITEMS: NavItem[] = [
       </svg>
     ),
   },
-  {
-    key: 'staff-onboarding',
-    label: 'Staff Onboarding',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-      </svg>
-    ),
-  },
-  {
-    key: 'student-onboarding',
-    label: 'Student Onboarding',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-      </svg>
-    ),
-  },
+  
   {
     key: 'class-management',
     label: 'Class Management',
@@ -146,6 +127,16 @@ const NAV_ITEMS: NavItem[] = [
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+      </svg>
+    ),
+  },
+  {
+    key: 'staff',
+    label: 'Staff Management',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
       </svg>
     ),
   },
@@ -180,18 +171,8 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
-    key: 'teachers',
-    label: 'Teachers',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-      </svg>
-    ),
-  },
-  {
     key: 'students',
-    label: 'Students',
+    label: 'Student Management',
     tier: ['basic', 'standard', 'premium'],
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -344,10 +325,17 @@ export default function SchoolAdmin() {
   function navigateTo(key: string) {
     setActiveNav(key)
     setVisited(prev => new Set([...prev, key]))
+    // Reset sub-tabs when navigating to hub pages
+    if (key === 'staff') setStaffSubTab('directory')
+    if (key === 'students') setStudentsSubTab('list')
   }
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [staffSubTab, setStaffSubTab] = useState<'directory' | 'onboard'>('directory')
+  const [studentsSubTab, setStudentsSubTab] = useState<'list' | 'onboard'>('list')
+  const [staffRefreshKey, setStaffRefreshKey] = useState(0)
+  const [studentRefreshKey, setStudentRefreshKey] = useState(0)
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -406,16 +394,28 @@ export default function SchoolAdmin() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-gray-400">Loading...</p>
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-5">
+        <div className="relative">
+          <div className="w-16 h-16 rounded-full border-4 border-slate-700" />
+          <div className="w-16 h-16 rounded-full border-4 border-indigo-500 border-t-transparent animate-spin absolute inset-0" />
+        </div>
+        <div className="text-center">
+          <p className="text-slate-300 font-medium text-sm">Loading your dashboard</p>
+          <p className="text-slate-500 text-xs mt-1">Please wait…</p>
+        </div>
+        <div className="flex gap-1.5 mt-2">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
+          ))}
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
+    <div className="min-h-screen flex flex-col bg-slate-50">
       {/* Top bar */}
-      <div className="bg-white border-b border-gray-200 px-5 py-3.5 flex items-center justify-between flex-shrink-0 z-30">
+      <div className="bg-white border-b border-slate-200 px-5 py-3 flex items-center justify-between flex-shrink-0 z-30 shadow-sm">
         <div className="flex items-center gap-3">
           <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Home</Link>
           <span className="text-gray-200">|</span>
@@ -514,24 +514,33 @@ export default function SchoolAdmin() {
       ) : (
         <div className="flex flex-1 min-h-0">
           {/* Sidebar */}
-          <aside className="w-56 bg-white border-r border-gray-200 flex-shrink-0 flex flex-col">
-            {/* School info in sidebar */}
-            <div className="px-4 py-4 border-b border-gray-100">
-              <div className="w-9 h-9 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-sm mb-2">
-                {selectedSchool.name.charAt(0).toUpperCase()}
+          <aside className="w-60 bg-slate-900 flex-shrink-0 flex flex-col shadow-xl">
+            {/* School branding */}
+            <div className="px-4 py-4 border-b border-slate-700/60">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-base flex-shrink-0 shadow-lg">
+                  {selectedSchool.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-white leading-tight truncate">{selectedSchool.name}</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5 truncate">{[selectedSchool.city, selectedSchool.country].filter(Boolean).join(', ') || selectedSchool.type || 'School'}</p>
+                </div>
               </div>
-              <p className="text-sm font-semibold text-gray-800 leading-tight">{selectedSchool.name}</p>
-              <p className="text-xs text-gray-400 mt-0.5">{[selectedSchool.city, selectedSchool.country].filter(Boolean).join(', ') || selectedSchool.type}</p>
             </div>
 
             {/* Nav */}
-            <nav className="flex-1 py-2 overflow-y-auto">
+            <nav className="flex-1 py-3 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700">
               {tier === 'none' ? (
-                <div className="px-4 py-3">
-                  <p className="text-xs text-gray-400 leading-relaxed">No plan enabled for this school.</p>
-                  <Link href={`/platform-admin/schools/${selectedSchool.id}`} className="text-xs text-purple-600 hover:text-purple-800 mt-2 block font-medium">
-                    Enable a plan →
-                  </Link>
+                <div className="px-4 py-4">
+                  <div className="flex items-start gap-2">
+                    <svg className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                    </svg>
+                    <div>
+                      <p className="text-xs text-slate-300 font-medium">No plan assigned</p>
+                      <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">Contact WLYL Admin to activate a plan for your school.</p>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <>
@@ -540,63 +549,69 @@ export default function SchoolAdmin() {
                     if (sectionEnabled.length === 0) return null
                     return (
                       <div key={section.label} className="mb-1">
-                        <p className="px-4 pt-3 pb-1 text-[10px] font-bold text-gray-300 uppercase tracking-widest">{section.label}</p>
-                        {sectionEnabled.map(item => (
-                          <button
-                            key={item.key}
-                            onClick={() => navigateTo(item.key)}
-                            className={`w-full flex items-center gap-2.5 px-4 py-2 text-sm transition-all text-left rounded-none ${
-                              activeNav === item.key
-                                ? 'bg-blue-50 text-blue-700 font-semibold border-r-[3px] border-blue-600'
-                                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
-                            }`}
-                          >
-                            <span className={activeNav === item.key ? 'text-blue-600' : 'text-gray-400'}>
-                              {item.icon}
-                            </span>
-                            <span className="truncate">{item.label}</span>
-                          </button>
-                        ))}
+                        <p className="px-4 pt-4 pb-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-[0.15em]">{section.label}</p>
+                        {sectionEnabled.map(item => {
+                          const isActive = activeNav === item.key
+                          return (
+                            <button
+                              key={item.key}
+                              onClick={() => navigateTo(item.key)}
+                              className={`w-full flex items-center gap-3 px-3 mx-1 py-2 text-sm transition-all text-left rounded-lg ${
+                                isActive
+                                  ? 'bg-indigo-600 text-white font-semibold shadow-md'
+                                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                              }`}
+                              style={{ width: 'calc(100% - 8px)' }}
+                            >
+                              <span className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`}>
+                                {item.icon}
+                              </span>
+                              <span className="truncate">{item.label}</span>
+                            </button>
+                          )
+                        })}
                       </div>
                     )
                   })}
 
-                  {/* Items with no section mapping — fallback flat list */}
+                  {/* Items with no section mapping */}
                   {(() => {
                     const allSectioned = NAV_SECTIONS.flatMap(s => s.keys)
                     const unsectioned = enabledNavItems.filter(i => !allSectioned.includes(i.key))
                     if (unsectioned.length === 0) return null
                     return (
                       <div className="mb-1">
-                        <p className="px-4 pt-3 pb-1 text-[10px] font-bold text-gray-300 uppercase tracking-widest">MORE</p>
-                        {unsectioned.map(item => (
-                          <button
-                            key={item.key}
-                            onClick={() => navigateTo(item.key)}
-                            className={`w-full flex items-center gap-2.5 px-4 py-2 text-sm transition-all text-left ${
-                              activeNav === item.key
-                                ? 'bg-blue-50 text-blue-700 font-semibold border-r-[3px] border-blue-600'
-                                : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
-                            }`}
-                          >
-                            <span className={activeNav === item.key ? 'text-blue-600' : 'text-gray-400'}>{item.icon}</span>
-                            <span className="truncate">{item.label}</span>
-                          </button>
-                        ))}
+                        <p className="px-4 pt-4 pb-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-[0.15em]">MORE</p>
+                        {unsectioned.map(item => {
+                          const isActive = activeNav === item.key
+                          return (
+                            <button
+                              key={item.key}
+                              onClick={() => navigateTo(item.key)}
+                              className={`w-full flex items-center gap-3 px-3 mx-1 py-2 text-sm transition-all text-left rounded-lg ${
+                                isActive ? 'bg-indigo-600 text-white font-semibold shadow-md' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                              }`}
+                              style={{ width: 'calc(100% - 8px)' }}
+                            >
+                              <span className={isActive ? 'text-white' : 'text-slate-400'}>{item.icon}</span>
+                              <span className="truncate">{item.label}</span>
+                            </button>
+                          )
+                        })}
                       </div>
                     )
                   })()}
 
                   {/* Locked features */}
                   {NAV_ITEMS.filter(item => !enabledFeatures.has(item.key)).length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-gray-50">
-                      <p className="px-4 pt-2 pb-1 text-[10px] font-bold text-gray-200 uppercase tracking-widest">Not in Plan</p>
+                    <div className="mt-3 pt-3 border-t border-slate-800">
+                      <p className="px-4 pb-1.5 text-[9px] font-bold text-slate-600 uppercase tracking-[0.15em]">Upgrade to Unlock</p>
                       {NAV_ITEMS.filter(item => !enabledFeatures.has(item.key)).map(item => (
-                        <div key={item.key} className="flex items-center gap-2.5 px-4 py-2 text-sm text-gray-300 cursor-not-allowed select-none">
-                          <svg className="w-4 h-4 flex-shrink-0 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div key={item.key} className="flex items-center gap-3 px-4 py-1.5 text-sm text-slate-600 cursor-not-allowed select-none">
+                          <svg className="w-4 h-4 flex-shrink-0 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                           </svg>
-                          <span className="truncate text-gray-300">{item.label}</span>
+                          <span className="truncate text-[13px]">{item.label}</span>
                         </div>
                       ))}
                     </div>
@@ -604,6 +619,11 @@ export default function SchoolAdmin() {
                 </>
               )}
             </nav>
+
+            {/* Sidebar footer */}
+            <div className="px-4 py-3 border-t border-slate-700/60">
+              <p className="text-[10px] text-slate-600 text-center">WLYL School Management</p>
+            </div>
           </aside>
 
           {/* Main content */}
@@ -611,21 +631,21 @@ export default function SchoolAdmin() {
             {tier === 'none' ? (
               <div className="flex items-center justify-center h-full min-h-[400px]">
                 <div className="text-center max-w-sm">
-                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  <div className="w-20 h-20 bg-amber-50 border-2 border-amber-200 rounded-full flex items-center justify-center mx-auto mb-5">
+                    <svg className="w-10 h-10 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                     </svg>
                   </div>
-                  <h3 className="text-lg font-semibold text-gray-700 mb-2">No Plan Enabled</h3>
-                  <p className="text-gray-400 text-sm mb-4">
-                    This school doesn&apos;t have an active plan. Enable a Basic, Standard, or Premium plan from Platform Admin to unlock features.
+                  <h3 className="text-lg font-semibold text-gray-800 mb-2">No Plan Assigned</h3>
+                  <p className="text-gray-400 text-sm mb-1">
+                    Your school doesn&apos;t have an active plan yet.
                   </p>
-                  <Link
-                    href={`/platform-admin/schools/${selectedSchool.id}`}
-                    className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium transition-colors"
-                  >
-                    Enable Plan for {selectedSchool.name}
-                  </Link>
+                  <p className="text-gray-400 text-sm mb-5">
+                    Please contact <span className="font-semibold text-gray-600">WLYL Admin</span> to activate a plan and unlock all features.
+                  </p>
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-500">
+                    📧 <a href="mailto:support@welearnyoulearn.com" className="text-indigo-600 hover:underline font-medium">support@welearnyoulearn.com</a>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -635,14 +655,48 @@ export default function SchoolAdmin() {
                 {visited.has('attendance')       && <div hidden={activeNav !== 'attendance'}><AttendanceDashboard schoolId={selectedSchool.id} /></div>}
                 {visited.has('leave-requests')   && <div hidden={activeNav !== 'leave-requests'}><LeaveRequests schoolId={selectedSchool.id} /></div>}
                 {visited.has('emergency-cover')  && <div hidden={activeNav !== 'emergency-cover'}><EmergencyCover schoolId={selectedSchool.id} /></div>}
-                {visited.has('staff-onboarding') && <div hidden={activeNav !== 'staff-onboarding'}><StaffOnboarding schoolId={selectedSchool.id} /></div>}
-                {visited.has('student-onboarding') && <div hidden={activeNav !== 'student-onboarding'}><StudentOnboarding schoolId={selectedSchool.id} /></div>}
+                {/* ── Staff Hub: Directory + Onboarding combined ── */}
+                {visited.has('staff') && (
+                  <div hidden={activeNav !== 'staff'}>
+                    <div className="mb-5">
+                      <h2 className="text-xl font-bold text-gray-900 mb-1">Staff</h2>
+                      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+                        {([['directory', 'Staff Directory'], ['onboard', 'Onboard Staff']] as const).map(([key, label]) => (
+                          <button key={key} onClick={() => setStaffSubTab(key)}
+                            className={`px-5 py-1.5 rounded-lg text-sm font-medium transition-all ${staffSubTab === key ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div hidden={staffSubTab !== 'directory'}><TeachersManagement schoolId={selectedSchool.id} refreshKey={staffRefreshKey} /></div>
+                    <div hidden={staffSubTab !== 'onboard'}><StaffOnboarding schoolId={selectedSchool.id} onRefresh={() => { setStaffRefreshKey(k => k + 1); setStaffSubTab('directory') }} /></div>
+                  </div>
+                )}
+
+                {/* ── Students Hub: List + Onboarding combined ── */}
+                {visited.has('students') && (
+                  <div hidden={activeNav !== 'students'}>
+                    <div className="mb-5">
+                      <h2 className="text-xl font-bold text-gray-900 mb-1">Student Management</h2>
+                      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+                        {([['list', 'Student List'], ['onboard', 'Onboard Students']] as const).map(([key, label]) => (
+                          <button key={key} onClick={() => setStudentsSubTab(key)}
+                            className={`px-5 py-1.5 rounded-lg text-sm font-medium transition-all ${studentsSubTab === key ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div hidden={studentsSubTab !== 'list'}><StudentsManagement schoolId={selectedSchool.id} refreshKey={studentRefreshKey} /></div>
+                    <div hidden={studentsSubTab !== 'onboard'}><StudentOnboarding schoolId={selectedSchool.id} onRefresh={() => { setStudentRefreshKey(k => k + 1); setStudentsSubTab('list') }} /></div>
+                  </div>
+                )}
+
                 {visited.has('class-management') && <div hidden={activeNav !== 'class-management'}><ClassManagement schoolId={selectedSchool.id} onNavigate={navigateTo} /></div>}
                 {visited.has('analysis')         && <div hidden={activeNav !== 'analysis'}><StudentTeacherAnalysis schoolId={selectedSchool.id} /></div>}
                 {visited.has('timetable')        && <div hidden={activeNav !== 'timetable'}><TimetableManagement schoolId={selectedSchool.id} /></div>}
                 {visited.has('exam-schedule')    && <div hidden={activeNav !== 'exam-schedule'}><ExamSchedule schoolId={selectedSchool.id} /></div>}
-                {visited.has('teachers')         && <div hidden={activeNav !== 'teachers'}><TeachersManagement schoolId={selectedSchool.id} /></div>}
-                {visited.has('students')         && <div hidden={activeNav !== 'students'}><StudentsManagement schoolId={selectedSchool.id} /></div>}
                 {visited.has('class-analytics')    && <div hidden={activeNav !== 'class-analytics'}><ClassAnalytics schoolId={selectedSchool.id} /></div>}
                 {visited.has('academic-analytics') && <div hidden={activeNav !== 'academic-analytics'}><AcademicAnalytics schoolId={selectedSchool.id} /></div>}
                 {visited.has('announcements')      && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} /></div>}

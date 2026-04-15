@@ -85,7 +85,15 @@ export default function EmergencyCover({ schoolId }: { schoolId: number }) {
   useEffect(() => {
     fetch(`/api/teachers?school_id=${schoolId}`)
       .then(r => r.json())
-      .then(data => setTeachers(Array.isArray(data) ? data.filter((t: Teacher) => t.status !== 'inactive') : []))
+      .then(data => {
+        if (!Array.isArray(data)) { setTeachers([]); return }
+        const seen = new Set<number>()
+        setTeachers(data.filter((t: Teacher) => {
+          if (t.status === 'inactive' || seen.has(t.id)) return false
+          seen.add(t.id)
+          return true
+        }))
+      })
       .catch(() => {})
   }, [schoolId])
 

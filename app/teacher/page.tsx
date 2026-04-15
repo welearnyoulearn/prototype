@@ -350,7 +350,7 @@ export default function TeacherPortal() {
 
           <div className="px-4 py-4 border-t border-slate-700 flex items-center gap-3">
             <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-              {teacher.name.charAt(0).toUpperCase()}
+              {teacher.name?.charAt(0)?.toUpperCase() ?? '?'}
             </div>
             <div className="min-w-0">
               <p className="text-white text-xs font-semibold truncate">{teacher.name}</p>

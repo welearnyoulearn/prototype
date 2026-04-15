@@ -9,8 +9,8 @@ export async function GET() {
         COUNT(*) FILTER (WHERE status = 'inactive') AS inactive,
         COUNT(*) AS total
         FROM schools`),
-      pool.query(`SELECT COUNT(*) AS total FROM teachers WHERE status = 'active'`),
-      pool.query(`SELECT COUNT(*) AS total FROM students`),
+      pool.query(`SELECT COUNT(*) AS total FROM teachers WHERE status = 'active' AND school_id IN (SELECT id FROM schools WHERE status = 'active')`),
+      pool.query(`SELECT COUNT(*) AS total FROM students WHERE school_id IN (SELECT id FROM schools WHERE status = 'active') AND status = 'active'`),
       pool.query(`SELECT
         COUNT(*) FILTER (WHERE tier = 'basic')    AS basic,
         COUNT(*) FILTER (WHERE tier = 'standard') AS standard,

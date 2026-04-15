@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { invalidateCache } from '@/lib/responseCache'
 
 function generateStudentId(schoolName: string): string {
   const slug = schoolName
@@ -49,11 +50,21 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        // Auto-create class if grade+section provided but class doesn't exist yet
+        if (s.grade?.trim() && s.section?.trim()) {
+          await client.query(
+            `INSERT INTO classes (school_id, grade, section)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (school_id, grade, section) DO NOTHING`,
+            [school_id, s.grade.trim(), s.section.trim()]
+          )
+        }
+
         const roll_number = generateStudentId(schoolName)
         const res = await client.query(
           `INSERT INTO students
-             (school_id, name, email, grade, section, roll_number, parent_name, parent_phone, parent_email, phone)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+             (school_id, name, email, grade, section, roll_number, parent_name, parent_phone, parent_email, phone, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active') RETURNING *`,
           [
             school_id,
             s.name.trim(),
@@ -95,6 +106,8 @@ export async function POST(req: NextRequest) {
       }
 
       await client.query('COMMIT')
+      // Invalidate classes cache so Class Management reflects new student counts immediately
+      invalidateCache(`classes:${school_id}`)
       return NextResponse.json({ inserted: inserted.length, students: inserted, errors }, { status: 201 })
     } catch (err) {
       await client.query('ROLLBACK')

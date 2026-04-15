@@ -1,9 +1,9 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect, useCallback } from 'react'
 import { parseCSV } from '@/lib/parseCSV'
 
-type Props = { schoolId: number }
+type Props = { schoolId: number; onRefresh?: () => void }
 
 type StudentRow = {
   name: string; email: string; grade: string; section: string
@@ -11,11 +11,23 @@ type StudentRow = {
 }
 
 const EMPTY_ROW: StudentRow = { name: '', email: '', grade: '', section: '', parent_name: '', parent_phone: '', parent_email: '', phone: '' }
-const CSV_TEMPLATE = 'name,email,grade,section,parent_name,parent_phone,parent_email,phone'
+const CSV_HEADER = 'name,email,grade,section,parent_name,parent_phone,parent_email,phone'
 const CSV_EXAMPLE = `Arjun Mehta,arjun@student.com,10,A,Suresh Mehta,9876543210,suresh@parent.com,
 Priya Patel,priya@student.com,10,A,Ramesh Patel,9876543211,ramesh@parent.com,`
 
-export default function StudentOnboarding({ schoolId }: Props) {
+// Staff CSV markers — if uploaded to student form by mistake
+const STAFF_CSV_MARKERS = ['department', 'qualification', 'staff_type', 'subject', 'employee_id', 'teaches_grades']
+
+function downloadTemplate() {
+  const content = CSV_HEADER + '\n' + CSV_EXAMPLE
+  const blob = new Blob([content], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = 'student_template.csv'; a.click()
+  URL.revokeObjectURL(url)
+}
+
+export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
   const [rows, setRows] = useState<StudentRow[]>([{ ...EMPTY_ROW }])
   const [mode, setMode] = useState<'manual' | 'csv'>('manual')
   const [filterGrade, setFilterGrade] = useState('')
@@ -23,7 +35,21 @@ export default function StudentOnboarding({ schoolId }: Props) {
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<{ inserted: number; students: { roll_number: string }[]; errors: { row: number; message: string }[] } | null>(null)
   const [error, setError] = useState('')
+  const [csvWarn, setCsvWarn] = useState('')
+  const [studentCount, setStudentCount] = useState<number | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const fetchStudentCount = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/admin/overview?school_id=${schoolId}&features=`)
+      if (res.ok) {
+        const d = await res.json()
+        setStudentCount(d.core?.students ?? null)
+      }
+    } catch { /* non-critical */ }
+  }, [schoolId])
+
+  useEffect(() => { fetchStudentCount() }, [fetchStudentCount])
 
   function updateRow(index: number, field: keyof StudentRow, value: string) {
     setRows(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r))
@@ -37,10 +63,22 @@ export default function StudentOnboarding({ schoolId }: Props) {
   }
 
   function parseText(text: string) {
+    setCsvWarn('')
     const allRows = parseCSV(text.trim())
     if (allRows.length === 0) return
-    const firstRowLower = allRows[0].map(c => c.toLowerCase())
+
+    const firstRowLower = allRows[0].map(c => c.toLowerCase().trim())
     const hasHeader = firstRowLower.some(c => ['name', 'email', 'grade', 'student'].includes(c))
+
+    // Conflict detection: check if this looks like a staff CSV
+    if (hasHeader) {
+      const isStaffCsv = STAFF_CSV_MARKERS.some(m => firstRowLower.includes(m))
+      if (isStaffCsv) {
+        setCsvWarn('This looks like a Staff CSV (contains staff-specific columns like department, qualification, etc.). Please use this form only for student data.')
+        return
+      }
+    }
+
     const dataRows = hasHeader ? allRows.slice(1) : allRows
     const parsed: StudentRow[] = dataRows.map(cols => ({
       name: cols[0] ?? '',
@@ -72,7 +110,16 @@ export default function StudentOnboarding({ schoolId }: Props) {
   async function handleSubmit() {
     const valid = rows.filter(r => r.name.trim())
     if (valid.length === 0) { setError('At least one student with a name is required'); return }
-    setSubmitting(true); setError(''); setResult(null)
+
+    // Validate required fields
+    const missing: string[] = []
+    valid.forEach((r, i) => {
+      if (!r.grade.trim()) missing.push(`Row ${i + 1}: Grade is required`)
+      if (!r.section.trim()) missing.push(`Row ${i + 1}: Section is required`)
+    })
+    if (missing.length > 0) { setError(missing.join(' · ')); return }
+
+    setSubmitting(true); setError(''); setResult(null); setCsvWarn('')
     try {
       const res = await fetch('/api/students/bulk', {
         method: 'POST',
@@ -83,6 +130,9 @@ export default function StudentOnboarding({ schoolId }: Props) {
       if (!res.ok) throw new Error(data.error)
       setResult(data)
       setRows([{ ...EMPTY_ROW }])
+      fetchStudentCount()
+      onRefresh?.()
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to enroll students')
     } finally {
@@ -95,18 +145,37 @@ export default function StudentOnboarding({ schoolId }: Props) {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-xl font-bold text-gray-900">Student Onboarding</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Bulk enroll students — parent email auto-creates parent account</p>
+        <div className="flex items-center gap-4">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Student Onboarding</h2>
+            <p className="text-sm text-gray-500 mt-0.5">Bulk enroll students — parent email auto-creates parent account</p>
+          </div>
+          {studentCount !== null && (
+            <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-2">
+              <span className="text-2xl font-black text-green-600">{studentCount}</span>
+              <div>
+                <p className="text-xs font-semibold text-green-700 leading-none">Students</p>
+                <button onClick={fetchStudentCount} className="text-[10px] text-green-400 hover:text-green-600">refresh</button>
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex gap-2">
           <input ref={fileRef} type="file" accept=".csv,.txt" onChange={handleFileImport} className="hidden" />
+          <button onClick={downloadTemplate}
+            title="Download CSV template"
+            className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Template
+          </button>
           <button onClick={() => fileRef.current?.click()}
             className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
-            Import CSV File
+            Import CSV
           </button>
           <button onClick={() => setMode(m => m === 'csv' ? 'manual' : 'csv')}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === 'csv' ? 'bg-green-600 text-white' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
@@ -114,6 +183,13 @@ export default function StudentOnboarding({ schoolId }: Props) {
           </button>
         </div>
       </div>
+
+      {csvWarn && (
+        <div className="mb-4 bg-amber-50 border border-amber-300 text-amber-800 px-4 py-3 rounded-lg flex justify-between text-sm">
+          <span>⚠ {csvWarn}</span>
+          <button onClick={() => setCsvWarn('')} className="text-amber-400 hover:text-amber-600 ml-4">✕</button>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
@@ -124,12 +200,23 @@ export default function StudentOnboarding({ schoolId }: Props) {
 
       {result && (
         <div className="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
-          <p className="font-medium">✓ {result.inserted} student{result.inserted !== 1 ? 's' : ''} enrolled — e.g. {result.students[0]?.roll_number}</p>
-          {result.errors.length > 0 && (
-            <div className="mt-2 space-y-0.5">
-              {result.errors.map((e, i) => <p key={i} className="text-orange-600 text-xs">Row {e.row}: {e.message}</p>)}
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-medium">✓ {result.inserted} student{result.inserted !== 1 ? 's' : ''} enrolled</p>
+              {result.students[0]?.roll_number && (
+                <p className="text-xs text-green-500 mt-0.5">First roll no: {result.students[0].roll_number}</p>
+              )}
+              {result.errors.length > 0 && (
+                <div className="mt-2 space-y-0.5">
+                  {result.errors.map((e, i) => <p key={i} className="text-orange-600 text-xs">Row {e.row}: {e.message}</p>)}
+                </div>
+              )}
             </div>
-          )}
+            <button onClick={() => setResult(null)}
+              className="text-green-400 hover:text-green-600 text-xs border border-green-200 px-2 py-1 rounded flex-shrink-0">
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
@@ -137,7 +224,7 @@ export default function StudentOnboarding({ schoolId }: Props) {
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="mb-3">
             <p className="text-sm font-medium text-gray-700 mb-1">CSV Format</p>
-            <code className="block bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs text-gray-600 font-mono">{CSV_TEMPLATE}</code>
+            <code className="block bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs text-gray-600 font-mono">{CSV_HEADER}</code>
           </div>
           <div className="mb-3">
             <p className="text-xs text-gray-400 mb-1">Example:</p>
@@ -150,7 +237,7 @@ export default function StudentOnboarding({ schoolId }: Props) {
               if (e.target.value.trim()) { parseText(e.target.value); e.target.value = '' }
             }}
           />
-          <p className="text-xs text-gray-400 mt-2">Paste triggers auto-parse — or use &quot;Import CSV File&quot; button above</p>
+          <p className="text-xs text-gray-400 mt-2">Paste triggers auto-parse — or use &quot;Import CSV&quot; button above</p>
         </div>
       ) : (
         <>
@@ -179,8 +266,8 @@ export default function StudentOnboarding({ schoolId }: Props) {
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-8">#</th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[130px]">Name *</th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[140px]">Student Email</th>
-                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Grade</th>
-                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Section</th>
+                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Grade <span className="text-red-400">*</span></th>
+                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Section <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[120px]">Parent Name</th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[100px]">Parent Phone</th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[150px] bg-orange-50">Parent Email</th>

@@ -5,23 +5,32 @@ import { sendOnboardingEmail } from '@/lib/email'
 
 export async function GET(req: NextRequest) {
   try {
-    const search = req.nextUrl.searchParams.get('search')
+    const sp     = req.nextUrl.searchParams
+    const search = sp.get('search')
+    const scope  = sp.get('scope') // 'active' (default) | 'inactive' | 'deleted' | 'all'
+
     if (search && search.trim()) {
       const result = await pool.query(
-        `SELECT id, name, city, country FROM schools WHERE name ILIKE $1 ORDER BY name LIMIT 20`,
+        `SELECT id, name, city, country FROM schools WHERE name ILIKE $1 AND deleted_at IS NULL ORDER BY name LIMIT 20`,
         [`%${search.trim()}%`]
       )
       return NextResponse.json(result.rows)
     }
+
+    let whereClause = 'deleted_at IS NULL AND status != \'deleted\''
+    if (scope === 'deleted')  whereClause = 'deleted_at IS NOT NULL'
+    else if (scope === 'inactive') whereClause = 'deleted_at IS NULL AND status = \'inactive\''
+    else if (scope === 'all') whereClause = '1=1'
 
     const result = await pool.query(`
       SELECT
         s.*,
         sub.tier,
         (SELECT COUNT(*) FROM teachers t WHERE t.school_id = s.id AND t.status = 'active') AS teacher_count,
-        (SELECT COUNT(*) FROM students st WHERE st.school_id = s.id) AS student_count
+        (SELECT COUNT(*) FROM students st WHERE st.school_id = s.id AND st.status = 'active') AS student_count
       FROM schools s
       LEFT JOIN school_subscriptions sub ON sub.school_id = s.id
+      WHERE ${whereClause}
       ORDER BY s.created_at DESC
     `)
     return NextResponse.json(result.rows)
@@ -85,8 +94,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ...school, school_code: schoolCode, temp_password: tempPassword }, { status: 201 })
   } catch (error) {
     await client.query('ROLLBACK')
-    console.error(error)
-    return NextResponse.json({ error: 'Failed to create school' }, { status: 500 })
+    console.error('[POST /api/schools]', error)
+    const msg = error instanceof Error ? error.message : String(error)
+    // Friendly messages for common constraint errors
+    if (msg.includes('duplicate') || msg.includes('unique')) {
+      if (msg.includes('email')) return NextResponse.json({ error: 'A school with this email already exists' }, { status: 409 })
+      if (msg.includes('school_code')) return NextResponse.json({ error: 'School code conflict — please try again' }, { status: 409 })
+    }
+    return NextResponse.json({ error: msg || 'Failed to create school' }, { status: 500 })
   } finally {
     client.release()
   }

@@ -132,11 +132,15 @@ export default function Overview({ schoolId, onNavigate }: Props) {
 
   const alertCount = uncovered.length + ttConflicts + (stats.pendingLeaves > 0 ? 1 : 0) + attNotMarked + (hasFeeManagement && feeOverdue > 0 ? 1 : 0)
 
-  // Build stat cards array dynamically based on enabled features
-  const statCards = [
-    { label: 'Teachers',  value: stats.teachers, sub: 'Active staff',   color: 'text-blue-600',    bg: 'bg-blue-50',    border: 'border-blue-200',    nav: 'teachers' },
-    { label: 'Students',  value: stats.students, sub: 'Enrolled',       color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', nav: 'students' },
-    { label: 'Classes',   value: stats.classes,  sub: 'Configured',     color: 'text-violet-600',  bg: 'bg-violet-50',  border: 'border-violet-200',  nav: 'class-management' },
+  // Count cards (shown at bottom)
+  const countCards = [
+    { label: 'Teachers', value: stats.teachers, sub: 'Active staff',   color: 'text-blue-600',    bg: 'bg-blue-50',    border: 'border-blue-200',    nav: 'teachers' },
+    { label: 'Students', value: stats.students, sub: 'Enrolled',       color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', nav: 'students' },
+    { label: 'Classes',  value: stats.classes,  sub: 'Configured',     color: 'text-violet-600',  bg: 'bg-violet-50',  border: 'border-violet-200',  nav: 'class-management' },
+  ]
+
+  // Feature metric cards (shown as KPI row)
+  const metricCards = [
     ...(hasAttendance ? [{
       label: "Today's Attendance",
       value: attPct !== null ? `${attPct}%` : '—',
@@ -255,17 +259,43 @@ export default function Overview({ schoolId, onNavigate }: Props) {
         </div>
       )}
 
-      {/* ── KPI cards ── */}
-      <div className={`grid gap-4 ${statCards.length <= 3 ? 'grid-cols-3' : statCards.length === 4 ? 'grid-cols-2 lg:grid-cols-4' : 'grid-cols-2 lg:grid-cols-3'}`}>
-        {loading
-          ? Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
-          : statCards.map(card => (
-              <StatCard key={card.nav} label={card.label} value={card.value} sub={card.sub}
-                color={card.color} bg={card.bg} border={card.border}
-                onClick={() => onNavigate?.(card.nav)} />
-            ))
-        }
-      </div>
+      {/* ── Quick actions ── */}
+      {!loading && (() => {
+        const quickActions = [
+          { label: 'Mark Attendance',  sub: 'Daily register',                 nav: 'attendance',      color: 'bg-blue-600',    show: hasAttendance },
+          { label: 'Review Leaves',    sub: `${stats.pendingLeaves} pending`,  nav: 'leave-requests',  color: 'bg-orange-500',  show: hasLeave },
+          { label: 'Class Analytics',  sub: 'Performance view',                nav: 'class-analytics', color: 'bg-violet-600',  show: hasClassAnalytics },
+          { label: 'Timetable',        sub: 'Manage schedules',                nav: 'timetable',       color: 'bg-emerald-600', show: hasTimetable },
+          { label: 'Collect Fees',     sub: feeOverdue > 0 ? `${feeOverdue} overdue` : 'Fee management', nav: 'fee-management', color: 'bg-amber-600', show: hasFeeManagement },
+        ].filter(a => a.show)
+
+        if (quickActions.length === 0) return null
+        return (
+          <div className={`grid gap-3 ${quickActions.length <= 2 ? 'grid-cols-2' : quickActions.length === 3 ? 'grid-cols-3' : 'grid-cols-2 md:grid-cols-4'}`}>
+            {quickActions.map(({ label, sub, nav, color }) => (
+              <button key={nav} onClick={() => onNavigate?.(nav)}
+                className={`${color} text-white rounded-2xl p-4 text-left hover:opacity-90 hover:shadow-lg hover:scale-[1.02] transition-all`}>
+                <p className="font-bold text-sm">{label}</p>
+                <p className="text-xs opacity-70 mt-0.5">{sub}</p>
+              </button>
+            ))}
+          </div>
+        )
+      })()}
+
+      {/* ── Feature metric cards (attendance %, leaves, fees) ── */}
+      {metricCards.length > 0 && (
+        <div className={`grid gap-4 ${metricCards.length === 1 ? 'grid-cols-1' : metricCards.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+          {loading
+            ? Array.from({ length: metricCards.length || 2 }).map((_, i) => <SkeletonCard key={i} />)
+            : metricCards.map(card => (
+                <StatCard key={card.nav} label={card.label} value={card.value} sub={card.sub}
+                  color={card.color} bg={card.bg} border={card.border}
+                  onClick={() => onNavigate?.(card.nav)} />
+              ))
+          }
+        </div>
+      )}
 
       {/* ── Health panels row (only panels for enabled features) ── */}
       {!loading && (hasTimetable || hasAttendance || hasExams) && (
@@ -415,29 +445,20 @@ export default function Overview({ schoolId, onNavigate }: Props) {
         </div>
       )}
 
-      {/* ── Quick actions (only show enabled feature nav items) ── */}
-      {!loading && (() => {
-        const quickActions = [
-          { label: 'Mark Attendance',  sub: 'Daily register',                 nav: 'attendance',      color: 'bg-blue-600',    show: hasAttendance },
-          { label: 'Review Leaves',    sub: `${stats.pendingLeaves} pending`,  nav: 'leave-requests',  color: 'bg-orange-500',  show: hasLeave },
-          { label: 'Class Analytics',  sub: 'Performance view',                nav: 'class-analytics', color: 'bg-violet-600',  show: hasClassAnalytics },
-          { label: 'Timetable',        sub: 'Manage schedules',                nav: 'timetable',       color: 'bg-emerald-600', show: hasTimetable },
-          { label: 'Collect Fees',     sub: feeOverdue > 0 ? `${feeOverdue} overdue` : 'Fee management', nav: 'fee-management', color: 'bg-amber-600', show: hasFeeManagement },
-        ].filter(a => a.show)
-
-        if (quickActions.length === 0) return null
-        return (
-          <div className={`grid gap-3 ${quickActions.length <= 2 ? 'grid-cols-2' : quickActions.length === 3 ? 'grid-cols-3' : 'grid-cols-2 md:grid-cols-4'}`}>
-            {quickActions.map(({ label, sub, nav, color }) => (
-              <button key={nav} onClick={() => onNavigate?.(nav)}
-                className={`${color} text-white rounded-2xl p-4 text-left hover:opacity-90 hover:shadow-lg hover:scale-[1.02] transition-all`}>
-                <p className="font-bold text-sm">{label}</p>
-                <p className="text-xs opacity-70 mt-0.5">{sub}</p>
-              </button>
-            ))}
-          </div>
-        )
-      })()}
+      {/* ── Count cards (teachers / students / classes) at bottom ── */}
+      <div>
+        <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-3">School Summary</p>
+        <div className="grid grid-cols-3 gap-4">
+          {loading
+            ? Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)
+            : countCards.map(card => (
+                <StatCard key={card.nav} label={card.label} value={card.value} sub={card.sub}
+                  color={card.color} bg={card.bg} border={card.border}
+                  onClick={() => onNavigate?.(card.nav)} />
+              ))
+          }
+        </div>
+      </div>
 
     </div>
   )

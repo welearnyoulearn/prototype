@@ -9,6 +9,16 @@ type ClassInfo = {
   class_teacher_name: string | null
 }
 
+type ClassDaySummary = {
+  id: number
+  morning_marked_by: string | null
+  morning_total: number | null
+  morning_present: number | null
+  afternoon_marked_by: string | null
+  afternoon_total: number | null
+  afternoon_present: number | null
+}
+
 type Student = {
   id: number
   name: string
@@ -98,10 +108,25 @@ function getSessionPeriods(slots: TimetableSlot[], day: string) {
   }
 }
 
+type HistoryRecord = {
+  student_name: string
+  roll_number: string
+  status: 'present' | 'absent' | 'late'
+  session: string
+}
+
 export default function Attendance({ teacherId, schoolId }: Props) {
+  const [mode, setMode] = useState<'mark' | 'history'>('mark')
   const [classes, setClasses] = useState<ClassInfo[]>([])
   const [loadingClasses, setLoadingClasses] = useState(true)
   const [step, setStep] = useState<Step>('select')
+
+  // History mode state
+  const [histClass, setHistClass] = useState<ClassInfo | null>(null)
+  const [histDate, setHistDate] = useState(new Date().toISOString().split('T')[0])
+  const [histRecords, setHistRecords] = useState<HistoryRecord[]>([])
+  const [histLoading, setHistLoading] = useState(false)
+  const [histError, setHistError] = useState('')
   const [selectedClass, setSelectedClass] = useState<ClassInfo | null>(null)
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
   const [session, setSession] = useState<Session>('morning')
@@ -120,12 +145,36 @@ export default function Attendance({ teacherId, schoolId }: Props) {
   const [timetableSlots, setTimetableSlots] = useState<TimetableSlot[]>([])
   const [sessionSummary, setSessionSummary] = useState<SessionSummary>({})
 
+  // School-wide per-class attendance status for the selected date
+  const [daySummary, setDaySummary] = useState<Record<number, ClassDaySummary>>({})
+
   useEffect(() => {
     fetch(`/api/classes?school_id=${schoolId}`)
       .then(r => r.json())
-      .then(data => setClasses(Array.isArray(data) ? data : []))
+      .then(data => {
+        const list: ClassInfo[] = Array.isArray(data) ? data : []
+        list.sort((a, b) => {
+          const ga = parseInt(a.grade) || 0, gb = parseInt(b.grade) || 0
+          return ga !== gb ? ga - gb : a.section.localeCompare(b.section)
+        })
+        setClasses(list)
+      })
       .finally(() => setLoadingClasses(false))
   }, [schoolId])
+
+  // Fetch who-marked summary for all classes on the selected date
+  useEffect(() => {
+    if (!selectedDate) return
+    fetch(`/api/attendance?school_id=${schoolId}&date=${selectedDate}&view=school`)
+      .then(r => r.json())
+      .then(data => {
+        if (!Array.isArray(data)) return
+        const map: Record<number, ClassDaySummary> = {}
+        data.forEach((row: ClassDaySummary) => { map[row.id] = row })
+        setDaySummary(map)
+      })
+      .catch(() => {})
+  }, [schoolId, selectedDate])
 
   async function handleSelectClass(cls: ClassInfo) {
     setSelectedClass(cls)
@@ -235,12 +284,33 @@ export default function Attendance({ teacherId, schoolId }: Props) {
       if (!res.ok) throw new Error(data.error || 'Failed')
       setResult({ saved: data.saved, notified: data.notified })
       if (selectedClass) await refreshSessionSummary(selectedClass, selectedDate)
+      // Refresh who-marked badges on class grid
+      fetch(`/api/attendance?school_id=${schoolId}&date=${selectedDate}&view=school`)
+        .then(r => r.json()).then(rows => {
+          if (!Array.isArray(rows)) return
+          const map: Record<number, ClassDaySummary> = {}
+          rows.forEach((row: ClassDaySummary) => { map[row.id] = row })
+          setDaySummary(map)
+        }).catch(() => {})
       setStep('done')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
       setStep('mark')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function loadHistory(cls: ClassInfo, date: string) {
+    setHistLoading(true); setHistError(''); setHistRecords([])
+    try {
+      const res = await fetch(`/api/attendance?class_id=${cls.id}&school_id=${schoolId}&date=${date}`)
+      const data = await res.json()
+      setHistRecords(Array.isArray(data) ? data : [])
+    } catch {
+      setHistError('Failed to load attendance history')
+    } finally {
+      setHistLoading(false)
     }
   }
 
@@ -252,13 +322,133 @@ export default function Attendance({ teacherId, schoolId }: Props) {
   const sessionLabel = session === 'morning' ? 'Morning' : 'Afternoon'
   const dateFormatted = new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
+  // ─── HISTORY MODE ──────────────────────────────────────────────────────────
+  if (mode === 'history') {
+    const histPresent = histRecords.filter(r => r.status === 'present').length
+    const histAbsent  = histRecords.filter(r => r.status === 'absent').length
+    const histLate    = histRecords.filter(r => r.status === 'late').length
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Attendance History</h2>
+            <p className="text-sm text-gray-500 mt-0.5">View past attendance by class and date</p>
+          </div>
+          <button onClick={() => setMode('mark')}
+            className="text-sm text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-50 font-medium">
+            ← Mark Attendance
+          </button>
+        </div>
+
+        {/* Filters */}
+        <div className="bg-white rounded-xl border border-gray-200 p-4 flex items-end gap-4 flex-wrap">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Class</label>
+            <select
+              value={histClass?.id ?? ''}
+              onChange={e => {
+                const cls = classes.find(c => c.id === Number(e.target.value)) || null
+                setHistClass(cls)
+                if (cls) loadHistory(cls, histDate)
+              }}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
+              <option value="">Select class…</option>
+              {classes.map(c => (
+                <option key={c.id} value={c.id}>{c.grade}-{c.section}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Date</label>
+            <input type="date" value={histDate} max={new Date().toISOString().split('T')[0]}
+              onChange={e => {
+                setHistDate(e.target.value)
+                if (histClass) loadHistory(histClass, e.target.value)
+              }}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300" />
+          </div>
+        </div>
+
+        {histError && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{histError}</div>
+        )}
+
+        {!histClass ? (
+          <div className="bg-white rounded-xl border border-gray-200 py-16 text-center text-gray-400 text-sm">
+            Select a class above to view attendance records
+          </div>
+        ) : histLoading ? (
+          <div className="bg-white rounded-xl border border-gray-200 py-16 text-center text-gray-400 text-sm">
+            Loading...
+          </div>
+        ) : histRecords.length === 0 ? (
+          <div className="bg-white rounded-xl border border-gray-200 py-16 text-center text-gray-400 text-sm">
+            No attendance marked for Class {histClass.grade}-{histClass.section} on this date
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-green-50 rounded-xl border border-green-200 px-4 py-3 text-center">
+                <p className="text-2xl font-bold text-green-700">{histPresent}</p>
+                <p className="text-xs text-green-600">Present</p>
+              </div>
+              <div className="bg-red-50 rounded-xl border border-red-200 px-4 py-3 text-center">
+                <p className="text-2xl font-bold text-red-700">{histAbsent}</p>
+                <p className="text-xs text-red-600">Absent</p>
+              </div>
+              <div className="bg-yellow-50 rounded-xl border border-yellow-200 px-4 py-3 text-center">
+                <p className="text-2xl font-bold text-yellow-700">{histLate}</p>
+                <p className="text-xs text-yellow-600">Late</p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
+                <p className="text-sm font-semibold text-gray-700">
+                  Class {histClass.grade}-{histClass.section} · {new Date(histDate + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
+                </p>
+              </div>
+              <div className="divide-y divide-gray-50">
+                {histRecords.map((r, i) => (
+                  <div key={i} className="flex items-center px-5 py-3 gap-3">
+                    <span className="text-sm text-gray-400 w-7">{i + 1}</span>
+                    <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-600 font-bold text-sm">
+                      {r.student_name.charAt(0)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800">{r.student_name}</p>
+                      {r.roll_number && <p className="text-xs text-gray-400">Roll #{r.roll_number}</p>}
+                    </div>
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${
+                      r.status === 'present' ? 'bg-green-100 text-green-700' :
+                      r.status === 'absent'  ? 'bg-red-100 text-red-700' :
+                                               'bg-yellow-100 text-yellow-700'
+                    }`}>
+                      {r.status.charAt(0).toUpperCase() + r.status.slice(1)}
+                    </span>
+                    {r.session && <span className="text-xs text-gray-400">{r.session}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
   // ─── SELECT CLASS ──────────────────────────────────────────────────────────
   if (step === 'select') {
     return (
       <div className="space-y-5">
-        <div>
-          <h2 className="text-xl font-bold text-gray-900">Mark Attendance</h2>
-          <p className="text-sm text-gray-500 mt-1">Select a class and date</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Mark Attendance</h2>
+            <p className="text-sm text-gray-500 mt-1">Select a class and date</p>
+          </div>
+          <button onClick={() => setMode('history')}
+            className="text-sm text-gray-500 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 font-medium">
+            View History →
+          </button>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 px-5 py-4 flex items-center gap-4">
           <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Date:</label>
@@ -272,14 +462,44 @@ export default function Attendance({ teacherId, schoolId }: Props) {
           <div className="py-10 text-center text-gray-400 text-sm">Loading classes...</div>
         ) : (
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4">
-            {classes.map(cls => (
-              <button key={cls.id} onClick={() => handleSelectClass(cls)} disabled={loadingStudents}
-                className="text-left bg-white rounded-xl border border-gray-200 p-5 hover:border-blue-300 hover:shadow-md transition-all disabled:opacity-50">
-                <p className="text-2xl font-bold text-gray-900 mb-1">{cls.grade}-{cls.section}</p>
-                {cls.class_teacher_name && <p className="text-xs text-gray-400 mb-3">CT: {cls.class_teacher_name}</p>}
-                <p className="text-xs text-blue-600 font-medium">→ Mark Attendance</p>
-              </button>
-            ))}
+            {classes.map(cls => {
+              const ds = daySummary[cls.id]
+              const morningDone  = !!(ds?.morning_marked_by)
+              const afternoonDone = !!(ds?.afternoon_marked_by)
+              const fullyDone = morningDone && afternoonDone
+              return (
+                <button key={cls.id} onClick={() => handleSelectClass(cls)} disabled={loadingStudents}
+                  className={`text-left rounded-xl border p-5 hover:shadow-md transition-all disabled:opacity-50 ${
+                    fullyDone ? 'bg-green-50 border-green-300 hover:border-green-400' :
+                    morningDone || afternoonDone ? 'bg-blue-50 border-blue-200 hover:border-blue-400' :
+                    'bg-white border-gray-200 hover:border-blue-300'
+                  }`}>
+                  <div className="flex items-start justify-between mb-1">
+                    <p className="text-2xl font-bold text-gray-900">{cls.grade}-{cls.section}</p>
+                    {fullyDone && <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-0.5 rounded-full">✓ Both</span>}
+                    {!fullyDone && morningDone && <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">½ AM</span>}
+                    {!fullyDone && afternoonDone && <span className="text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">½ PM</span>}
+                  </div>
+                  {cls.class_teacher_name && <p className="text-xs text-gray-400 mb-2">CT: {cls.class_teacher_name}</p>}
+                  {morningDone && (
+                    <p className="text-[11px] text-green-700 font-medium">
+                      ☀ AM: {ds.morning_present}/{ds.morning_total} · by {ds.morning_marked_by}
+                    </p>
+                  )}
+                  {afternoonDone && (
+                    <p className="text-[11px] text-purple-700 font-medium mt-0.5">
+                      🌙 PM: {ds.afternoon_present}/{ds.afternoon_total} · by {ds.afternoon_marked_by}
+                    </p>
+                  )}
+                  {!morningDone && !afternoonDone && (
+                    <p className="text-xs text-blue-600 font-medium mt-1">→ Mark Attendance</p>
+                  )}
+                  {(morningDone || afternoonDone) && (
+                    <p className="text-[10px] text-gray-400 mt-1">Click to {fullyDone ? 'edit' : 'complete'}</p>
+                  )}
+                </button>
+              )
+            })}
           </div>
         )}
       </div>

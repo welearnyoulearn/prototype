@@ -6,12 +6,16 @@ import { Pool, types } from 'pg'
 // instead of "2026-03-31", causing a persistent one-day-behind display bug.
 types.setTypeParser(types.builtins.DATE, (val: string) => val)
 
+// Auto-detect local vs Supabase: skip SSL for localhost connections
+const isLocal = (process.env.DATABASE_URL ?? '').includes('localhost') ||
+                (process.env.DATABASE_URL ?? '').includes('127.0.0.1')
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 3,                // keep connection count low for Supabase pooler
+  max: isLocal ? 10 : 3,            // local: more connections; Supabase pooler: keep low
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
-  ssl: { rejectUnauthorized: false },
+  connectionTimeoutMillis: isLocal ? 5000 : 10000,
+  ssl: isLocal ? false : { rejectUnauthorized: false },
 })
 
 export default pool
@@ -893,6 +897,28 @@ export async function initDB() {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_display_tokens_school ON display_tokens(school_id)`,
     `CREATE INDEX IF NOT EXISTS idx_display_tokens_token ON display_tokens(token)`,
+
+    // ── Soft-delete for schools ───────────────────────────────────────────────
+    // Instead of hard deleting, we mark deleted_at so platform admin retains all history.
+    `ALTER TABLE schools ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
+    `CREATE INDEX IF NOT EXISTS idx_schools_deleted ON schools(deleted_at) WHERE deleted_at IS NOT NULL`,
+
+    // ── Soft-delete for teachers ─────────────────────────────────────────────
+    `ALTER TABLE teachers ADD COLUMN IF NOT EXISTS removed_at TIMESTAMPTZ`,
+
+    // ── School default subject sets ───────────────────────────────────────────
+    // Admins define subject templates per grade range; auto-applied when creating classes
+    `CREATE TABLE IF NOT EXISTS school_subject_templates (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      name VARCHAR(100) NOT NULL,
+      from_grade INTEGER NOT NULL DEFAULT 1,
+      to_grade INTEGER NOT NULL DEFAULT 12,
+      subjects JSONB NOT NULL DEFAULT '[]',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_subject_templates_school ON school_subject_templates(school_id)`,
   ]
 
   for (const sql of migrations) {

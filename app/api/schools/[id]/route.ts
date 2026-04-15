@@ -9,7 +9,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         s.*,
         sub.tier,
         (SELECT COUNT(*) FROM teachers t WHERE t.school_id = s.id AND t.status = 'active') AS teacher_count,
-        (SELECT COUNT(*) FROM students st WHERE st.school_id = s.id) AS student_count,
+        (SELECT COUNT(*) FROM students st WHERE st.school_id = s.id AND st.status = 'active') AS student_count,
         u.id AS admin_user_id,
         u.email AS admin_email,
         u.first_login AS admin_first_login,
@@ -31,7 +31,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params
   try {
     const body = await req.json()
-    const { name, type, city, country, status, phone, email, address, logo_url, grading_scheme } = body
+    const { name, type, city, country, status, phone, email, address, logo_url, grading_scheme, restore } = body
+
+    // Restore a soft-deleted school
+    if (restore) {
+      const r = await pool.query(
+        `UPDATE schools SET deleted_at = NULL, status = 'active' WHERE id = $1 RETURNING *`, [id]
+      )
+      return NextResponse.json(r.rows[0])
+    }
 
     const result = await pool.query(
       `UPDATE schools SET
@@ -59,12 +67,24 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+// Soft delete — preserves all data, sets deleted_at timestamp
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   try {
-    const result = await pool.query('DELETE FROM schools WHERE id = $1', [id])
+    const result = await pool.query(
+      `UPDATE schools SET deleted_at = NOW(), status = 'deleted' WHERE id = $1 RETURNING id, name`,
+      [id]
+    )
     if (result.rowCount === 0) return NextResponse.json({ error: 'School not found' }, { status: 404 })
-    return NextResponse.json({ message: 'School deleted' })
+
+    // Log to audit trail
+    await pool.query(
+      `INSERT INTO platform_audit_log (action, entity_type, entity_id, entity_name, details)
+       VALUES ('delete_school', 'school', $1, $2, '{}')`,
+      [id, result.rows[0].name]
+    ).catch(() => {})
+
+    return NextResponse.json({ message: 'School deleted', school: result.rows[0] })
   } catch (error) {
     console.error(error)
     return NextResponse.json({ error: 'Failed to delete school' }, { status: 500 })

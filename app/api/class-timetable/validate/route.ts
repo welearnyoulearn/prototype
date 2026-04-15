@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
        FROM classes c
        LEFT JOIN teachers t ON t.id = c.class_teacher_id
        WHERE c.school_id = $1
-       ORDER BY c.grade::int NULLS LAST, c.grade, c.section`,
+       ORDER BY (NULLIF(regexp_replace(c.grade,'[^0-9]','','g'),''))::int NULLS LAST, c.section`,
       [school_id]
     )
 

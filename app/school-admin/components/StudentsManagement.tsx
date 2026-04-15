@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
-type Props = { schoolId: number }
+type Props = { schoolId: number; refreshKey?: number }
 
 type Student = {
   id: number
@@ -13,6 +13,7 @@ type Student = {
   roll_number: string
   parent_name: string
   parent_phone: string
+  parent_email: string
   phone: string
   status: string
 }
@@ -33,13 +34,14 @@ type StudentRewards = {
   streak: { current_streak: number; longest_streak: number } | null
 }
 
-export default function StudentsManagement({ schoolId }: Props) {
+export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const [students, setStudents] = useState<Student[]>([])
   const [classes, setClasses] = useState<{ id: number; grade: string; section: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [gradeFilter, setGradeFilter] = useState('all')
   const [sectionFilter, setSectionFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active')
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Student | null>(null)
   const [editing, setEditing] = useState(false)
@@ -51,6 +53,7 @@ export default function StudentsManagement({ schoolId }: Props) {
   const [perfLoading, setPerfLoading] = useState(false)
 
   useEffect(() => {
+    setLoading(true)
     Promise.all([
       fetch(`/api/students?school_id=${schoolId}`).then(r => r.json()),
       fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()),
@@ -58,7 +61,7 @@ export default function StudentsManagement({ schoolId }: Props) {
       setStudents(Array.isArray(stu) ? stu : [])
       setClasses(Array.isArray(cls) ? cls : [])
     }).catch(() => setError('Failed to load students')).finally(() => setLoading(false))
-  }, [schoolId])
+  }, [schoolId, refreshKey])
 
   async function loadStudentPerformance(student: Student) {
     setPerfLoading(true); setStudentPerf(null); setStudentRewards(null)
@@ -78,13 +81,15 @@ export default function StudentsManagement({ schoolId }: Props) {
     } finally { setPerfLoading(false) }
   }
 
-  // kept for backward compat (used nowhere else, but lets us keep old delete logic)
-  async function loadStudents() {
-    const res = await fetch(`/api/students?school_id=${schoolId}`)
-    const data = await res.json()
-    setStudents(Array.isArray(data) ? data : [])
+  async function reloadStudents() {
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/students?school_id=${schoolId}`)
+      const data = await res.json()
+      setStudents(Array.isArray(data) ? data : [])
+    } catch { setError('Failed to refresh students') }
+    finally { setLoading(false) }
   }
-  void loadStudents // suppress unused warning
 
   function validateSave(): string | null {
     const name = (editForm.name ?? selected?.name ?? '').trim()
@@ -122,23 +127,50 @@ export default function StudentsManagement({ schoolId }: Props) {
   }
 
   async function handleDelete(student: Student) {
-    if (!confirm(`Remove ${student.name}?`)) return
+    if (!confirm(`Remove ${student.name}? They will be marked inactive and can be restored later.`)) return
     try {
       const res = await fetch(`/api/students/${student.id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error()
-      setStudents(prev => prev.filter(s => s.id !== student.id))
-      if (selected?.id === student.id) setSelected(null)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setStudents(prev => prev.map(s => s.id === student.id ? { ...s, status: 'inactive' } : s))
+      if (selected?.id === student.id) setSelected({ ...student, status: 'inactive' })
+      reloadStudents()
     } catch {
-      setError('Failed to delete student')
+      setError('Failed to remove student')
     }
   }
 
-  const grades = ['all', ...Array.from(new Set(students.map(s => s.grade).filter(Boolean))).sort()]
+  async function handleRestore(student: Student) {
+    try {
+      const res = await fetch(`/api/students/${student.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'active' }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setStudents(prev => prev.map(s => s.id === student.id ? { ...s, status: 'active' } : s))
+      if (selected?.id === student.id) setSelected({ ...student, status: 'active' })
+      reloadStudents()
+    } catch {
+      setError('Failed to restore student')
+    }
+  }
+
+  const activeStudents = students.filter(s => s.status === 'active' || !s.status)
+  const inactiveStudents = students.filter(s => s.status === 'inactive')
+
+  const displayStudents = statusFilter === 'active' ? activeStudents
+    : statusFilter === 'inactive' ? inactiveStudents
+    : students
+
+  const grades = ['all', ...Array.from(new Set(displayStudents.map(s => s.grade).filter(Boolean)))
+    .sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))]
   const sections = ['all', ...Array.from(new Set(
-    students.filter(s => gradeFilter === 'all' || s.grade === gradeFilter).map(s => s.section).filter(Boolean)
+    displayStudents.filter(s => gradeFilter === 'all' || s.grade === gradeFilter).map(s => s.section).filter(Boolean)
   )).sort()]
 
-  const filtered = students.filter(s => {
+  const filtered = displayStudents.filter(s => {
     const matchesGrade = gradeFilter === 'all' || s.grade === gradeFilter
     const matchesSection = sectionFilter === 'all' || s.section === sectionFilter
     const matchesSearch = !search || s.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -164,7 +196,30 @@ export default function StudentsManagement({ schoolId }: Props) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-gray-900">Students</h2>
-          <span className="text-sm text-gray-400">{students.length} total students</span>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-400">{students.length} total · {activeStudents.length} active · {inactiveStudents.length} removed</span>
+            <button onClick={reloadStudents} disabled={loading}
+              title="Refresh student list"
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-500 rounded-lg text-xs hover:bg-gray-50 transition-colors disabled:opacity-40">
+              <svg className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {/* Status tabs */}
+        <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-fit">
+          {([['active', 'Active'], ['inactive', 'Removed'], ['all', 'All']] as const).map(([key, label]) => (
+            <button key={key} onClick={() => { setStatusFilter(key); setGradeFilter('all'); setSectionFilter('all') }}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              {label}
+              {key === 'inactive' && inactiveStudents.length > 0 && (
+                <span className="ml-1.5 bg-red-100 text-red-600 text-xs px-1.5 py-0.5 rounded-full">{inactiveStudents.length}</span>
+              )}
+            </button>
+          ))}
         </div>
 
         {error && (
@@ -190,15 +245,17 @@ export default function StudentsManagement({ schoolId }: Props) {
 
         {/* Stats chips */}
         <div className="flex gap-2 mb-4 flex-wrap">
-          {Array.from(new Set(students.map(s => s.grade).filter(Boolean))).sort().map(g => {
-            const count = students.filter(s => s.grade === g).length
-            return (
-              <button key={g} onClick={() => { setGradeFilter(g === gradeFilter ? 'all' : g); setSectionFilter('all') }}
-                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${gradeFilter === g ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-200 hover:border-green-300'}`}>
-                Grade {g} · {count}
-              </button>
-            )
-          })}
+          {Array.from(new Set(displayStudents.map(s => s.grade).filter(Boolean)))
+            .sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))
+            .map(g => {
+              const count = displayStudents.filter(s => s.grade === g).length
+              return (
+                <button key={g} onClick={() => { setGradeFilter(g === gradeFilter ? 'all' : g); setSectionFilter('all') }}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${gradeFilter === g ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-200 hover:border-green-300'}`}>
+                  Grade {g} · {count}
+                </button>
+              )
+            })}
         </div>
 
         {filtered.length === 0 ? (
@@ -326,7 +383,7 @@ export default function StudentsManagement({ schoolId }: Props) {
                             <div className="flex flex-wrap gap-1.5">
                               {studentRewards.badges.map((b, i) => (
                                 <span key={i} className="text-[10px] bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium capitalize">
-                                  {b.badge_type.replace(/_/g, ' ')}
+                                  {(b.badge_type ?? '').replace(/_/g, ' ')}
                                 </span>
                               ))}
                             </div>
@@ -335,11 +392,12 @@ export default function StudentsManagement({ schoolId }: Props) {
                       </div>
                     )}
                     {/* Parent info */}
-                    {(selected.parent_name || selected.parent_phone) && (
+                    {(selected.parent_name || selected.parent_phone || selected.parent_email) && (
                       <div className="bg-blue-50 rounded-xl px-3 py-2.5">
                         <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wide mb-1">Parent</p>
                         {selected.parent_name && <p className="text-xs font-semibold text-gray-800">{selected.parent_name}</p>}
                         {selected.parent_phone && <p className="text-xs text-gray-500">{selected.parent_phone}</p>}
+                        {selected.parent_email && <p className="text-xs text-gray-400">{selected.parent_email}</p>}
                       </div>
                     )}
                   </div>
@@ -384,6 +442,7 @@ export default function StudentsManagement({ schoolId }: Props) {
                     { field: 'phone', label: 'Phone', type: 'tel', placeholder: '10-digit number' },
                     { field: 'parent_name', label: 'Parent Name', type: 'text', placeholder: 'Parent full name' },
                     { field: 'parent_phone', label: 'Parent Phone', type: 'tel', placeholder: '10-digit number' },
+                    { field: 'parent_email', label: 'Parent Email', type: 'email', placeholder: 'parent@email.com' },
                   ].map(({ field, label, type, placeholder }) => (
                     <div key={field}>
                       <label className="block text-xs text-gray-500 mb-1">{label}</label>
@@ -415,10 +474,17 @@ export default function StudentsManagement({ schoolId }: Props) {
                   Edit Details
                 </button>
               )}
-              <button onClick={() => handleDelete(selected)}
-                className="w-full border border-red-200 text-red-600 py-2 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">
-                Remove Student
-              </button>
+              {selected.status === 'inactive' ? (
+                <button onClick={() => handleRestore(selected)}
+                  className="w-full border border-green-300 text-green-700 py-2 rounded-lg text-sm font-medium hover:bg-green-50 transition-colors">
+                  ↩ Restore Student
+                </button>
+              ) : (
+                <button onClick={() => handleDelete(selected)}
+                  className="w-full border border-red-200 text-red-600 py-2 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">
+                  Remove Student
+                </button>
+              )}
             </div>
             </>) /* end info tab */}
           </div>

@@ -56,6 +56,7 @@ export default function SchoolDetailPage() {
   const [selectedTier, setSelectedTier] = useState<string>('none')
   const [savingSub, setSavingSub]       = useState(false)
   const [savedSub, setSavedSub]         = useState(false)
+  const [tierPopup, setTierPopup]       = useState<{ tier: string; from: string } | null>(null)
 
   // Edit mode
   const [editing, setEditing]     = useState(false)
@@ -104,6 +105,7 @@ export default function SchoolDetailPage() {
 
   async function handleSaveSub() {
     setSavingSub(true); setSavedSub(false); setError('')
+    const prevTier = school?.tier || 'none'
     try {
       const res = await fetch(`/api/schools/${schoolId}/subscription`, {
         method: 'PUT',
@@ -114,6 +116,7 @@ export default function SchoolDetailPage() {
       if (!res.ok) throw new Error(data.error)
       setSchool(s => s ? { ...s, tier: data.tier } : s)
       setSavedSub(true)
+      setTierPopup({ tier: selectedTier, from: prevTier })
       setTimeout(() => setSavedSub(false), 3000)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save')
@@ -507,6 +510,58 @@ export default function SchoolDetailPage() {
                 Done
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Tier Assignment Confirmation Popup ── */}
+      {tierPopup && school && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            {(() => {
+              const meta = TIER_META.find(t => t.key === tierPopup.tier) ?? TIER_META[0]
+              const fromMeta = TIER_META.find(t => t.key === tierPopup.from) ?? TIER_META[0]
+              const isUpgrade = ['none','basic','standard','premium'].indexOf(tierPopup.tier) > ['none','basic','standard','premium'].indexOf(tierPopup.from)
+              return (
+                <>
+                  <div className={`${meta.bg} px-6 py-5 border-b ${meta.border}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-full ${meta.bg} border-2 ${meta.border} flex items-center justify-center`}>
+                        <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-gray-900 text-base">Plan {isUpgrade ? 'Upgraded' : 'Changed'}!</h3>
+                        <p className="text-gray-500 text-xs">{school.name}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="px-6 py-5">
+                    <div className="flex items-center justify-center gap-4 mb-4">
+                      <div className="text-center">
+                        <span className={`text-sm font-semibold px-2.5 py-1 rounded-full ${fromMeta.badge}`}>{fromMeta.label}</span>
+                        <p className="text-xs text-gray-400 mt-1">Before</p>
+                      </div>
+                      <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                      </svg>
+                      <div className="text-center">
+                        <span className={`text-sm font-bold px-2.5 py-1 rounded-full ${meta.badge}`}>{meta.label}</span>
+                        <p className="text-xs text-gray-400 mt-1">Now</p>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 mb-4 text-center">
+                      School admin will see updated features on next login.
+                    </p>
+                    <button onClick={() => setTierPopup(null)}
+                      className="w-full bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-xl text-sm font-medium transition-colors">
+                      Done
+                    </button>
+                  </div>
+                </>
+              )
+            })()}
           </div>
         </div>
       )}

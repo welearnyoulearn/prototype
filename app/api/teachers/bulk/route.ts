@@ -70,18 +70,6 @@ export async function POST(req: NextRequest) {
         const teacher = res.rows[0]
         inserted.push(teacher)
 
-        // Auto-assign class teacher if class_teacher_grade and class_teacher_section provided
-        const ctGrade = t.class_teacher_grade?.trim()
-        const ctSection = t.class_teacher_section?.trim()
-        if (ctGrade && ctSection) {
-          await client.query(
-            `INSERT INTO classes (school_id, grade, section, class_teacher_id)
-             VALUES ($1, $2, $3, $4)
-             ON CONFLICT (school_id, grade, section)
-             DO UPDATE SET class_teacher_id = EXCLUDED.class_teacher_id`,
-            [school_id, ctGrade, ctSection, teacher.id]
-          )
-        }
       }
 
       await client.query('COMMIT')

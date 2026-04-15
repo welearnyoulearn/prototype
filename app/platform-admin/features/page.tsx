@@ -21,6 +21,7 @@ export default function FeaturePlansPage() {
   const [saving, setSaving]     = useState(false)
   const [saved, setSaved]       = useState(false)
   const [error, setError]       = useState('')
+  const [showSavedPopup, setShowSavedPopup] = useState(false)
 
   useEffect(() => { load() }, [])
 
@@ -34,6 +35,8 @@ export default function FeaturePlansPage() {
     finally { setLoading(false) }
   }
 
+  // Each tier checkbox is independent — checking Premium does NOT auto-check Basic/Standard.
+  // This allows premium-only, standard-only, or any custom combination.
   function toggle(featureKey: string, tier: string) {
     setMatrix(prev => ({
       ...prev,
@@ -42,26 +45,6 @@ export default function FeaturePlansPage() {
         [tier]: !prev[featureKey]?.[tier],
       },
     }))
-    setSaved(false)
-  }
-
-  // When enabling a tier, also enable all lower tiers (premium includes standard includes basic)
-  function toggleWithCascade(featureKey: string, tier: string) {
-    const tierOrder = ['basic', 'standard', 'premium']
-    const tierIdx   = tierOrder.indexOf(tier)
-    const current   = matrix[featureKey]?.[tier] ?? false
-
-    setMatrix(prev => {
-      const updated = { ...prev[featureKey] }
-      if (!current) {
-        // enabling: also enable all lower tiers
-        for (let i = 0; i <= tierIdx; i++) updated[tierOrder[i]] = true
-      } else {
-        // disabling: also disable all higher tiers
-        for (let i = tierIdx; i < tierOrder.length; i++) updated[tierOrder[i]] = false
-      }
-      return { ...prev, [featureKey]: updated }
-    })
     setSaved(false)
   }
 
@@ -81,6 +64,7 @@ export default function FeaturePlansPage() {
       })
       if (!res.ok) throw new Error()
       setSaved(true)
+      setShowSavedPopup(true)
       setTimeout(() => setSaved(false), 3000)
     } catch { setError('Failed to save') }
     finally { setSaving(false) }
@@ -121,8 +105,8 @@ export default function FeaturePlansPage() {
         <div className="mb-6">
           <h1 className="text-xl font-bold text-gray-900">Feature Plan Configuration</h1>
           <p className="text-gray-500 text-sm mt-1">
-            Check which features are available in each plan. School admins will only see features enabled for their plan.
-            Enabling a higher tier also enables lower tiers automatically.
+            Each tier checkbox is independent — you can enable a feature for Premium only without giving it to Basic or Standard.
+            School admins only see features enabled for their plan.
           </p>
         </div>
 
@@ -164,8 +148,18 @@ export default function FeaturePlansPage() {
                     className={`grid grid-cols-[1fr_100px_100px_100px] items-center hover:bg-gray-50 transition-colors
                       ${gi < grouped.length - 1 || fi < group.items.length - 1 ? 'border-b border-gray-100' : ''}`}
                   >
-                    <div className="px-5 py-3.5">
+                    <div className="px-5 py-3.5 flex items-center gap-2">
                       <span className="text-sm text-gray-800 font-medium">{feature.label}</span>
+                      {/* Badge: show tier restriction at a glance */}
+                      {(() => {
+                        const b = matrix[feature.key]?.basic    ?? false
+                        const s = matrix[feature.key]?.standard ?? false
+                        const p = matrix[feature.key]?.premium  ?? false
+                        if (!b && !s && p)  return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700">Premium only</span>
+                        if (!b && s && p)   return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700">Standard+</span>
+                        if (!b && !s && !p) return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400">Disabled</span>
+                        return null
+                      })()}
                     </div>
 
                     {TIERS.map(t => {
@@ -173,7 +167,7 @@ export default function FeaturePlansPage() {
                       return (
                         <div key={t.key} className="flex items-center justify-center py-3.5">
                           <button
-                            onClick={() => toggleWithCascade(feature.key, t.key)}
+                            onClick={() => toggle(feature.key, t.key)}
                             className={`w-6 h-6 rounded-md border-2 flex items-center justify-center transition-all ${
                               enabled
                                 ? `${t.check} border-transparent`
@@ -200,6 +194,44 @@ export default function FeaturePlansPage() {
           Changes saved here are reflected immediately in all school admin dashboards on next page load.
         </p>
       </div>
+
+      {/* ── Save Confirmation Popup ── */}
+      {showSavedPopup && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="bg-green-600 px-6 py-5">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-white font-bold text-base">Plan Config Saved!</h3>
+                  <p className="text-green-200 text-xs">Feature access updated across all schools</p>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-5">
+              <div className="space-y-2 mb-4">
+                {TIERS.map(t => (
+                  <div key={t.key} className="flex items-center justify-between text-sm">
+                    <span className={`font-medium ${t.color}`}>{t.label}</span>
+                    <span className="text-gray-500">{features.filter(f => matrix[f.key]?.[t.key]).length} features enabled</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 bg-gray-50 rounded-lg px-3 py-2 mb-4">
+                School admin dashboards will reflect these changes on next page load.
+              </p>
+              <button onClick={() => setShowSavedPopup(false)}
+                className="w-full bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-xl text-sm font-medium transition-colors">
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

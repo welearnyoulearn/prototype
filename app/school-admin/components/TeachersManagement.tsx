@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
-type Props = { schoolId: number }
+type Props = { schoolId: number; refreshKey?: number }
 
 type Teacher = {
   id: number
@@ -19,6 +19,7 @@ type Teacher = {
   class_id: number | null
   class_grade: string | null
   class_section: string | null
+  teaches_grades: string | null
 }
 
 type EditForm = Partial<Teacher>
@@ -33,13 +34,6 @@ type TimetableSlot = {
   grade: string
   section: string
   room: string
-}
-
-type UnavailableSlot = {
-  id: number
-  day_of_week: string
-  period_number: number
-  reason: string | null
 }
 
 type SubDuty = {
@@ -63,11 +57,57 @@ function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg'
   )
 }
 
-export default function TeachersManagement({ schoolId }: Props) {
+const ALL_GRADES = Array.from({ length: 12 }, (_, i) => String(i + 1))
+
+// Multi-select grades dropdown
+function GradesDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const selected = value ? value.split(',').map(s => s.trim()).filter(Boolean) : []
+
+  function toggle(g: string) {
+    const next = selected.includes(g) ? selected.filter(x => x !== g) : [...selected, g]
+    onChange(next.sort((a, b) => parseInt(a) - parseInt(b)).join(','))
+  }
+
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen(v => !v)}
+        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-left bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 flex justify-between items-center">
+        <span className={selected.length ? 'text-gray-900' : 'text-gray-400'}>
+          {selected.length ? `Grades: ${selected.join(', ')}` : 'Select grades...'}
+        </span>
+        <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute z-50 top-full left-0 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg p-2">
+          <div className="grid grid-cols-4 gap-1">
+            {ALL_GRADES.map(g => (
+              <button key={g} type="button" onClick={() => toggle(g)}
+                className={`py-1 rounded-lg text-xs font-medium transition-colors ${
+                  selected.includes(g) ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}>
+                {g}
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => { onChange(''); setOpen(false) }}
+            className="mt-2 w-full text-xs text-red-500 hover:text-red-700 text-center py-1">
+            Clear all
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [tab, setTab] = useState<'teaching' | 'non_teaching'>('teaching')
+  const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'removed' | 'all'>('active')
   const [deptFilter, setDeptFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Teacher | null>(null)
@@ -78,18 +118,20 @@ export default function TeachersManagement({ schoolId }: Props) {
   const [teacherTimetable, setTeacherTimetable] = useState<TimetableSlot[]>([])
   const [teacherSubDuties, setTeacherSubDuties] = useState<SubDuty[]>([])
   const [timetableLoading, setTimetableLoading] = useState(false)
-  const [showAvailability, setShowAvailability] = useState(false)
-  const [unavailableSlots, setUnavailableSlots] = useState<UnavailableSlot[]>([])
-  const [availLoading, setAvailLoading] = useState(false)
-  const [togglingSlot, setTogglingSlot] = useState<string | null>(null)
-  // 360° profile panel
   const [detailTab, setDetailTab] = useState<'info' | 'analytics'>('info')
   const [teacherAnalytics, setTeacherAnalytics] = useState<{
     taskCount: number; pendingLeaves: number; totalLeaves: number; subDutyCount: number; periodsPerWeek: number
   } | null>(null)
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
+  const [showRemoveDialog, setShowRemoveDialog] = useState(false)
+  const [removeConsequences, setRemoveConsequences] = useState<{
+    subjects_teaching: { subject_name: string; grade: string; section: string }[]
+    class_teacher_of: { grade: string; section: string }[]
+    timetable_slots: { subject_name: string; grade: string; section: string; day_of_week: string; period_number: number }[]
+  } | null>(null)
+  const [loadingConsequences, setLoadingConsequences] = useState(false)
 
-  useEffect(() => { loadTeachers() }, [schoolId])
+  useEffect(() => { loadTeachers() }, [schoolId, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadTeachers() {
     setLoading(true)
@@ -109,7 +151,7 @@ export default function TeachersManagement({ schoolId }: Props) {
     const phone = (editForm.phone ?? selected?.phone ?? '').trim()
     const email = (editForm.email ?? selected?.email ?? '').trim()
     if (!name) return 'Name is required'
-    if (phone && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(phone)) return 'Phone must be 7–15 digits (optionally with +, spaces, or dashes)'
+    if (phone && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(phone)) return 'Phone must be 7–15 digits'
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Enter a valid email address'
     return null
   }
@@ -129,7 +171,7 @@ export default function TeachersManagement({ schoolId }: Props) {
       if (!res.ok) throw new Error(data.error)
       setTeachers(prev => prev.map(t => t.id === selected.id ? { ...t, ...data } : t))
       setSelected({ ...selected, ...data })
-      setEditing(false)
+      setEditing(false); setEditForm({})
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save teacher')
     } finally {
@@ -170,37 +212,6 @@ export default function TeachersManagement({ schoolId }: Props) {
     finally { setTimetableLoading(false) }
   }
 
-  async function loadAvailability(teacherId: number) {
-    setAvailLoading(true)
-    try {
-      const res = await fetch(`/api/teacher-availability?teacher_id=${teacherId}&school_id=${schoolId}`)
-      const data = await res.json()
-      setUnavailableSlots(Array.isArray(data) ? data : [])
-    } catch { setError('Failed to load availability') }
-    finally { setAvailLoading(false) }
-  }
-
-  async function toggleSlot(teacherId: number, day: string, pNum: number) {
-    const key = `${day}-${pNum}`
-    setTogglingSlot(key)
-    const isUnavail = unavailableSlots.some(s => s.day_of_week === day && s.period_number === pNum)
-    try {
-      if (isUnavail) {
-        await fetch(`/api/teacher-availability?teacher_id=${teacherId}&school_id=${schoolId}&day_of_week=${day}&period_number=${pNum}`, { method: 'DELETE' })
-        setUnavailableSlots(prev => prev.filter(s => !(s.day_of_week === day && s.period_number === pNum)))
-      } else {
-        const res = await fetch('/api/teacher-availability', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ teacher_id: teacherId, school_id: schoolId, day_of_week: day, period_number: pNum }),
-        })
-        const data = await res.json()
-        if (!data.already_set) setUnavailableSlots(prev => [...prev, data])
-      }
-    } catch { setError('Failed to update availability') }
-    finally { setTogglingSlot(null) }
-  }
-
   async function loadTeacherAnalytics(teacherId: number) {
     setAnalyticsLoading(true); setTeacherAnalytics(null)
     try {
@@ -212,41 +223,71 @@ export default function TeachersManagement({ schoolId }: Props) {
       const taskArr = Array.isArray(tasks) ? tasks : []
       const leaveArr = Array.isArray(leaves) ? leaves : []
       const ttArr = Array.isArray(tt) ? tt : []
-      const periodsPerWeek = ttArr.length
       const pendingLeaves = leaveArr.filter((l: { status: string }) => l.status === 'pending').length
       setTeacherAnalytics({
         taskCount: taskArr.length,
         pendingLeaves,
         totalLeaves: leaveArr.length,
         subDutyCount: teacherSubDuties.length,
-        periodsPerWeek,
+        periodsPerWeek: ttArr.length,
       })
     } finally { setAnalyticsLoading(false) }
   }
 
   async function handleDelete(teacher: Teacher) {
-    if (!confirm(`Remove ${teacher.name} from this school?`)) return
+    setLoadingConsequences(true)
+    setShowRemoveDialog(true)
+    setRemoveConsequences(null)
     try {
-      const res = await fetch(`/api/teachers/${teacher.id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error()
-      setTeachers(prev => prev.filter(t => t.id !== teacher.id))
-      if (selected?.id === teacher.id) setSelected(null)
+      const res = await fetch(`/api/teachers/${teacher.id}?consequences=true`)
+      const data = await res.json()
+      setRemoveConsequences(data)
     } catch {
-      setError('Failed to delete teacher')
+      setError('Failed to fetch removal consequences')
+      setShowRemoveDialog(false)
+    } finally {
+      setLoadingConsequences(false)
     }
   }
 
-  const byType = teachers.filter(t => (t.staff_type || 'teaching') === tab)
-  const departments = ['all', ...Array.from(new Set(byType.map(t => t.department).filter(Boolean)))]
+  async function confirmDelete() {
+    if (!selected) return
+    try {
+      const res = await fetch(`/api/teachers/${selected.id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error()
+      setTeachers(prev => prev.map(t => t.id === selected.id ? { ...t, status: 'removed' } : t))
+      setShowRemoveDialog(false)
+      setSelected(null)
+    } catch {
+      setError('Failed to remove teacher')
+      setShowRemoveDialog(false)
+    }
+  }
 
-  const filtered = byType.filter(t => {
+  function openDetail(t: Teacher) {
+    setSelected(t)
+    setEditing(false)
+    setEditForm({})
+    setDetailTab('info')
+    setShowTimetable(false)
+    setTeacherAnalytics(null)
+  }
+
+  const byType = teachers.filter(t => (t.staff_type || 'teaching') === tab)
+  const byStatus = statusFilter === 'all'
+    ? byType.filter(t => t.status !== 'removed')
+    : statusFilter === 'removed'
+    ? byType.filter(t => t.status === 'removed')
+    : byType.filter(t => t.status === statusFilter)
+  const departments = ['all', ...Array.from(new Set(byStatus.map(t => t.department).filter(Boolean)))]
+
+  const filtered = byStatus.filter(t => {
     const matchesDept = deptFilter === 'all' || t.department === deptFilter
     const matchesSearch = !search || t.name.toLowerCase().includes(search.toLowerCase()) ||
       (t.employee_id || '').toLowerCase().includes(search.toLowerCase())
     return matchesDept && matchesSearch
   })
 
-  // Group teaching staff by department
   const grouped: Record<string, Teacher[]> = {}
   if (tab === 'teaching') {
     filtered.forEach(t => {
@@ -258,295 +299,376 @@ export default function TeachersManagement({ schoolId }: Props) {
 
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300'
 
+
   if (loading) return <div className="py-12 text-center text-gray-400">Loading staff...</div>
 
   return (
-    <div className="flex gap-6 h-full">
-      {/* Left: List */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-gray-900">Staff Directory</h2>
-          <div className="text-sm text-gray-400">{teachers.length} total staff</div>
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-xl font-bold text-gray-900">Staff Directory</h2>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-400">{teachers.length} total staff</span>
+          <button onClick={loadTeachers} disabled={loading}
+            title="Refresh staff list"
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-500 rounded-lg text-xs hover:bg-gray-50 transition-colors disabled:opacity-40">
+            <svg className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            Refresh
+          </button>
         </div>
+      </div>
 
-        {error && (
-          <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
-            <span>{error}</span>
-            <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 ml-4">✕</button>
-          </div>
-        )}
-
-        {/* Tabs */}
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit mb-4">
-          {(['teaching', 'non_teaching'] as const).map(t => (
-            <button key={t} onClick={() => { setTab(t); setDeptFilter('all') }}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-              {t === 'teaching' ? 'Teaching Staff' : 'Non-Teaching Staff'}
-              <span className="ml-1.5 text-xs text-gray-400">({teachers.filter(x => (x.staff_type || 'teaching') === t).length})</span>
-            </button>
-          ))}
+      {error && (
+        <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
+          <span>{error}</span>
+          <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 ml-4">✕</button>
         </div>
+      )}
 
-        {/* Filters */}
-        <div className="flex gap-3 mb-4">
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or ID..."
-            className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300" />
-          {tab === 'teaching' && departments.length > 1 && (
-            <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
-              {departments.map(d => <option key={d} value={d}>{d === 'all' ? 'All Departments' : d}</option>)}
-            </select>
-          )}
+      {/* Staff type tabs */}
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit mb-4">
+        {(['teaching', 'non_teaching'] as const).map(t => (
+          <button key={t} onClick={() => { setTab(t); setDeptFilter('all'); setStatusFilter('active') }}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            {t === 'teaching' ? 'Teaching Staff' : 'Non-Teaching Staff'}
+            <span className="ml-1.5 text-xs text-gray-400">({teachers.filter(x => (x.staff_type || 'teaching') === t).length})</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Filters row */}
+      <div className="flex gap-3 mb-4 flex-wrap">
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or ID..."
+          className="flex-1 min-w-[200px] border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300" />
+        {/* Status filter */}
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+          {(['active', 'inactive', 'removed', 'all'] as const).map(s => {
+            const count = s === 'inactive' ? byType.filter(t => t.status === 'inactive').length
+              : s === 'removed' ? byType.filter(t => t.status === 'removed').length : 0
+            return (
+              <button key={s} onClick={() => setStatusFilter(s as typeof statusFilter)}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${statusFilter === s ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
+                {count > 0 && (
+                  <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[10px] ${s === 'removed' ? 'bg-red-100 text-red-600' : 'bg-gray-200 text-gray-600'}`}>{count}</span>
+                )}
+              </button>
+            )
+          })}
         </div>
-
-        {filtered.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 py-12 text-center">
-            <p className="text-gray-400">No {tab === 'teaching' ? 'teaching' : 'non-teaching'} staff found</p>
-          </div>
-        ) : tab === 'teaching' ? (
-          // Department-wise grouped view
-          <div className="space-y-5">
-            {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([dept, members]) => (
-              <div key={dept} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="px-5 py-3 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
-                  <span className="font-semibold text-blue-800 text-sm">{dept}</span>
-                  <span className="text-xs text-blue-500">{members.length} teacher{members.length !== 1 ? 's' : ''}</span>
-                </div>
-                <div className="divide-y divide-gray-100">
-                  {members.map(t => (
-                    <TeacherRow key={t.id} teacher={t} selected={selected?.id === t.id}
-                      onClick={() => { setSelected(t); setEditing(false); setDetailTab('info'); setShowTimetable(false); setShowAvailability(false) }}
-                      onToggle={() => handleToggleStatus(t)} onDelete={() => handleDelete(t)} />
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          // Non-teaching: flat list
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="divide-y divide-gray-100">
-              {filtered.map(t => (
-                <TeacherRow key={t.id} teacher={t} selected={selected?.id === t.id}
-                  onClick={() => { setSelected(t); setEditing(false); setDetailTab('info'); setShowTimetable(false); setShowAvailability(false) }}
-                  onToggle={() => handleToggleStatus(t)} onDelete={() => handleDelete(t)} />
-              ))}
-            </div>
-          </div>
+        {tab === 'teaching' && departments.length > 1 && (
+          <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
+            {departments.map(d => <option key={d} value={d}>{d === 'all' ? 'All Departments' : d}</option>)}
+          </select>
         )}
       </div>
 
-      {/* Right: Detail panel */}
-      {selected && (
-        <div className="w-80 flex-shrink-0">
-          <div className="bg-white rounded-xl border border-gray-200 sticky top-6">
-            <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-              <div className="flex gap-1">
-                {(['info', 'analytics'] as const).map(t => (
-                  <button key={t} onClick={() => {
-                    setDetailTab(t)
-                    if (t === 'analytics' && !teacherAnalytics) loadTeacherAnalytics(selected.id)
-                  }}
-                    className={`px-3 py-1 rounded-md text-xs font-semibold capitalize transition-colors ${detailTab === t ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
-                    {t === 'info' ? 'Profile' : '360° View'}
-                  </button>
+      {filtered.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 py-12 text-center">
+          <p className="text-gray-400">No {statusFilter !== 'all' ? statusFilter + ' ' : ''}{tab === 'teaching' ? 'teaching' : 'non-teaching'} staff found</p>
+          {(statusFilter === 'inactive' || statusFilter === 'removed') && (
+            <button onClick={() => setStatusFilter('active')} className="text-blue-500 text-sm mt-2 hover:underline">
+              Switch to active staff
+            </button>
+          )}
+        </div>
+      ) : tab === 'teaching' ? (
+        <div className="space-y-5">
+          {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([dept, members]) => (
+            <div key={dept} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-5 py-3 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
+                <span className="font-semibold text-blue-800 text-sm">{dept}</span>
+                <span className="text-xs text-blue-500">{members.length} teacher{members.length !== 1 ? 's' : ''}</span>
+              </div>
+              <div className="divide-y divide-gray-100">
+                {members.map(t => (
+                  <TeacherCard key={t.id} teacher={t}
+                    onClick={() => openDetail(t)}
+                    onToggle={() => handleToggleStatus(t)}
+                    onDelete={() => handleDelete(t)} />
                 ))}
               </div>
-              <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
             </div>
+          ))}
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="divide-y divide-gray-100">
+            {filtered.map(t => (
+              <TeacherCard key={t.id} teacher={t}
+                onClick={() => openDetail(t)}
+                onToggle={() => handleToggleStatus(t)}
+                onDelete={() => handleDelete(t)} />
+            ))}
+          </div>
+        </div>
+      )}
 
-            {/* Profile */}
-            <div className="px-5 py-5 border-b border-gray-100">
-              <div className="flex items-center gap-3 mb-4">
-                <Avatar name={selected.name} size="lg" />
-                <div>
-                  <p className="font-bold text-gray-900">{selected.name}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{selected.employee_id}</p>
-                  <span className={`inline-flex mt-1 px-2 py-0.5 rounded-full text-xs font-medium ${selected.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+      {/* ── Full-screen Detail Modal ── */}
+      {selected && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-3xl my-6 shadow-2xl">
+
+            {/* Modal header */}
+            <div className="flex items-center gap-4 px-6 py-4 border-b border-gray-100">
+              <Avatar name={selected.name} size="lg" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <h3 className="font-bold text-gray-900 text-lg">{selected.name}</h3>
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${selected.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                     {selected.status}
                   </span>
+                  {selected.class_grade && (
+                    <span className="bg-blue-100 text-blue-700 text-xs px-2.5 py-0.5 rounded-full font-medium">
+                      Class Teacher: Gr.{selected.class_grade}-{selected.class_section}
+                    </span>
+                  )}
                 </div>
+                <p className="text-sm text-gray-400 mt-0.5">{selected.employee_id}</p>
               </div>
-
-              {selected.class_grade && (
-                <div className="bg-blue-50 rounded-lg px-3 py-2 mb-3 text-xs text-blue-700">
-                  <span className="font-medium">Class Teacher:</span> Grade {selected.class_grade} – Section {selected.class_section}
-                </div>
-              )}
-
-              {!editing ? (
-                <div className="space-y-2 text-sm">
-                  {[
-                    { label: 'Subject', value: selected.subject },
-                    { label: 'Department', value: selected.department },
-                    { label: 'Staff Type', value: selected.staff_type === 'non_teaching' ? 'Non-Teaching' : 'Teaching' },
-                    { label: 'Qualification', value: selected.qualification },
-                    { label: 'Joining Date', value: selected.date_of_joining ? new Date(selected.date_of_joining).toLocaleDateString() : null },
-                    { label: 'Email', value: selected.email },
-                    { label: 'Phone', value: selected.phone },
-                  ].map(({ label, value }) => value ? (
-                    <div key={label} className="flex gap-2">
-                      <span className="text-gray-400 w-24 flex-shrink-0">{label}</span>
-                      <span className="text-gray-700 font-medium break-all">{value}</span>
-                    </div>
-                  ) : null)}
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {[
-                    { field: 'name', label: 'Name *', type: 'text', placeholder: 'Full name' },
-                    { field: 'email', label: 'Email', type: 'email', placeholder: 'teacher@school.com' },
-                    { field: 'subject', label: 'Subject', type: 'text', placeholder: 'e.g. Mathematics' },
-                    { field: 'phone', label: 'Phone', type: 'tel', placeholder: '10-digit number' },
-                    { field: 'department', label: 'Department', type: 'text', placeholder: 'e.g. Science' },
-                    { field: 'qualification', label: 'Qualification', type: 'text', placeholder: 'e.g. B.Ed, M.Sc' },
-                  ].map(({ field, label, type, placeholder }) => (
-                    <div key={field}>
-                      <label className="block text-xs text-gray-500 mb-1">{label}</label>
-                      <input type={type} placeholder={placeholder}
-                        value={(editForm as Record<string, unknown>)[field] as string ?? (selected as Record<string, unknown>)[field] as string ?? ''}
-                        onChange={e => setEditForm(f => ({ ...f, [field]: e.target.value }))}
-                        className={inputCls + ' !text-xs !py-1.5'} />
-                    </div>
-                  ))}
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">Staff Type</label>
-                    <select value={editForm.staff_type ?? selected.staff_type ?? 'teaching'}
-                      onChange={e => setEditForm(f => ({ ...f, staff_type: e.target.value }))}
-                      className={inputCls + ' !text-xs !py-1.5'}>
-                      <option value="teaching">Teaching</option>
-                      <option value="non_teaching">Non-Teaching</option>
-                    </select>
-                  </div>
-                </div>
-              )}
+              <button onClick={() => { setSelected(null); setEditing(false) }}
+                className="text-gray-400 hover:text-gray-600 text-2xl leading-none flex-shrink-0 ml-2">×</button>
             </div>
 
-            {/* Actions */}
-            <div className="px-5 py-4 space-y-2">
-              {editing ? (
-                <div className="flex gap-2">
-                  <button onClick={handleSave} disabled={saving}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
-                    {saving ? 'Saving...' : 'Save Changes'}
-                  </button>
-                  <button onClick={() => { setEditing(false); setEditForm({}) }}
-                    className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50 transition-colors">
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <button onClick={() => { setEditing(true); setEditForm({}) }}
-                  className="w-full border border-blue-200 text-blue-600 py-2 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors">
-                  Edit Details
+            {/* Sub-tabs */}
+            <div className="flex gap-1 px-6 pt-4 border-b border-gray-100 pb-0">
+              {(['info', 'analytics'] as const).map(t => (
+                <button key={t} onClick={() => {
+                  setDetailTab(t)
+                  if (t === 'analytics' && !teacherAnalytics) loadTeacherAnalytics(selected.id)
+                }}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${detailTab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                  {t === 'info' ? 'Profile' : '360° View'}
                 </button>
-              )}
-              <button
-                onClick={() => {
-                  const next = !showTimetable
-                  setShowTimetable(next)
-                  if (next) { setShowAvailability(false); loadTeacherTimetable(selected.id) }
-                }}
-                className="w-full border border-purple-200 text-purple-600 py-2 rounded-lg text-sm font-medium hover:bg-purple-50 transition-colors">
-                {showTimetable ? 'Hide Timetable' : 'View Timetable'}
-              </button>
-              <button
-                onClick={() => {
-                  const next = !showAvailability
-                  setShowAvailability(next)
-                  if (next) { setShowTimetable(false); loadAvailability(selected.id) }
-                }}
-                className="w-full border border-teal-200 text-teal-600 py-2 rounded-lg text-sm font-medium hover:bg-teal-50 transition-colors">
-                {showAvailability ? 'Hide Availability' : 'Set Availability'}
-              </button>
-              <button onClick={() => handleToggleStatus(selected)}
-                className={`w-full py-2 rounded-lg text-sm font-medium transition-colors border ${selected.status === 'active' ? 'border-orange-200 text-orange-600 hover:bg-orange-50' : 'border-green-200 text-green-600 hover:bg-green-50'}`}>
-                {selected.status === 'active' ? 'Deactivate' : 'Activate'}
-              </button>
-              <button onClick={() => handleDelete(selected)}
-                className="w-full border border-red-200 text-red-600 py-2 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">
-                Remove from School
-              </button>
+              ))}
             </div>
 
-            {/* Timetable view */}
-            {detailTab === 'info' && showTimetable && (
-              <div className="border-t border-gray-100">
-                <TeacherTimetableView
-                  timetable={teacherTimetable}
-                  loading={timetableLoading}
-                  teacherName={selected.name}
-                  subDuties={teacherSubDuties}
-                />
-              </div>
-            )}
+            <div className="p-6">
+              {detailTab === 'info' && (
+                <>
+                  {!editing ? (
+                    <div className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm">
+                      {[
+                        { label: 'Subject', value: selected.subject },
+                        { label: 'Department', value: selected.department },
+                        { label: 'Staff Type', value: selected.staff_type === 'non_teaching' ? 'Non-Teaching' : 'Teaching' },
+                        { label: 'Qualification', value: selected.qualification },
+                        { label: 'Date of Joining', value: selected.date_of_joining ? new Date(selected.date_of_joining).toLocaleDateString() : null },
+                        { label: 'Email', value: selected.email },
+                        { label: 'Phone', value: selected.phone },
+                        { label: 'Teaches Grades', value: selected.teaches_grades },
+                      ].map(({ label, value }) => value ? (
+                        <div key={label}>
+                          <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+                          <p className="text-gray-800 font-medium">{value}</p>
+                        </div>
+                      ) : null)}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-4">
+                      {[
+                        { field: 'name', label: 'Name *', type: 'text', placeholder: 'Full name' },
+                        { field: 'email', label: 'Email', type: 'email', placeholder: 'teacher@school.com' },
+                        { field: 'subject', label: 'Subject', type: 'text', placeholder: 'e.g. Mathematics' },
+                        { field: 'phone', label: 'Phone', type: 'tel', placeholder: '10-digit number' },
+                        { field: 'department', label: 'Department', type: 'text', placeholder: 'e.g. Science' },
+                        { field: 'qualification', label: 'Qualification', type: 'text', placeholder: 'e.g. B.Ed, M.Sc' },
+                      ].map(({ field, label, type, placeholder }) => (
+                        <div key={field}>
+                          <label className="block text-xs text-gray-500 mb-1">{label}</label>
+                          <input type={type} placeholder={placeholder}
+                            value={(editForm as Record<string, unknown>)[field] as string ?? (selected as Record<string, unknown>)[field] as string ?? ''}
+                            onChange={e => setEditForm(f => ({ ...f, [field]: e.target.value }))}
+                            className={inputCls} />
+                        </div>
+                      ))}
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Staff Type</label>
+                        <select value={editForm.staff_type ?? selected.staff_type ?? 'teaching'}
+                          onChange={e => setEditForm(f => ({ ...f, staff_type: e.target.value }))}
+                          className={inputCls}>
+                          <option value="teaching">Teaching</option>
+                          <option value="non_teaching">Non-Teaching</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Teaches Grades</label>
+                        <GradesDropdown
+                          value={editForm.teaches_grades ?? selected.teaches_grades ?? ''}
+                          onChange={v => setEditForm(f => ({ ...f, teaches_grades: v }))}
+                        />
+                      </div>
+                    </div>
+                  )}
 
-            {/* Availability grid */}
-            {detailTab === 'info' && showAvailability && (
-              <div className="border-t border-gray-100">
-                <AvailabilityGrid
-                  teacherId={selected.id}
-                  unavailableSlots={unavailableSlots}
-                  loading={availLoading}
-                  togglingSlot={togglingSlot}
-                  onToggle={(day, pNum) => toggleSlot(selected.id, day, pNum)}
-                />
-              </div>
-            )}
+                  {/* Timetable toggle */}
+                  <div className="mt-6 border-t border-gray-100 pt-4">
+                    <button
+                      onClick={() => {
+                        const next = !showTimetable
+                        setShowTimetable(next)
+                        if (next) loadTeacherTimetable(selected.id)
+                      }}
+                      className="text-sm font-medium text-purple-600 hover:text-purple-800 flex items-center gap-2">
+                      {showTimetable ? '▲ Hide Timetable' : '▼ View Weekly Timetable'}
+                    </button>
+                    {showTimetable && (
+                      <div className="mt-3">
+                        <TeacherTimetableView
+                          timetable={teacherTimetable}
+                          loading={timetableLoading}
+                          teacherName={selected.name}
+                          subDuties={teacherSubDuties}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
 
-            {/* 360° Analytics */}
-            {detailTab === 'analytics' && (
-              <div className="px-5 py-5 space-y-4">
-                {analyticsLoading ? (
-                  <div className="py-8 text-center">
-                    <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto" />
+              {detailTab === 'analytics' && (
+                analyticsLoading ? (
+                  <div className="py-12 text-center">
+                    <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto" />
                   </div>
                 ) : !teacherAnalytics ? null : (
-                  <>
-                    <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-4 gap-3">
                       {[
                         { label: 'Periods/Week', value: teacherAnalytics.periodsPerWeek, color: 'text-blue-600', bg: 'bg-blue-50' },
                         { label: 'Tasks Assigned', value: teacherAnalytics.taskCount, color: 'text-violet-600', bg: 'bg-violet-50' },
                         { label: 'Total Leaves', value: teacherAnalytics.totalLeaves, color: 'text-orange-600', bg: 'bg-orange-50' },
                         { label: 'Pending Leaves', value: teacherAnalytics.pendingLeaves, color: 'text-red-600', bg: 'bg-red-50' },
                       ].map(({ label, value, color, bg }) => (
-                        <div key={label} className={`${bg} rounded-xl p-3 text-center`}>
-                          <p className={`text-2xl font-black ${color}`}>{value}</p>
-                          <p className="text-[10px] text-gray-500 mt-0.5">{label}</p>
+                        <div key={label} className={`${bg} rounded-xl p-4 text-center`}>
+                          <p className={`text-3xl font-black ${color}`}>{value}</p>
+                          <p className="text-xs text-gray-500 mt-1">{label}</p>
                         </div>
                       ))}
                     </div>
-                    <div className="bg-gray-50 rounded-xl p-3">
-                      <p className="text-xs font-semibold text-gray-600 mb-2">Quick Info</p>
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-500">Subject</span>
-                          <span className="font-medium text-gray-700">{selected.subject || '—'}</span>
+                    <div className="bg-gray-50 rounded-xl p-4 grid grid-cols-2 gap-3 text-sm">
+                      {[
+                        { label: 'Subject', value: selected.subject },
+                        { label: 'Department', value: selected.department },
+                        { label: 'Teaches Grades', value: selected.teaches_grades },
+                        { label: 'Class Teacher', value: selected.class_grade ? `Gr.${selected.class_grade}-${selected.class_section}` : null },
+                      ].map(({ label, value }) => value ? (
+                        <div key={label}>
+                          <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+                          <p className="font-medium text-gray-700">{value}</p>
                         </div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-500">Department</span>
-                          <span className="font-medium text-gray-700">{selected.department || '—'}</span>
-                        </div>
-                        {selected.class_grade && (
-                          <div className="flex justify-between text-xs">
-                            <span className="text-gray-500">Class Teacher</span>
-                            <span className="font-medium text-emerald-600">Grade {selected.class_grade}-{selected.class_section}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between text-xs">
-                          <span className="text-gray-500">Status</span>
-                          <span className={`font-medium ${selected.status === 'active' ? 'text-emerald-600' : 'text-gray-400'}`}>{selected.status}</span>
-                        </div>
-                      </div>
+                      ) : null)}
                     </div>
-                    <button onClick={() => { setDetailTab('info'); setTimeout(() => { setShowTimetable(true); loadTeacherTimetable(selected.id) }, 100) }}
-                      className="w-full border border-purple-200 text-purple-600 py-2 rounded-lg text-xs font-medium hover:bg-purple-50 transition-colors">
-                      View Full Timetable →
+                  </div>
+                )
+              )}
+            </div>
+
+            {/* Modal footer actions */}
+            <div className="flex items-center gap-3 px-6 py-4 border-t border-gray-100 flex-wrap">
+              {selected.status === 'removed' ? (
+                <>
+                  <div className="flex-1 text-sm text-red-500 font-medium">This teacher has been removed.</div>
+                  <button onClick={async () => {
+                    const res = await fetch(`/api/teachers/${selected.id}`, {
+                      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ status: 'active' }),
+                    })
+                    if (res.ok) {
+                      setTeachers(prev => prev.map(t => t.id === selected.id ? { ...t, status: 'active' } : t))
+                      setSelected(s => s ? { ...s, status: 'active' } : s)
+                    }
+                  }} className="border border-green-300 text-green-700 hover:bg-green-50 px-5 py-2 rounded-lg text-sm font-medium transition-colors">
+                    Restore Teacher
+                  </button>
+                </>
+              ) : (
+                <>
+                  {editing ? (
+                    <>
+                      <button onClick={handleSave} disabled={saving}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
+                        {saving ? 'Saving...' : 'Save Changes'}
+                      </button>
+                      <button onClick={() => { setEditing(false); setEditForm({}) }}
+                        className="border border-gray-200 text-gray-600 px-5 py-2 rounded-lg text-sm hover:bg-gray-50 transition-colors">
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button onClick={() => setEditing(true)}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors">
+                      Edit Details
                     </button>
-                  </>
-                )}
-              </div>
-            )}
+                  )}
+                  <button onClick={() => handleToggleStatus(selected)}
+                    className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors border ${selected.status === 'active' ? 'border-orange-200 text-orange-600 hover:bg-orange-50' : 'border-green-200 text-green-600 hover:bg-green-50 font-semibold'}`}>
+                    {selected.status === 'active' ? 'Deactivate' : 'Reactivate'}
+                  </button>
+                  <button onClick={() => handleDelete(selected)}
+                    className="ml-auto border border-red-200 text-red-600 px-5 py-2 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">
+                    Remove from School
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Remove Consequences Dialog ── */}
+      {showRemoveDialog && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="px-6 py-4 border-b border-gray-100">
+              <h3 className="font-bold text-gray-900">Remove {selected?.name}?</h3>
+              <p className="text-xs text-gray-500 mt-0.5">Their record is kept for history. All assignments will be unlinked.</p>
+            </div>
+            <div className="px-6 py-4 space-y-3 max-h-80 overflow-y-auto">
+              {loadingConsequences ? (
+                <div className="py-6 text-center text-gray-400 text-sm">Checking impact...</div>
+              ) : removeConsequences ? (
+                <>
+                  {removeConsequences.class_teacher_of.length > 0 && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                      <p className="text-xs font-semibold text-red-700 mb-1">Class Teacher of:</p>
+                      {removeConsequences.class_teacher_of.map((c, i) => (
+                        <p key={i} className="text-xs text-red-600">Grade {c.grade}-{c.section} (will be unassigned)</p>
+                      ))}
+                    </div>
+                  )}
+                  {removeConsequences.subjects_teaching.length > 0 && (
+                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-3">
+                      <p className="text-xs font-semibold text-orange-700 mb-1">Teaching {removeConsequences.subjects_teaching.length} subject(s):</p>
+                      {removeConsequences.subjects_teaching.map((s, i) => (
+                        <p key={i} className="text-xs text-orange-600">Grade {s.grade}-{s.section}: {s.subject_name}</p>
+                      ))}
+                    </div>
+                  )}
+                  {removeConsequences.timetable_slots.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <p className="text-xs font-semibold text-amber-700 mb-1">{removeConsequences.timetable_slots.length} timetable slot(s) will lose teacher</p>
+                      <p className="text-xs text-amber-600">Timetable slots will remain but teacher will be blank</p>
+                    </div>
+                  )}
+                  {removeConsequences.class_teacher_of.length === 0 && removeConsequences.subjects_teaching.length === 0 && removeConsequences.timetable_slots.length === 0 && (
+                    <p className="text-sm text-gray-500 text-center py-2">No active assignments found. Safe to remove.</p>
+                  )}
+                </>
+              ) : null}
+            </div>
+            <div className="flex gap-3 px-6 py-4 border-t border-gray-100">
+              <button onClick={() => setShowRemoveDialog(false)}
+                className="flex-1 border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm hover:bg-gray-50">
+                Cancel
+              </button>
+              <button onClick={confirmDelete} disabled={loadingConsequences}
+                className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+                Yes, Remove
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -563,18 +685,14 @@ const PERIOD_TIMES: Record<number, { from: string; to: string }> = {
   5: { from: '11:35', to: '12:20' },
   6: { from: '12:25', to: '13:10' },
 }
-const BREAK_ROWS = [
-  { afterPeriod: 3, label: 'Break', time: '10:25–10:45' },
-]
+const BREAK_ROWS = [{ afterPeriod: 3, label: 'Break', time: '10:25–10:45' }]
 
 function TeacherTimetableView({ timetable, loading, teacherName, subDuties }: { timetable: TimetableSlot[]; loading: boolean; teacherName: string; subDuties: SubDuty[] }) {
-  if (loading) return <div className="px-5 py-6 text-center text-gray-400 text-xs">Loading timetable...</div>
-
+  if (loading) return <div className="py-6 text-center text-gray-400 text-sm">Loading timetable...</div>
   if (timetable.length === 0) {
     return (
-      <div className="px-5 py-6 text-center">
-        <p className="text-gray-400 text-xs">No timetable generated yet</p>
-        <p className="text-gray-300 text-[10px] mt-1">Go to Class Management → generate timetable</p>
+      <div className="py-6 text-center">
+        <p className="text-gray-400 text-sm">No timetable generated yet</p>
       </div>
     )
   }
@@ -590,7 +708,6 @@ function TeacherTimetableView({ timetable, loading, teacherName, subDuties }: { 
   })()
   const nowMins = new Date().getHours() * 60 + new Date().getMinutes()
 
-  // Build display rows: periods 1-7 with break rows inserted
   const rows: ({ type: 'period'; num: number } | { type: 'break'; label: string; time: string })[] = []
   for (const p of ALL_PERIODS) {
     rows.push({ type: 'period', num: p })
@@ -599,22 +716,22 @@ function TeacherTimetableView({ timetable, loading, teacherName, subDuties }: { 
   }
 
   return (
-    <div className="px-3 py-4">
-      <div className="flex items-center justify-between px-2 mb-3 flex-wrap gap-2">
-        <p className="text-xs font-semibold text-gray-700">Weekly Timetable — {teacherName}</p>
+    <div>
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <p className="text-sm font-semibold text-gray-700">Weekly Timetable — {teacherName}</p>
         {subDuties.length > 0 && (
-          <span className="text-[10px] bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full font-semibold">
+          <span className="text-xs bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full font-semibold">
             {subDuties.length} substitute period{subDuties.length > 1 ? 's' : ''} today
           </span>
         )}
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-[10px] border-collapse">
+        <table className="w-full text-xs border-collapse">
           <thead>
             <tr>
               <th className="bg-slate-700 text-slate-200 px-2 py-1.5 text-left font-semibold rounded-tl-lg">P</th>
               {DAYS.map(d => (
-                <th key={d} className={`px-1.5 py-1.5 text-center font-semibold ${d === today ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
+                <th key={d} className={`px-2 py-1.5 text-center font-semibold ${d === today ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
                   {d.slice(0, 3)}
                 </th>
               ))}
@@ -626,7 +743,7 @@ function TeacherTimetableView({ timetable, loading, teacherName, subDuties }: { 
                 return (
                   <tr key={`brk-${i}`} className="bg-amber-50 border-y border-amber-100">
                     <td className="px-2 py-1 text-amber-600 font-semibold text-center">{row.label}</td>
-                    <td colSpan={5} className="px-2 py-1 text-center text-amber-400 italic">{row.time}</td>
+                    <td colSpan={6} className="px-2 py-1 text-center text-amber-400 italic">{row.time}</td>
                   </tr>
                 )
               }
@@ -653,15 +770,11 @@ function TeacherTimetableView({ timetable, loading, teacherName, subDuties }: { 
                             <p className="text-gray-400 leading-tight">Gr.{slot.grade}-{slot.section}</p>
                           </div>
                         ) : subDuty ? (
-                          <div className={`rounded px-1 py-1 text-center bg-amber-50 border-2 border-amber-300 ${isNow ? 'ring-1 ring-orange-400' : ''}`}>
-                            <div className="flex items-center justify-center gap-0.5 mb-0.5">
-                              <p className="font-semibold text-amber-800 leading-tight text-[10px]">
-                                {subDuty.subject_name || subDuty.original_teacher_department || '—'}
-                              </p>
-                              <span className="text-[8px] bg-amber-400 text-white px-0.5 rounded font-bold leading-none py-0.5">SUB</span>
-                            </div>
+                          <div className="rounded px-1 py-1 text-center bg-amber-50 border-2 border-amber-300">
+                            <p className="font-semibold text-amber-800 leading-tight text-[10px]">
+                              {subDuty.subject_name || subDuty.original_teacher_department || '—'}
+                            </p>
                             <p className="text-amber-600 leading-tight text-[10px]">Gr.{subDuty.grade}-{subDuty.section}</p>
-                            <p className="text-amber-400 text-[9px] truncate">for {subDuty.original_teacher_name || 'absent'}</p>
                           </div>
                         ) : (
                           <div className="rounded px-1 py-1 text-center bg-gray-50 border border-gray-100">
@@ -677,113 +790,60 @@ function TeacherTimetableView({ timetable, loading, teacherName, subDuties }: { 
           </tbody>
         </table>
       </div>
-      <p className="text-[10px] text-gray-400 mt-2 px-2">{timetable.length} assigned period{timetable.length !== 1 ? 's' : ''} · free slots shown in gray</p>
+      <p className="text-xs text-gray-400 mt-2">{timetable.length} assigned period{timetable.length !== 1 ? 's' : ''}</p>
     </div>
   )
 }
 
-const AVAIL_PERIODS = [1, 2, 3, 4, 5, 6]
-const AVAIL_PERIOD_TIMES: Record<number, string> = {
-  1: '08:00', 2: '08:50', 3: '09:40', 4: '10:45', 5: '11:35', 6: '12:25',
-}
-
-function AvailabilityGrid({ teacherId, unavailableSlots, loading, togglingSlot, onToggle }: {
-  teacherId: number
-  unavailableSlots: UnavailableSlot[]
-  loading: boolean
-  togglingSlot: string | null
-  onToggle: (day: string, pNum: number) => void
-}) {
-  if (loading) return <div className="px-5 py-6 text-center text-gray-400 text-xs">Loading availability...</div>
-
-  const isUnavail = (day: string, pNum: number) =>
-    unavailableSlots.some(s => s.day_of_week === day && s.period_number === pNum)
-
-  const unavailCount = unavailableSlots.length
-
-  return (
-    <div className="px-3 py-4">
-      <div className="flex items-center justify-between mb-2 px-2">
-        <p className="text-xs font-semibold text-gray-700">Availability Grid</p>
-        <span className="text-[10px] text-gray-400">{unavailCount} slot{unavailCount !== 1 ? 's' : ''} blocked</span>
-      </div>
-      <p className="text-[10px] text-gray-400 px-2 mb-3">Click a cell to mark/unmark unavailable. Red = blocked for timetable.</p>
-      <div className="overflow-x-auto">
-        <table className="w-full text-[10px] border-collapse">
-          <thead>
-            <tr>
-              <th className="bg-slate-700 text-slate-200 px-2 py-1.5 text-left font-semibold rounded-tl-lg w-8">P</th>
-              {DAYS.map(d => (
-                <th key={d} className="bg-slate-700 text-slate-300 px-1.5 py-1.5 text-center font-semibold">
-                  {d.slice(0, 3)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {AVAIL_PERIODS.map(pNum => (
-              <tr key={pNum} className="border-b border-gray-100">
-                <td className="px-2 py-1 bg-gray-50 font-semibold text-gray-500 border-r border-gray-100 text-center whitespace-nowrap">
-                  <span>{pNum}</span>
-                  <span className="block text-gray-300 font-normal" style={{ fontSize: '8px' }}>{AVAIL_PERIOD_TIMES[pNum]}</span>
-                </td>
-                {DAYS.map(day => {
-                  const blocked = isUnavail(day, pNum)
-                  const key = `${day}-${pNum}`
-                  const toggling = togglingSlot === key
-                  return (
-                    <td key={day} className="px-1 py-1 border-r border-gray-100 last:border-r-0">
-                      <button
-                        onClick={() => onToggle(day, pNum)}
-                        disabled={toggling}
-                        className={`w-full rounded px-1 py-1.5 text-center transition-colors border ${
-                          blocked
-                            ? 'bg-red-100 border-red-300 text-red-600 hover:bg-red-200'
-                            : 'bg-green-50 border-green-200 text-green-600 hover:bg-green-100'
-                        } ${toggling ? 'opacity-50' : ''}`}
-                      >
-                        {toggling ? '...' : blocked ? '✕' : '✓'}
-                      </button>
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-[10px] text-gray-400 mt-2 px-2">
-        <span className="inline-block w-2 h-2 rounded-full bg-green-400 mr-1" />Available
-        <span className="inline-block w-2 h-2 rounded-full bg-red-400 mr-1 ml-3" />Unavailable (blocked from timetable)
-      </p>
-    </div>
-  )
-}
-
-function TeacherRow({ teacher, selected, onClick, onToggle, onDelete }:
-  { teacher: Teacher; selected: boolean; onClick: () => void; onToggle: () => void; onDelete: () => void }) {
+function TeacherCard({ teacher, onClick, onToggle, onDelete }:
+  { teacher: Teacher; onClick: () => void; onToggle: () => void; onDelete: () => void }) {
+  const isInactive = teacher.status === 'inactive'
+  const isRemoved = teacher.status === 'removed'
   return (
     <div onClick={onClick}
-      className={`flex items-center gap-4 px-5 py-3.5 cursor-pointer transition-colors ${selected ? 'bg-blue-50 border-l-2 border-blue-500' : 'hover:bg-gray-50'}`}>
-      <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0 ${selected ? 'bg-blue-600' : 'bg-gray-300'}`}>
+      className={`flex items-center gap-4 px-5 py-3.5 cursor-pointer transition-colors hover:bg-gray-50 ${isInactive || isRemoved ? 'opacity-60' : ''}`}>
+      <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0 ${
+        isRemoved ? 'bg-red-300' : isInactive ? 'bg-gray-300' : 'bg-blue-600'
+      }`}>
         {teacher.name.charAt(0).toUpperCase()}
       </div>
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-gray-900 text-sm">{teacher.name}</span>
-          {teacher.class_grade && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`font-medium text-sm ${isRemoved ? 'line-through text-gray-400' : 'text-gray-900'}`}>{teacher.name}</span>
+          {teacher.class_grade && !isRemoved && (
             <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">
               CT: Gr.{teacher.class_grade}-{teacher.class_section}
             </span>
           )}
+          {teacher.teaches_grades && !isRemoved && (
+            <span className="text-xs bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">
+              Gr: {teacher.teaches_grades}
+            </span>
+          )}
+          {isInactive && <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">Inactive</span>}
+          {isRemoved && <span className="text-xs bg-red-100 text-red-500 px-1.5 py-0.5 rounded font-medium">Removed</span>}
         </div>
         <div className="flex items-center gap-2 mt-0.5">
           {teacher.employee_id && <span className="text-xs text-gray-400 font-mono">{teacher.employee_id}</span>}
           {teacher.subject && <span className="text-xs text-gray-500">· {teacher.subject}</span>}
+          {/* Show staff type label */}
+          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
+            teacher.staff_type === 'non_teaching' ? 'bg-gray-100 text-gray-500' : 'bg-blue-50 text-blue-500'
+          }`}>
+            {teacher.staff_type === 'non_teaching' ? 'Non-Teaching' : 'Teaching'}
+          </span>
         </div>
       </div>
-      <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-        <span className={`w-2 h-2 rounded-full ${teacher.status === 'active' ? 'bg-green-400' : 'bg-gray-300'}`} />
+      <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+        {isInactive && (
+          <button onClick={onToggle}
+            className="text-xs px-2.5 py-1 rounded border border-green-200 hover:bg-green-50 text-green-600 font-medium transition-colors">
+            Reactivate
+          </button>
+        )}
+        <span className={`w-2 h-2 rounded-full ${
+          teacher.status === 'active' ? 'bg-green-400' : isRemoved ? 'bg-red-300' : 'bg-gray-300'
+        }`} />
       </div>
     </div>
   )

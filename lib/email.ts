@@ -1,13 +1,22 @@
 import nodemailer from 'nodemailer'
 
-// ─── Transporter (Gmail SMTP) ─────────────────────────────────────────────────
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS, // Gmail App Password (16 chars, no spaces)
-  },
-})
+// ─── Transporter (auto-detects Gmail vs custom SMTP) ─────────────────────���───
+const emailHost = process.env.EMAIL_HOST || 'smtp.zoho.in'
+const isGmail = emailHost.includes('gmail')
+
+const transporter = nodemailer.createTransport(
+  isGmail
+    ? {
+        service: 'gmail',
+        auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+      }
+    : {
+        host: emailHost,
+        port: parseInt(process.env.EMAIL_PORT || '587'),
+        secure: false, // STARTTLS on port 587
+        auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+      }
+)
 
 const FROM = process.env.EMAIL_FROM || `"WLYL Team" <${process.env.EMAIL_USER}>`
 

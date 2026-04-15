@@ -5,11 +5,13 @@ export const ALL_FEATURES = [
   { key: 'attendance',         label: 'Attendance',               category: 'Core' },
   { key: 'leave-requests',     label: 'Leave Requests',           category: 'Core' },
   { key: 'emergency-cover',    label: 'Emergency Cover',          category: 'Core' },
-  { key: 'staff-onboarding',   label: 'Staff Onboarding',         category: 'Core' },
-  { key: 'student-onboarding', label: 'Student Onboarding',       category: 'Core' },
+  { key: 'staff',              label: 'Staff (Directory + Onboarding)', category: 'Core' },
+  { key: 'students',           label: 'Students (List + Onboarding)',  category: 'Core' },
   { key: 'class-management',   label: 'Class Management',         category: 'Core' },
-  { key: 'teachers',           label: 'Teachers Management',      category: 'Core' },
-  { key: 'students',           label: 'Students Management',      category: 'Core' },
+  // Legacy keys — kept for feature config backward compat; UI now uses 'staff' and 'students'
+  { key: 'teachers',           label: 'Teachers Management (legacy)',  category: 'Core' },
+  { key: 'staff-onboarding',   label: 'Staff Onboarding (legacy)',     category: 'Core' },
+  { key: 'student-onboarding', label: 'Student Onboarding (legacy)',   category: 'Core' },
   // Academic
   { key: 'timetable',          label: 'Timetable',                category: 'Academic' },
   { key: 'exam-schedule',      label: 'Exam Schedule',            category: 'Academic' },

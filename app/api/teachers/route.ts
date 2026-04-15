@@ -22,12 +22,12 @@ export async function GET(req: NextRequest) {
       const where = `WHERE ${conditions.join(' AND ')}`
 
       const result = await pool.query(
-        `SELECT t.*,
+        `SELECT DISTINCT ON (t.id) t.*,
                 c.id AS class_id, c.grade AS class_grade, c.section AS class_section
          FROM teachers t
          LEFT JOIN classes c ON c.class_teacher_id = t.id AND c.school_id = t.school_id
          ${where}
-         ORDER BY t.staff_type, t.department, t.name`,
+         ORDER BY t.id, t.staff_type, t.department, t.name`,
         values
       )
       setCache(cacheKey, result.rows, 60_000)
@@ -44,12 +44,12 @@ export async function GET(req: NextRequest) {
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
     const result = await pool.query(
-      `SELECT t.*,
+      `SELECT DISTINCT ON (t.id) t.*,
               c.id AS class_id, c.grade AS class_grade, c.section AS class_section
        FROM teachers t
        LEFT JOIN classes c ON c.class_teacher_id = t.id AND c.school_id = t.school_id
        ${where}
-       ORDER BY t.staff_type, t.department, t.name`,
+       ORDER BY t.id, t.staff_type, t.department, t.name`,
       values
     )
     return NextResponse.json(result.rows)
