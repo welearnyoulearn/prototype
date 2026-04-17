@@ -27,6 +27,39 @@ async function callGemini(prompt: string, maxTokens = 1024): Promise<string> {
   return text.trim()
 }
 
+// Multi-turn chat using systemInstruction + conversation history
+async function callGeminiChat(
+  systemPrompt: string,
+  messages: { role: 'user' | 'assistant'; content: string }[],
+  maxTokens = 512
+): Promise<string> {
+  const key = process.env.GEMINI_API_KEY
+  if (!key) throw new Error('GEMINI_API_KEY not set')
+
+  const contents = messages.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }],
+  }))
+
+  const res = await fetch(`${GEMINI_URL}?key=${key}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents,
+      generationConfig: { temperature: 0.7, maxOutputTokens: maxTokens },
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Gemini API error ${res.status}: ${err}`)
+  }
+
+  const data = await res.json()
+  return (data.candidates?.[0]?.content?.parts?.[0]?.text ?? '').trim()
+}
+
 // ─── 1. Doubt AI Answer ────────────────────────────────────────────────────
 
 export async function generateDoubtAnswer(
@@ -115,7 +148,76 @@ Rules:
   return parsed
 }
 
-// ─── 3. Weekly MCQ Test ────────────────────────────────────────────────────
+// ─── 3. Student AI Chatbot (multi-turn) ───────────────────────────────────
+
+export async function chatWithAI(
+  messages: { role: 'user' | 'assistant'; content: string }[],
+  subject: string,
+  grade: string
+): Promise<string> {
+  const system = `You are a friendly, patient school tutor helping a Grade ${grade} student understand a doubt in ${subject}.
+Give clear explanations using simple language appropriate for Grade ${grade}. If explaining steps, number them. Use real-life examples when helpful.
+Keep each reply concise — under 150 words. Be encouraging and supportive. Do not use markdown, asterisks, or bullet symbols — plain text only.`
+
+  return callGeminiChat(system, messages, 400)
+}
+
+// ─── 4. Announcement Drafter ──────────────────────────────────────────────
+
+export async function draftAnnouncement(
+  type: string,
+  topic: string,
+  audience: string
+): Promise<{ title: string; content: string }> {
+  const prompt = `Write a school announcement.
+Type: ${type}
+Topic: ${topic}
+Audience: ${audience}
+
+Return ONLY valid JSON (no markdown, no code fences):
+{
+  "title": "Short clear title under 10 words",
+  "content": "Announcement body: 50-80 words, professional but warm, suitable for a school. No markdown formatting."
+}
+
+Return only the JSON object, nothing else.`
+
+  const raw = await callGemini(prompt, 400)
+  const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
+  return JSON.parse(cleaned) as { title: string; content: string }
+}
+
+// ─── 5. School Admin Daily Insights ───────────────────────────────────────
+
+export async function generateSchoolInsights(context: {
+  date: string
+  teachers: number
+  students: number
+  classes: number
+  pendingLeaves: number
+  attendancePct?: number
+  uncoveredPeriods?: number
+  upcomingExams?: number
+}): Promise<string> {
+  const lines = [
+    `${context.teachers} teachers, ${context.students} students, ${context.classes} classes`,
+    `Pending leave requests: ${context.pendingLeaves}`,
+    context.attendancePct !== undefined ? `Today's attendance: ${context.attendancePct}%` : null,
+    context.uncoveredPeriods ? `Uncovered periods today: ${context.uncoveredPeriods}` : null,
+    context.upcomingExams ? `Exams scheduled this week: ${context.upcomingExams}` : null,
+  ].filter(Boolean).join('\n')
+
+  const prompt = `You are a school management assistant. Generate a brief, actionable daily summary for a school principal.
+
+School data for ${context.date}:
+${lines}
+
+Write 3-4 sentences: highlight what needs immediate attention, what looks good, and one suggested action for the day. Be direct and practical. No markdown, plain text only.`
+
+  return callGemini(prompt, 200)
+}
+
+// ─── 6. Weekly MCQ Test ────────────────────────────────────────────────────
 
 export interface MCQQuestion {
   question: string

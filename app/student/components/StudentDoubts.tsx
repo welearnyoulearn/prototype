@@ -104,6 +104,14 @@ export default function StudentDoubts({ student, classId, schoolId }: Props) {
   const [askError, setAskError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  // AI Chat state
+  const [showAIChat, setShowAIChat] = useState(false)
+  const [aiMessages, setAiMessages] = useState<{ role: 'user' | 'assistant'; content: string }[]>([])
+  const [aiThinking, setAiThinking] = useState(false)
+  const [aiInput, setAiInput] = useState('')
+  const aiChatEndRef = useRef<HTMLDivElement>(null)
+  const aiInputRef = useRef<HTMLTextAreaElement>(null)
+
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -167,6 +175,10 @@ export default function StudentDoubts({ student, classId, schoolId }: Props) {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  useEffect(() => {
+    aiChatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [aiMessages, aiThinking])
+
   async function sendMessage() {
     if (!selected || !newMsg.trim() || selected.status === 'resolved') return
     setSending(true)
@@ -188,6 +200,68 @@ export default function StudentDoubts({ student, classId, schoolId }: Props) {
     }
     setSending(false)
     setTimeout(() => inputRef.current?.focus(), 50)
+  }
+
+  async function startAIChat() {
+    setAskError('')
+    if (!askSubject) { setAskError('Please select a subject'); return }
+    if (askQuestion.trim().length < 10) { setAskError('Question must be at least 10 characters'); return }
+
+    const initial: { role: 'user' | 'assistant'; content: string }[] = [
+      { role: 'user', content: askQuestion.trim() },
+    ]
+    setAiMessages(initial)
+    setAiInput('')
+    setShowAIChat(true)
+    setShowAsk(false)
+    setAiThinking(true)
+
+    try {
+      const res = await fetch('/api/ai-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: initial, subject: askSubject, grade: student.grade }),
+      })
+      const data = await res.json()
+      if (data.reply) {
+        setAiMessages(prev => [...prev, { role: 'assistant', content: data.reply }])
+      } else {
+        setAiMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, I had trouble answering. Try rephrasing or ask your teacher.' }])
+      }
+    } catch {
+      setAiMessages(prev => [...prev, { role: 'assistant', content: 'Connection error. Please check your internet and try again.' }])
+    } finally {
+      setAiThinking(false)
+    }
+  }
+
+  async function sendAIMessage() {
+    if (!aiInput.trim() || aiThinking) return
+    const updated: { role: 'user' | 'assistant'; content: string }[] = [
+      ...aiMessages,
+      { role: 'user', content: aiInput.trim() },
+    ]
+    setAiMessages(updated)
+    setAiInput('')
+    setAiThinking(true)
+
+    try {
+      const res = await fetch('/api/ai-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: updated, subject: askSubject, grade: student.grade }),
+      })
+      const data = await res.json()
+      setAiMessages(prev => [...prev, {
+        role: 'assistant',
+        content: data.reply ?? 'Sorry, something went wrong. Try again.',
+      }])
+    } catch {
+      setAiMessages(prev => [...prev, { role: 'assistant', content: 'Connection error. Please try again.' }])
+    } finally {
+      setAiThinking(false)
+      setTimeout(() => aiInputRef.current?.focus(), 50)
+    }
   }
 
   async function submitDoubt() {
@@ -311,6 +385,115 @@ export default function StudentDoubts({ student, classId, schoolId }: Props) {
       <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
     </div>
   )
+
+  // ── AI Chat view ──────────────────────────────────────────────────────────
+  if (showAIChat) {
+    return (
+      <div className="flex flex-col max-h-[calc(100vh-7rem)] h-[75vh]">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-violet-600 to-purple-600 rounded-2xl p-4 mb-3 flex items-center gap-3 flex-shrink-0">
+          <button
+            onClick={() => { setShowAIChat(false); setShowAsk(true) }}
+            className="flex items-center gap-2 text-sm text-white/80 hover:text-white flex-shrink-0">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            Back
+          </button>
+          <div className="w-px h-5 bg-white/30" />
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-white text-sm">AI Tutor</p>
+            <p className="text-xs text-white/70 truncate">{askSubject} · Grade {student.grade}</p>
+          </div>
+          <div className="w-9 h-9 bg-white/20 rounded-full flex items-center justify-center flex-shrink-0">
+            <span className="text-lg">✨</span>
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 bg-white rounded-2xl border border-gray-200 overflow-y-auto p-4 space-y-4 min-h-0">
+          {/* Original question shown as context banner */}
+          <div className="bg-violet-50 border border-violet-100 rounded-xl px-4 py-3 text-sm text-violet-800">
+            <p className="text-[10px] font-semibold text-violet-500 uppercase tracking-wide mb-1">Your question</p>
+            <p className="leading-relaxed">{askQuestion}</p>
+          </div>
+
+          {aiMessages.slice(1).map((msg, i) => (
+            <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 self-end ${
+                msg.role === 'user' ? 'bg-blue-100' : 'bg-violet-100'
+              }`}>
+                {msg.role === 'user'
+                  ? <span className="text-blue-600 text-xs font-bold">{student.name.charAt(0)}</span>
+                  : <span className="text-base">✨</span>
+                }
+              </div>
+              <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                msg.role === 'user'
+                  ? 'bg-blue-600 text-white rounded-tr-sm'
+                  : 'bg-violet-50 border border-violet-100 text-gray-800 rounded-tl-sm'
+              }`}>
+                {msg.content}
+              </div>
+            </div>
+          ))}
+
+          {aiThinking && (
+            <div className="flex gap-3">
+              <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center flex-shrink-0 self-end">
+                <span className="text-base">✨</span>
+              </div>
+              <div className="bg-violet-50 border border-violet-100 rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-1">
+                <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-2 h-2 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            </div>
+          )}
+          <div ref={aiChatEndRef} />
+        </div>
+
+        {/* Input */}
+        <div className="bg-white rounded-2xl border border-gray-200 p-3 mt-3 flex-shrink-0 space-y-2">
+          <div className="flex gap-2">
+            <textarea
+              ref={aiInputRef}
+              value={aiInput}
+              onChange={e => setAiInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAIMessage() } }}
+              placeholder="Ask a follow-up question..."
+              rows={2}
+              disabled={aiThinking}
+              className="flex-1 border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 resize-none disabled:opacity-50"
+            />
+            <button
+              onClick={sendAIMessage}
+              disabled={aiThinking || !aiInput.trim()}
+              className="bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white px-4 rounded-xl flex-shrink-0 flex items-center gap-1.5 transition-colors">
+              {aiThinking ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              )}
+            </button>
+          </div>
+          <button
+            onClick={async () => {
+              setShowAIChat(false)
+              await submitDoubt()
+            }}
+            className="w-full py-2 text-xs text-gray-500 hover:text-blue-700 border border-dashed border-gray-200 hover:border-blue-300 rounded-xl transition-colors flex items-center justify-center gap-1.5">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+            Still confused? Ask your teacher instead
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   // ── Chat view ──────────────────────────────────────────────────────────────
   if (selected) {
@@ -571,10 +754,29 @@ export default function StudentDoubts({ student, classId, schoolId }: Props) {
             {askError && (
               <p className="text-xs bg-red-50 text-red-700 border border-red-200 rounded-lg px-3 py-2">{askError}</p>
             )}
-            <button onClick={submitDoubt} disabled={submitting}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-semibold py-3 rounded-xl text-sm">
-              {submitting ? 'Submitting...' : 'Submit Doubt'}
-            </button>
+
+            {/* Two-path choice */}
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              <button
+                onClick={startAIChat}
+                disabled={submitting}
+                className="py-3 rounded-xl font-semibold text-sm bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 disabled:opacity-40 text-white flex items-center justify-center gap-2 transition-all shadow-sm">
+                <span className="text-base">✨</span>
+                Solve with AI
+              </button>
+              <button
+                onClick={submitDoubt}
+                disabled={submitting}
+                className="py-3 rounded-xl font-semibold text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white flex items-center justify-center gap-2 transition-all">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                {submitting ? 'Submitting…' : 'Ask Teacher'}
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-400 text-center">
+              AI gives instant answers · Teacher gives verified answers
+            </p>
           </div>
         </div>
       </div>

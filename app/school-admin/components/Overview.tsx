@@ -65,6 +65,9 @@ export default function Overview({ schoolId, onNavigate }: Props) {
   const [feeOverdue, setFeeOverdue]           = useState(0)
   const [feeOutstanding, setFeeOutstanding]   = useState(0)
   const [loading, setLoading]                 = useState(true)
+  const [aiInsights, setAiInsights]           = useState<string | null>(null)
+  const [aiLoading, setAiLoading]             = useState(false)
+  const [aiError, setAiError]                 = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -111,6 +114,34 @@ export default function Overview({ schoolId, onNavigate }: Props) {
   }, [schoolId, hasAttendance, hasLeave, hasCover, hasTimetable, hasExams, hasFeeManagement])
 
   useEffect(() => { load() }, [load])
+
+  async function loadAiInsights() {
+    setAiLoading(true)
+    setAiError('')
+    try {
+      const res = await fetch('/api/ai/school-insights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date: new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }),
+          teachers: stats.teachers,
+          students: stats.students,
+          classes: stats.classes,
+          pendingLeaves: stats.pendingLeaves,
+          attendancePct: attPct ?? undefined,
+          uncoveredPeriods: uncovered.length || undefined,
+          upcomingExams: upcomingExams.length || undefined,
+        }),
+      })
+      const data = await res.json()
+      if (data.error) { setAiError(data.error); return }
+      setAiInsights(data.insights)
+    } catch {
+      setAiError('Failed to load AI insights.')
+    } finally {
+      setAiLoading(false)
+    }
+  }
 
   const todayLabel   = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })
   const attMarked    = attendance.filter(a => a.morning_marked).length
@@ -184,6 +215,53 @@ export default function Overview({ schoolId, onNavigate }: Props) {
           Refresh
         </button>
       </div>
+
+      {/* ── AI Daily Insights ── */}
+      {!loading && (
+        <div className={`rounded-2xl border p-4 transition-all ${
+          aiInsights
+            ? 'bg-gradient-to-r from-violet-50 to-purple-50 border-violet-200'
+            : 'bg-white border-gray-200'
+        }`}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">✨</span>
+              <div>
+                <p className="text-sm font-bold text-gray-800">AI Daily Summary</p>
+                {!aiInsights && !aiLoading && (
+                  <p className="text-xs text-gray-400">Get an AI analysis of today&apos;s school status</p>
+                )}
+              </div>
+            </div>
+            {!aiInsights && (
+              <button
+                onClick={loadAiInsights}
+                disabled={aiLoading}
+                className="text-xs bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-lg flex items-center gap-1.5 transition-colors flex-shrink-0">
+                {aiLoading ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Analysing…
+                  </>
+                ) : (
+                  <>✨ Generate Insights</>
+                )}
+              </button>
+            )}
+            {aiInsights && (
+              <button
+                onClick={() => setAiInsights(null)}
+                className="text-xs text-violet-500 hover:text-violet-700 flex-shrink-0">
+                Dismiss
+              </button>
+            )}
+          </div>
+          {aiError && <p className="text-xs text-red-600 mt-2">{aiError}</p>}
+          {aiInsights && (
+            <p className="text-sm text-violet-900 leading-relaxed mt-3 border-t border-violet-100 pt-3">{aiInsights}</p>
+          )}
+        </div>
+      )}
 
       {/* ── Alert strip (feature-gated) ── */}
       {!loading && (
