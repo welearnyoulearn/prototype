@@ -11,6 +11,7 @@ import StudentSyllabus from './components/StudentSyllabus'
 import StudentProfile from './components/StudentProfile'
 import StudentMarks from './components/StudentMarks'
 import StudentTimetable from './components/StudentTimetable'
+import WeeklyTest from './components/WeeklyTest'
 import NotificationBell from '../components/NotificationBell'
 import TestCalendar from '../components/TestCalendar'
 
@@ -332,7 +333,17 @@ export default function StudentPortal() {
             {visitedNav.has('rewards')     && <div hidden={activeNav !== 'rewards'}><StudentRewards studentId={student.id} schoolId={parseInt(selectedSchoolId)} classId={parseInt(selectedClassId)} /></div>}
             {visitedNav.has('syllabus')    && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={parseInt(selectedSchoolId)} classId={parseInt(selectedClassId)} /></div>}
             {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={parseInt(selectedSchoolId)} classId={parseInt(selectedClassId)} /></div>}
-            {visitedNav.has('weekly-test') && <div hidden={activeNav !== 'weekly-test'}><TestCalendar mode="student" schoolId={parseInt(selectedSchoolId)} classId={parseInt(selectedClassId)} studentId={student.id} /></div>}
+            {visitedNav.has('weekly-test') && (
+                <div hidden={activeNav !== 'weekly-test'}>
+                  <div className="space-y-6">
+                    <WeeklyTest student={student} classId={parseInt(selectedClassId)} schoolId={parseInt(selectedSchoolId)} />
+                    <div className="border-t border-gray-100 pt-6">
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Exam Calendar</p>
+                      <TestCalendar mode="student" schoolId={parseInt(selectedSchoolId)} classId={parseInt(selectedClassId)} studentId={student.id} />
+                    </div>
+                  </div>
+                </div>
+              )}
             {visitedNav.has('timetable')   && <div hidden={activeNav !== 'timetable'}><StudentTimetable classId={parseInt(selectedClassId)} schoolId={parseInt(selectedSchoolId)} grade={student.grade} section={student.section} /></div>}
             {visitedNav.has('profile')     && <div hidden={activeNav !== 'profile'}><StudentProfile student={student} /></div>}
           </div>

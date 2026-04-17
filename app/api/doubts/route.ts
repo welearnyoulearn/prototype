@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { generateDoubtAnswer } from '@/lib/gemini'
 
 // AUTH DISABLED FOR TESTING — will be re-enabled when all features are complete
 
@@ -114,6 +115,24 @@ export async function POST(req: NextRequest) {
     }
   } catch (notifErr) {
     console.warn('Failed to send doubt notification (non-critical):', notifErr)
+  }
+
+  // AI auto-answer — non-blocking, updates doubt after response is already sent
+  if (process.env.GEMINI_API_KEY) {
+    const { rows: [cls] } = await pool.query(
+      'SELECT grade FROM classes WHERE id = $1', [class_id]
+    )
+    const grade = cls?.grade ?? '8'
+    generateDoubtAnswer(subject.trim(), question.trim(), grade)
+      .then(async (aiAnswer) => {
+        if (aiAnswer) {
+          await pool.query(
+            'UPDATE doubts SET ai_answer = $1 WHERE id = $2',
+            [aiAnswer, doubt.id]
+          )
+        }
+      })
+      .catch((err) => console.warn('Gemini doubt answer failed (non-critical):', err))
   }
 
   // Doubt pattern alert — if 3+ students ask about same subject in this class within 7 days, notify teacher
