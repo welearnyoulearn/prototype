@@ -130,6 +130,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     timetable_slots: { subject_name: string; grade: string; section: string; day_of_week: string; period_number: number }[]
   } | null>(null)
   const [loadingConsequences, setLoadingConsequences] = useState(false)
+  const [removeToast, setRemoveToast] = useState<{ name: string; summary: string[] } | null>(null)
 
   useEffect(() => { loadTeachers() }, [schoolId, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -241,7 +242,11 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     try {
       const res = await fetch(`/api/teachers/${teacher.id}?consequences=true`)
       const data = await res.json()
-      setRemoveConsequences(data)
+      setRemoveConsequences({
+        subjects_teaching: data.subjects_teaching ?? [],
+        class_teacher_of:  data.class_teacher_of  ?? [],
+        timetable_slots:   data.timetable_slots   ?? [],
+      })
     } catch {
       setError('Failed to fetch removal consequences')
       setShowRemoveDialog(false)
@@ -252,12 +257,26 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
 
   async function confirmDelete() {
     if (!selected) return
+    const teacherName = selected.name
+    const impact = removeConsequences
     try {
       const res = await fetch(`/api/teachers/${selected.id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
       setTeachers(prev => prev.map(t => t.id === selected.id ? { ...t, status: 'removed' } : t))
       setShowRemoveDialog(false)
       setSelected(null)
+      // Build short impact summary
+      const summary: string[] = []
+      if (impact) {
+        if (impact.class_teacher_of.length > 0)
+          summary.push(`Class teacher unlinked from ${impact.class_teacher_of.map(c => `Gr.${c.grade}-${c.section}`).join(', ')}`)
+        if (impact.subjects_teaching.length > 0)
+          summary.push(`Unassigned from ${impact.subjects_teaching.length} subject${impact.subjects_teaching.length !== 1 ? 's' : ''}`)
+        if (impact.timetable_slots.length > 0)
+          summary.push(`${impact.timetable_slots.length} timetable slot${impact.timetable_slots.length !== 1 ? 's' : ''} cleared`)
+      }
+      setRemoveToast({ name: teacherName, summary })
+      setTimeout(() => setRemoveToast(null), 6000)
     } catch {
       setError('Failed to remove teacher')
       setShowRemoveDialog(false)
@@ -614,6 +633,30 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                 </>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Remove impact toast ── */}
+      {removeToast && (
+        <div className="fixed bottom-5 right-5 z-[70] bg-gray-900 text-white rounded-xl shadow-2xl px-5 py-4 max-w-sm w-full animate-in slide-in-from-bottom-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold">{removeToast.name} removed</p>
+              {removeToast.summary.length > 0 ? (
+                <ul className="mt-1.5 space-y-0.5">
+                  {removeToast.summary.map((s, i) => (
+                    <li key={i} className="text-xs text-gray-400 flex items-center gap-1.5">
+                      <span className="w-1 h-1 rounded-full bg-orange-400 flex-shrink-0" />
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-gray-400 mt-1">No active assignments were affected.</p>
+              )}
+            </div>
+            <button onClick={() => setRemoveToast(null)} className="text-gray-500 hover:text-gray-300 flex-shrink-0 mt-0.5">✕</button>
           </div>
         </div>
       )}

@@ -4,28 +4,33 @@ import { notifyTimetableChange } from '@/lib/notifyTimetable'
 import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
 
 export async function GET(req: NextRequest) {
+  await ensureDB()
 
   const { searchParams } = new URL(req.url)
-  const school_id = searchParams.get('school_id')
-  const class_id = searchParams.get('class_id')
-  const teacher_id = searchParams.get('teacher_id')
-  const date = searchParams.get('date')
+  const school_id           = searchParams.get('school_id')
+  const class_id            = searchParams.get('class_id')
+  const teacher_id          = searchParams.get('teacher_id')
+  const date                = searchParams.get('date')
+  const day_of_week_filter   = searchParams.get('day_of_week')
+  const period_number_filter = searchParams.get('period_number')
+  // template_id: 'default' → IS NULL (school default), numeric → specific template, absent → no filter
+  const template_id_param   = searchParams.get('template_id')
 
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 
-  // Cache class-level and school-level timetable fetches (no date filter = structural data)
-  if (!date) {
+  // Only serve from cache for full structural fetches (no slot-level or date filters)
+  if (!date && !day_of_week_filter && !period_number_filter) {
     const cacheKey = class_id
-      ? `timetable:class:${class_id}`
+      ? `timetable:class:${class_id}:tmpl:${template_id_param ?? 'all'}`
       : teacher_id
-        ? `timetable:teacher:${teacher_id}:school:${school_id}`
-        : `timetable:school:${school_id}`
+        ? `timetable:teacher:${teacher_id}:school:${school_id}:tmpl:${template_id_param ?? 'all'}`
+        : `timetable:school:${school_id}:tmpl:${template_id_param ?? 'all'}`
     const cached = getCache(cacheKey)
     if (cached) return NextResponse.json(cached)
   }
 
   try {
-    const vals: (string | number)[] = [school_id]
+    const vals: (string | number | null)[] = [school_id]
 
     const selectExtra = date
       ? `, sa.substitute_teacher_id, st.name AS substitute_teacher_name, sa.id AS substitute_assignment_id, st.subject AS substitute_teacher_subject, st.department AS substitute_teacher_department`
@@ -43,26 +48,33 @@ export async function GET(req: NextRequest) {
              LEFT JOIN teachers st ON st.id = sa.substitute_teacher_id`
     }
 
-    const day_of_week_param = searchParams.get('day_of_week')
-    const period_number_param = searchParams.get('period_number')
-
     let whereClause = ` WHERE ct.school_id = $1`
-    if (class_id)          { whereClause += ` AND ct.class_id = $${vals.length + 1}`;       vals.push(class_id) }
-    if (teacher_id)        { whereClause += ` AND ct.teacher_id = $${vals.length + 1}`;     vals.push(teacher_id) }
-    if (day_of_week_param) { whereClause += ` AND ct.day_of_week = $${vals.length + 1}`;    vals.push(day_of_week_param) }
-    if (period_number_param){ whereClause += ` AND ct.period_number = $${vals.length + 1}`; vals.push(period_number_param) }
+    if (class_id)             { whereClause += ` AND ct.class_id = $${vals.length + 1}`;      vals.push(class_id) }
+    if (teacher_id)           { whereClause += ` AND ct.teacher_id = $${vals.length + 1}`;    vals.push(teacher_id) }
+    if (day_of_week_filter)   { whereClause += ` AND ct.day_of_week = $${vals.length + 1}`;   vals.push(day_of_week_filter) }
+    if (period_number_filter) { whereClause += ` AND ct.period_number = $${vals.length + 1}`; vals.push(period_number_filter) }
 
-    // has_conflict: TRUE when this teacher is simultaneously assigned to another class at the same slot
+    // Template scoping — each template is independent; NULL = school default
+    if (template_id_param === 'default') {
+      whereClause += ` AND ct.template_id IS NULL`
+    } else if (template_id_param !== null) {
+      whereClause += ` AND ct.template_id = $${vals.length + 1}`
+      vals.push(parseInt(template_id_param))
+    }
+    // else: no template filter → return all (used by health, teacher schedules, etc.)
+
+    // has_conflict: teacher double-booked within the SAME template only
     const conflictCheck = `
       CASE
         WHEN ct.teacher_id IS NOT NULL AND ct.is_break = FALSE AND EXISTS (
           SELECT 1 FROM class_timetable cx
-          WHERE cx.school_id = ct.school_id
-            AND cx.teacher_id = ct.teacher_id
-            AND cx.day_of_week = ct.day_of_week
+          WHERE cx.school_id     = ct.school_id
+            AND cx.teacher_id    = ct.teacher_id
+            AND cx.day_of_week   = ct.day_of_week
             AND cx.period_number = ct.period_number
-            AND cx.class_id != ct.class_id
-            AND cx.is_break = FALSE
+            AND cx.class_id     != ct.class_id
+            AND cx.is_break      = FALSE
+            AND cx.template_id IS NOT DISTINCT FROM ct.template_id
         ) THEN TRUE ELSE FALSE
       END AS has_conflict`
 
@@ -72,18 +84,14 @@ export async function GET(req: NextRequest) {
 
     const result = await pool.query(q, vals)
 
-    // Store in cache if this is a cacheable query (no date, no special slot lookup)
-    if (!date) {
-      const day_of_week_param = searchParams.get('day_of_week')
-      const period_number_param = searchParams.get('period_number')
-      if (!day_of_week_param && !period_number_param) {
-        const cacheKey = class_id
-          ? `timetable:class:${class_id}`
-          : teacher_id
-            ? `timetable:teacher:${teacher_id}:school:${school_id}`
-            : `timetable:school:${school_id}`
-        setCache(cacheKey, result.rows, 30_000)
-      }
+    // Cache only if no slot-level or date filters
+    if (!date && !day_of_week_filter && !period_number_filter) {
+      const cacheKey = class_id
+        ? `timetable:class:${class_id}:tmpl:${template_id_param ?? 'all'}`
+        : teacher_id
+          ? `timetable:teacher:${teacher_id}:school:${school_id}:tmpl:${template_id_param ?? 'all'}`
+          : `timetable:school:${school_id}:tmpl:${template_id_param ?? 'all'}`
+      setCache(cacheKey, result.rows, 30_000)
     }
 
     return NextResponse.json(result.rows)
@@ -97,6 +105,7 @@ export async function PUT(req: NextRequest) {
   try {
     const body = await req.json()
 
+    // Direct slot update by id (e.g. from add-subject flow)
     if (body.id) {
       const { id, subject_name, teacher_id, room, time_from, time_to } = body
       const result = await pool.query(
@@ -112,10 +121,15 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json(result.rows[0])
     }
 
-    const { class_id, school_id, day_of_week, period_number, teacher_id, apply_to_subject, subject_name } = body
+    const { class_id, school_id, day_of_week, period_number, teacher_id, apply_to_subject, subject_name, template_id } = body
     if (!class_id || !school_id) {
       return NextResponse.json({ error: 'class_id, school_id required' }, { status: 400 })
     }
+
+    // Build template WHERE fragment (safe: template_id is either null or a validated integer from the client)
+    const tmplWhere = template_id != null
+      ? `AND template_id = ${parseInt(String(template_id))}`
+      : `AND template_id IS NULL`
 
     const client = await pool.connect()
     try {
@@ -126,7 +140,7 @@ export async function PUT(req: NextRequest) {
         const { rows: updatedSlots } = await client.query(
           `UPDATE class_timetable
            SET teacher_id=$1, is_manual=TRUE, source='manual'
-           WHERE class_id=$2 AND school_id=$3 AND subject_name=$4
+           WHERE class_id=$2 AND school_id=$3 AND subject_name=$4 ${tmplWhere}
            RETURNING *`,
           [teacher_id || null, class_id, school_id, subject_name]
         )
@@ -158,7 +172,7 @@ export async function PUT(req: NextRequest) {
       const result = await client.query(
         `UPDATE class_timetable
          SET teacher_id=$1, is_manual=TRUE, source='manual'
-         WHERE class_id=$2 AND school_id=$3 AND day_of_week=$4 AND period_number=$5
+         WHERE class_id=$2 AND school_id=$3 AND day_of_week=$4 AND period_number=$5 ${tmplWhere}
          RETURNING *`,
         [teacher_id || null, class_id, school_id, day_of_week, period_number]
       )
@@ -216,15 +230,46 @@ export async function PATCH(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   const { searchParams } = new URL(req.url)
-  const school_id = searchParams.get('school_id')
-  const class_id = searchParams.get('class_id')
+  const school_id         = searchParams.get('school_id')
+  const class_id          = searchParams.get('class_id')
+  const template_id_param = searchParams.get('template_id')
+
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+
+  // Build template fragment
+  const isDefault = template_id_param === 'default' || template_id_param === null
+  const tmplWhere = isDefault
+    ? `AND template_id IS NULL`
+    : `AND template_id = ${parseInt(template_id_param!)}`
+
   try {
     if (class_id) {
-      await pool.query('DELETE FROM class_timetable WHERE class_id=$1 AND school_id=$2', [class_id, school_id])
+      await pool.query(
+        `DELETE FROM class_timetable WHERE class_id=$1 AND school_id=$2 ${tmplWhere}`,
+        [class_id, school_id]
+      )
+      // Clear timetable_generated_at only when deleting the school-default timetable
+      if (isDefault) {
+        await pool.query(
+          'UPDATE classes SET timetable_generated_at=NULL, timetable_circulated_at=NULL WHERE id=$1 AND school_id=$2',
+          [class_id, school_id]
+        )
+      }
+      invalidateCache(`timetable:class:${class_id}`)
     } else {
-      await pool.query('DELETE FROM class_timetable WHERE school_id=$1', [school_id])
+      await pool.query(
+        `DELETE FROM class_timetable WHERE school_id=$1 ${tmplWhere}`,
+        [school_id]
+      )
+      if (isDefault) {
+        await pool.query(
+          'UPDATE classes SET timetable_generated_at=NULL, timetable_circulated_at=NULL WHERE school_id=$1',
+          [school_id]
+        )
+      }
     }
+    invalidateCache(`timetable:school:${school_id}`)
+    invalidateCache(`health:${school_id}`)
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error(error)

@@ -26,7 +26,8 @@ const EMPTY_ROW: TeacherRow = {
 const CSV_HEADER = 'name,email,subject,phone,department,qualification,date_of_joining,staff_type,teaches_grades'
 const CSV_EXAMPLE = `Priya Sharma,priya@school.com,Mathematics,9876543210,Science,B.Ed,2023-06-01,teaching,"8,9,10"
 Raj Kumar,raj@school.com,Physics,9876543211,Science,M.Sc,2022-07-15,teaching,"11,12"
-Suresh Patel,suresh@school.com,,,Admin,,2021-01-10,non_teaching,`
+Suresh Patel,suresh@school.com,,,Admin,,2021-01-10,non_teaching,
+# Note: wrap grades in quotes — "8,9,10" — or leave blank for all grades`
 
 const STUDENT_CSV_MARKERS = ['roll_number', 'parent_name', 'parent_phone', 'parent_email']
 const ALL_GRADES = Array.from({ length: 12 }, (_, i) => String(i + 1))
@@ -152,17 +153,27 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
     }
 
     const dataRows = hasHeader ? allRows.slice(1) : allRows
-    const parsed: TeacherRow[] = dataRows.map(cols => ({
-      name: cols[0] ?? '',
-      email: cols[1] ?? '',
-      subject: cols[2] ?? '',
-      phone: cols[3] ?? '',
-      department: cols[4] ?? '',
-      qualification: cols[5] ?? '',
-      date_of_joining: cols[6] ?? '',
-      staff_type: normalizeStaffType(cols[7] ?? ''),
-      teaches_grades: cols[8] ?? '',
-    }))
+    const parsed: TeacherRow[] = dataRows.map(cols => {
+      // Grades recovery: if user wrote 8,9,10 without quotes, CSV parser spills them into cols 8,9,10...
+      // Detect: col 8 onwards are all grade numbers (1–12), merge them back
+      const isGrade = (v: string) => /^\d{1,2}$/.test(v.trim()) && +v.trim() >= 1 && +v.trim() <= 12
+      let teachesGrades = cols[8] ?? ''
+      if (cols.length > 9 && isGrade(cols[8] ?? '')) {
+        const spilledGrades = cols.slice(8).filter(c => isGrade(c))
+        if (spilledGrades.length > 1) teachesGrades = spilledGrades.map(g => g.trim()).join(',')
+      }
+      return {
+        name:            cols[0] ?? '',
+        email:           cols[1] ?? '',
+        subject:         cols[2] ?? '',
+        phone:           cols[3] ?? '',
+        department:      cols[4] ?? '',
+        qualification:   cols[5] ?? '',
+        date_of_joining: cols[6] ?? '',
+        staff_type:      normalizeStaffType(cols[7] ?? ''),
+        teaches_grades:  teachesGrades,
+      }
+    })
     if (parsed.length > 0) { setRows(parsed); setMode('manual') }
   }
 
@@ -198,7 +209,8 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
       setShowErrors(false)
       fetchStaffCount()
       onRefresh?.()
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+      // Scroll the main content container to top (not window — sidebar layout uses overflow-y-auto on <main>)
+      document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to onboard staff')
     } finally {
@@ -314,7 +326,15 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
               }
             }}
           />
-          <p className="text-xs text-gray-400 mt-2">Paste triggers auto-parse — or use &quot;Import CSV&quot; button above</p>
+          <div className="mt-2 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            <svg className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <p className="text-xs text-amber-700">
+              <strong>Grades column:</strong> always wrap in quotes — <code className="bg-amber-100 px-1 rounded font-mono">&quot;8,9,10&quot;</code> — or leave blank for all grades. Without quotes, the CSV parser will split grades into wrong columns.
+            </p>
+          </div>
+          <p className="text-xs text-gray-400 mt-1.5">Paste triggers auto-parse — or use &quot;Import CSV&quot; button above</p>
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -331,7 +351,9 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[120px]">Qualification</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Joining Date</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Staff Type</th>
-                  <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[130px]">Teaches Grades</th>
+                  <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[130px]">
+                    Teaches Grades <span className="text-amber-400 text-[10px] font-semibold">← important</span>
+                  </th>
                   <th className="px-3 py-2.5 w-8"></th>
                 </tr>
               </thead>
@@ -360,10 +382,18 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                         </select>
                       </td>
                       <td className="px-3 py-2">
-                        {row.staff_type === 'teaching'
-                          ? <InlineGrades value={row.teaches_grades} onChange={v => updateRow(i, 'teaches_grades', v)} />
-                          : <span className="text-gray-300 text-xs italic">N/A</span>
-                        }
+                        {row.staff_type === 'teaching' ? (
+                          <div className="space-y-0.5">
+                            <InlineGrades value={row.teaches_grades} onChange={v => updateRow(i, 'teaches_grades', v)} />
+                            {!row.teaches_grades.trim() && row.name.trim() && (
+                              <p className="text-[10px] text-amber-500 leading-tight">
+                                ⚠ No grades = teaches all
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-300 text-xs italic">N/A</span>
+                        )}
                       </td>
                       <td className="px-3 py-2">
                         <button onClick={() => removeRow(i)} className="text-red-400 hover:text-red-600 text-base leading-none">×</button>
@@ -374,8 +404,13 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
               </tbody>
             </table>
           </div>
-          <div className="px-4 py-2 bg-gray-50 border-t border-gray-100">
-            <p className="text-xs text-gray-400">Teaches Grades — select specific grades or leave blank to teach all grades</p>
+          <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 flex items-center gap-2">
+            <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p className="text-xs text-gray-400">
+              <strong className="text-gray-500">Teaches Grades</strong> — use the dropdown to select grades. In CSV, always wrap grades in quotes: <code className="bg-gray-100 px-1 rounded font-mono text-[10px]">&quot;8,9,10&quot;</code>
+            </p>
           </div>
           <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
             <button onClick={addRow} className="text-sm text-blue-600 hover:text-blue-800 font-medium">+ Add Row</button>

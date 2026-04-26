@@ -3,6 +3,11 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import { SCHEDULE, DAYS, ACADEMIC_SLOTS, ScheduleSlot, buildScheduleFromSettings, DEFAULT_SCHEDULE_SETTINGS, SchoolScheduleSettings } from '@/lib/schedule'
 
+function canTeachGrade(teachesGrades: string | null | undefined, grade: string): boolean {
+  if (!teachesGrades || !teachesGrades.trim()) return true
+  return teachesGrades.split(',').map(g => g.trim()).includes(grade.trim())
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 type ClassRow = {
   id: number; grade: string; section: string
@@ -17,7 +22,7 @@ type ClassHealth = {
   subjects_unassigned: number
   timetable_exists: boolean
 }
-type Teacher = { id: number; name: string; subject: string; staff_type: string }
+type Teacher = { id: number; name: string; subject: string; staff_type: string; teaches_grades?: string }
 type TimetableSlot = {
   id: number; day_of_week: string; period_number: number
   time_from: string; time_to: string
@@ -91,6 +96,21 @@ export default function TimetableManagement({ schoolId }: { schoolId: number }) 
 }
 
 // ─── Class Timetables Tab ─────────────────────────────────────────────────────
+type TeacherLoadSubject = {
+  subject_name: string; class_count: number; total_periods: number
+  classes: string; parallel_risk: boolean
+}
+type TeacherLoad = {
+  teacher_id: number; teacher_name: string
+  total_periods: number; total_slots_available: number
+  overloaded: boolean; risk: 'high' | 'medium' | 'low'
+  subjects: TeacherLoadSubject[]
+}
+type LoadSummary = {
+  total_teachers: number; high_risk: number; medium_risk: number; low_risk: number
+  periods_per_day: number; days_per_week: number
+}
+
 function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; schedule: ScheduleSlot[]; academicSlots: ScheduleSlot[] }) {
   const [classes, setClasses]       = useState<ClassRow[]>([])
   const [healthMap, setHealthMap]   = useState<Record<number, ClassHealth>>({})
@@ -99,6 +119,19 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   const [timetable, setTimetable]   = useState<TimetableSlot[]>([])
   const [loading, setLoading]       = useState(true)
   const [ttLoading, setTtLoading]   = useState(false)
+
+  // Teacher load analysis panel
+  const [loadData, setLoadData]           = useState<{ teachers: TeacherLoad[]; summary: LoadSummary } | null>(null)
+  const [loadAnalysing, setLoadAnalysing] = useState(false)
+  const [showLoadPanel, setShowLoadPanel] = useState(false)
+
+  async function runLoadAnalysis() {
+    setLoadAnalysing(true); setShowLoadPanel(true)
+    try {
+      const data = await fetch(`/api/class-timetable/teacher-load?school_id=${schoolId}`).then(r => r.json())
+      setLoadData(data)
+    } finally { setLoadAnalysing(false) }
+  }
 
   // Named schedule templates — loaded once, used for template selector in Regenerate
   const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>([])
@@ -132,6 +165,26 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   const [busyTeachers, setBusyTeachers] = useState<Record<number, BusyInfo>>({})
   const [loadingAvail, setLoadingAvail] = useState(false)
 
+  // Subject assignment info (for slot-no-teacher scenario)
+  type SubjectAssignment = { id: number; subject_name: string; teacher_id: number | null; teacher_name: string | null }
+  const [subjectAssignment, setSubjectAssignment] = useState<SubjectAssignment | null>(null)
+  // All class_subjects for the selected class — used to build the "this class teachers" list
+  const [classSubjects, setClassSubjects]         = useState<SubjectAssignment[]>([])
+  const [changingSubjTeacher, setChangingSubjTeacher] = useState(false)
+  const [newPermTeacherId, setNewPermTeacherId]     = useState<number | null>(null)
+  const [savingPermTeacher, setSavingPermTeacher]   = useState(false)
+
+  // Add subject directly from a slot
+  const [addSubjMode, setAddSubjMode]   = useState(false)
+  const [newSubjName, setNewSubjName]   = useState('')
+  const [newSubjPPW, setNewSubjPPW]     = useState(4)
+  const [addingSubj, setAddingSubj]     = useState(false)
+  const [addSubjErr, setAddSubjErr]     = useState<string | null>(null)
+
+  // Swap suggestions (shown when all class teachers are busy)
+  const [showSwapHints, setShowSwapHints] = useState(false)
+  const [swapping, setSwapping]           = useState(false)
+
   // Regenerate + Circulate
   const [regenerating, setRegenerating]     = useState(false)
   const [regenMsg, setRegenMsg]             = useState<{ text: string; ok: boolean } | null>(null)
@@ -140,6 +193,75 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   const [conflictCount, setConflictCount]   = useState(0)
   // Track unsaved changes made after last circulation (swap / teacher edit / regenerate)
   const [hasChanges, setHasChanges]         = useState(false)
+
+  // Conflict resolution panel
+  type ConflictGroup = {
+    teacher_id: number; teacher_name: string
+    day_of_week: string; period_number: number; time_from: string; time_to: string
+    slots: { slot_id: number; class_id: number; grade: string; section: string; subject_name: string; is_manual: boolean }[]
+    alternatives: { id: number; name: string; subject: string }[]
+  }
+  const [showConflictPanel, setShowConflictPanel]   = useState(false)
+  const [conflicts, setConflicts]                   = useState<ConflictGroup[]>([])
+  const [conflictsLoading, setConflictsLoading]     = useState(false)
+  const [fixingSlot, setFixingSlot]                 = useState<number | null>(null)
+
+  // Delete timetable
+  const [deletingTt, setDeletingTt]             = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+
+  async function deleteTimetable() {
+    if (!selected) return
+    setDeletingTt(true); setShowDeleteConfirm(false)
+    try {
+      const tmplParam = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
+      const res = await fetch(`/api/class-timetable?class_id=${selected.id}&school_id=${schoolId}&template_id=${tmplParam}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Delete failed')
+      setTimetable([])
+      setConflictCount(0)
+      setConflicts([])
+      setShowConflictPanel(false)
+      setHasChanges(false)
+      setClasses(prev => prev.map(c => c.id === selected.id
+        ? { ...c, timetable_generated_at: null, timetable_circulated_at: null }
+        : c
+      ))
+      setSelected(prev => prev ? { ...prev, timetable_generated_at: null, timetable_circulated_at: null } : prev)
+      refreshAllSlots(); loadHealth()
+    } finally { setDeletingTt(false) }
+  }
+
+  const loadConflicts = useCallback(async () => {
+    setConflictsLoading(true)
+    try {
+      const tmplParam = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
+      const data = await fetch(`/api/class-timetable/conflicts?school_id=${schoolId}&template_id=${tmplParam}`).then(r => r.json())
+      setConflicts(Array.isArray(data) ? data : [])
+    } catch { setConflicts([]) }
+    finally { setConflictsLoading(false) }
+  }, [schoolId, selectedTemplateId])
+
+  async function fixConflict(slotId: number, newTeacherId: number | null) {
+    setFixingSlot(slotId)
+    try {
+      const res = await fetch('/api/class-timetable/conflicts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slot_id: slotId, new_teacher_id: newTeacherId, school_id: schoolId }),
+      })
+      if (res.ok) {
+        await loadConflicts()
+        // Reload current class timetable if it contains the fixed slot
+        if (selected) {
+          const tmplParam = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
+          const ttData = await fetch(`/api/class-timetable?class_id=${selected.id}&school_id=${schoolId}&template_id=${tmplParam}`).then(r => r.json())
+          const slots: TimetableSlot[] = Array.isArray(ttData) ? ttData : []
+          setTimetable(slots)
+          setConflictCount(slots.filter(s => (s as TimetableSlot & { has_conflict?: boolean }).has_conflict).length)
+        }
+        refreshAllSlots(); loadHealth()
+      }
+    } finally { setFixingSlot(null) }
+  }
 
   // Named schedule templates — loaded once, used for template selector in Regenerate
   const today = getToday()
@@ -185,10 +307,20 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     setSelected(cls); setTtLoading(true)
     setEditSlot(null); setSelectedSlot(null); setSwapMsg(null)
     setRegenMsg(null); setCirculateMsg(null); setEditMode(false); setConflictCount(0); setHasChanges(false)
-    const data = await fetch(`/api/class-timetable?class_id=${cls.id}&school_id=${schoolId}`).then(r => r.json())
+    // Reset to school default schedule when switching classes so the grid always
+    // reflects the schedule the class was generated with (avoids stale template bleed)
+    setSelectedTemplateId('default')
+    setActiveSchedule(schedule)
+    setActiveAcademicSlots(academicSlots)
+    const [data, subjsData] = await Promise.all([
+      fetch(`/api/class-timetable?class_id=${cls.id}&school_id=${schoolId}&template_id=default`).then(r => r.json()),
+      fetch(`/api/classes/${cls.id}/subjects`).then(r => r.json()),
+    ])
     const slots: TimetableSlot[] = Array.isArray(data) ? data : []
     setTimetable(slots)
     setConflictCount(slots.filter(s => (s as TimetableSlot & { has_conflict?: boolean }).has_conflict).length)
+    // Load class_subjects so swap-blocking can check assigned teacher availability
+    setClassSubjects(Array.isArray(subjsData) ? subjsData : [])
     // Build busy map from cached school slots (no extra API call)
     const bm: Record<number, Record<string, Set<number>>> = {}
     for (const s of allSchoolSlots) {
@@ -199,29 +331,133 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     }
     setBusyMap(bm)
     setTtLoading(false)
-  }, [schoolId, allSchoolSlots])
+  }, [schoolId, allSchoolSlots, schedule, academicSlots])
 
-  // ── Fetch busy teachers when assign-teacher modal opens ────────────────────
+  // ── Fetch busy teachers + subject assignment when assign-teacher modal opens ──
   useEffect(() => {
-    if (!editSlot || !selected) { setBusyTeachers({}); return }
-    setLoadingAvail(true); setConflictError(null)
+    if (!editSlot || !selected) {
+      setBusyTeachers({}); setSubjectAssignment(null); setChangingSubjTeacher(false)
+      setAddSubjMode(false); setNewSubjName(''); setAddSubjErr(null)
+      return
+    }
+    setLoadingAvail(true); setConflictError(null); setAddSubjMode(false)
+    setAddSubjErr(null); setChangingSubjTeacher(false); setNewPermTeacherId(null)
+    setShowSwapHints(false)
     setSelTeacherId(editSlot.teacher_id ?? null)
     setApplyToAll(true)
     const pNum = Math.round(Number(editSlot.period_number))
-    fetch(`/api/class-timetable?school_id=${schoolId}&day_of_week=${encodeURIComponent(editSlot.day_of_week)}&period_number=${pNum}`)
-      .then(r => r.json())
-      .then((rows: (TimetableSlot & { class_id?: number })[]) => {
-        if (!Array.isArray(rows)) return
+
+    const tmplParamModal = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
+    Promise.all([
+      fetch(`/api/class-timetable?school_id=${schoolId}&day_of_week=${encodeURIComponent(editSlot.day_of_week)}&period_number=${pNum}&template_id=${tmplParamModal}`).then(r => r.json()),
+      fetch(`/api/classes/${selected.id}/subjects`).then(r => r.json()),
+    ]).then(([slotsData, subjsData]) => {
+      // Busy teachers (other classes at this slot)
+      if (Array.isArray(slotsData)) {
         const busy: Record<number, BusyInfo> = {}
-        for (const row of rows) {
+        for (const row of slotsData as (TimetableSlot & { class_id?: number })[]) {
           if (row.teacher_id && row.class_id !== selected.id)
             busy[row.teacher_id] = { grade: row.grade ?? '', section: row.section ?? '', subject_name: row.subject_name ?? null }
         }
         setBusyTeachers(busy)
-      })
-      .catch(() => setBusyTeachers({}))
-      .finally(() => setLoadingAvail(false))
+      }
+      // All class_subjects for this class
+      const allSubjs: SubjectAssignment[] = Array.isArray(subjsData) ? subjsData : []
+      setClassSubjects(allSubjs)
+      // The specific subject assignment for THIS slot's subject
+      if (editSlot.subject_name) {
+        const match = allSubjs.find(s =>
+          s.subject_name.toLowerCase() === (editSlot.subject_name ?? '').toLowerCase()
+        )
+        setSubjectAssignment(match ?? null)
+      } else {
+        setSubjectAssignment(null)
+      }
+    })
+    .catch(() => { setBusyTeachers({}); setSubjectAssignment(null); setClassSubjects([]) })
+    .finally(() => setLoadingAvail(false))
   }, [editSlot, selected, schoolId])
+
+  // ── Swap two slots from within the modal ─────────────────────────────────
+  async function doSwapFromModal(slotA: TimetableSlot, slotB: TimetableSlot) {
+    if (!selected) return
+    setSwapping(true)
+    const pA = Math.round(Number(slotA.period_number))
+    const pB = Math.round(Number(slotB.period_number))
+    try {
+      const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
+      const tmplParam = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
+      const res = await fetch('/api/class-timetable/swap', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId, class_id: selected.id, template_id: tmplIdForBody,
+          slot_a: { day: slotA.day_of_week, period_number: pA },
+          slot_b: { day: slotB.day_of_week, period_number: pB },
+        }),
+      })
+      if (res.ok) {
+        const freshData = await fetch(`/api/class-timetable?class_id=${selected.id}&school_id=${schoolId}&template_id=${tmplParam}`).then(r => r.json())
+        const freshSlots: TimetableSlot[] = Array.isArray(freshData) ? freshData : []
+        setTimetable(freshSlots)
+        setConflictCount(freshSlots.filter(s => (s as TimetableSlot & { has_conflict?: boolean }).has_conflict).length)
+        setHasChanges(true); loadHealth(); refreshAllSlots()
+        setEditSlot(null)
+      }
+    } finally { setSwapping(false) }
+  }
+
+  // ── Add a new subject directly to a slot ─────────────────────────────────
+  async function addSubjectToSlot() {
+    if (!editSlot || !selected || !newSubjName.trim()) return
+    setAddingSubj(true); setAddSubjErr(null)
+    try {
+      // 1. Create/update the class_subjects entry (no teacher yet)
+      const subjRes = await fetch(`/api/classes/${selected.id}/subjects`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject_name: newSubjName.trim(), periods_per_week: newSubjPPW, teacher_id: null }),
+      })
+      if (!subjRes.ok) {
+        const e = await subjRes.json()
+        setAddSubjErr(e.error ?? 'Failed to add subject')
+        return
+      }
+      // 2. Set subject_name on this slot (uses PUT /api/class-timetable with id)
+      await fetch('/api/class-timetable', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: editSlot.id, subject_name: newSubjName.trim(), teacher_id: null }),
+      })
+      // Reload timetable
+      const tmplParam = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
+      const freshData = await fetch(`/api/class-timetable?class_id=${selected.id}&school_id=${schoolId}&template_id=${tmplParam}`).then(r => r.json())
+      const freshSlots: TimetableSlot[] = Array.isArray(freshData) ? freshData : []
+      setTimetable(freshSlots)
+      setConflictCount(freshSlots.filter(s => (s as TimetableSlot & { has_conflict?: boolean }).has_conflict).length)
+      setHasChanges(true); loadHealth()
+      setEditSlot(null)
+    } catch {
+      setAddSubjErr('Network error — please try again')
+    } finally { setAddingSubj(false) }
+  }
+
+  // ── Change permanent class_subjects teacher assignment ────────────────────
+  async function savePermTeacher() {
+    if (!selected || !subjectAssignment) return
+    setSavingPermTeacher(true)
+    try {
+      await fetch(`/api/classes/${selected.id}/subjects`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject_id: subjectAssignment.id, teacher_id: newPermTeacherId }),
+      })
+      // Reload timetable to reflect teacher change
+      const tmplParam = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
+      const freshData = await fetch(`/api/class-timetable?class_id=${selected.id}&school_id=${schoolId}&template_id=${tmplParam}`).then(r => r.json())
+      const freshSlots: TimetableSlot[] = Array.isArray(freshData) ? freshData : []
+      setTimetable(freshSlots)
+      setConflictCount(freshSlots.filter(s => (s as TimetableSlot & { has_conflict?: boolean }).has_conflict).length)
+      setHasChanges(true); loadHealth(); refreshAllSlots()
+      setEditSlot(null)
+    } finally { setSavingPermTeacher(false) }
+  }
 
   // ── Assign / change teacher ────────────────────────────────────────────────
   async function saveEditSlot(teacherId: number | null, applyAll: boolean) {
@@ -234,19 +470,21 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     setConflictError(null); setSaving(true)
     const pNum = Math.round(Number(editSlot.period_number))
     const teacherName = teachers.find(t => t.id === teacherId)?.name ?? null
+    const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
+    const tmplParam = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
     if (applyAll && editSlot.subject_name) {
       await fetch('/api/class-timetable', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ class_id: selected.id, school_id: schoolId, teacher_id: teacherId, apply_to_subject: true, subject_name: editSlot.subject_name }),
+        body: JSON.stringify({ class_id: selected.id, school_id: schoolId, teacher_id: teacherId, apply_to_subject: true, subject_name: editSlot.subject_name, template_id: tmplIdForBody }),
       })
     } else {
       await fetch('/api/class-timetable', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ class_id: selected.id, school_id: schoolId, day_of_week: editSlot.day_of_week, period_number: pNum, teacher_id: teacherId }),
+        body: JSON.stringify({ class_id: selected.id, school_id: schoolId, day_of_week: editSlot.day_of_week, period_number: pNum, teacher_id: teacherId, template_id: tmplIdForBody }),
       })
     }
     // Re-fetch timetable to get fresh has_conflict flags after teacher change
-    const freshData = await fetch(`/api/class-timetable?class_id=${selected.id}&school_id=${schoolId}`).then(r => r.json())
+    const freshData = await fetch(`/api/class-timetable?class_id=${selected.id}&school_id=${schoolId}&template_id=${tmplParam}`).then(r => r.json())
     const freshSlots: TimetableSlot[] = Array.isArray(freshData) ? freshData : []
     setTimetable(freshSlots)
     setConflictCount(freshSlots.filter(s => (s as TimetableSlot & { has_conflict?: boolean }).has_conflict).length)
@@ -255,17 +493,33 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     refreshAllSlots(); loadHealth()
   }
 
-  // ── 2-click swap: instant conflict check using pre-loaded busy map ────────
+  // ── 2-click swap: check BOTH teachers (current or assigned via class_subjects) ──
   function isSwapBlocked(slotA: TimetableSlot, slotB: TimetableSlot): string | null {
-    if (slotA.teacher_id) {
-      const pB = Math.round(Number(slotB.period_number))
-      if (busyMap[slotA.teacher_id]?.[slotB.day_of_week]?.has(pB))
-        return `${slotA.teacher_name ?? 'Teacher'} is busy at ${slotB.day_of_week} P${pB} (another class)`
+    // Resolve effective teacher: use current teacher, or look up assigned teacher from class_subjects
+    // for no-teacher slots (e.g. English + Assign — Mary Joseph is still the English teacher)
+    const effectiveTeacher = (slot: TimetableSlot): { id: number; name: string } | null => {
+      if (slot.teacher_id && slot.teacher_name) return { id: slot.teacher_id, name: slot.teacher_name }
+      if (slot.subject_name) {
+        const cs = classSubjects.find(s => s.subject_name.toLowerCase() === (slot.subject_name ?? '').toLowerCase())
+        if (cs?.teacher_id && cs?.teacher_name) return { id: cs.teacher_id, name: cs.teacher_name }
+      }
+      return null
     }
-    if (slotB.teacher_id) {
+
+    const tA = effectiveTeacher(slotA)
+    const tB = effectiveTeacher(slotB)
+
+    // Check: can teacher A cover slotB's time?
+    if (tA) {
+      const pB = Math.round(Number(slotB.period_number))
+      if (busyMap[tA.id]?.[slotB.day_of_week]?.has(pB))
+        return `${tA.name} is busy at ${slotB.day_of_week} P${pB} (another class)`
+    }
+    // Check: can teacher B cover slotA's time?
+    if (tB) {
       const pA = Math.round(Number(slotA.period_number))
-      if (busyMap[slotB.teacher_id]?.[slotA.day_of_week]?.has(pA))
-        return `${slotB.teacher_name ?? 'Teacher'} is busy at ${slotA.day_of_week} P${pA} (another class)`
+      if (busyMap[tB.id]?.[slotA.day_of_week]?.has(pA))
+        return `${tB.name} is busy at ${slotA.day_of_week} P${pA} (another class)`
     }
     return null
   }
@@ -286,10 +540,11 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     setSwapMsg({ text: 'Periods swapped', ok: true })
     setTimeout(() => setSwapMsg(null), 3000)
     // Fire-and-forget save; revert on failure, refresh health on success
+    const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
     fetch('/api/class-timetable/swap', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        school_id: schoolId, class_id: selected.id,
+        school_id: schoolId, class_id: selected.id, template_id: tmplIdForBody,
         slot_a: { day: slotA.day_of_week, period_number: pA },
         slot_b: { day: slotB.day_of_week, period_number: pB },
       }),
@@ -356,10 +611,13 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
       const templateSettings = selectedTemplateId !== 'default'
         ? savedTemplates.find(t => t.id === selectedTemplateId)?.settings
         : undefined
+      const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
+      const tmplParam = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
       const res = await fetch('/api/class-timetable/generate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           school_id: schoolId, class_id: selected.id, force_replace: true,
+          template_id: tmplIdForBody,
           ...(templateSettings ? { schedule_settings: templateSettings } : {}),
         }),
       })
@@ -367,15 +625,20 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
       if (!res.ok) {
         setRegenMsg({ text: data.error || 'Regeneration failed', ok: false })
       } else {
-        setRegenMsg({ text: `Timetable regenerated — ${data.slots} slots`, ok: true })
-        const ttData = await fetch(`/api/class-timetable?class_id=${selected.id}&school_id=${schoolId}`).then(r => r.json())
+        const parts: string[] = ['Timetable regenerated.']
+        if (data.conflicts_auto_resolved > 0) parts.push(`${data.conflicts_auto_resolved} conflict(s) auto-resolved.`)
+        if (data.conflicts_need_manual   > 0) parts.push(`${data.conflicts_need_manual} slot(s) need a teacher — click amber cells.`)
+        setRegenMsg({ text: parts.join(' '), ok: true })
+        const ttData = await fetch(`/api/class-timetable?class_id=${selected.id}&school_id=${schoolId}&template_id=${tmplParam}`).then(r => r.json())
         const slots: TimetableSlot[] = Array.isArray(ttData) ? ttData : []
         setTimetable(slots)
-        setConflictCount(0)
+        const newConflicts = slots.filter(s => (s as TimetableSlot & { has_conflict?: boolean }).has_conflict).length
+        setConflictCount(newConflicts)
+        if (newConflicts > 0 && showConflictPanel) loadConflicts()
         setClasses(prev => prev.map(c => c.id === selected.id ? { ...c, timetable_generated_at: new Date().toISOString() } : c))
         setHasChanges(true)
         refreshAllSlots(); loadHealth()
-        setTimeout(() => setRegenMsg(null), 4000)
+        setTimeout(() => setRegenMsg(null), 6000)
       }
     } finally { setRegenerating(false) }
   }
@@ -385,9 +648,10 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     if (!selected) return
     setCirculating(true); setCirculateMsg(null)
     try {
+      const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
       const res = await fetch('/api/class-timetable/circulate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, class_id: selected.id }),
+        body: JSON.stringify({ school_id: schoolId, class_id: selected.id, template_id: tmplIdForBody }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -418,6 +682,116 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   if (loading) return <div className="py-12 text-center text-gray-400">Loading...</div>
 
   return (
+    <div className="space-y-4">
+
+      {/* ── Teacher Load Analysis Banner ── */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-4 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="text-base">📊</span>
+            <div>
+              <p className="text-sm font-semibold text-gray-800">Teacher Load Analysis</p>
+              <p className="text-xs text-gray-400">Check if any teacher is overcommitted before generating — prevents conflicts at the root</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 flex-shrink-0">
+            {loadData?.summary && (
+              <div className="flex items-center gap-2 text-xs">
+                {loadData.summary.high_risk > 0   && <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold">{loadData.summary.high_risk} High risk</span>}
+                {loadData.summary.medium_risk > 0 && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-semibold">{loadData.summary.medium_risk} Medium</span>}
+                {loadData.summary.high_risk === 0 && loadData.summary.medium_risk === 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-semibold">✓ All good</span>
+                )}
+              </div>
+            )}
+            <button onClick={runLoadAnalysis} disabled={loadAnalysing}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-40 transition-colors">
+              {loadAnalysing ? 'Analysing…' : loadData ? '↻ Re-check' : 'Check Now'}
+            </button>
+            {loadData && (
+              <button onClick={() => setShowLoadPanel(p => !p)}
+                className="text-xs text-gray-400 hover:text-gray-600 font-medium">
+                {showLoadPanel ? 'Hide ▲' : 'Show ▼'}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {showLoadPanel && loadData?.teachers && loadData?.summary && (
+          <div className="border-t border-gray-100 px-4 pb-4 pt-3">
+            {loadData.teachers.length === 0 ? (
+              <p className="text-xs text-gray-400 text-center py-4">No teacher assignments found. Add subjects to classes first.</p>
+            ) : (
+              <div className="space-y-2">
+                {loadData.teachers.filter(t => t.risk !== 'low').length === 0 && (
+                  <div className="flex items-center gap-2 px-3 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-700 font-medium">
+                    ✓ All teachers have manageable loads — timetable generation should produce minimal conflicts.
+                  </div>
+                )}
+                {loadData.teachers.map(teacher => (
+                  <div key={teacher.teacher_id}
+                    className={`rounded-xl border p-3 ${
+                      teacher.risk === 'high'   ? 'bg-red-50 border-red-200' :
+                      teacher.risk === 'medium' ? 'bg-amber-50 border-amber-200' :
+                                                  'bg-gray-50 border-gray-200'
+                    }`}>
+                    <div className="flex items-start justify-between gap-3 mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                          teacher.risk === 'high'   ? 'bg-red-200 text-red-800' :
+                          teacher.risk === 'medium' ? 'bg-amber-200 text-amber-800' :
+                                                      'bg-gray-200 text-gray-600'
+                        }`}>{teacher.risk.toUpperCase()}</span>
+                        <span className="text-sm font-semibold text-gray-800">{teacher.teacher_name}</span>
+                      </div>
+                      <span className={`text-[11px] font-medium flex-shrink-0 ${
+                        teacher.overloaded ? 'text-red-600' : 'text-gray-500'
+                      }`}>
+                        {teacher.total_periods} periods/week
+                        {teacher.overloaded && <span className="ml-1 text-red-600 font-bold">⚠ overloaded</span>}
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      {teacher.subjects.map(s => (
+                        <div key={s.subject_name} className="flex items-center justify-between text-[11px]">
+                          <span className={s.parallel_risk ? 'text-gray-700 font-medium' : 'text-gray-500'}>
+                            {s.subject_name}
+                            {s.parallel_risk && (
+                              <span className="ml-1.5 text-[10px] text-amber-600">
+                                ({s.class_count} classes: {s.classes})
+                              </span>
+                            )}
+                          </span>
+                          <span className={`font-medium ${s.parallel_risk ? 'text-amber-700' : 'text-gray-400'}`}>
+                            {s.total_periods} p/w
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {teacher.risk === 'high' && teacher.subjects.some(s => s.parallel_risk) && (
+                      <p className="text-[10px] text-red-600 mt-2 font-medium">
+                        Fix: Split the load — assign a second teacher to some of these sections before generating.
+                      </p>
+                    )}
+                    {teacher.risk === 'medium' && (
+                      <p className="text-[10px] text-amber-700 mt-2">
+                        May cause some conflicts. Generate and use swap/fix tools if needed.
+                      </p>
+                    )}
+                  </div>
+                ))}
+                {/* Show low-risk teachers in a compact row */}
+                {loadData.teachers.filter(t => t.risk === 'low').length > 0 && (
+                  <div className="text-[10px] text-gray-400 pt-1">
+                    {loadData.teachers.filter(t => t.risk === 'low').map(t => t.teacher_name).join(', ')} — load OK
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
     <div className="flex gap-5">
       {/* Class sidebar */}
       <div className="w-60 flex-shrink-0 space-y-2">
@@ -539,7 +913,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                 {savedTemplates.length > 0 && (
                   <select
                     value={String(selectedTemplateId)}
-                    onChange={e => {
+                    onChange={async e => {
                       const val = e.target.value
                       if (val === 'default') {
                         setSelectedTemplateId('default')
@@ -554,27 +928,61 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                           setActiveAcademicSlots(built.filter(s => !s.is_break))
                         }
                       }
+                      // Re-fetch timetable for the selected class using the new template
+                      if (selected) {
+                        setTtLoading(true)
+                        const data = await fetch(`/api/class-timetable?class_id=${selected.id}&school_id=${schoolId}&template_id=${val}`).then(r => r.json())
+                        const slots: TimetableSlot[] = Array.isArray(data) ? data : []
+                        setTimetable(slots)
+                        setConflictCount(slots.filter(s => (s as TimetableSlot & { has_conflict?: boolean }).has_conflict).length)
+                        setHasChanges(false)
+                        setTtLoading(false)
+                      }
                     }}
-                    className="border border-blue-200 rounded-lg px-2 py-1.5 text-xs text-blue-700 bg-blue-50 font-medium focus:outline-none focus:ring-2 focus:ring-blue-300 max-w-[160px]"
-                    title="Select schedule template — grid updates instantly">
+                    className={`rounded-lg px-2 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-300 max-w-[160px] ${
+                      selectedTemplateId !== 'default'
+                        ? 'border border-violet-300 text-violet-700 bg-violet-50 ring-1 ring-violet-200'
+                        : 'border border-blue-200 text-blue-700 bg-blue-50'
+                    }`}
+                    title="Select schedule template — grid and generation both update instantly">
                     <option value="default">School Default</option>
                     {savedTemplates.map(t => (
                       <option key={t.id} value={t.id}>{t.name}</option>
                     ))}
                   </select>
                 )}
-                <button onClick={regenerate} disabled={regenerating || editMode}
-                  className="px-4 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors">
-                  {regenerating ? 'Regenerating...' : 'Regenerate'}
-                </button>
-                {!editMode ? (
-                  <>
-                    <button onClick={() => { setEditMode(true); setSwapMsg(null); setCirculateMsg(null) }}
-                      className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
-                      ✏ Edit Timetable
+                {timetable.length > 0 && (
+                  <button onClick={() => setShowDeleteConfirm(true)} disabled={deletingTt || editMode}
+                    className="px-3 py-1.5 rounded-lg text-xs border border-gray-200 text-gray-400 hover:border-red-300 hover:text-red-500 hover:bg-red-50 disabled:opacity-40 transition-colors"
+                    title="Delete this class timetable">
+                    🗑 Delete
+                  </button>
+                )}
+                {/* Generate (first time) or Regenerate (already exists) */}
+                {(() => {
+                  const tmplName = selectedTemplateId !== 'default'
+                    ? (savedTemplates.find(t => t.id === selectedTemplateId)?.name ?? '')
+                    : ''
+                  return timetable.length === 0 ? (
+                    <button onClick={regenerate} disabled={regenerating}
+                      className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">
+                      {regenerating ? 'Generating…' : tmplName ? `Generate · ${tmplName}` : 'Generate Timetable'}
                     </button>
-                    {/* Circulate always visible when timetable exists — highlighted when changes pending */}
-                    {timetable.length > 0 && (
+                  ) : (
+                    <button onClick={regenerate} disabled={regenerating || editMode}
+                      className="px-4 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors">
+                      {regenerating ? 'Regenerating…' : tmplName ? `↻ Regen · ${tmplName}` : '↻ Regenerate'}
+                    </button>
+                  )
+                })()}
+                {/* Edit + Circulate — only when timetable exists */}
+                {timetable.length > 0 && (
+                  !editMode ? (
+                    <>
+                      <button onClick={() => { setEditMode(true); setSwapMsg(null); setCirculateMsg(null) }}
+                        className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
+                        ✏ Edit Timetable
+                      </button>
                       <button onClick={circulate} disabled={circulating || conflictCount > 0}
                         title={conflictCount > 0 ? 'Resolve all conflicts before circulating' : 'Publish timetable to staff and students'}
                         className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-40 ${
@@ -584,23 +992,56 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                         }`}>
                         {circulating ? 'Circulating...' : selected.timetable_circulated_at && !hasChanges ? '✓ Circulated' : 'Circulate'}
                       </button>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <button onClick={() => { setEditMode(false); setSwapMsg(null) }}
-                      className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors">
-                      Done Editing
-                    </button>
-                    <button onClick={circulate} disabled={circulating || conflictCount > 0}
-                      title={conflictCount > 0 ? 'Resolve all conflicts before circulating' : ''}
-                      className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 transition-colors ring-2 ring-emerald-300">
-                      {circulating ? 'Circulating...' : 'Circulate'}
-                    </button>
-                  </>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => { setEditMode(false); setSwapMsg(null) }}
+                        className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors">
+                        Done Editing
+                      </button>
+                      <button onClick={circulate} disabled={circulating || conflictCount > 0}
+                        title={conflictCount > 0 ? 'Resolve all conflicts before circulating' : ''}
+                        className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 transition-colors ring-2 ring-emerald-300">
+                        {circulating ? 'Circulating...' : 'Circulate'}
+                      </button>
+                    </>
+                  )
                 )}
               </div>
             </div>
+
+            {/* ── Delete confirmation modal ── */}
+            {showDeleteConfirm && selected && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
+                  <div className="flex items-start gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                      <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-gray-900 text-sm">Delete Timetable?</h3>
+                      <p className="text-xs text-gray-500 mt-1">
+                        This will permanently remove the timetable for{' '}
+                        <strong>Grade {selected.grade} – Section {selected.section}</strong>,
+                        including all manually edited slots. You can generate a fresh one anytime.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={() => setShowDeleteConfirm(false)}
+                      className="px-4 py-2 rounded-lg text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
+                      Cancel
+                    </button>
+                    <button onClick={deleteTimetable} disabled={deletingTt}
+                      className="px-4 py-2 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 transition-colors">
+                      {deletingTt ? 'Deleting...' : 'Delete Timetable'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* ── Edit mode banner ── */}
             {editMode && (
@@ -631,90 +1072,202 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                 {circulateMsg.ok ? '✓ ' : '✗ '}{circulateMsg.text}
               </div>
             )}
-            {/* ── Timetable grid ── */}
+
+            {/* ── Conflict Resolution Panel ── */}
+            {conflictCount > 0 && (
+              <div className="mx-4 mt-3">
+                <div className={`rounded-xl border overflow-hidden ${showConflictPanel ? 'border-red-300' : 'border-red-200'}`}>
+                  {/* Header — always visible */}
+                  <button
+                    onClick={() => {
+                      const next = !showConflictPanel
+                      setShowConflictPanel(next)
+                      if (next && conflicts.length === 0) loadConflicts()
+                    }}
+                    className="w-full flex items-center justify-between px-4 py-3 bg-red-50 hover:bg-red-100 transition-colors text-left">
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">!</span>
+                      <span className="text-sm font-semibold text-red-800">
+                        {conflictCount} conflict{conflictCount !== 1 ? 's' : ''} — teacher double-booked
+                      </span>
+                      <span className="text-xs text-red-500">(Cannot circulate until resolved)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-red-600 font-medium">{showConflictPanel ? 'Hide' : 'Resolve →'}</span>
+                      <svg className={`w-4 h-4 text-red-400 transition-transform ${showConflictPanel ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </button>
+
+                  {/* Expandable conflict list */}
+                  {showConflictPanel && (
+                    <div className="bg-white divide-y divide-gray-100">
+                      {conflictsLoading ? (
+                        <div className="py-6 text-center text-gray-400 text-sm flex items-center justify-center gap-2">
+                          <div className="w-4 h-4 border-2 border-red-300 border-t-transparent rounded-full animate-spin" />
+                          Loading conflicts…
+                        </div>
+                      ) : conflicts.length === 0 ? (
+                        <div className="py-4 text-center text-gray-400 text-xs">No conflict details found — try refreshing.</div>
+                      ) : (
+                        conflicts.map((cg, i) => (
+                          <div key={i} className="px-4 py-3 space-y-2">
+                            {/* Conflict summary line */}
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <span className="text-sm font-semibold text-gray-900">{cg.teacher_name}</span>
+                                <span className="text-xs text-gray-500 ml-2">
+                                  {cg.day_of_week.slice(0, 3)} · {cg.time_from}–{cg.time_to}
+                                </span>
+                                <div className="flex flex-wrap gap-1.5 mt-1">
+                                  {cg.slots.map(s => (
+                                    <span key={s.slot_id} className={`text-[11px] px-2 py-0.5 rounded-full border font-medium ${s.is_manual ? 'bg-violet-50 border-violet-200 text-violet-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                                      Gr.{s.grade}{s.section} · {s.subject_name || '?'}
+                                      {s.is_manual && <span className="ml-1 text-[9px] opacity-70">manual</span>}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Fix options */}
+                            <div className="flex flex-wrap gap-2 items-center">
+                              <span className="text-[11px] text-gray-400 font-medium">Free a slot:</span>
+                              {cg.slots.filter(s => !s.is_manual).map(s => (
+                                <button key={s.slot_id}
+                                  onClick={() => fixConflict(s.slot_id, null)}
+                                  disabled={fixingSlot === s.slot_id}
+                                  className="text-[11px] px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:border-red-300 hover:text-red-600 hover:bg-red-50 disabled:opacity-40 transition-colors">
+                                  {fixingSlot === s.slot_id ? '…' : `Clear Gr.${s.grade}${s.section}`}
+                                </button>
+                              ))}
+                              {cg.alternatives.length > 0 && (
+                                <>
+                                  <span className="text-[11px] text-gray-400 font-medium ml-1">Or reassign:</span>
+                                  {cg.alternatives.slice(0, 3).map(alt => (
+                                    <button key={alt.id}
+                                      onClick={() => fixConflict(cg.slots.find(s => !s.is_manual)?.slot_id ?? cg.slots[0].slot_id, alt.id)}
+                                      disabled={!!fixingSlot}
+                                      className="text-[11px] px-2.5 py-1 rounded-lg border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-40 transition-colors">
+                                      {fixingSlot ? '…' : alt.name}
+                                    </button>
+                                  ))}
+                                </>
+                              )}
+                              {cg.slots.every(s => s.is_manual) && (
+                                <span className="text-[11px] text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                                  All slots are manual edits — go to the affected class to reassign
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                      <div className="px-4 py-2 bg-gray-50 flex items-center justify-between">
+                        <p className="text-[10px] text-gray-400">Violet = manually set (preserved on regenerate) · Red = auto-generated</p>
+                        <button onClick={loadConflicts} disabled={conflictsLoading}
+                          className="text-[10px] text-blue-500 hover:text-blue-700 font-medium disabled:opacity-40">
+                          ↻ Refresh
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Timetable grid (days × periods) ── */}
             {timetable.length === 0 ? (
-              <div className="py-16 text-center text-gray-400 text-sm">No timetable generated yet</div>
+              <div className="py-16 text-center space-y-3">
+                <p className="text-gray-400 text-sm">No timetable generated yet for Grade {selected.grade}-{selected.section}</p>
+                <p className="text-gray-300 text-xs">Add subjects in Class Management, then click <strong className="text-blue-500">Generate Timetable</strong> above</p>
+              </div>
             ) : (
               <div className="overflow-x-auto p-4">
                 <table className="w-full text-xs border-collapse">
                   <thead>
                     <tr>
-                      <th className="bg-slate-800 text-slate-200 px-3 py-2.5 text-left font-semibold w-24 border-r border-slate-700 sticky left-0 z-10">Period</th>
-                      {DAYS.map(d => (
-                        <th key={d} className={`px-2 py-2.5 text-center font-semibold border-r border-slate-700 last:border-r-0 min-w-[100px] ${
-                          d === today ? 'bg-blue-700 text-white' : 'bg-slate-800 text-slate-300'
-                        }`}>{d.slice(0, 3)}</th>
+                      {/* Day column header */}
+                      <th className="bg-slate-800 text-slate-200 px-3 py-2.5 text-left font-semibold w-20 border-r border-slate-700 sticky left-0 z-10">Day</th>
+                      {/* Period/break columns */}
+                      {activeSchedule.map(s => (
+                        <th key={s.slot} className={`px-2 py-2 text-center font-semibold border-r border-slate-700 last:border-r-0 min-w-[95px] ${
+                          s.is_break ? 'bg-amber-800/70 text-amber-100' : 'bg-slate-800 text-slate-300'
+                        }`}>
+                          {s.is_break ? (
+                            <span className="text-[10px]">{s.break_label || 'Break'}</span>
+                          ) : (
+                            <div>
+                              <div>{s.short}</div>
+                              <div className="text-[10px] font-normal text-slate-400 mt-0.5 whitespace-nowrap">{s.time_from}–{s.time_to}</div>
+                            </div>
+                          )}
+                        </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {activeSchedule.map(s => {
-                      if (s.is_break) {
-                        return (
-                          <tr key={s.slot} className="bg-amber-50 border-y border-amber-100">
-                            <td className="px-3 py-1 border-r border-amber-100 sticky left-0 bg-amber-50 z-10">
-                              <span className="font-semibold text-amber-600 text-[11px]">{s.break_label}</span>
-                              <span className="block text-amber-400 text-[10px]">{s.time_from}–{s.time_to}</span>
+                    {DAYS.map(day => (
+                      <tr key={day} className={`border-b border-gray-100 hover:bg-gray-50/30 ${day === today ? 'bg-blue-50/30' : ''}`}>
+                        {/* Day label */}
+                        <td className={`px-3 py-2 border-r border-gray-100 sticky left-0 z-10 ${day === today ? 'bg-blue-100' : 'bg-gray-50'}`}>
+                          <span className={`font-semibold text-[11px] ${day === today ? 'text-blue-700' : 'text-gray-600'}`}>{day.slice(0, 3)}</span>
+                          {day === today && <span className="block text-[9px] text-blue-400 font-medium">Today</span>}
+                        </td>
+                        {/* Period/break cells */}
+                        {activeSchedule.map(s => {
+                          if (s.is_break) return (
+                            <td key={s.slot} className="px-1 py-1 border-r border-gray-100 last:border-r-0 bg-amber-50/60 text-center">
+                              <span className="text-amber-400 text-[10px] italic">{s.break_label || 'Break'}</span>
                             </td>
-                            <td colSpan={DAYS.length} className="text-center text-amber-400 italic py-1 text-[11px]">{s.break_label}</td>
-                          </tr>
-                        )
-                      }
-                      return (
-                        <tr key={s.slot} className="border-b border-gray-100 hover:bg-gray-50/30">
-                          <td className="px-3 py-1 bg-gray-50 border-r border-gray-100 sticky left-0 z-10">
-                            <span className="font-semibold text-gray-600 text-[11px]">{s.short}</span>
-                            <span className="block text-gray-400 text-[10px]">{s.time_from}–{s.time_to}</span>
-                          </td>
-                          {DAYS.map(day => {
-                            const slot = timetable.find(t => t.day_of_week === day && Math.round(Number(t.period_number)) === s.slot && !t.is_break)
-                            const isSelected = !!selectedSlot &&
-                              selectedSlot.day_of_week === day &&
-                              Math.round(Number(selectedSlot.period_number)) === s.slot
-                            // When a slot is selected: show whether this slot is a free or blocked target
-                            const isBlockedTarget = !!selectedSlot && !isSelected && slot && !slot.is_break &&
-                              !!isSwapBlocked(selectedSlot, slot)
-                            const isFreeTarget = !!selectedSlot && !isSelected && slot && !slot.is_break &&
-                              !isSwapBlocked(selectedSlot, slot)
-                            return (
-                              <td key={day} className="px-1 py-1 border-r border-gray-100 last:border-r-0">
-                                {slot ? (
-                                  <button
-                                    onClick={() => handleCellClick(slot)}
-                                    title={isBlockedTarget && selectedSlot ? isSwapBlocked(selectedSlot, slot) ?? undefined : undefined}
-                                    className={`w-full text-left rounded-lg px-2 py-1.5 min-h-[52px] transition-all select-none cursor-pointer ${
-                                      isSelected
-                                        ? 'ring-2 ring-yellow-400 bg-yellow-50 border border-yellow-300' :
-                                      isBlockedTarget
-                                        ? 'bg-red-50 border border-red-300 opacity-60 cursor-not-allowed' :
-                                      isFreeTarget
-                                        ? 'ring-2 ring-emerald-400 bg-emerald-50 border border-emerald-200' :
-                                      (slot as TimetableSlot & { has_conflict?: boolean }).has_conflict
-                                        ? 'bg-red-100 border border-red-400 hover:bg-red-200' :
-                                      slot.teacher_name
-                                        ? 'bg-emerald-50 border border-emerald-200 hover:bg-emerald-100'
-                                        : 'bg-red-50 border border-red-200 hover:bg-red-100'
-                                    }`}>
-                                    <p className="font-semibold text-gray-800 leading-tight text-[11px]">{slot.subject_name}</p>
-                                    {slot.teacher_name
-                                      ? <p className="text-gray-500 text-[10px] mt-0.5 truncate">{slot.teacher_name}</p>
-                                      : <p className="text-red-400 text-[10px] mt-0.5 font-medium">+ Assign</p>}
-                                    {(slot as TimetableSlot & { has_conflict?: boolean }).has_conflict &&
-                                      <p className="text-red-500 text-[9px] mt-0.5 font-bold">⚠ Conflict</p>}
-                                    {isSelected && <p className="text-yellow-600 text-[9px] mt-0.5 font-semibold">● Selected</p>}
-                                    {isFreeTarget && <p className="text-emerald-500 text-[9px] mt-0.5 font-semibold">↔ Click to swap</p>}
-                                  </button>
-                                ) : (
-                                  <div className="rounded-lg px-2 py-1.5 border border-dashed border-gray-200 bg-gray-50 min-h-[52px] flex items-center justify-center">
-                                    <span className="text-gray-200 text-[10px]">—</span>
-                                  </div>
-                                )}
-                              </td>
-                            )
-                          })}
-                        </tr>
-                      )
-                    })}
+                          )
+                          const slot = timetable.find(t => t.day_of_week === day && Math.round(Number(t.period_number)) === s.slot && !t.is_break)
+                          const isSelected = !!selectedSlot &&
+                            selectedSlot.day_of_week === day &&
+                            Math.round(Number(selectedSlot.period_number)) === s.slot
+                          const isBlockedTarget = !!selectedSlot && !isSelected && slot && !slot.is_break &&
+                            !!isSwapBlocked(selectedSlot, slot)
+                          const isFreeTarget = !!selectedSlot && !isSelected && slot && !slot.is_break &&
+                            !isSwapBlocked(selectedSlot, slot)
+                          return (
+                            <td key={s.slot} className="px-1 py-1 border-r border-gray-100 last:border-r-0">
+                              {slot ? (
+                                <button
+                                  onClick={() => handleCellClick(slot)}
+                                  title={isBlockedTarget && selectedSlot ? isSwapBlocked(selectedSlot, slot) ?? undefined : undefined}
+                                  className={`w-full text-left rounded-lg px-2 py-1.5 min-h-[48px] transition-all select-none cursor-pointer ${
+                                    isSelected
+                                      ? 'ring-2 ring-yellow-400 bg-yellow-50 border border-yellow-300' :
+                                    isBlockedTarget
+                                      ? 'bg-red-50 border border-red-300 opacity-60 cursor-not-allowed' :
+                                    isFreeTarget
+                                      ? 'ring-2 ring-emerald-400 bg-emerald-50 border border-emerald-200' :
+                                    (slot as TimetableSlot & { has_conflict?: boolean }).has_conflict
+                                      ? 'bg-red-100 border border-red-400 hover:bg-red-200' :
+                                    slot.teacher_name
+                                      ? 'bg-emerald-50 border border-emerald-200 hover:bg-emerald-100'
+                                      : 'bg-red-50 border border-red-200 hover:bg-red-100'
+                                  }`}>
+                                  <p className="font-semibold text-gray-800 leading-tight text-[11px]">{slot.subject_name}</p>
+                                  {slot.teacher_name
+                                    ? <p className="text-gray-500 text-[10px] mt-0.5 truncate">{slot.teacher_name}</p>
+                                    : <p className="text-red-400 text-[10px] mt-0.5 font-medium">+ Assign</p>}
+                                  {(slot as TimetableSlot & { has_conflict?: boolean }).has_conflict &&
+                                    <p className="text-red-500 text-[9px] mt-0.5 font-bold">⚠ Conflict</p>}
+                                  {isSelected && <p className="text-yellow-600 text-[9px] mt-0.5 font-semibold">● Selected</p>}
+                                  {isFreeTarget && <p className="text-emerald-500 text-[9px] mt-0.5 font-semibold">↔ Swap</p>}
+                                </button>
+                              ) : (
+                                <div className="rounded-lg px-2 py-1.5 border border-dashed border-gray-200 bg-gray-50 min-h-[48px] flex items-center justify-center">
+                                  <span className="text-gray-200 text-[10px]">—</span>
+                                </div>
+                              )}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -735,7 +1288,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
         )}
       </div>
 
-      {/* ── Assign Teacher modal (click on period) ── */}
+      {/* ── Slot action modal (assign teacher / add subject) ── */}
       {editSlot && (() => {
         const subj = editSlot.subject_name ?? ''
         const matchFn = (t: Teacher) => {
@@ -747,78 +1300,348 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
         const availOther  = teachers.filter(t => !busyTeachers[t.id] && !matchFn(t))
         const busyList    = teachers.filter(t => !!busyTeachers[t.id])
 
-        const TRow = ({ t, isBusy }: { t: Teacher; isBusy: boolean }) => {
-          const busy = busyTeachers[t.id]; const isSel = selTeacherId === t.id
+        // Is the assigned class_subjects teacher busy right now?
+        const assignedTeacherBusy = subjectAssignment?.teacher_id
+          ? busyTeachers[subjectAssignment.teacher_id] ?? null
+          : null
+
+        const TRow = ({ t, isBusy, forPerm, gradeOk = true }: { t: Teacher; isBusy: boolean; forPerm?: boolean; gradeOk?: boolean }) => {
+          const busy = busyTeachers[t.id]
+          const isSel = forPerm ? newPermTeacherId === t.id : selTeacherId === t.id
           return (
-            <button disabled={isBusy} onClick={() => !isBusy && setSelTeacherId(t.id)}
+            <button disabled={isBusy && !forPerm}
+              onClick={() => forPerm ? setNewPermTeacherId(t.id) : (!isBusy && setSelTeacherId(t.id))}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-left text-sm transition-colors ${
-                isBusy ? 'opacity-40 cursor-not-allowed' : isSel ? 'bg-blue-600 text-white' : 'hover:bg-gray-50 text-gray-800'
+                isBusy && !forPerm ? 'opacity-40 cursor-not-allowed' : isSel ? 'bg-blue-600 text-white' : 'hover:bg-gray-50 text-gray-800'
               }`}>
-              <span>
-                <span className="font-medium">{t.name}</span>
-                {t.subject && <span className={`ml-1.5 text-[11px] ${isSel ? 'text-blue-200' : 'text-gray-400'}`}>· {t.subject}</span>}
+              <span className="flex items-center gap-1.5 min-w-0">
+                <span className="font-medium truncate">{t.name}</span>
+                {t.subject && <span className={`text-[11px] flex-shrink-0 ${isSel ? 'text-blue-200' : 'text-gray-400'}`}>· {t.subject}</span>}
+                {!gradeOk && <span className={`text-[10px] px-1 py-0.5 rounded font-semibold flex-shrink-0 ${isSel ? 'bg-blue-500 text-blue-100' : 'bg-amber-100 text-amber-700'}`}>
+                  ⚠ other grade
+                </span>}
               </span>
-              {isBusy && busy && <span className="text-[10px] text-red-500 font-medium ml-2 flex-shrink-0">Gr {busy.grade}-{busy.section}</span>}
+              {isBusy && !forPerm && busy && <span className="text-[10px] text-red-500 font-medium ml-2 flex-shrink-0">Gr {busy.grade}-{busy.section}</span>}
             </button>
           )
         }
 
         return (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setEditSlot(null)}>
-            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+
+              {/* Header */}
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-bold text-gray-900">{editSlot.teacher_id ? 'Change Teacher' : 'Assign Teacher'}</h3>
+                <h3 className="font-bold text-gray-900">
+                  {addSubjMode ? 'Add New Subject' : editSlot.teacher_id ? 'Change Teacher' : subj ? 'Assign Teacher' : 'Slot Options'}
+                </h3>
                 <button onClick={() => setEditSlot(null)} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
               </div>
+
+              {/* Slot meta badges */}
               <div className="flex flex-wrap gap-1.5 mb-4">
                 <span className="text-[11px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{editSlot.day_of_week}</span>
                 <span className="text-[11px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
                   {activeSchedule.find(s => s.slot === Math.round(Number(editSlot.period_number)))?.label}
                 </span>
-                {subj && <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{subj}</span>}
-                {editSlot.teacher_name && <span className="text-[11px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Current: {editSlot.teacher_name}</span>}
+                {subj && !addSubjMode && <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{subj}</span>}
+                {editSlot.teacher_name && !addSubjMode && <span className="text-[11px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Current: {editSlot.teacher_name}</span>}
               </div>
 
-              <div className="border border-gray-200 rounded-xl overflow-hidden mb-3">
-                {loadingAvail ? (
-                  <div className="py-6 flex items-center justify-center gap-2 text-gray-400 text-sm">
-                    <div className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />Checking...
+              {/* ── ADD SUBJECT MODE ── */}
+              {addSubjMode ? (
+                <div className="space-y-4">
+                  <p className="text-xs text-gray-500">Add a new subject to this class. Teacher can be assigned later by clicking the slot again.</p>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Subject Name</label>
+                    <input
+                      type="text" placeholder="e.g. Sports, Art, Music..."
+                      value={newSubjName} onChange={e => setNewSubjName(e.target.value)}
+                      autoFocus
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                    />
                   </div>
-                ) : (
-                  <div className="max-h-60 overflow-y-auto divide-y divide-gray-50">
-                    <button onClick={() => setSelTeacherId(null)}
-                      className={`w-full px-3 py-2 text-left text-sm transition-colors ${selTeacherId === null ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-50 italic'}`}>
-                      — No teacher —
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Periods per week</label>
+                    <input
+                      type="number" min={1} max={12} value={newSubjPPW}
+                      onChange={e => setNewSubjPPW(Math.max(1, Math.min(12, parseInt(e.target.value) || 1)))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                    />
+                  </div>
+                  {addSubjErr && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{addSubjErr}</p>}
+                  <div className="flex gap-2">
+                    <button onClick={() => { setAddSubjMode(false); setNewSubjName(''); setAddSubjErr(null) }}
+                      className="flex-1 py-2 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50">Back</button>
+                    <button onClick={addSubjectToSlot} disabled={addingSubj || !newSubjName.trim()}
+                      className="flex-1 py-2 bg-violet-600 text-white rounded-xl text-sm font-semibold hover:bg-violet-700 disabled:opacity-50">
+                      {addingSubj ? 'Adding...' : 'Add Subject'}
                     </button>
-                    {availMatch.length > 0 && (<><div className="px-3 py-1 bg-emerald-50 text-[10px] font-semibold text-emerald-600 uppercase tracking-wide">Available · {subj || 'Subject'}</div>{availMatch.map(t => <TRow key={t.id} t={t} isBusy={false} />)}</>)}
-                    {availOther.length > 0 && (<><div className="px-3 py-1 bg-gray-50 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Available · Other</div>{availOther.map(t => <TRow key={t.id} t={t} isBusy={false} />)}</>)}
-                    {busyList.length > 0 && (<><div className="px-3 py-1 bg-red-50 text-[10px] font-semibold text-red-400 uppercase tracking-wide">Busy at this slot</div>{busyList.map(t => <TRow key={t.id} t={t} isBusy />)}</>)}
                   </div>
-                )}
-              </div>
+                </div>
+              ) : (
+                <>
+                  {/* ── SUBJECT ASSIGNMENT INFO (for slots with subject but no teacher) ── */}
+                  {subj && !editSlot.teacher_id && !loadingAvail && (
+                    <>
+                      {subjectAssignment?.teacher_name ? (
+                        <div className={`rounded-xl p-3 mb-4 border text-xs ${assignedTeacherBusy ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                          <p className="font-semibold text-gray-800 mb-1">
+                            {assignedTeacherBusy ? '⚠ Assigned teacher is busy at this slot' : '✓ Assigned teacher for ' + subj}
+                          </p>
+                          <p className={`${assignedTeacherBusy ? 'text-amber-700' : 'text-emerald-700'}`}>
+                            <span className="font-medium">{subjectAssignment.teacher_name}</span>
+                            {assignedTeacherBusy && (
+                              <> — currently teaching <span className="font-medium">{assignedTeacherBusy.subject_name || 'another subject'}</span> in Grade {assignedTeacherBusy.grade}-{assignedTeacherBusy.section}</>
+                            )}
+                          </p>
+                          {assignedTeacherBusy && (
+                            <div className="mt-2">
+                              {!changingSubjTeacher ? (
+                                <button onClick={() => { setChangingSubjTeacher(true); setNewPermTeacherId(null) }}
+                                  className="text-[11px] text-blue-600 font-semibold hover:text-blue-800 underline underline-offset-2">
+                                  Change permanent {subj} teacher →
+                                </button>
+                              ) : (
+                                <div className="mt-2">
+                                  <p className="text-[11px] font-semibold text-gray-700 mb-1.5">Select new permanent teacher for {subj}:</p>
+                                  <div className="border border-gray-200 rounded-lg overflow-hidden max-h-40 overflow-y-auto bg-white divide-y divide-gray-50 mb-2">
+                                    {[...availMatch, ...availOther].map(t => <TRow key={t.id} t={t} isBusy={false} forPerm gradeOk={canTeachGrade(t.teaches_grades, selected?.grade ?? '')} />)}
+                                    {busyList.filter(t => t.id !== subjectAssignment.teacher_id).map(t => <TRow key={t.id} t={t} isBusy forPerm gradeOk={canTeachGrade(t.teaches_grades, selected?.grade ?? '')} />)}
+                                  </div>
+                                  <div className="flex gap-2">
+                                    <button onClick={() => setChangingSubjTeacher(false)}
+                                      className="flex-1 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs hover:bg-gray-50">Cancel</button>
+                                    <button onClick={savePermTeacher} disabled={savingPermTeacher || newPermTeacherId === null}
+                                      className="flex-1 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 disabled:opacity-50">
+                                      {savingPermTeacher ? 'Saving...' : 'Save'}
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ) : subjectAssignment && !subjectAssignment.teacher_name ? (
+                        <div className="rounded-xl p-3 mb-4 border border-gray-200 bg-gray-50 text-xs text-gray-500">
+                          No teacher assigned for <span className="font-medium">{subj}</span> in class subjects. Select a teacher below.
+                        </div>
+                      ) : null}
+                    </>
+                  )}
 
-              {conflictError && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">{conflictError}</div>}
-              {subj && (
-                <label className="flex items-start gap-2 mb-4 cursor-pointer select-none">
-                  <input type="checkbox" checked={applyToAll} onChange={e => setApplyToAll(e.target.checked)} className="mt-0.5 accent-blue-600" />
-                  <span className="text-xs text-gray-600">
-                    <span className="font-semibold">Apply to all {subj} periods in this class</span>
-                    <span className="block text-gray-400 text-[10px] mt-0.5">Replaces teacher for every {subj} slot</span>
-                  </span>
-                </label>
+                  {/* ── TEACHER SELECTION LIST ── */}
+                  {!changingSubjTeacher && (
+                    <>
+                      {/* Precompute class-teacher lists for the "no teacher" scenario */}
+                      {(() => {
+                        // Include teachers from class_subjects AND from timetable slots —
+                        // auto-generation fills timetable slots but often leaves class_subjects.teacher_id=null
+                        const classTeacherIds = new Set<number>([
+                          ...classSubjects.map(s => s.teacher_id).filter(Boolean) as number[],
+                          ...timetable.filter(s => !s.is_break && s.teacher_id).map(s => s.teacher_id as number),
+                        ])
+                        const freeClassTeachers = teachers.filter(t => classTeacherIds.has(t.id) && !busyTeachers[t.id])
+                        const busyClassTeachers = teachers.filter(t => classTeacherIds.has(t.id) && !!busyTeachers[t.id])
+                        const classTeacherSubject = (tid: number) => {
+                          const fromSubjects = classSubjects.find(s => s.teacher_id === tid)?.subject_name
+                          if (fromSubjects) return fromSubjects
+                          const fromTimetable = timetable.find(s => s.teacher_id === tid && s.subject_name)
+                          return fromTimetable?.subject_name ?? ''
+                        }
+                        const showClassView = classSubjects.length > 0
+
+                        return (
+                          <div className="border border-gray-200 rounded-xl overflow-hidden mb-3">
+                            {loadingAvail ? (
+                              <div className="py-6 flex items-center justify-center gap-2 text-gray-400 text-sm">
+                                <div className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />Checking...
+                              </div>
+                            ) : (
+                              <div className="max-h-52 overflow-y-auto divide-y divide-gray-50">
+                                <button onClick={() => setSelTeacherId(null)}
+                                  className={`w-full px-3 py-2 text-left text-sm transition-colors ${selTeacherId === null ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-50 italic'}`}>
+                                  — No teacher —
+                                </button>
+
+                                {showClassView ? (
+                                  /* Always show THIS CLASS's teachers first, then other school staff */
+                                  <>
+                                    {/* ── This class's free teachers ── */}
+                                    {freeClassTeachers.length > 0 && (
+                                      <>
+                                        <div className="px-3 py-1 bg-emerald-50 text-[10px] font-semibold text-emerald-600 uppercase tracking-wide">
+                                          Free · Grade {selected?.grade}-{selected?.section} teachers
+                                        </div>
+                                        {freeClassTeachers.map(t => {
+                                          const subjLabel = classTeacherSubject(t.id)
+                                          const isSel = selTeacherId === t.id
+                                          return (
+                                            <button key={t.id} onClick={() => setSelTeacherId(t.id)}
+                                              className={`w-full flex items-center justify-between px-3 py-2 text-left text-sm transition-colors ${isSel ? 'bg-blue-600 text-white' : 'hover:bg-gray-50 text-gray-800'}`}>
+                                              <span>
+                                                <span className="font-medium">{t.name}</span>
+                                                {subjLabel && <span className={`ml-1.5 text-[11px] ${isSel ? 'text-blue-200' : 'text-gray-400'}`}>· {subjLabel}</span>}
+                                              </span>
+                                            </button>
+                                          )
+                                        })}
+                                      </>
+                                    )}
+                                    {/* ── All class teachers are busy: show swap suggestions ── */}
+                                    {freeClassTeachers.length === 0 && classSubjects.length > 0 && (() => {
+                                      // Find other slots in this class whose teacher is free at the current day+period
+                                      const suggestions = timetable.filter(s =>
+                                        !s.is_break && s.id !== editSlot.id &&
+                                        s.teacher_id && s.subject_name &&
+                                        !busyTeachers[s.teacher_id]
+                                      )
+                                      return (
+                                        <>
+                                          <div className="px-3 py-2.5 bg-amber-50 text-[11px] text-amber-700 font-medium border-b border-amber-100">
+                                            All class teachers are busy at this slot
+                                          </div>
+                                          {suggestions.length > 0 && (
+                                            <div className="border-b border-gray-100">
+                                              <button onClick={() => setShowSwapHints(h => !h)}
+                                                className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-semibold text-blue-600 hover:bg-blue-50 transition-colors">
+                                                <span>↔ Swap this slot to fix ({suggestions.length} option{suggestions.length !== 1 ? 's' : ''})</span>
+                                                <span className="text-gray-400">{showSwapHints ? '▲' : '▼'}</span>
+                                              </button>
+                                              {showSwapHints && (
+                                                <div className="px-3 pb-3 space-y-1.5">
+                                                  <p className="text-[10px] text-gray-400 mb-1.5">
+                                                    Swap <span className="font-semibold text-gray-600">{editSlot.subject_name}</span> with one of these — that teacher is free right now and can cover this period:
+                                                  </p>
+                                                  {suggestions.slice(0, 6).map(s => {
+                                                    const pLabel = activeSchedule.find(sc => sc.slot === Math.round(Number(s.period_number)))?.label ?? `P${s.period_number}`
+                                                    return (
+                                                      <button key={s.id}
+                                                        disabled={swapping}
+                                                        onClick={() => doSwapFromModal(editSlot, s)}
+                                                        className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-left text-[11px] transition-colors disabled:opacity-40">
+                                                        <span>
+                                                          <span className="font-semibold text-blue-800">{s.subject_name}</span>
+                                                          <span className="text-blue-500 ml-1.5">{s.day_of_week} · {pLabel}</span>
+                                                        </span>
+                                                        <span className="text-emerald-600 font-medium flex-shrink-0 ml-2">
+                                                          {swapping ? '…' : `${s.teacher_name} free ↔`}
+                                                        </span>
+                                                      </button>
+                                                    )
+                                                  })}
+                                                </div>
+                                              )}
+                                            </div>
+                                          )}
+                                        </>
+                                      )
+                                    })()}
+                                    {/* ── Other school teachers free at this slot, split by grade eligibility ── */}
+                                    {(() => {
+                                      const classTeacherIdSet = new Set(freeClassTeachers.map(t => t.id).concat(busyClassTeachers.map(t => t.id)))
+                                      const grade = selected?.grade ?? ''
+                                      const otherFree = teachers.filter(t => !classTeacherIdSet.has(t.id) && !busyTeachers[t.id])
+                                      const gradeOk  = otherFree.filter(t => canTeachGrade(t.teaches_grades, grade))
+                                      const gradeNo  = otherFree.filter(t => !canTeachGrade(t.teaches_grades, grade))
+                                      return (
+                                        <>
+                                          {gradeOk.length > 0 && (
+                                            <>
+                                              <div className="px-3 py-1 bg-gray-50 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+                                                Other Available Staff
+                                              </div>
+                                              {gradeOk.map(t => <TRow key={t.id} t={t} isBusy={false} gradeOk />)}
+                                            </>
+                                          )}
+                                          {gradeNo.length > 0 && (
+                                            <>
+                                              <div className="px-3 py-1 bg-amber-50 text-[10px] font-semibold text-amber-500 uppercase tracking-wide">
+                                                Not assigned to Grade {grade}
+                                              </div>
+                                              {gradeNo.map(t => <TRow key={t.id} t={t} isBusy={false} gradeOk={false} />)}
+                                            </>
+                                          )}
+                                        </>
+                                      )
+                                    })()}
+                                    {/* ── This class's busy teachers — show what they're teaching ── */}
+                                    {busyClassTeachers.length > 0 && (
+                                      <>
+                                        <div className="px-3 py-1 bg-red-50 text-[10px] font-semibold text-red-400 uppercase tracking-wide">
+                                          Busy · Grade {selected?.grade}-{selected?.section} teachers
+                                        </div>
+                                        {busyClassTeachers.map(t => {
+                                          const busy = busyTeachers[t.id]
+                                          const subjLabel = classTeacherSubject(t.id)
+                                          return (
+                                            <div key={t.id} className="flex items-center justify-between px-3 py-2 gap-2">
+                                              <div>
+                                                <span className="text-sm font-medium text-gray-500">{t.name}</span>
+                                                {subjLabel && <span className="ml-1.5 text-[11px] text-gray-400">· {subjLabel}</span>}
+                                              </div>
+                                              {busy && (
+                                                <span className="text-[10px] text-red-500 font-medium flex-shrink-0 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full">
+                                                  {busy.subject_name ? `Teaching ${busy.subject_name}` : 'Busy'} · Gr {busy.grade}-{busy.section}
+                                                </span>
+                                              )}
+                                            </div>
+                                          )
+                                        })}
+                                      </>
+                                    )}
+                                  </>
+                                ) : (
+                                  /* No class_subjects loaded — show all school teachers */
+                                  <>
+                                    {availMatch.length > 0 && (<><div className="px-3 py-1 bg-emerald-50 text-[10px] font-semibold text-emerald-600 uppercase tracking-wide">Available · {subj || 'Subject'}</div>{availMatch.map(t => <TRow key={t.id} t={t} isBusy={false} />)}</>)}
+                                    {availOther.length > 0 && (<><div className="px-3 py-1 bg-gray-50 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Available · Other</div>{availOther.map(t => <TRow key={t.id} t={t} isBusy={false} />)}</>)}
+                                    {busyList.length > 0 && (<><div className="px-3 py-1 bg-red-50 text-[10px] font-semibold text-red-400 uppercase tracking-wide">Busy at this slot</div>{busyList.map(t => <TRow key={t.id} t={t} isBusy />)}</>)}
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })()}
+
+                      {conflictError && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">{conflictError}</div>}
+                      {subj && (
+                        <label className="flex items-start gap-2 mb-4 cursor-pointer select-none">
+                          <input type="checkbox" checked={applyToAll} onChange={e => setApplyToAll(e.target.checked)} className="mt-0.5 accent-blue-600" />
+                          <span className="text-xs text-gray-600">
+                            <span className="font-semibold">Apply to all {subj} periods in this class</span>
+                            <span className="block text-gray-400 text-[10px] mt-0.5">Replaces teacher for every {subj} slot</span>
+                          </span>
+                        </label>
+                      )}
+                      <div className="flex gap-2 mb-3">
+                        <button onClick={() => setEditSlot(null)} className="flex-1 py-2 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
+                        <button disabled={saving} onClick={() => saveEditSlot(selTeacherId, applyToAll)}
+                          className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
+                          {saving ? 'Saving...' : editSlot.teacher_id ? 'Change' : 'Assign'}
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {/* ── ADD NEW SUBJECT OPTION ── */}
+                  {!changingSubjTeacher && (
+                    <div className="pt-3 border-t border-gray-100">
+                      <button onClick={() => { setAddSubjMode(true); setNewSubjName(''); setNewSubjPPW(4); setAddSubjErr(null) }}
+                        className="w-full py-2 border border-dashed border-violet-300 text-violet-600 rounded-xl text-xs font-medium hover:bg-violet-50 transition-colors">
+                        + Add New Subject to this slot
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
-              <div className="flex gap-2">
-                <button onClick={() => setEditSlot(null)} className="flex-1 py-2 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
-                <button disabled={saving} onClick={() => saveEditSlot(selTeacherId, applyToAll)}
-                  className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
-                  {saving ? 'Saving...' : editSlot.teacher_id ? 'Change' : 'Assign'}
-                </button>
-              </div>
             </div>
           </div>
         )
       })()}
 
+    </div>
     </div>
   )
 }
@@ -946,25 +1769,27 @@ function TeachersTab({ schoolId, schedule, academicSlots }: { schoolId: number; 
                   <table className="text-xs border-collapse">
                     <thead>
                       <tr>
-                        <th className="px-3 py-2 bg-gray-50 border border-gray-200 text-gray-500 font-semibold text-left w-24">Period</th>
-                        {DAYS.map(d => (
-                          <th key={d} className="px-3 py-2 bg-gray-50 border border-gray-200 text-gray-500 font-semibold text-center min-w-[70px]">{d.slice(0, 3)}</th>
+                        <th className="px-3 py-2 bg-gray-50 border border-gray-200 text-gray-500 font-semibold text-left w-20">Day</th>
+                        {academicSlots.map(s => (
+                          <th key={s.slot} className="px-2 py-2 bg-gray-50 border border-gray-200 text-gray-500 font-semibold text-center min-w-[64px]">
+                            <div>{s.short}</div>
+                            <div className="text-[9px] font-normal text-gray-400">{s.time_from}</div>
+                          </th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {academicSlots.map(s => (
-                        <tr key={s.slot}>
+                      {DAYS.map(day => (
+                        <tr key={day}>
                           <td className="px-3 py-1.5 border border-gray-100 bg-gray-50 whitespace-nowrap">
-                            <span className="font-semibold text-gray-600">{s.short}</span>
-                            <span className="block text-gray-400 text-[10px]">{s.time_from}</span>
+                            <span className="font-semibold text-gray-600 text-[11px]">{day.slice(0, 3)}</span>
                           </td>
-                          {DAYS.map(day => {
+                          {academicSlots.map(s => {
                             const key = `${day}-${s.slot}`
                             const isBlocked = unavail.some(u => u.day_of_week === day && u.period_number === s.slot)
                             const hasClass  = timetable.some(t => t.day_of_week === day && Math.round(Number(t.period_number)) === s.slot)
                             return (
-                              <td key={day} className="px-1 py-1 border border-gray-100 text-center">
+                              <td key={s.slot} className="px-1 py-1 border border-gray-100 text-center">
                                 <button onClick={() => toggleSlot(day, s.slot)} disabled={!!toggling}
                                   className={`w-full h-8 rounded-lg text-[10px] font-medium transition-colors ${
                                     isBlocked ? 'bg-red-500 text-white' :
@@ -996,57 +1821,60 @@ function TeachersTab({ schoolId, schedule, academicSlots }: { schoolId: number; 
                   <table className="w-full text-xs border-collapse">
                     <thead>
                       <tr>
-                        <th className="bg-slate-800 text-slate-200 px-3 py-2.5 text-left font-semibold w-28 border-r border-slate-700 sticky left-0 z-10">Period</th>
-                        {DAYS.map(d => (
-                          <th key={d} className={`px-2 py-2.5 text-center font-semibold border-r border-slate-700 last:border-r-0 min-w-[90px] ${
-                            d === today ? 'bg-blue-700 text-white' : 'bg-slate-800 text-slate-300'
-                          }`}>{d.slice(0, 3)}</th>
+                        <th className="bg-slate-800 text-slate-200 px-3 py-2.5 text-left font-semibold w-20 border-r border-slate-700 sticky left-0 z-10">Day</th>
+                        {schedule.map(s => (
+                          <th key={s.slot} className={`px-2 py-2 text-center font-semibold border-r border-slate-700 last:border-r-0 min-w-[85px] ${
+                            s.is_break ? 'bg-amber-800/70 text-amber-100' : 'bg-slate-800 text-slate-300'
+                          }`}>
+                            {s.is_break ? (
+                              <span className="text-[10px]">{s.break_label || 'Break'}</span>
+                            ) : (
+                              <div>
+                                <div>{s.short}</div>
+                                <div className="text-[10px] font-normal text-slate-400 mt-0.5 whitespace-nowrap">{s.time_from}–{s.time_to}</div>
+                              </div>
+                            )}
+                          </th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {schedule.map(s => {
-                        if (s.is_break) return (
-                          <tr key={s.slot} className="bg-amber-50 border-y border-amber-100">
-                            <td className="px-3 py-1.5 border-r border-amber-100 sticky left-0 bg-amber-50 z-10">
-                              <span className="font-semibold text-amber-600 text-[11px]">{s.break_label}</span>
-                              <span className="block text-amber-400 text-[10px]">{s.time_from}–{s.time_to}</span>
-                            </td>
-                            <td colSpan={DAYS.length} className="text-center text-amber-400 italic py-1.5 text-[11px]">{s.break_label}</td>
-                          </tr>
-                        )
-                        return (
-                          <tr key={s.slot} className="border-b border-gray-100">
-                            <td className="px-3 py-1.5 bg-gray-50 border-r border-gray-100 sticky left-0 z-10">
-                              <span className="font-semibold text-gray-600 text-[11px]">{s.short}</span>
-                              <span className="block text-gray-400 text-[10px]">{s.time_from}–{s.time_to}</span>
-                            </td>
-                            {DAYS.map(day => {
-                              const slot    = byDay[day]?.find(t => Math.round(Number(t.period_number)) === s.slot)
-                              const blocked = unavail.some(u => u.day_of_week === day && u.period_number === s.slot)
-                              return (
-                                <td key={day} className="px-1 py-1 border-r border-gray-100 last:border-r-0">
-                                  {blocked ? (
-                                    <div className="rounded px-1.5 py-1.5 bg-red-50 border border-red-200 min-h-[42px] flex items-center justify-center">
-                                      <span className="text-red-300 text-[10px] italic">Unavailable</span>
-                                    </div>
-                                  ) : slot ? (
-                                    <div className="rounded px-1.5 py-1.5 bg-emerald-50 border border-emerald-200 min-h-[42px]">
-                                      <p className="font-semibold text-gray-800 leading-tight text-[11px]">{slot.subject}</p>
-                                      {slot.grade && <p className="text-gray-500 text-[10px]">Gr.{slot.grade}–{slot.section}</p>}
-                                      {slot.room && <p className="text-gray-400 text-[10px]">{slot.room}</p>}
-                                    </div>
-                                  ) : (
-                                    <div className="rounded px-1.5 py-1.5 bg-gray-50 border border-gray-100 min-h-[42px] flex items-center justify-center">
-                                      <span className="text-gray-200 text-[10px]">Free</span>
-                                    </div>
-                                  )}
-                                </td>
-                              )
-                            })}
-                          </tr>
-                        )
-                      })}
+                      {DAYS.map(day => (
+                        <tr key={day} className={`border-b border-gray-100 ${day === today ? 'bg-blue-50/30' : ''}`}>
+                          <td className={`px-3 py-1.5 border-r border-gray-100 sticky left-0 z-10 ${day === today ? 'bg-blue-100' : 'bg-gray-50'}`}>
+                            <span className={`font-semibold text-[11px] ${day === today ? 'text-blue-700' : 'text-gray-600'}`}>{day.slice(0, 3)}</span>
+                            {day === today && <span className="block text-[9px] text-blue-400 font-medium">Today</span>}
+                          </td>
+                          {schedule.map(s => {
+                            if (s.is_break) return (
+                              <td key={s.slot} className="px-1 py-1 border-r border-gray-100 last:border-r-0 bg-amber-50/60 text-center">
+                                <span className="text-amber-400 text-[10px] italic">{s.break_label || 'Break'}</span>
+                              </td>
+                            )
+                            const slot    = byDay[day]?.find(t => Math.round(Number(t.period_number)) === s.slot)
+                            const blocked = unavail.some(u => u.day_of_week === day && u.period_number === s.slot)
+                            return (
+                              <td key={s.slot} className="px-1 py-1 border-r border-gray-100 last:border-r-0">
+                                {blocked ? (
+                                  <div className="rounded px-1.5 py-1.5 bg-red-50 border border-red-200 min-h-[42px] flex items-center justify-center">
+                                    <span className="text-red-300 text-[10px] italic">Unavailable</span>
+                                  </div>
+                                ) : slot ? (
+                                  <div className="rounded px-1.5 py-1.5 bg-emerald-50 border border-emerald-200 min-h-[42px]">
+                                    <p className="font-semibold text-gray-800 leading-tight text-[11px]">{slot.subject}</p>
+                                    {slot.grade && <p className="text-gray-500 text-[10px]">Gr.{slot.grade}–{slot.section}</p>}
+                                    {slot.room && <p className="text-gray-400 text-[10px]">{slot.room}</p>}
+                                  </div>
+                                ) : (
+                                  <div className="rounded px-1.5 py-1.5 bg-gray-50 border border-gray-100 min-h-[42px] flex items-center justify-center">
+                                    <span className="text-gray-200 text-[10px]">Free</span>
+                                  </div>
+                                )}
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
@@ -1208,13 +2036,38 @@ function TemplateTab({
     } finally { setSaving(false) }
   }
 
-  const periodDuration = Math.max(30, Math.floor(
-    ((() => {
-      const [h1, m1] = form.end_time.split(':').map(Number)
-      const [h2, m2] = form.start_time.split(':').map(Number)
-      return (h1 * 60 + m1) - (h2 * 60 + m2)
-    })() - form.morning_break_duration - form.lunch_duration - form.afternoon_break_duration) / form.periods_per_day
-  ))
+  function computePeriodDuration(f: SchoolScheduleSettings) {
+    const [h1, m1] = f.end_time.split(':').map(Number)
+    const [h2, m2] = f.start_time.split(':').map(Number)
+    const total = (h1 * 60 + m1) - (h2 * 60 + m2)
+    return Math.max(15, Math.floor(
+      (total - f.morning_break_duration - f.lunch_duration - f.afternoon_break_duration) / f.periods_per_day
+    ))
+  }
+
+  const periodDuration = computePeriodDuration(form)
+
+  // Local period duration input — lets the user set it directly; updates end_time on change
+  const [periodDurInput, setPeriodDurInput] = useState<number>(() => computePeriodDuration(savedSettings))
+
+  // Keep periodDurInput in sync when settings are loaded externally (template load, DB sync)
+  useEffect(() => { setPeriodDurInput(computePeriodDuration(form)) }, [form.start_time, form.periods_per_day, form.morning_break_duration, form.lunch_duration, form.afternoon_break_duration]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handlePeriodDurChange(dur: number) {
+    const clamped = Math.max(15, Math.min(120, dur))
+    setPeriodDurInput(clamped)
+    // Recompute end_time
+    const [h, m] = form.start_time.split(':').map(Number)
+    const startMins = h * 60 + m
+    const endMins = startMins
+      + form.periods_per_day * clamped
+      + form.morning_break_duration
+      + form.lunch_duration
+      + form.afternoon_break_duration
+    const hh = Math.floor(endMins / 60)
+    const mm = endMins % 60
+    set('end_time', `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`)
+  }
 
   return (
     <div className="flex gap-5">
@@ -1335,8 +2188,20 @@ function TemplateTab({
               <span className="text-sm font-semibold text-gray-800 w-6 text-center">{form.periods_per_day}</span>
               <button onClick={addPeriod} disabled={form.periods_per_day >= 12}
                 className="w-7 h-7 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-30 text-base font-bold">+</button>
-              <span className="text-[10px] text-gray-400 ml-1">≈ {periodDuration} min each</span>
             </div>
+          </div>
+          <div>
+            <span className="text-[11px] text-gray-500">Period Duration (min)</span>
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                type="number" min={15} max={120} step={5}
+                value={periodDurInput}
+                onChange={e => handlePeriodDurChange(Number(e.target.value))}
+                className="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+              />
+              <span className="text-[10px] text-gray-400">min → End: {form.end_time}</span>
+            </div>
+            <p className="text-[10px] text-gray-400 mt-1">Changing this auto-adjusts the End Time above.</p>
           </div>
         </div>
 

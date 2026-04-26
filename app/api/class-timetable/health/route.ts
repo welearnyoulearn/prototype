@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
                AND cx.period_number = ct.period_number
                AND cx.class_id  != ct.class_id
                AND cx.is_break  = FALSE
+               AND cx.template_id IS NOT DISTINCT FROM ct.template_id
            )
          GROUP BY ct.class_id
        ),

@@ -7,11 +7,11 @@ import { invalidateCache } from '@/lib/responseCache'
 //
 // Swaps two academic period slots within a class timetable.
 // Validates no teacher conflict arises after the swap.
-// Updates both class_timetable and teacher timetable.
 //
 // Body: {
-//   school_id: number,
-//   class_id:  number,
+//   school_id:   number,
+//   class_id:    number,
+//   template_id: number | null,   // null = school default
 //   slot_a: { day: string, period_number: number },
 //   slot_b: { day: string, period_number: number },
 // }
@@ -20,7 +20,7 @@ import { invalidateCache } from '@/lib/responseCache'
 export async function POST(req: NextRequest) {
 
   const body = await req.json()
-  const { school_id, class_id, slot_a, slot_b } = body
+  const { school_id, class_id, slot_a, slot_b, template_id = null } = body
 
   if (!school_id || !class_id || !slot_a || !slot_b) {
     return NextResponse.json({ error: 'school_id, class_id, slot_a, slot_b required' }, { status: 400 })
@@ -29,20 +29,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Cannot swap a slot with itself' }, { status: 400 })
   }
 
+  // Template param for typed query ($6)
+  const tmplVal = template_id != null ? parseInt(String(template_id)) : null
+
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
 
-    // Fetch both slots
+    // Fetch both slots scoped to the correct template
     const { rows: slots } = await client.query(
       `SELECT id, day_of_week, period_number, subject_name, teacher_id, room, time_from, time_to, is_break
        FROM class_timetable
        WHERE class_id=$1
+         AND template_id IS NOT DISTINCT FROM $6
          AND (
            (day_of_week=$2 AND period_number=$3) OR
            (day_of_week=$4 AND period_number=$5)
          )`,
-      [class_id, slot_a.day, slot_a.period_number, slot_b.day, slot_b.period_number]
+      [class_id, slot_a.day, slot_a.period_number, slot_b.day, slot_b.period_number, tmplVal]
     )
 
     const rowA = slots.find(s => s.day_of_week === slot_a.day && Math.round(Number(s.period_number)) === slot_a.period_number)
@@ -57,9 +61,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Cannot swap break slots' }, { status: 400 })
     }
 
-    // ── Conflict check ─────────────────────────────────────────────────────
-    // After swap: teacher from A would be in slot_b's day+period, and vice versa.
-    // Check that neither teacher is already busy in the new slot (in another class).
+    // ── Conflict check — scoped to same template ───────────────────────────
     const conflicts: string[] = []
 
     if (rowA.teacher_id) {
@@ -67,8 +69,9 @@ export async function POST(req: NextRequest) {
         `SELECT ct.id FROM class_timetable ct
          WHERE ct.school_id=$1 AND ct.teacher_id=$2
            AND ct.day_of_week=$3 AND ct.period_number=$4
-           AND ct.class_id != $5`,
-        [school_id, rowA.teacher_id, slot_b.day, slot_b.period_number, class_id]
+           AND ct.class_id != $5
+           AND ct.template_id IS NOT DISTINCT FROM $6`,
+        [school_id, rowA.teacher_id, slot_b.day, slot_b.period_number, class_id, tmplVal]
       )
       if (conflict.length > 0) {
         const { rows: [t] } = await client.query('SELECT name FROM teachers WHERE id=$1', [rowA.teacher_id])
@@ -81,8 +84,9 @@ export async function POST(req: NextRequest) {
         `SELECT ct.id FROM class_timetable ct
          WHERE ct.school_id=$1 AND ct.teacher_id=$2
            AND ct.day_of_week=$3 AND ct.period_number=$4
-           AND ct.class_id != $5`,
-        [school_id, rowB.teacher_id, slot_a.day, slot_a.period_number, class_id]
+           AND ct.class_id != $5
+           AND ct.template_id IS NOT DISTINCT FROM $6`,
+        [school_id, rowB.teacher_id, slot_a.day, slot_a.period_number, class_id, tmplVal]
       )
       if (conflict.length > 0) {
         const { rows: [t] } = await client.query('SELECT name FROM teachers WHERE id=$1', [rowB.teacher_id])
@@ -95,26 +99,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Swap blocked: teacher conflict', conflicts }, { status: 409 })
     }
 
-    // ── Perform swap in class_timetable ────────────────────────────────────
-    // We swap subject_name, teacher_id, room — the day/period/time stays in place
+    // ── Perform swap — swap subject_name, teacher_id, room only ───────────
     await client.query(
       `UPDATE class_timetable
        SET subject_name=$1, teacher_id=$2, room=$3
-       WHERE class_id=$4 AND day_of_week=$5 AND period_number=$6`,
-      [rowB.subject_name, rowB.teacher_id, rowB.room, class_id, slot_a.day, slot_a.period_number]
+       WHERE class_id=$4 AND day_of_week=$5 AND period_number=$6
+         AND template_id IS NOT DISTINCT FROM $7`,
+      [rowB.subject_name, rowB.teacher_id, rowB.room, class_id, slot_a.day, slot_a.period_number, tmplVal]
     )
     await client.query(
       `UPDATE class_timetable
        SET subject_name=$1, teacher_id=$2, room=$3
-       WHERE class_id=$4 AND day_of_week=$5 AND period_number=$6`,
-      [rowA.subject_name, rowA.teacher_id, rowA.room, class_id, slot_b.day, slot_b.period_number]
+       WHERE class_id=$4 AND day_of_week=$5 AND period_number=$6
+         AND template_id IS NOT DISTINCT FROM $7`,
+      [rowA.subject_name, rowA.teacher_id, rowA.room, class_id, slot_b.day, slot_b.period_number, tmplVal]
     )
 
-    // Mark swapped slots as manually set — preserves them during future regeneration
     await client.query(
       `UPDATE class_timetable SET is_manual=TRUE, source='manual'
-       WHERE class_id=$1 AND ((day_of_week=$2 AND period_number=$3) OR (day_of_week=$4 AND period_number=$5))`,
-      [class_id, slot_a.day, slot_a.period_number, slot_b.day, slot_b.period_number]
+       WHERE class_id=$1 AND template_id IS NOT DISTINCT FROM $6
+         AND ((day_of_week=$2 AND period_number=$3) OR (day_of_week=$4 AND period_number=$5))`,
+      [class_id, slot_a.day, slot_a.period_number, slot_b.day, slot_b.period_number, tmplVal]
     )
 
     await client.query('COMMIT')
@@ -122,7 +127,6 @@ export async function POST(req: NextRequest) {
     invalidateCache(`timetable:school:${school_id}`)
     invalidateCache(`health:${school_id}`)
 
-    // Notifications are sent only on Circulate — not on individual swaps
     return NextResponse.json({ success: true, message: 'Slots swapped successfully' })
 
   } catch (err) {

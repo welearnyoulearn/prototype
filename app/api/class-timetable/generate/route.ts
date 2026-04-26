@@ -65,7 +65,8 @@ export async function POST(req: NextRequest) {
   try {
 
     const body = await req.json()
-    const { school_id, class_id, force_replace = false, schedule_settings: bodySettings } = body
+    const { school_id, class_id, force_replace = false, schedule_settings: bodySettings, template_id = null } = body
+    // template_id: null = school default, number = specific template
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 
@@ -135,15 +136,22 @@ export async function POST(req: NextRequest) {
       const toGenerate = classes  // always process all matched classes
       const skipped: string[] = []
 
+      // Template-scoped WHERE for deletions
+      const tmplDeleteWhere = template_id != null
+        ? `AND template_id = ${parseInt(String(template_id))}`
+        : `AND template_id IS NULL`
+
       if (force_replace) {
-        // Full reset: delete everything including manual assignments
-        await client.query('DELETE FROM class_timetable WHERE class_id = ANY($1)', [toGenerate.map(c => c.id)])
+        // Full reset: delete all slots for this template (preserves other templates)
+        await client.query(
+          `DELETE FROM class_timetable WHERE class_id = ANY($1) ${tmplDeleteWhere}`,
+          [toGenerate.map(c => c.id)]
+        )
         await client.query('UPDATE classes SET timetable_generated_at=NULL WHERE id = ANY($1)', [toGenerate.map(c => c.id)])
       } else {
-        // Smart regenerate: only delete auto-generated rows (is_manual=FALSE)
-        // Manual assignments are preserved and pre-seeded into teacherBusy
+        // Smart regenerate: only delete auto-generated rows for this template
         await client.query(
-          'DELETE FROM class_timetable WHERE class_id = ANY($1) AND is_manual = FALSE',
+          `DELETE FROM class_timetable WHERE class_id = ANY($1) AND is_manual = FALSE ${tmplDeleteWhere}`,
           [toGenerate.map(c => c.id)]
         )
       }
@@ -183,6 +191,11 @@ export async function POST(req: NextRequest) {
       // Also seed from ALL existing timetable slots of classes NOT being regenerated.
       // This prevents the generator from double-booking teachers already assigned
       // in previously-generated classes (both manual and auto-generated slots).
+      // Only seed busyMap from same-template slots of OTHER classes.
+      // Cross-template slots don't conflict — each template is independent.
+      const tmplExistingWhere = template_id != null
+        ? `AND ct.template_id = ${parseInt(String(template_id))}`
+        : `AND ct.template_id IS NULL`
       const { rows: existingSlots } = await client.query(
         `SELECT ct.teacher_id, ct.day_of_week, ct.period_number
          FROM class_timetable ct
@@ -190,13 +203,35 @@ export async function POST(req: NextRequest) {
          WHERE c.school_id = $1
            AND ct.teacher_id IS NOT NULL
            AND ct.is_break = FALSE
-           AND ct.class_id != ALL($2::int[])`,
+           AND ct.class_id != ALL($2::int[])
+           ${tmplExistingWhere}`,
         [school_id, toGenerate.map(c => c.id)]
       )
       for (const row of existingSlots) {
         const pNum = Math.round(Number(row.period_number))
         if (!teacherBusy[row.teacher_id]) teacherBusy[row.teacher_id] = new Set()
         teacherBusy[row.teacher_id].add(`${row.day_of_week}-${pNum}`)
+      }
+
+      // ── FIX: For smart-regenerate, also seed manual slots of classes being regenerated ──
+      // Without this, manual edits within the batch are invisible to teacherBusy,
+      // causing the algorithm to double-book those teachers.
+      if (!force_replace) {
+        const { rows: manualSlots } = await client.query<{
+          teacher_id: number; day_of_week: string; period_number: number
+        }>(
+          `SELECT teacher_id, day_of_week, period_number
+           FROM class_timetable
+           WHERE class_id = ANY($1) AND is_manual = TRUE
+             AND teacher_id IS NOT NULL AND is_break = FALSE
+             ${tmplDeleteWhere}`,
+          [toGenerate.map(c => c.id)]
+        )
+        for (const row of manualSlots) {
+          const pNum = Math.round(Number(row.period_number))
+          if (!teacherBusy[row.teacher_id]) teacherBusy[row.teacher_id] = new Set()
+          teacherBusy[row.teacher_id].add(`${row.day_of_week}-${pNum}`)
+        }
       }
 
       // ── Fetch all active teaching staff ───────────────────────────────────
@@ -215,6 +250,12 @@ export async function POST(req: NextRequest) {
         if (!teachersBySubject[key]) teachersBySubject[key] = []
         teachersBySubject[key].push(t)
       }
+
+      // FIX: Track which teacher is locked per subject globally across classes.
+      // Prevents the pre-lock phase from assigning the same teacher to the same
+      // subject in two classes — which would cause guaranteed conflicts during
+      // slot placement.
+      const globalSubjectLocks: Record<string, Set<number>> = {} // subjectName → set of locked teacherIds
 
       // ── Constraint tracking ────────────────────────────────────────────────
       const teacherLoad: Record<number, number> = {}
@@ -288,23 +329,32 @@ export async function POST(req: NextRequest) {
         }
 
         // ── PRE-LOCK: one teacher per subject per class ────────────────────────
-        // This guarantees the same teacher appears for ALL periods of a given
-        // subject in this class — no multiple teachers for same subject.
+        // Guarantees the same teacher appears for ALL periods of a given subject
+        // in this class. Uses globalSubjectLocks to avoid assigning the same
+        // teacher to the same subject across two different classes — which would
+        // cause conflicts when both classes are scheduled at the same period.
         const lockedTeacher: Record<string, number | null> = {}
         for (const subj of subjects) {
           if (subj.teacher_id) {
-            // Explicitly assigned in class_subjects — always use this teacher
+            // Explicitly assigned in class_subjects — always honour this
             lockedTeacher[subj.subject_name] = subj.teacher_id
+            if (!globalSubjectLocks[subj.subject_name]) globalSubjectLocks[subj.subject_name] = new Set()
+            globalSubjectLocks[subj.subject_name].add(subj.teacher_id)
           } else {
-            // No explicit assignment — pick the best available teacher from the pool
-            // and lock them to this class+subject combination
             const key = subj.subject_name.trim().toLowerCase()
             const candidates = teachersBySubject[key] || []
             const gradeMatch = candidates.filter(t => canTeachGrade(t.teaches_grades, cls.grade, cls.section))
-            const pool = gradeMatch.length > 0 ? gradeMatch : candidates
-            // Prefer teachers with lowest current load
-            const sorted = [...pool].sort((a, b) => (teacherLoad[a.id] || 0) - (teacherLoad[b.id] || 0))
+            const basePool = gradeMatch.length > 0 ? gradeMatch : candidates
+            // FIX: Prefer teachers NOT already locked to this subject in another class
+            const alreadyLocked = globalSubjectLocks[subj.subject_name] ?? new Set<number>()
+            const freePool = basePool.filter(t => !alreadyLocked.has(t.id))
+            const pickPool = freePool.length > 0 ? freePool : basePool // fall back if no "free" teacher
+            const sorted = [...pickPool].sort((a, b) => (teacherLoad[a.id] || 0) - (teacherLoad[b.id] || 0))
             lockedTeacher[subj.subject_name] = sorted[0]?.id ?? null
+            if (lockedTeacher[subj.subject_name] !== null) {
+              if (!globalSubjectLocks[subj.subject_name]) globalSubjectLocks[subj.subject_name] = new Set()
+              globalSubjectLocks[subj.subject_name].add(lockedTeacher[subj.subject_name]!)
+            }
           }
         }
 
@@ -314,10 +364,10 @@ export async function POST(req: NextRequest) {
             await client.query(
               `INSERT INTO class_timetable
                  (class_id, school_id, day_of_week, period_number, time_from, time_to,
-                  is_break, break_label)
-               VALUES ($1,$2,$3,$4,$5,$6,TRUE,$7)
-               ON CONFLICT (class_id, day_of_week, period_number) DO NOTHING`,
-              [cls.id, school_id, day, brk.slot, brk.time_from, brk.time_to, brk.break_label]
+                  is_break, break_label, template_id)
+               VALUES ($1,$2,$3,$4,$5,$6,TRUE,$7,$8)
+               ON CONFLICT (class_id, day_of_week, period_number, COALESCE(template_id, 0)) DO NOTHING`,
+              [cls.id, school_id, day, brk.slot, brk.time_from, brk.time_to, brk.break_label, template_id]
             )
             totalInserted++
           }
@@ -329,10 +379,10 @@ export async function POST(req: NextRequest) {
             for (const s of ACADEMIC_SLOTS) {
               await client.query(
                 `INSERT INTO class_timetable
-                   (class_id, school_id, day_of_week, period_number, time_from, time_to)
-                 VALUES ($1,$2,$3,$4,$5,$6)
-                 ON CONFLICT (class_id, day_of_week, period_number) DO NOTHING`,
-                [cls.id, school_id, day, s.slot, s.time_from, s.time_to]
+                   (class_id, school_id, day_of_week, period_number, time_from, time_to, template_id)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7)
+                 ON CONFLICT (class_id, day_of_week, period_number, COALESCE(template_id, 0)) DO NOTHING`,
+                [cls.id, school_id, day, s.slot, s.time_from, s.time_to, template_id]
               )
               totalInserted++
             }
@@ -449,13 +499,13 @@ export async function POST(req: NextRequest) {
             await client.query(
               `INSERT INTO class_timetable
                  (class_id, school_id, day_of_week, period_number, time_from, time_to,
-                  subject_name, teacher_id, room, is_manual)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,FALSE)
-               ON CONFLICT (class_id, day_of_week, period_number) DO UPDATE
+                  subject_name, teacher_id, room, is_manual, template_id)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,FALSE,$10)
+               ON CONFLICT (class_id, day_of_week, period_number, COALESCE(template_id, 0)) DO UPDATE
                SET subject_name=$7, teacher_id=$8, room=$9, is_manual=FALSE, source='auto'`,
               [cls.id, school_id, day, academicSlot.slot,
                academicSlot.time_from, academicSlot.time_to,
-               slot.subject_name, slot.teacher_id, slot.room || null]
+               slot.subject_name, slot.teacher_id, slot.room || null, template_id]
             )
             totalInserted++
           }
@@ -466,6 +516,61 @@ export async function POST(req: NextRequest) {
           unfilled_slots: unfilledCount,
           missing_teachers: [...missingTeachersSet],
         })
+      }
+
+      // ── Post-generation conflict resolution pass ──────────────────────────
+      // Even after the above fixes, the teacher pool may be too small to
+      // avoid all conflicts (e.g. only 1 Math teacher for 3 classes).
+      // This pass detects any remaining conflicts on auto-generated slots and
+      // either reassigns to a free alternative or nulls out the teacher
+      // (amber "no teacher" is better than red "conflict").
+      const conflictTmplWhere = template_id != null
+        ? `AND ct.template_id = ${parseInt(String(template_id))}`
+        : `AND ct.template_id IS NULL`
+      const { rows: conflictedAutoSlots } = await client.query<{
+        id: number; teacher_id: number; day_of_week: string; period_number: number; subject_name: string
+      }>(
+        `SELECT ct.id, ct.teacher_id, ct.day_of_week, ct.period_number, ct.subject_name
+         FROM class_timetable ct
+         WHERE ct.school_id = $1
+           AND ct.is_break = FALSE
+           AND ct.is_manual = FALSE
+           AND ct.teacher_id IS NOT NULL
+           AND ct.class_id = ANY($2)
+           ${conflictTmplWhere}
+           AND EXISTS (
+             SELECT 1 FROM class_timetable cx
+             WHERE cx.school_id = ct.school_id
+               AND cx.teacher_id = ct.teacher_id
+               AND cx.day_of_week = ct.day_of_week
+               AND cx.period_number = ct.period_number
+               AND cx.class_id != ct.class_id
+               AND cx.is_break = FALSE
+               AND cx.template_id IS NOT DISTINCT FROM ct.template_id
+           )`,
+        [school_id, toGenerateIds]
+      )
+
+      let conflictsResolved = 0
+      let conflictsNulled   = 0
+      for (const cslot of conflictedAutoSlots) {
+        const pNum = Math.round(Number(cslot.period_number))
+        // Try to find a free alternative teacher for this subject at this slot
+        const key = cslot.subject_name.trim().toLowerCase()
+        const altPool = (teachersBySubject[key] || []).filter(
+          t => t.id !== cslot.teacher_id && isTeacherFree(t.id, cslot.day_of_week, pNum)
+        )
+        const newTid = altPool.length > 0 ? altPool.sort((a, b) => (teacherLoad[a.id] || 0) - (teacherLoad[b.id] || 0))[0].id : null
+        await client.query(
+          'UPDATE class_timetable SET teacher_id=$1 WHERE id=$2',
+          [newTid, cslot.id]
+        )
+        if (newTid) {
+          markBusy(newTid, cslot.day_of_week, pNum)
+          conflictsResolved++
+        } else {
+          conflictsNulled++
+        }
       }
 
       // ── Stamp generation timestamp on each class ──────────────────────────
@@ -513,6 +618,8 @@ export async function POST(req: NextRequest) {
         slots: totalInserted,
         classes_generated: toGenerate.length,
         classes_skipped: skipped,
+        conflicts_auto_resolved: conflictsResolved,
+        conflicts_need_manual:   conflictsNulled,
         audit: auditReport,
         issues: auditReport.filter(r => r.unfilled_slots > 0 || r.missing_teachers.length > 0),
       }, { status: 201 })

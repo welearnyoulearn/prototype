@@ -52,13 +52,20 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const [studentRewards, setStudentRewards] = useState<StudentRewards | null>(null)
   const [perfLoading, setPerfLoading] = useState(false)
 
+  // Auto-scroll to top when this module opens
+  useEffect(() => {
+    document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [])
+
   useEffect(() => {
     setLoading(true)
     Promise.all([
       fetch(`/api/students?school_id=${schoolId}`).then(r => r.json()),
       fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()),
     ]).then(([stu, cls]) => {
-      setStudents(Array.isArray(stu) ? stu : [])
+      // Normalise section to uppercase so "a" and "A" are the same class
+      const normStu = Array.isArray(stu) ? stu.map((s: Student) => ({ ...s, section: s.section?.toUpperCase() ?? s.section })) : []
+      setStudents(normStu)
       setClasses(Array.isArray(cls) ? cls : [])
     }).catch(() => setError('Failed to load students')).finally(() => setLoading(false))
   }, [schoolId, refreshKey])
@@ -166,25 +173,38 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
 
   const grades = ['all', ...Array.from(new Set(displayStudents.map(s => s.grade).filter(Boolean)))
     .sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))]
+  // Sections are already normalised to uppercase; show only sections for the selected grade
   const sections = ['all', ...Array.from(new Set(
-    displayStudents.filter(s => gradeFilter === 'all' || s.grade === gradeFilter).map(s => s.section).filter(Boolean)
+    displayStudents
+      .filter(s => gradeFilter === 'all' || s.grade === gradeFilter)
+      .map(s => (s.section ?? '').toUpperCase())
+      .filter(Boolean)
   )).sort()]
 
   const filtered = displayStudents.filter(s => {
-    const matchesGrade = gradeFilter === 'all' || s.grade === gradeFilter
-    const matchesSection = sectionFilter === 'all' || s.section === sectionFilter
-    const matchesSearch = !search || s.name.toLowerCase().includes(search.toLowerCase()) ||
+    const sec = (s.section ?? '').toUpperCase()
+    const matchesGrade   = gradeFilter === 'all' || s.grade === gradeFilter
+    const matchesSection = sectionFilter === 'all' || sec === sectionFilter.toUpperCase()
+    const matchesSearch  = !search || s.name.toLowerCase().includes(search.toLowerCase()) ||
       (s.roll_number || '').toLowerCase().includes(search.toLowerCase())
     return matchesGrade && matchesSection && matchesSearch
   })
 
-  // Group by grade-section
+  // Group by grade-section, sort numerically by grade then alphabetically by section
   const grouped: Record<string, Student[]> = {}
   filtered.forEach(s => {
-    const key = s.grade && s.section ? `Grade ${s.grade} – Section ${s.section}` : s.grade ? `Grade ${s.grade}` : 'Unassigned'
+    const sec = (s.section ?? '').toUpperCase()
+    const key = s.grade && sec ? `Grade ${s.grade} – Section ${sec}` : s.grade ? `Grade ${s.grade}` : 'Unassigned'
     if (!grouped[key]) grouped[key] = []
     grouped[key].push(s)
   })
+
+  function sortGroupKey(a: string, b: string) {
+    const ga = parseInt(a.match(/Grade (\d+)/)?.[1] ?? '0')
+    const gb = parseInt(b.match(/Grade (\d+)/)?.[1] ?? '0')
+    if (ga !== gb) return ga - gb
+    return a.localeCompare(b)
+  }
 
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300'
 
@@ -243,16 +263,32 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
           </select>
         </div>
 
-        {/* Stats chips */}
+        {/* Section-wise chips */}
         <div className="flex gap-2 mb-4 flex-wrap">
-          {Array.from(new Set(displayStudents.map(s => s.grade).filter(Boolean)))
-            .sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))
-            .map(g => {
-              const count = displayStudents.filter(s => s.grade === g).length
+          {Array.from(new Set(
+            displayStudents
+              .filter(s => s.grade && s.section)
+              .map(s => `${s.grade}-${(s.section ?? '').toUpperCase()}`)
+          ))
+            .sort((a, b) => {
+              const [ga, sa] = a.split('-'); const [gb, sb] = b.split('-')
+              const n = (parseInt(ga) || 0) - (parseInt(gb) || 0)
+              return n !== 0 ? n : sa.localeCompare(sb)
+            })
+            .map(key => {
+              const [g, sec] = key.split('-')
+              const count = displayStudents.filter(s => s.grade === g && (s.section ?? '').toUpperCase() === sec).length
+              const active = gradeFilter === g && sectionFilter.toUpperCase() === sec
               return (
-                <button key={g} onClick={() => { setGradeFilter(g === gradeFilter ? 'all' : g); setSectionFilter('all') }}
-                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${gradeFilter === g ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-200 hover:border-green-300'}`}>
-                  Grade {g} · {count}
+                <button key={key}
+                  onClick={() => {
+                    if (active) { setGradeFilter('all'); setSectionFilter('all') }
+                    else { setGradeFilter(g); setSectionFilter(sec) }
+                  }}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    active ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-200 hover:border-green-300'
+                  }`}>
+                  Gr.{g}-{sec} · {count}
                 </button>
               )
             })}
@@ -264,11 +300,11 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
           </div>
         ) : (
           <div className="space-y-4">
-            {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([group, members]) => (
+            {Object.entries(grouped).sort(([a], [b]) => sortGroupKey(a, b)).map(([group, members]) => (
               <div key={group} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                 <div className="px-5 py-3 bg-green-50 border-b border-green-100 flex items-center justify-between">
                   <span className="font-semibold text-green-800 text-sm">{group}</span>
-                  <span className="text-xs text-green-500">{members.length} student{members.length !== 1 ? 's' : ''}</span>
+                  <span className="text-xs text-green-600 font-medium">{members.length} student{members.length !== 1 ? 's' : ''}</span>
                 </div>
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-100">

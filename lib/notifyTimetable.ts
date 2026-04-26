@@ -35,9 +35,12 @@ export async function notifyTimetableChange(
   }
 
   // Notify all students in the class
+  // Students are linked by grade+section (no class_id FK on students table)
   if (class_id) {
     const { rows: students } = await client.query(
-      `SELECT id FROM students WHERE class_id=$1 AND school_id=$2`,
+      `SELECT s.id FROM students s
+       JOIN classes c ON c.grade = s.grade AND c.section = s.section AND c.school_id = s.school_id
+       WHERE c.id = $1 AND s.school_id = $2`,
       [class_id, school_id]
     )
     for (const s of students) {

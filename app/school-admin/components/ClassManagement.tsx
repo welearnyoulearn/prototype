@@ -1,12 +1,12 @@
 'use client'
 
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { CURRICULA } from '@/lib/curricula'
 
 type Props = { schoolId: number; onNavigate?: (tab: string) => void }
 
 type ClassRow = { id: number; grade: string; section: string; class_teacher_id: number | null; class_teacher_name: string | null; student_count: number; timetable_generated_at: string | null }
-type Teacher = { id: number; name: string; subject: string; employee_id: string; department: string }
+type Teacher = { id: number; name: string; subject: string; employee_id: string; department: string; teaches_grades?: string; staff_type?: string }
 type Subject = { id: number; subject_name: string; teacher_id: number | null; teacher_name: string | null; periods_per_week: number }
 type TimetableSlot = { id: number; day_of_week: string; period_number: number; time_from: string; time_to: string; subject_name: string | null; teacher_id: number | null; teacher_name: string | null; is_break: boolean; break_label: string | null; room: string | null; has_conflict?: boolean; source?: string }
 type Student = { id: number; name: string; roll_number: string; email: string; phone: string }
@@ -28,6 +28,12 @@ function getSuggestedSubjects(grade: string, curriculum: 'CBSE' | 'APSSC' | 'SSC
     ;['English', 'Mathematics', 'Science', 'Social Science', 'Telugu', 'Physical Education'].forEach(s => names.add(s))
   }
   return Array.from(names)
+}
+
+// Returns true when teacher has no grade restriction OR their restriction includes this grade
+function canTeachGrade(teachesGrades: string | null | undefined, grade: string): boolean {
+  if (!teachesGrades || !teachesGrades.trim()) return true
+  return teachesGrades.split(',').map(g => g.trim()).includes(grade.trim())
 }
 
 export default function ClassManagement({ schoolId, onNavigate }: Props) {
@@ -61,8 +67,22 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
   const [setMsg, setSetMsg] = useState<string | null>(null)
 
   const inp = 'border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300'
+  const rightPanelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { loadData(); autoSync() }, [schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Scroll newly selected class into view in the sidebar list
+  useEffect(() => {
+    if (!selectedId) return
+    setTimeout(() => {
+      document.getElementById(`class-item-${selectedId}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }, 100)
+  }, [selectedId])
+
+  // Scroll right panel to top when class selection changes
+  useEffect(() => {
+    if (selectedId) rightPanelRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }, [selectedId])
 
   async function loadData() {
     setLoading(true)
@@ -291,6 +311,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-4 py-1">Grade {grade}</p>
                 {byGrade[grade].map(cls => (
                   <div key={cls.id}
+                    id={`class-item-${cls.id}`}
                     onClick={() => setSelectedId(cls.id)}
                     className={`group flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${
                       selectedId === cls.id ? 'bg-violet-50 border-r-2 border-violet-500' : 'hover:bg-gray-50'
@@ -320,7 +341,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
       </div>
 
       {/* ── Right panel: class detail or default sets ── */}
-      <div className="flex-1 min-w-0 bg-white rounded-r-xl overflow-hidden overflow-y-auto">
+      <div ref={rightPanelRef} className="flex-1 min-w-0 bg-white rounded-r-xl overflow-hidden overflow-y-auto">
         {showDefaultSets ? (
           /* Default Subject Sets Panel */
           <div className="p-6 space-y-5">
@@ -534,6 +555,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
             cls={selectedClass}
             schoolId={schoolId}
             teachers={teachers}
+            allClasses={classes}
             onClassUpdated={(updates) => setClasses(prev => prev.map(c => c.id === updates.id ? { ...c, ...updates } : c))}
             onNavigate={onNavigate}
           />
@@ -556,11 +578,12 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
 
 // ─── Class Detail (right panel) ────────────────────────────────────────────────
 function ClassDetail({
-  cls, schoolId, teachers, onClassUpdated, onNavigate
+  cls, schoolId, teachers, allClasses, onClassUpdated, onNavigate
 }: {
   cls: ClassRow
   schoolId: number
   teachers: Teacher[]
+  allClasses: ClassRow[]
   onClassUpdated: (updates: Partial<ClassRow> & { id: number }) => void
   onNavigate?: (tab: string) => void
 }) {
@@ -571,23 +594,28 @@ function ClassDetail({
   const [subLoading, setSubLoading] = useState(true)
   const [subjectMsg, setSubjectMsg] = useState<{ text: string; ok: boolean } | null>(null)
   const [addingSubject, setAddingSubject] = useState(false)
-  // Shown after adding a subject when timetable already exists — prompts admin to regenerate
-  const [ttPrompt, setTtPrompt] = useState<string | null>(null)
   const [removingId, setRemovingId] = useState<number | null>(null)
   const [newName, setNewName] = useState('')
   const [newTeacher, setNewTeacher] = useState('')
   const [editingClassTeacher, setEditingClassTeacher] = useState(false)
   const [ctId, setCtId] = useState(String(cls.class_teacher_id || ''))
   const [savingCT, setSavingCT] = useState(false)
+  const [ctConflict, setCtConflict] = useState<{ teacherName: string; existingClass: ClassRow } | null>(null)
   const [timetable, setTimetable] = useState<TimetableSlot[]>([])
   const [ttLoading, setTtLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [genMsg, setGenMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const [deletingTt, setDeletingTt] = useState(false)
+  const [showDeleteTtConfirm, setShowDeleteTtConfirm] = useState(false)
   const [editSlotId, setEditSlotId] = useState<number | null>(null)
   const [editSubject, setEditSubject] = useState('')
   const [editTeacher, setEditTeacher] = useState('')
   const [students, setStudents] = useState<Student[]>([])
   const [studLoading, setStudLoading] = useState(false)
+  const [showAddStudent, setShowAddStudent] = useState(false)
+  const [addStudentForm, setAddStudentForm] = useState({ name: '', roll_number: '', email: '', phone: '', parent_name: '', parent_phone: '' })
+  const [addingStudent, setAddingStudent] = useState(false)
+  const [addStudentMsg, setAddStudentMsg] = useState<{ text: string; ok: boolean } | null>(null)
   const [assigningTeacherId, setAssigningTeacherId] = useState<number | null>(null) // subject id being inline-assigned
   const [inlineTeacher, setInlineTeacher] = useState('')
   const [templates, setTemplates] = useState<{ id: number; name: string; from_grade: number; to_grade: number; subjects: { name: string; periods_per_week: number }[] }[]>([])
@@ -667,6 +695,29 @@ function ClassDetail({
     } finally { setStudLoading(false) }
   }
 
+  async function handleAddStudent(e: React.FormEvent) {
+    e.preventDefault()
+    if (!addStudentForm.name.trim()) return
+    setAddingStudent(true); setAddStudentMsg(null)
+    try {
+      const res = await fetch('/api/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, grade: cls.grade, section: cls.section, ...addStudentForm }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setAddStudentForm({ name: '', roll_number: '', email: '', phone: '', parent_name: '', parent_phone: '' })
+      setShowAddStudent(false)
+      await loadStudents()
+      onClassUpdated({ id: cls.id, student_count: cls.student_count + 1 })
+      setAddStudentMsg({ text: `✓ ${data.name} added to ${cls.grade}-${cls.section}`, ok: true })
+      setTimeout(() => setAddStudentMsg(null), 4000)
+    } catch (err: unknown) {
+      setAddStudentMsg({ text: err instanceof Error ? err.message : 'Failed to add student', ok: false })
+    } finally { setAddingStudent(false) }
+  }
+
   async function addSubject(name: string, ppw?: string, teacherId?: string) {
     const subjectName = name.trim()
     if (!subjectName) return
@@ -688,10 +739,6 @@ function ClassDetail({
       setNewName(''); setNewTeacher('')
       setSubjectMsg({ text: `✓ ${subjectName} added${data.teacher_name ? ` · Teacher: ${data.teacher_name}` : ''}`, ok: true })
       setTimeout(() => setSubjectMsg(null), 4000)
-      // Prompt to regenerate timetable if it was already generated
-      if (cls.timetable_generated_at) {
-        setTtPrompt(subjectName)
-      }
     } catch (err: unknown) {
       setSubjectMsg({ text: err instanceof Error ? err.message : 'Failed to add subject', ok: false })
     } finally { setAddingSubject(false) }
@@ -706,7 +753,17 @@ function ClassDetail({
     } finally { setRemovingId(null) }
   }
 
-  async function saveClassTeacher() {
+  async function saveClassTeacher(force = false) {
+    // Conflict check: is this teacher already a class teacher of another class?
+    if (ctId && !force) {
+      const tid = parseInt(ctId)
+      const conflict = allClasses.find(c => c.id !== cls.id && c.class_teacher_id === tid)
+      if (conflict) {
+        const teacher = teachers.find(t => t.id === tid)
+        setCtConflict({ teacherName: teacher?.name ?? 'This teacher', existingClass: conflict })
+        return
+      }
+    }
     setSavingCT(true)
     try {
       const res = await fetch(`/api/classes/${cls.id}`, {
@@ -718,6 +775,7 @@ function ClassDetail({
       const t = teachers.find(t => t.id === parseInt(ctId)) || null
       onClassUpdated({ id: cls.id, class_teacher_id: data.class_teacher_id, class_teacher_name: t?.name || null })
       setEditingClassTeacher(false)
+      setCtConflict(null)
     } finally { setSavingCT(false) }
   }
 
@@ -730,11 +788,28 @@ function ClassDetail({
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setGenMsg({ text: `Generated ${data.slots} slots successfully`, ok: true })
+      const parts: string[] = [`Generated successfully.`]
+      if (data.conflicts_auto_resolved > 0) parts.push(`${data.conflicts_auto_resolved} conflict(s) auto-resolved.`)
+      if (data.conflicts_need_manual  > 0) parts.push(`${data.conflicts_need_manual} slot(s) need a teacher — click the amber cells to assign.`)
+      setGenMsg({ text: parts.join(' '), ok: true })
+      onClassUpdated({ id: cls.id, timetable_generated_at: new Date().toISOString() } as Partial<ClassRow> & { id: number })
       await loadTimetable()
     } catch (err: unknown) {
       setGenMsg({ text: err instanceof Error ? err.message : 'Generation failed', ok: false })
     } finally { setGenerating(false) }
+  }
+
+  async function deleteTimetable() {
+    setDeletingTt(true); setGenMsg(null); setShowDeleteTtConfirm(false)
+    try {
+      const res = await fetch(`/api/class-timetable?class_id=${cls.id}&school_id=${schoolId}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Delete failed')
+      setTimetable([])
+      onClassUpdated({ id: cls.id, timetable_generated_at: null } as Partial<ClassRow> & { id: number })
+      setGenMsg({ text: 'Timetable deleted. You can generate a new one anytime.', ok: true })
+    } catch (err: unknown) {
+      setGenMsg({ text: err instanceof Error ? err.message : 'Delete failed', ok: false })
+    } finally { setDeletingTt(false) }
   }
 
   async function applyDefaults() {
@@ -766,7 +841,6 @@ function ClassDetail({
     setDefaultsMsg({ text: msg, ok: added > 0 })
     setApplyingDefaults(false)
     setTimeout(() => setDefaultsMsg(null), 5000)
-    if (cls.timetable_generated_at && added > 0) setTtPrompt('default subjects')
   }
 
   async function assignTeacherInline(subjectId: number) {
@@ -817,16 +891,23 @@ function ClassDetail({
                   <select value={ctId} onChange={e => setCtId(e.target.value)}
                     className="border border-violet-300 rounded-lg px-3 py-1.5 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 min-w-[200px]">
                     <option value="">— No class teacher —</option>
-                    {teachers.filter(t => (t as Teacher & { staff_type?: string }).staff_type !== 'non_teaching').map(t => {
-                      const tExt = t as Teacher & { staff_type?: string; subject?: string }
+                    {(() => {
+                      const teaching   = teachers.filter(t => t.staff_type !== 'non_teaching')
+                      const eligible   = teaching.filter(t => canTeachGrade(t.teaches_grades, cls.grade))
+                      const ineligible = teaching.filter(t => !canTeachGrade(t.teaches_grades, cls.grade))
                       return (
-                        <option key={t.id} value={t.id}>
-                          {t.name}{tExt.subject ? ` · ${tExt.subject}` : ''}
-                        </option>
+                        <>
+                          {eligible.length > 0 && <optgroup label={`Grade ${cls.grade} teachers`}>
+                            {eligible.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
+                          </optgroup>}
+                          {ineligible.length > 0 && <optgroup label="Other grades">
+                            {ineligible.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
+                          </optgroup>}
+                        </>
                       )
-                    })}
+                    })()}
                   </select>
-                  <button onClick={saveClassTeacher} disabled={savingCT}
+                  <button onClick={() => saveClassTeacher()} disabled={savingCT}
                     className="text-sm bg-violet-600 text-white px-3 py-1.5 rounded-lg hover:bg-violet-700 disabled:opacity-50 font-medium">
                     {savingCT ? 'Saving...' : 'Save'}
                   </button>
@@ -857,6 +938,41 @@ function ClassDetail({
             </div>
           </div>
         </div>
+
+        {/* Class teacher conflict modal */}
+        {ctConflict && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setCtConflict(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full" onClick={e => e.stopPropagation()}>
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-900 text-sm">Teacher Already Assigned</h3>
+                  <p className="text-xs text-gray-500 mt-1">
+                    <strong>{ctConflict.teacherName}</strong> is already the Class Teacher of{' '}
+                    <span className="font-semibold text-violet-700">Grade {ctConflict.existingClass.grade} – {ctConflict.existingClass.section}</span>.
+                  </p>
+                  <p className="text-xs text-amber-700 mt-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    A teacher can serve as class teacher for multiple classes, but this may cause scheduling conflicts. Do you want to proceed?
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setCtConflict(null)}
+                  className="px-4 py-2 rounded-lg text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
+                  Cancel — pick another
+                </button>
+                <button onClick={() => saveClassTeacher(true)} disabled={savingCT}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                  {savingCT ? 'Saving...' : 'Assign Anyway'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex gap-0 mt-3 -mb-4">
@@ -1019,28 +1135,6 @@ function ClassDetail({
               </div>
             )}
 
-            {/* Timetable regeneration prompt — shown after adding a subject when timetable already exists */}
-            {ttPrompt && (
-              <div className="rounded-lg px-4 py-3 bg-amber-50 border border-amber-200 flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-amber-800">Timetable needs updating</p>
-                  <p className="text-xs text-amber-600 mt-0.5">
-                    <strong>{ttPrompt}</strong> was added. Regenerate the timetable to include it in the schedule.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {onNavigate && (
-                    <button
-                      onClick={() => { setTtPrompt(null); onNavigate('timetable') }}
-                      className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-semibold hover:bg-amber-700 transition-colors">
-                      Go to Timetable →
-                    </button>
-                  )}
-                  <button onClick={() => setTtPrompt(null)} className="text-amber-400 hover:text-amber-600 text-lg leading-none">×</button>
-                </div>
-              </div>
-            )}
-
             {/* Apply defaults banner */}
             {(() => {
               const gradeNum = parseInt(cls.grade)
@@ -1094,12 +1188,22 @@ function ClassDetail({
                           <div className="flex items-center gap-1.5">
                             <select value={inlineTeacher} onChange={e => setInlineTeacher(e.target.value)}
                               autoFocus
-                              className="border border-violet-300 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-violet-400 max-w-[160px]">
+                              className="border border-violet-300 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-violet-400 max-w-[180px]">
                               <option value="">Select teacher...</option>
-                              {teachers.filter(t => (t as Teacher & { staff_type?: string }).staff_type !== 'non_teaching').map(t => {
-                                const tExt = t as Teacher & { subject?: string }
-                                return <option key={t.id} value={t.id}>{t.name}{tExt.subject ? ` · ${tExt.subject}` : ''}</option>
-                              })}
+                              {(() => {
+                                const eligible   = teachers.filter(t => t.staff_type !== 'non_teaching' && canTeachGrade(t.teaches_grades, cls.grade))
+                                const ineligible = teachers.filter(t => t.staff_type !== 'non_teaching' && !canTeachGrade(t.teaches_grades, cls.grade))
+                                return (
+                                  <>
+                                    {eligible.length > 0 && <optgroup label={`Grade ${cls.grade} teachers`}>
+                                      {eligible.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
+                                    </optgroup>}
+                                    {ineligible.length > 0 && <optgroup label="Other grades (not assigned)">
+                                      {ineligible.map(t => <option key={t.id} value={t.id}>{t.name}{t.subject ? ` · ${t.subject}` : ''}</option>)}
+                                    </optgroup>}
+                                  </>
+                                )
+                              })()}
                             </select>
                             <button onClick={() => assignTeacherInline(s.id)} disabled={!inlineTeacher}
                               className="text-xs px-2 py-1 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">✓</button>
@@ -1169,9 +1273,22 @@ function ClassDetail({
                   onKeyDown={e => e.key === 'Enter' && addSubject(newName, '4', newTeacher)}
                   className={inp + ' flex-1 min-w-36 text-sm'} placeholder="Subject name" />
                 <select value={newTeacher} onChange={e => setNewTeacher(e.target.value)}
-                  className={inp + ' w-48 text-sm'}>
+                  className={inp + ' w-56 text-sm'}>
                   <option value="">Auto-assign teacher</option>
-                  {teachers.filter(t => t.subject).map(t => <option key={t.id} value={t.id}>{t.name} – {t.subject}</option>)}
+                  {(() => {
+                    const eligible   = teachers.filter(t => t.subject && canTeachGrade(t.teaches_grades, cls.grade))
+                    const ineligible = teachers.filter(t => t.subject && !canTeachGrade(t.teaches_grades, cls.grade))
+                    return (
+                      <>
+                        {eligible.length > 0 && <optgroup label={`Grade ${cls.grade} teachers`}>
+                          {eligible.map(t => <option key={t.id} value={t.id}>{t.name} – {t.subject}</option>)}
+                        </optgroup>}
+                        {ineligible.length > 0 && <optgroup label="Other grades">
+                          {ineligible.map(t => <option key={t.id} value={t.id}>{t.name} – {t.subject}</option>)}
+                        </optgroup>}
+                      </>
+                    )
+                  })()}
                 </select>
                 <button onClick={() => addSubject(newName, '4', newTeacher)}
                   disabled={addingSubject || !newName.trim()}
@@ -1182,18 +1299,18 @@ function ClassDetail({
             </div>
 
             {subjects.length > 0 && (
-              <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+              <div className={`rounded-xl px-4 py-3 flex items-center justify-between flex-wrap gap-3 ${hasTimetable ? 'bg-emerald-50 border border-emerald-200' : 'bg-blue-50 border border-blue-200'}`}>
                 <div>
-                  <p className="text-sm font-medium text-blue-800">
-                    {hasTimetable ? 'Timetable active.' : 'Ready to generate timetable!'}
+                  <p className={`text-sm font-medium ${hasTimetable ? 'text-emerald-800' : 'text-blue-800'}`}>
+                    {hasTimetable ? '✓ Timetable is active.' : `${subjects.length} subject${subjects.length !== 1 ? 's' : ''} added — timetable not generated yet.`}
                   </p>
-                  <p className="text-xs text-blue-600 mt-0.5">
-                    {hasTimetable ? 'Regenerate if subjects changed.' : `${subjects.length} subjects · ${totalPPW} periods/week`}
+                  <p className={`text-xs mt-0.5 ${hasTimetable ? 'text-emerald-600' : 'text-blue-600'}`}>
+                    {hasTimetable ? `${subjects.length} subjects · ${totalPPW} periods/week` : 'Go to the Timetable tab to generate.'}
                   </p>
                 </div>
                 <button onClick={() => setTab('timetable')}
-                  className="px-4 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700">
-                  {hasTimetable ? 'View →' : 'Generate →'}
+                  className={`px-4 py-1.5 text-xs font-medium rounded-lg ${hasTimetable ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
+                  {hasTimetable ? 'View Timetable →' : 'Go to Timetable →'}
                 </button>
               </div>
             )}
@@ -1203,31 +1320,6 @@ function ClassDetail({
         {/* ── TIMETABLE ── */}
         {tab === 'timetable' && (
           <div className="space-y-4">
-            <div className="bg-white rounded-xl border border-gray-200 px-4 py-3 flex items-center justify-between flex-wrap gap-3">
-              <div>
-                <p className="text-sm font-medium text-gray-800">
-                  {subjects.length === 0 ? 'Add subjects first.' : hasTimetable ? 'Timetable generated.' : `${subjects.length} subjects ready.`}
-                </p>
-                <p className="text-xs text-gray-400 mt-0.5">Regenerate keeps manual slots. Force replace wipes all.</p>
-              </div>
-              {subjects.length > 0 && (
-                <div className="flex gap-2">
-                  {hasTimetable && (
-                    <button onClick={() => generateTimetable(true)} disabled={generating}
-                      className="px-3 py-1.5 border border-red-200 text-red-600 text-xs rounded-lg hover:bg-red-50 disabled:opacity-50">
-                      Force Replace
-                    </button>
-                  )}
-                  <button onClick={() => generateTimetable(false)} disabled={generating}
-                    className="px-4 py-1.5 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
-                    {generating
-                      ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />Generating...</>
-                      : hasTimetable ? '↻ Regenerate' : '⚡ Generate Timetable'}
-                  </button>
-                </div>
-              )}
-            </div>
-
             {genMsg && (
               <div className={`rounded-xl px-4 py-2.5 text-sm border ${genMsg.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
                 {genMsg.text}
@@ -1239,50 +1331,181 @@ function ClassDetail({
                 <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />Loading...
               </div>
             ) : timetable.length === 0 ? (
-              <div className="bg-white rounded-xl border border-gray-200 py-12 text-center text-gray-400 text-sm">
-                No timetable yet.
+              /* ── No timetable yet: show generate CTA ── */
+              <div className="bg-white rounded-xl border border-gray-200 py-16 flex flex-col items-center justify-center gap-4 text-center">
+                <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center">
+                  <svg className="w-7 h-7 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </div>
+                {subjects.length === 0 ? (
+                  <>
+                    <div>
+                      <p className="text-gray-700 font-semibold">No subjects added yet</p>
+                      <p className="text-gray-400 text-sm mt-1">Add subjects in the Subjects tab first, then come back to generate the timetable.</p>
+                    </div>
+                    <button onClick={() => setTab('subjects')}
+                      className="px-5 py-2 bg-violet-600 text-white text-sm font-medium rounded-xl hover:bg-violet-700">
+                      Go to Subjects →
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <p className="text-gray-700 font-semibold">Ready to generate!</p>
+                      <p className="text-gray-400 text-sm mt-1">{subjects.length} subject{subjects.length !== 1 ? 's' : ''} · {totalPPW} periods/week</p>
+                    </div>
+                    <button onClick={() => generateTimetable(false)} disabled={generating}
+                      className="px-6 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+                      {generating
+                        ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Generating...</>
+                        : <>⚡ Generate Timetable</>}
+                    </button>
+                  </>
+                )}
               </div>
             ) : (
-              <TimetableGrid
-                timetable={timetable}
-                teachers={teachers}
-                editSlotId={editSlotId}
-                editSubject={editSubject}
-                editTeacher={editTeacher}
-                setEditSlotId={setEditSlotId}
-                setEditSubject={setEditSubject}
-                setEditTeacher={setEditTeacher}
-                onSaveSlot={saveSlotEdit}
-              />
+              /* ── Timetable exists: show read-only grid ── */
+              <>
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <p className="text-xs text-gray-400">{subjects.length} subjects · {totalPPW} periods/week</p>
+                  <button onClick={() => {/* navigate to timetable tab handled by parent */}}
+                    className="text-xs text-blue-500 hover:text-blue-700 font-medium transition-colors">
+                    Manage in Timetable tab →
+                  </button>
+                </div>
+                <TimetableGrid
+                  timetable={timetable}
+                  teachers={teachers}
+                  editSlotId={null}
+                  editSubject={''}
+                  editTeacher={''}
+                  setEditSlotId={() => {}}
+                  setEditSubject={() => {}}
+                  setEditTeacher={() => {}}
+                  onSaveSlot={() => {}}
+                />
+              </>
             )}
           </div>
         )}
 
         {/* ── STUDENTS ── */}
         {tab === 'students' && (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-100 flex justify-between items-center">
-              <span className="text-xs font-semibold text-gray-600">Students</span>
-              <span className="text-xs text-gray-400">{students.length} enrolled</span>
-            </div>
-            {studLoading ? (
-              <div className="py-8 text-center text-gray-400 text-sm">Loading...</div>
-            ) : students.length === 0 ? (
-              <div className="py-8 text-center text-gray-400 text-sm">No students enrolled.</div>
-            ) : (
-              <div className="divide-y divide-gray-50">
-                {students.map((s, i) => (
-                  <div key={s.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50">
-                    <span className="text-xs text-gray-300 w-5">{i + 1}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-gray-900 text-sm">{s.name}</p>
-                      <p className="text-xs text-gray-400">Roll: {s.roll_number}</p>
-                    </div>
-                    {s.phone && <span className="text-xs text-gray-400">{s.phone}</span>}
-                  </div>
-                ))}
+          <div className="space-y-3">
+            {addStudentMsg && (
+              <div className={`rounded-lg px-4 py-2.5 text-sm border ${addStudentMsg.ok ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                {addStudentMsg.text}
               </div>
             )}
+
+            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100 flex justify-between items-center">
+                <div>
+                  <span className="text-xs font-semibold text-gray-600">Students in {cls.grade}-{cls.section}</span>
+                  <span className="text-xs text-gray-400 ml-2">{students.length} enrolled</span>
+                </div>
+                <button
+                  onClick={() => setShowAddStudent(v => !v)}
+                  className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors ${
+                    showAddStudent ? 'bg-violet-600 text-white border-violet-600' : 'border-violet-200 text-violet-600 hover:bg-violet-50'
+                  }`}>
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add Student
+                </button>
+              </div>
+
+              {/* Quick add student form */}
+              {showAddStudent && (
+                <form onSubmit={handleAddStudent} className="px-4 py-4 bg-violet-50 border-b border-violet-100 space-y-3">
+                  <p className="text-xs font-semibold text-violet-700 mb-1">
+                    New student → Grade {cls.grade} – Section {cls.section}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-0.5">Name <span className="text-red-400">*</span></label>
+                      <input required value={addStudentForm.name}
+                        onChange={e => setAddStudentForm(f => ({ ...f, name: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-violet-300"
+                        placeholder="Full name" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-0.5">Roll No.</label>
+                      <input value={addStudentForm.roll_number}
+                        onChange={e => setAddStudentForm(f => ({ ...f, roll_number: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-violet-300"
+                        placeholder="e.g. 23" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-0.5">Phone</label>
+                      <input value={addStudentForm.phone}
+                        onChange={e => setAddStudentForm(f => ({ ...f, phone: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-violet-300"
+                        placeholder="Student phone" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-0.5">Email</label>
+                      <input type="email" value={addStudentForm.email}
+                        onChange={e => setAddStudentForm(f => ({ ...f, email: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-violet-300"
+                        placeholder="student@email.com" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-0.5">Parent Name</label>
+                      <input value={addStudentForm.parent_name}
+                        onChange={e => setAddStudentForm(f => ({ ...f, parent_name: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-violet-300"
+                        placeholder="Parent full name" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-0.5">Parent Phone</label>
+                      <input value={addStudentForm.parent_phone}
+                        onChange={e => setAddStudentForm(f => ({ ...f, parent_phone: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-violet-300"
+                        placeholder="Parent phone" />
+                    </div>
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button type="submit" disabled={addingStudent}
+                      className="flex-1 bg-violet-600 hover:bg-violet-700 text-white text-xs py-1.5 rounded-lg font-medium disabled:opacity-50">
+                      {addingStudent ? 'Adding...' : 'Add Student'}
+                    </button>
+                    <button type="button" onClick={() => setShowAddStudent(false)}
+                      className="flex-1 border border-gray-200 text-gray-500 text-xs py-1.5 rounded-lg hover:bg-gray-50">
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {studLoading ? (
+                <div className="py-8 text-center">
+                  <div className="w-5 h-5 border-2 border-violet-400 border-t-transparent rounded-full animate-spin mx-auto" />
+                </div>
+              ) : students.length === 0 ? (
+                <div className="py-8 text-center text-gray-400 text-sm">
+                  No students enrolled yet.
+                  <button onClick={() => setShowAddStudent(true)} className="block mx-auto mt-2 text-violet-500 hover:text-violet-700 underline text-xs">
+                    Add the first student →
+                  </button>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {students.map((s, i) => (
+                    <div key={s.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50">
+                      <span className="text-xs text-gray-300 w-5 flex-shrink-0">{i + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-900 text-sm">{s.name}</p>
+                        <p className="text-xs text-gray-400">Roll: {s.roll_number || '—'}</p>
+                      </div>
+                      {s.phone && <span className="text-xs text-gray-400">{s.phone}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -1290,7 +1513,7 @@ function ClassDetail({
   )
 }
 
-// ─── Timetable Grid (periods × days) ──────────────────────────────────────────
+// ─── Timetable Grid (days × periods) ──────────────────────────────────────────
 function TimetableGrid({
   timetable, teachers, editSlotId, editSubject, editTeacher,
   setEditSlotId, setEditSubject, setEditTeacher, onSaveSlot,
@@ -1307,7 +1530,7 @@ function TimetableGrid({
 }) {
   const activeDays = DAYS.filter(d => timetable.some(s => s.day_of_week === d))
 
-  // Build period rows: unique period_number sorted ascending
+  // Periods sorted ascending
   const periodNumbers = Array.from(new Set(timetable.map(s => s.period_number))).sort((a, b) => a - b)
 
   // Slot lookup: day+period → slot
@@ -1336,10 +1559,16 @@ function TimetableGrid({
     }
   }
 
-  // Get time label from the first day that has this period
+  // Get time label for a period (from any day that has it)
   function getTime(period: number) {
     const s = timetable.find(t => t.period_number === period)
     return s ? `${s.time_from}–${s.time_to}` : ''
+  }
+
+  // Is this period a break across all days?
+  function isBreakPeriod(period: number) {
+    const sample = activeDays.map(d => slotMap.get(`${d}-${period}`)).find(Boolean)
+    return sample?.is_break ?? false
   }
 
   return (
@@ -1348,105 +1577,103 @@ function TimetableGrid({
         <table className="w-full text-xs border-collapse">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="px-3 py-2.5 text-left font-semibold text-gray-500 w-24 border-r border-gray-200 sticky left-0 bg-gray-50 z-10">
-                Period
+              {/* Day column header */}
+              <th className="px-3 py-2.5 text-left font-semibold text-gray-500 w-20 border-r border-gray-200 sticky left-0 bg-gray-50 z-10">
+                Day
               </th>
-              {activeDays.map(day => (
-                <th key={day} className="px-2 py-2.5 text-center font-semibold text-gray-600 min-w-[110px] border-r border-gray-100 last:border-r-0">
-                  {day.slice(0, 3)}
-                </th>
-              ))}
+              {/* Period columns */}
+              {periodNumbers.map(period => {
+                const isBreak = isBreakPeriod(period)
+                const sample = activeDays.map(d => slotMap.get(`${d}-${period}`)).find(Boolean)
+                return (
+                  <th key={period} className={`px-2 py-2 text-center font-semibold min-w-[100px] border-r border-gray-100 last:border-r-0 ${isBreak ? 'bg-amber-50' : ''}`}>
+                    {isBreak ? (
+                      <span className="text-amber-600 text-[10px] font-semibold">{sample?.break_label || 'Break'}</span>
+                    ) : (
+                      <div>
+                        <div className="text-gray-600">P{period}</div>
+                        <div className="text-gray-400 text-[10px] font-normal mt-0.5 whitespace-nowrap">{getTime(period)}</div>
+                      </div>
+                    )}
+                  </th>
+                )
+              })}
             </tr>
           </thead>
           <tbody>
-            {periodNumbers.map(period => {
-              // Determine if this period is a break (check any day)
-              const sampleSlot = activeDays.map(d => slotMap.get(`${d}-${period}`)).find(Boolean)
-              const isBreakRow = sampleSlot?.is_break ?? false
+            {activeDays.map(day => (
+              <tr key={day} className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50/30">
+                {/* Day label */}
+                <td className="px-3 py-2 border-r border-gray-200 sticky left-0 bg-white z-10">
+                  <span className="font-semibold text-gray-700 text-[11px]">{day.slice(0, 3)}</span>
+                </td>
 
-              return (
-                <tr key={period} className={`border-b border-gray-100 last:border-b-0 ${isBreakRow ? 'bg-amber-50/60' : 'hover:bg-gray-50/50'}`}>
-                  {/* Period label */}
-                  <td className="px-3 py-2 border-r border-gray-200 sticky left-0 bg-inherit z-10">
-                    {isBreakRow ? (
-                      <span className="text-amber-600 font-medium text-[10px]">{sampleSlot?.break_label || 'Break'}</span>
-                    ) : (
-                      <div>
-                        <div className="font-semibold text-gray-700">P{period}</div>
-                        <div className="text-gray-400 text-[10px] mt-0.5 whitespace-nowrap">{getTime(period)}</div>
+                {/* Period cells */}
+                {periodNumbers.map(period => {
+                  const slot = slotMap.get(`${day}-${period}`)
+                  if (!slot) return (
+                    <td key={period} className="px-2 py-2 border-r border-gray-100 last:border-r-0 text-center text-gray-200">—</td>
+                  )
+                  if (slot.is_break) return (
+                    <td key={period} className="px-2 py-2 border-r border-gray-100 last:border-r-0 text-center bg-amber-50/60">
+                      <span className="text-amber-500 text-[10px]">Break</span>
+                    </td>
+                  )
+                  if (editSlotId === slot.id) return (
+                    <td key={period} className="px-2 py-1.5 border-r border-gray-100 last:border-r-0">
+                      <div className="flex flex-col gap-1">
+                        <input value={editSubject} onChange={e => setEditSubject(e.target.value)}
+                          className="border border-gray-200 rounded px-1.5 py-1 text-[10px] text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-violet-300 w-full" placeholder="Subject" />
+                        <select value={editTeacher} onChange={e => setEditTeacher(e.target.value)}
+                          className="border border-gray-200 rounded px-1 py-1 text-[10px] text-gray-900 bg-white focus:outline-none w-full">
+                          <option value="">No teacher</option>
+                          {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                        <div className="flex gap-1">
+                          <button onClick={() => onSaveSlot(slot.id)}
+                            className="flex-1 bg-blue-600 text-white text-[10px] py-0.5 rounded hover:bg-blue-700">Save</button>
+                          <button onClick={() => setEditSlotId(null)}
+                            className="flex-1 border border-gray-200 text-gray-500 text-[10px] py-0.5 rounded hover:bg-gray-50">✕</button>
+                        </div>
                       </div>
-                    )}
-                  </td>
-
-                  {/* Day cells */}
-                  {activeDays.map(day => {
-                    const slot = slotMap.get(`${day}-${period}`)
-                    if (!slot) return (
-                      <td key={day} className="px-2 py-2 border-r border-gray-100 last:border-r-0 text-center text-gray-200">—</td>
-                    )
-                    if (slot.is_break) return (
-                      <td key={day} className="px-2 py-2 border-r border-gray-100 last:border-r-0 text-center">
-                        <span className="text-amber-500 text-[10px]">Break</span>
-                      </td>
-                    )
-                    if (editSlotId === slot.id) return (
-                      <td key={day} className="px-2 py-1.5 border-r border-gray-100 last:border-r-0" colSpan={1}>
-                        <div className="flex flex-col gap-1">
-                          <input value={editSubject} onChange={e => setEditSubject(e.target.value)}
-                            className="border border-gray-200 rounded px-1.5 py-1 text-[10px] text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-violet-300 w-full" placeholder="Subject" />
-                          <select value={editTeacher} onChange={e => setEditTeacher(e.target.value)}
-                            className="border border-gray-200 rounded px-1 py-1 text-[10px] text-gray-900 bg-white focus:outline-none w-full">
-                            <option value="">No teacher</option>
-                            {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                          </select>
-                          <div className="flex gap-1">
-                            <button onClick={() => onSaveSlot(slot.id)}
-                              className="flex-1 bg-blue-600 text-white text-[10px] py-0.5 rounded hover:bg-blue-700">Save</button>
-                            <button onClick={() => setEditSlotId(null)}
-                              className="flex-1 border border-gray-200 text-gray-500 text-[10px] py-0.5 rounded hover:bg-gray-50">✕</button>
-                          </div>
+                    </td>
+                  )
+                  const isConflict = slot.has_conflict === true
+                  const isManual = slot.source === 'manual'
+                  const colorCls = isConflict
+                    ? 'bg-red-50 border-red-400 text-red-800'
+                    : slot.subject_name
+                    ? subjectColors[slot.subject_name] ?? 'bg-gray-50 border-gray-200 text-gray-700'
+                    : 'bg-gray-50 border-gray-200 text-gray-400'
+                  return (
+                    <td key={period} className="px-1.5 py-1.5 border-r border-gray-100 last:border-r-0">
+                      <div
+                        className={`rounded-lg border px-2 py-1.5 cursor-pointer hover:opacity-80 transition-opacity group relative ${colorCls}`}
+                        onClick={() => { setEditSlotId(slot.id); setEditSubject(slot.subject_name || ''); setEditTeacher(String(slot.teacher_id || '')) }}
+                        title={isConflict ? `⚠ ${slot.teacher_name} is also teaching another class at this slot` : undefined}
+                      >
+                        {isConflict && (
+                          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full flex items-center justify-center text-white text-[8px] font-bold">!</span>
+                        )}
+                        {isManual && !isConflict && (
+                          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-violet-400 rounded-full" title="Manually set" />
+                        )}
+                        <div className="font-semibold text-[11px] leading-tight truncate">
+                          {slot.subject_name || <span className="text-gray-300 italic">Empty</span>}
                         </div>
-                      </td>
-                    )
-                    const isConflict = slot.has_conflict === true
-                    const isManual = slot.source === 'manual'
-                    const colorCls = isConflict
-                      ? 'bg-red-50 border-red-400 text-red-800'
-                      : slot.subject_name
-                      ? subjectColors[slot.subject_name] ?? 'bg-gray-50 border-gray-200 text-gray-700'
-                      : 'bg-gray-50 border-gray-200 text-gray-400'
-                    return (
-                      <td key={day} className="px-1.5 py-1.5 border-r border-gray-100 last:border-r-0">
-                        <div
-                          className={`rounded-lg border px-2 py-1.5 cursor-pointer hover:opacity-80 transition-opacity group relative ${colorCls}`}
-                          onClick={() => { setEditSlotId(slot.id); setEditSubject(slot.subject_name || ''); setEditTeacher(String(slot.teacher_id || '')) }}
-                          title={isConflict ? `⚠ ${slot.teacher_name} is also teaching another class at this slot` : undefined}
-                        >
-                          {/* Conflict badge */}
-                          {isConflict && (
-                            <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full flex items-center justify-center text-white text-[8px] font-bold">!</span>
-                          )}
-                          {/* Manual override dot */}
-                          {isManual && !isConflict && (
-                            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-violet-400 rounded-full" title="Manually set" />
-                          )}
-                          <div className="font-semibold text-[11px] leading-tight truncate">
-                            {slot.subject_name || <span className="text-gray-300 italic">Empty</span>}
+                        {slot.teacher_name ? (
+                          <div className={`text-[10px] truncate mt-0.5 ${isConflict ? 'text-red-600 font-medium' : 'opacity-70'}`}>
+                            {isConflict ? '⚠ ' : ''}{slot.teacher_name}
                           </div>
-                          {slot.teacher_name ? (
-                            <div className={`text-[10px] truncate mt-0.5 ${isConflict ? 'text-red-600 font-medium' : 'opacity-70'}`}>
-                              {isConflict ? '⚠ ' : ''}{slot.teacher_name}
-                            </div>
-                          ) : (
-                            <div className="text-[10px] text-amber-500 mt-0.5 italic">No teacher</div>
-                          )}
-                        </div>
-                      </td>
-                    )
-                  })}
-                </tr>
-              )
-            })}
+                        ) : (
+                          <div className="text-[10px] text-amber-500 mt-0.5 italic">No teacher</div>
+                        )}
+                      </div>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

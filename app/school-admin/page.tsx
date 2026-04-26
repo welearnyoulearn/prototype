@@ -413,7 +413,7 @@ export default function SchoolAdmin() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50">
+    <div className="h-screen flex flex-col overflow-hidden bg-slate-50">
       {/* Top bar */}
       <div className="bg-white border-b border-slate-200 px-5 py-3 flex items-center justify-between flex-shrink-0 z-30 shadow-sm">
         <div className="flex items-center gap-3">
@@ -512,7 +512,7 @@ export default function SchoolAdmin() {
           </div>
         </div>
       ) : (
-        <div className="flex flex-1 min-h-0">
+        <div className="flex flex-1 overflow-hidden">
           {/* Sidebar */}
           <aside className="w-60 bg-slate-900 flex-shrink-0 flex flex-col shadow-xl">
             {/* School branding */}
