@@ -523,6 +523,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
               )}
             </div>
             </>) /* end info tab */}
+
           </div>
         </div>
       )}

@@ -105,6 +105,8 @@ function SubstituteModal({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [viewMode, setViewMode] = useState<'list' | 'timetable'>('list')
+  const [aiSuggestion, setAiSuggestion] = useState('')
+  const [aiSuggLoading, setAiSuggLoading] = useState(false)
 
   // Load teacher's timetable periods (all classes they teach)
   useEffect(() => {
@@ -167,6 +169,20 @@ function SubstituteModal({
         setFreeTeacherCache(prev => ({ ...prev, [key]: [] }))
       }
     } catch { /* ignore */ }
+  }
+
+  async function loadAiSuggestion() {
+    setAiSuggLoading(true)
+    try {
+      const res = await fetch('/api/ai/leave-coverage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, leave_request_id: leave.id }),
+      })
+      const data = await res.json()
+      setAiSuggestion(data.suggestion || 'Could not generate suggestion.')
+    } catch { setAiSuggestion('Could not generate suggestion.') }
+    setAiSuggLoading(false)
   }
 
   function setSubTeacher(date: string, period: number, teacherId: number | null) {
@@ -240,6 +256,30 @@ function SubstituteModal({
           {error && (
             <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>
           )}
+
+          {/* AI Coverage Suggestion */}
+          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-3">
+            <span className="text-base flex-shrink-0 mt-0.5">✨</span>
+            <div className="flex-1">
+              {aiSuggestion ? (
+                <>
+                  <p className="text-xs font-bold text-amber-800 mb-1">AI Coverage Suggestion</p>
+                  <p className="text-sm text-amber-800 leading-relaxed">{aiSuggestion}</p>
+                </>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <p className="text-sm text-amber-700">Let AI suggest the best coverage arrangement for this leave</p>
+                  <button
+                    onClick={loadAiSuggestion}
+                    disabled={aiSuggLoading}
+                    className="flex-shrink-0 text-xs bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg font-semibold"
+                  >
+                    {aiSuggLoading ? 'Analysing...' : 'AI Suggest'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
 
           {/* View toggle */}
           {!loadingSlots && subs.length > 0 && (

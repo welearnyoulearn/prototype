@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
   }
 
   // AI auto-answer — non-blocking, updates doubt after response is already sent
-  if (process.env.GEMINI_API_KEY) {
+  if (process.env.GROQ_API_KEY) {
     const { rows: [cls] } = await pool.query(
       'SELECT grade FROM classes WHERE id = $1', [class_id]
     )

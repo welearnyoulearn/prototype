@@ -50,7 +50,14 @@ type Props = {
   schoolId: number
 }
 
-export default function StudentDashboard({ student, classId, schoolId }: Props) {
+type WeeklyTestStatus = {
+  status: 'not_generated' | 'available' | 'submitted'
+  week_start: string
+  score?: number | null
+  max_score?: number | null
+}
+
+export default function StudentDashboard({ student, classId, schoolId, onNavigate }: Props & { onNavigate?: (key: string) => void }) {
   const [tasks, setTasks] = useState<Task[]>([])
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [doubts, setDoubts] = useState<Doubt[]>([])
@@ -58,6 +65,15 @@ export default function StudentDashboard({ student, classId, schoolId }: Props) 
   const [engagementScore, setEngagementScore] = useState<number | null>(null)
   const [announcements, setAnnouncements] = useState<AnnouncementItem[]>([])
   const [annExpanded, setAnnExpanded] = useState<number | null>(null)
+  const [weeklyTest, setWeeklyTest] = useState<WeeklyTestStatus | null>(null)
+
+  useEffect(() => {
+    // Check weekly test status without triggering AI generation
+    fetch(`/api/weekly-test?student_id=${student.id}&school_id=${schoolId}&class_id=${classId}&check_only=true`)
+      .then(r => r.json())
+      .then(d => setWeeklyTest(d))
+      .catch(() => {})
+  }, [student.id, schoolId, classId])
 
   useEffect(() => {
     Promise.all([
@@ -89,9 +105,28 @@ export default function StudentDashboard({ student, classId, schoolId }: Props) 
           })
           const totalAtt = byDate.size
           const presentDays = Array.from(byDate.values()).filter(Boolean).length
-          const attPct = totalAtt > 0 ? (presentDays / totalAtt) * 100 : 0
+          const attPct  = totalAtt > 0 ? (presentDays / totalAtt) * 100 : 0
           const taskPct = published.length > 0 ? (subs.filter(s => s.submitted_at).length / published.length) * 100 : 0
-          setEngagementScore(Math.round(attPct * 0.5 + taskPct * 0.5))
+          // Fetch this month's test avg to include in engagement score
+          const now2 = new Date()
+          const monthStart = `${now2.getFullYear()}-${String(now2.getMonth() + 1).padStart(2,'0')}-01`
+          fetch(`/api/weekly-test/history?student_id=${student.id}&school_id=${schoolId}&limit=5`)
+            .then(r => r.json())
+            .then(d => {
+              const recent = (d.tests || []).filter((t: { week_start: string; status: string; score: number | null; max_score: number | null }) =>
+                t.week_start >= monthStart && t.status === 'submitted' && t.score !== null && t.max_score
+              )
+              const testPct = recent.length > 0
+                ? recent.reduce((a: number, t: { score: number; max_score: number }) => a + (t.score / t.max_score * 100), 0) / recent.length
+                : 0
+              const hasTests = recent.length > 0
+              setEngagementScore(Math.round(
+                hasTests
+                  ? attPct * 0.4 + taskPct * 0.4 + testPct * 0.2
+                  : attPct * 0.5 + taskPct * 0.5
+              ))
+            })
+            .catch(() => setEngagementScore(Math.round(attPct * 0.5 + taskPct * 0.5)))
         }).catch(() => { /* non-critical */ })
     }).finally(() => setLoading(false))
   }, [student.id, classId, schoolId])
@@ -140,6 +175,50 @@ export default function StudentDashboard({ student, classId, schoolId }: Props) 
           </div>
         )}
       </div>
+
+      {/* Weekly test banner */}
+      {weeklyTest && weeklyTest.status !== 'not_generated' && (
+        weeklyTest.status === 'available' ? (
+          <button
+            onClick={() => onNavigate?.('weekly-test')}
+            className="w-full text-left bg-gradient-to-r from-violet-600 to-purple-700 rounded-xl p-4 text-white hover:from-violet-700 hover:to-purple-800 transition-all group"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-violet-200 text-xs font-semibold uppercase tracking-wide mb-0.5">This Week</p>
+                <p className="text-base font-bold">Weekly AI Test is ready! ✨</p>
+                <p className="text-violet-200 text-xs mt-0.5">Questions from your recent syllabus topics</p>
+              </div>
+              <div className="bg-white/20 rounded-xl px-4 py-2 text-center group-hover:bg-white/30 transition-colors flex-shrink-0">
+                <p className="text-sm font-bold">Take Test →</p>
+              </div>
+            </div>
+          </button>
+        ) : weeklyTest.status === 'submitted' && weeklyTest.score != null && weeklyTest.max_score ? (
+          <button
+            onClick={() => onNavigate?.('weekly-test')}
+            className="w-full text-left bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 rounded-xl p-4 hover:border-green-300 transition-all"
+          >
+            {(() => {
+              const pct = Math.round((weeklyTest.score as number) / (weeklyTest.max_score as number) * 100)
+              return (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-green-600 text-xs font-semibold uppercase tracking-wide mb-0.5">This Week&apos;s Test</p>
+                    <p className="text-sm font-bold text-gray-800">You&apos;ve submitted — see your result</p>
+                  </div>
+                  <div className="text-right">
+                    <p className={`text-2xl font-black ${pct >= 80 ? 'text-green-600' : pct >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
+                      {pct}%
+                    </p>
+                    <p className="text-xs text-gray-400">{weeklyTest.score}/{weeklyTest.max_score}</p>
+                  </div>
+                </div>
+              )
+            })()}
+          </button>
+        ) : null
+      )}
 
       {/* Overdue alert */}
       {overdue.length > 0 && (

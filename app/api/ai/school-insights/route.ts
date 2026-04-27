@@ -9,7 +9,7 @@ import { generateSchoolInsights } from '@/lib/gemini'
 export async function POST(req: NextRequest) {
   const body = await req.json()
 
-  if (!process.env.GEMINI_API_KEY)
+  if (!process.env.GROQ_API_KEY)
     return NextResponse.json({ error: 'AI not configured' }, { status: 503 })
 
   try {

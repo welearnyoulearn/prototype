@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
       let topic
       let quizOptions: string[] = []
       try {
-        if (process.env.GEMINI_API_KEY) {
+        if (process.env.GROQ_API_KEY) {
           const generated = await generateNewspaper(today)
           topic = generated
           quizOptions = generated.quiz_options ?? []

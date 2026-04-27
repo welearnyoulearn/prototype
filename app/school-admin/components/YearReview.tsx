@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 type ReviewData = {
   academic_year: string
@@ -14,8 +14,6 @@ type ReviewData = {
   top_students: Array<{ name: string; grade: string; section: string; total_points: number }>
   monthly_attendance: Array<{ month: string; pct: number; present: number; total: number }>
 }
-
-const ACADEMIC_YEARS = ['2025-26', '2024-25', '2023-24']
 
 function fmt(n: number) { return `₹${n.toLocaleString('en-IN')}` }
 function pct(v: number, t: number) { return t > 0 ? Math.round((v / t) * 100) : 0 }
@@ -31,12 +29,26 @@ function StatBox({ label, value, sub, color }: { label: string; value: string | 
 }
 
 export default function YearReview({ schoolId }: { schoolId: number }) {
-  const [year, setYear]       = useState(ACADEMIC_YEARS[0])
+  const [year, setYear]       = useState('')
+  const [academicYears, setAcademicYears] = useState<string[]>([])
   const [data, setData]       = useState<ReviewData | null>(null)
   const [loading, setLoading] = useState(false)
   const [pdfLoading, setPdfLoading] = useState(false)
   const [error, setError]     = useState('')
   const reportRef             = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    Promise.all([
+      fetch(`/api/academic-year/current?school_id=${schoolId}`).then(r => r.ok ? r.json() : null),
+      fetch(`/api/academic-years?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
+    ]).then(([current, all]) => {
+      const allLabels: string[] = Array.isArray(all) ? all.map((y: { label: string }) => y.label) : []
+      const currentLabel: string = current?.label ?? allLabels[0] ?? '2025-26'
+      if (!allLabels.length) allLabels.push(currentLabel)
+      setAcademicYears(allLabels)
+      setYear(currentLabel)
+    }).catch(() => { setAcademicYears(['2025-26']); setYear('2025-26') })
+  }, [schoolId])
 
   async function generate() {
     setLoading(true); setError('')
@@ -93,7 +105,7 @@ export default function YearReview({ schoolId }: { schoolId: number }) {
         <div className="flex items-center gap-3">
           <select value={year} onChange={e => { setYear(e.target.value); setData(null) }}
             className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
-            {ACADEMIC_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+            {academicYears.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
           <button onClick={generate} disabled={loading}
             className="bg-purple-600 hover:bg-purple-700 text-white px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors">

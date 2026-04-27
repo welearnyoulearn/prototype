@@ -517,6 +517,7 @@ export async function initDB() {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_syllabus_class ON syllabus_topics(class_id, school_id)`,
     `CREATE INDEX IF NOT EXISTS idx_syllabus_subject ON syllabus_topics(class_id, subject)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_syllabus_unique_topic ON syllabus_topics(class_id, subject, chapter_name, topic_name)`,
 
     // ── Exam Marks System ────────────────────────────────────────────────────
     `CREATE TABLE IF NOT EXISTS exam_records (
@@ -921,12 +922,7 @@ export async function initDB() {
     `CREATE INDEX IF NOT EXISTS idx_school_subject_templates_school ON school_subject_templates(school_id)`,
 
     // ── Per-template timetables ───────────────────────────────────────────────
-    // Each class can have multiple independent timetables — one per schedule template.
-    // template_id = NULL means the school-default timetable.
-    // Conflicts are scoped to the same template (IS NOT DISTINCT FROM).
-    // Add column first (no FK) so this never fails silently due to a missing ref table.
     `ALTER TABLE class_timetable ADD COLUMN IF NOT EXISTS template_id INTEGER`,
-    // Add FK constraint separately — safe to re-run (DO NOTHING if already exists)
     `DO $$ BEGIN
        IF NOT EXISTS (
          SELECT 1 FROM pg_constraint
@@ -938,10 +934,55 @@ export async function initDB() {
            FOREIGN KEY (template_id) REFERENCES schedule_templates(id) ON DELETE SET NULL;
        END IF;
      END $$`,
-    // Drop the old 3-column unique index and replace with a 4-column expression index
-    // that includes template_id (NULL → 0 via COALESCE so the school-default rows stay unique)
     `DROP INDEX IF EXISTS idx_class_timetable_slot`,
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_class_timetable_slot ON class_timetable(class_id, day_of_week, period_number, COALESCE(template_id, 0))`,
+
+    // ── AI Chat Sessions (student floating chat — visible to parents) ───────────
+    `CREATE TABLE IF NOT EXISTS ai_chat_sessions (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      subject VARCHAR(100),
+      messages JSONB NOT NULL DEFAULT '[]',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_ai_chat_sessions_student ON ai_chat_sessions(student_id, created_at DESC)`,
+
+    // ── Teacher AI chat sessions (professional assistant, not parent-visible) ────
+    `CREATE TABLE IF NOT EXISTS teacher_ai_sessions (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      teacher_id INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+      context VARCHAR(100),
+      messages JSONB NOT NULL DEFAULT '[]',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_teacher_ai_sessions_teacher ON teacher_ai_sessions(teacher_id, created_at DESC)`,
+
+    // ── HOD (Head of Department) assignments ─────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS department_hods (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      department VARCHAR(100) NOT NULL,
+      teacher_id INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
+      class_ids INTEGER[] NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_department_hods_school ON department_hods(school_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_department_hods_teacher ON department_hods(teacher_id)`,
+    `ALTER TABLE department_hods DROP CONSTRAINT IF EXISTS department_hods_school_id_department_key`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_department_hods_school_dept_teacher ON department_hods(school_id, department, teacher_id)`,
+
+    // ── Extend syllabus_topics with HOD-governance fields ─────────────────────────
+    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS target_date DATE`,
+    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS delay_reason TEXT`,
+    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS hod_remark TEXT`,
+    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS hod_remark_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL`,
+    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS hod_remark_at TIMESTAMPTZ`,
+    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS last_teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL`,
   ]
 
   for (const sql of migrations) {

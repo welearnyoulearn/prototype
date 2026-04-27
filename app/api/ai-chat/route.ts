@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
   if (!subject?.trim() || !grade?.trim())
     return NextResponse.json({ error: 'subject and grade required' }, { status: 400 })
 
-  if (!process.env.GEMINI_API_KEY)
+  if (!process.env.GROQ_API_KEY)
     return NextResponse.json({ error: 'AI not configured' }, { status: 503 })
 
   try {

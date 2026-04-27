@@ -26,6 +26,7 @@ type Doubt = {
 }
 
 type DoubtPattern = { subject: string; count: number }
+type AIPattern = { pattern: string; concept: string; affected_count: number; suggested_action: string }
 
 type Message = {
   id: number
@@ -103,6 +104,10 @@ export default function DoubtsCenter({ teacher, schoolId }: Props) {
   const [closing, setClosing] = useState(false)
   const [togglingFaq, setTogglingFaq] = useState(false)
   const [doubtPatterns, setDoubtPatterns] = useState<DoubtPattern[]>([])
+  const [aiPatterns, setAiPatterns] = useState<AIPattern[]>([])
+  const [aiPatternsLoading, setAiPatternsLoading] = useState(false)
+  const [aiPatternsError, setAiPatternsError] = useState('')
+  const [aiPatternsLoaded, setAiPatternsLoaded] = useState(false)
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
@@ -233,6 +238,20 @@ export default function DoubtsCenter({ teacher, schoolId }: Props) {
       await fetchDoubts()
     }
     setTogglingFaq(false)
+  }
+
+  async function loadAIPatterns() {
+    setAiPatternsLoading(true)
+    setAiPatternsError('')
+    try {
+      const res = await fetch(`/api/ai/confusion-patterns?school_id=${schoolId}&teacher_id=${teacher.id}&days=7`)
+      const data = await res.json()
+      setAiPatterns(Array.isArray(data.patterns) ? data.patterns : [])
+      setAiPatternsLoaded(true)
+    } catch {
+      setAiPatternsError('Could not analyze patterns')
+    }
+    setAiPatternsLoading(false)
   }
 
   const subjects = [...new Set(doubts.map(d => d.subject))].sort()
@@ -491,24 +510,66 @@ export default function DoubtsCenter({ teacher, schoolId }: Props) {
         ))}
       </div>
 
-      {/* Doubt pattern alert */}
-      {doubtPatterns.length > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
-          <svg className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <div>
-            <p className="text-sm font-semibold text-red-700 mb-1">Doubt Pattern Detected</p>
-            <p className="text-xs text-red-600">
-              Multiple students are struggling with the same topic. Consider addressing in class:
-            </p>
-            <div className="flex gap-2 flex-wrap mt-2">
-              {doubtPatterns.map(p => (
-                <span key={p.subject} className="text-xs bg-red-100 text-red-700 px-2.5 py-1 rounded-full font-medium">
-                  {p.subject} — {p.count} doubts in 7 days
-                </span>
-              ))}
+      {/* AI Confusion Pattern Detection */}
+      {(doubtPatterns.length > 0 || aiPatternsLoaded) && (
+        <div className={`rounded-xl border p-4 ${aiPatternsLoaded && aiPatterns.length > 0 ? 'bg-amber-50 border-amber-200' : doubtPatterns.length > 0 ? 'bg-red-50 border-red-200' : 'bg-gray-50 border-gray-200'}`}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3 flex-1">
+              <span className="text-lg flex-shrink-0 mt-0.5">🔍</span>
+              <div className="flex-1">
+                <p className={`text-sm font-semibold mb-1 ${aiPatterns.length > 0 ? 'text-amber-800' : 'text-red-700'}`}>
+                  {aiPatternsLoaded && aiPatterns.length === 0
+                    ? 'No major confusion patterns detected this week'
+                    : aiPatterns.length > 0
+                      ? `${aiPatterns.length} confusion pattern${aiPatterns.length > 1 ? 's' : ''} detected`
+                      : `${doubtPatterns.reduce((s, p) => s + p.count, 0)} doubts in last 7 days — click to analyze`
+                  }
+                </p>
+
+                {/* Simple count badges (always shown) */}
+                {doubtPatterns.length > 0 && !aiPatternsLoaded && (
+                  <div className="flex gap-2 flex-wrap mb-2">
+                    {doubtPatterns.map(p => (
+                      <span key={p.subject} className="text-xs bg-red-100 text-red-700 px-2.5 py-1 rounded-full font-medium">
+                        {p.subject} — {p.count} doubts
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                {/* AI pattern cards */}
+                {aiPatterns.length > 0 && (
+                  <div className="space-y-2 mt-2">
+                    {aiPatterns.map((p, i) => (
+                      <div key={i} className="bg-white rounded-lg border border-amber-200 p-3">
+                        <p className="text-xs font-bold text-amber-900">{p.concept}</p>
+                        <p className="text-xs text-amber-700 mt-0.5">{p.pattern}</p>
+                        <div className="flex items-center justify-between mt-1.5">
+                          <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                            ~{p.affected_count} student{p.affected_count > 1 ? 's' : ''}
+                          </span>
+                          <p className="text-[10px] text-green-700 font-medium">→ {p.suggested_action}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {aiPatternsError && (
+                  <p className="text-xs text-red-500 mt-1">{aiPatternsError}</p>
+                )}
+              </div>
             </div>
+
+            {!aiPatternsLoaded && (
+              <button
+                onClick={loadAIPatterns}
+                disabled={aiPatternsLoading}
+                className="flex-shrink-0 text-xs bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg font-semibold"
+              >
+                {aiPatternsLoading ? 'Analyzing...' : '✨ AI Analyze'}
+              </button>
+            )}
           </div>
         </div>
       )}

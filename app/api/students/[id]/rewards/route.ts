@@ -16,7 +16,7 @@ export async function GET(
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 
   try {
-    const [pointsRes, badgesRes, streakRes, recentRes, leaderboardRes] = await Promise.all([
+    const [pointsRes, badgesRes, streakRes, recentRes, weeklyTestRes, leaderboardRes] = await Promise.all([
       // Total points
       pool.query(
         `SELECT COALESCE(SUM(points), 0) AS total FROM student_points WHERE student_id = $1 AND school_id = $2`,
@@ -40,6 +40,18 @@ export async function GET(
         `SELECT action_type, points, earned_at FROM student_points
          WHERE student_id = $1 AND school_id = $2
          ORDER BY earned_at DESC LIMIT 10`,
+        [student_id, school_id]
+      ),
+
+      // Weekly test stats
+      pool.query(
+        `SELECT
+           COUNT(*)::int                              AS tests_taken,
+           ROUND(AVG(score::numeric / max_score * 100))::int AS avg_pct,
+           MAX(ROUND(score::numeric / max_score * 100))::int AS best_pct,
+           COUNT(*) FILTER (WHERE ROUND(score::numeric / max_score * 100) >= 80)::int AS excellent_count
+         FROM weekly_tests
+         WHERE student_id = $1 AND school_id = $2 AND status = 'submitted'`,
         [student_id, school_id]
       ),
 
@@ -84,6 +96,8 @@ export async function GET(
 
     const myRank = leaderboard.find((r: { is_me: boolean }) => r.is_me)?.rank ?? null
 
+    const wt = weeklyTestRes.rows[0]
+
     return NextResponse.json({
       total_points: totalPoints,
       streak: {
@@ -95,6 +109,12 @@ export async function GET(
       recent_transactions: recentRes.rows,
       leaderboard,
       my_rank: myRank,
+      weekly_tests: {
+        tests_taken:     wt?.tests_taken     ?? 0,
+        avg_pct:         wt?.avg_pct         ?? null,
+        best_pct:        wt?.best_pct        ?? null,
+        excellent_count: wt?.excellent_count ?? 0,
+      },
     })
   } catch (err) {
     console.error('Rewards API error:', err)

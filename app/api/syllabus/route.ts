@@ -15,9 +15,12 @@ export async function GET(req: NextRequest) {
 
   try {
     let query = `
-      SELECT st.*, t.name AS covered_by_name
+      SELECT st.*,
+             t.name  AS covered_by_name,
+             ht.name AS hod_remark_by_name
       FROM syllabus_topics st
-      LEFT JOIN teachers t ON t.id = st.covered_by
+      LEFT JOIN teachers t  ON t.id  = st.covered_by
+      LEFT JOIN teachers ht ON ht.id = st.hod_remark_by
       WHERE st.school_id = $1 AND st.class_id = $2
     `
     const args: (string | number)[] = [school_id, class_id]
@@ -110,8 +113,12 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ inserted })
-  } catch (err) {
+  } catch (err: unknown) {
     console.error('Syllabus POST error:', err)
+    // Unique constraint violation — duplicate topic
+    if (err && typeof err === 'object' && 'code' in err && (err as { code: string }).code === '23505') {
+      return NextResponse.json({ error: 'A topic with this name already exists in this chapter' }, { status: 409 })
+    }
     return NextResponse.json({ error: 'Failed to add topics' }, { status: 500 })
   }
 }

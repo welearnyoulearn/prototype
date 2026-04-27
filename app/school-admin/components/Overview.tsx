@@ -65,14 +65,23 @@ export default function Overview({ schoolId, onNavigate }: Props) {
   const [feeOverdue, setFeeOverdue]           = useState(0)
   const [feeOutstanding, setFeeOutstanding]   = useState(0)
   const [loading, setLoading]                 = useState(true)
+  const [currentYear, setCurrentYear]         = useState<string | null>(null)
   const [aiInsights, setAiInsights]           = useState<string | null>(null)
   const [aiLoading, setAiLoading]             = useState(false)
   const [aiError, setAiError]                 = useState('')
+  const [healthReport, setHealthReport]       = useState<string | null>(null)
+  const [healthLoading, setHealthLoading]     = useState(false)
+  const [parentMsgStudentId, setParentMsgStudentId] = useState('')
+  const [parentMsgConcern, setParentMsgConcern]     = useState('')
+  const [parentMsg, setParentMsg]             = useState('')
+  const [parentMsgLoading, setParentMsgLoading]     = useState(false)
+  const [parentMsgError, setParentMsgError]         = useState('')
+  const [showParentTool, setShowParentTool]         = useState(false)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (year?: string) => {
     setLoading(true)
     const todayStr = new Date().toISOString().split('T')[0]
-    const currentYear = '2025-26'
+    const yearToUse = year ?? currentYear ?? '2025-26'
 
     // Build features list for batched API — only request what's enabled
     const featuresList = [
@@ -86,7 +95,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
 
     try {
       const res = await fetch(
-        `/api/admin/overview?school_id=${schoolId}&features=${featuresList}&date=${todayStr}&year=${currentYear}`
+        `/api/admin/overview?school_id=${schoolId}&features=${featuresList}&date=${todayStr}&year=${yearToUse}`
       )
       if (!res.ok) throw new Error('overview fetch failed')
       const d = await res.json()
@@ -113,7 +122,18 @@ export default function Overview({ schoolId, onNavigate }: Props) {
     }
   }, [schoolId, hasAttendance, hasLeave, hasCover, hasTimetable, hasExams, hasFeeManagement])
 
-  useEffect(() => { load() }, [load])
+  // Fetch current academic year once, then load overview with it
+  useEffect(() => {
+    fetch(`/api/academic-year/current?school_id=${schoolId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        const label = d?.label ?? null
+        setCurrentYear(label)
+        load(label ?? undefined)
+      })
+      .catch(() => load())
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schoolId])
 
   async function loadAiInsights() {
     setAiLoading(true)
@@ -141,6 +161,38 @@ export default function Overview({ schoolId, onNavigate }: Props) {
     } finally {
       setAiLoading(false)
     }
+  }
+
+  async function loadHealthReport() {
+    setHealthLoading(true)
+    try {
+      const res = await fetch('/api/ai/school-health-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId }),
+      })
+      const data = await res.json()
+      setHealthReport(data.report || 'Could not generate report.')
+    } catch { setHealthReport('Could not generate report.') }
+    setHealthLoading(false)
+  }
+
+  async function generateParentMsg() {
+    if (!parentMsgStudentId.trim()) { setParentMsgError('Enter a student ID'); return }
+    setParentMsgLoading(true)
+    setParentMsgError('')
+    setParentMsg('')
+    try {
+      const res = await fetch('/api/ai/parent-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, student_id: parseInt(parentMsgStudentId), concern: parentMsgConcern }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setParentMsgError(data.error || 'Failed'); return }
+      setParentMsg(data.message)
+    } catch { setParentMsgError('Connection error') }
+    setParentMsgLoading(false)
   }
 
   const todayLabel   = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })
@@ -259,6 +311,94 @@ export default function Overview({ schoolId, onNavigate }: Props) {
           {aiError && <p className="text-xs text-red-600 mt-2">{aiError}</p>}
           {aiInsights && (
             <p className="text-sm text-violet-900 leading-relaxed mt-3 border-t border-violet-100 pt-3">{aiInsights}</p>
+          )}
+        </div>
+      )}
+
+      {/* ── Weekly Health Report ── */}
+      {!loading && (
+        <div className={`rounded-2xl border p-4 transition-all ${healthReport ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}`}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">📊</span>
+              <div>
+                <p className="text-sm font-bold text-gray-800">Weekly School Health Report</p>
+                {!healthReport && <p className="text-xs text-gray-400">AI analyses last 7 days — attendance, doubts, tasks, fees</p>}
+              </div>
+            </div>
+            {!healthReport ? (
+              <button onClick={loadHealthReport} disabled={healthLoading}
+                className="text-xs bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-lg transition-colors flex-shrink-0 flex items-center gap-1.5">
+                {healthLoading ? (
+                  <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />Generating…</>
+                ) : '📊 Generate Report'}
+              </button>
+            ) : (
+              <button onClick={() => setHealthReport(null)} className="text-xs text-emerald-600 hover:text-emerald-800 flex-shrink-0">Dismiss</button>
+            )}
+          </div>
+          {healthReport && (
+            <p className="text-sm text-emerald-900 leading-relaxed mt-3 border-t border-emerald-100 pt-3">{healthReport}</p>
+          )}
+        </div>
+      )}
+
+      {/* ── Parent Message Generator ── */}
+      {!loading && (
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">💌</span>
+              <div>
+                <p className="text-sm font-bold text-gray-800">Parent Message Generator</p>
+                <p className="text-xs text-gray-400">AI writes a personalised message for any student&apos;s parent</p>
+              </div>
+            </div>
+            <button onClick={() => setShowParentTool(v => !v)}
+              className="text-xs text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-50">
+              {showParentTool ? 'Hide' : 'Open Tool'}
+            </button>
+          </div>
+
+          {showParentTool && (
+            <div className="border-t border-gray-100 pt-4 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Student ID</label>
+                  <input
+                    type="number"
+                    value={parentMsgStudentId}
+                    onChange={e => setParentMsgStudentId(e.target.value)}
+                    placeholder="e.g. 42"
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Specific concern (optional)</label>
+                  <input
+                    value={parentMsgConcern}
+                    onChange={e => setParentMsgConcern(e.target.value)}
+                    placeholder="e.g. dropping attendance"
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  />
+                </div>
+              </div>
+              {parentMsgError && <p className="text-xs text-red-500">{parentMsgError}</p>}
+              <button onClick={generateParentMsg} disabled={parentMsgLoading}
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl py-2.5 text-sm font-semibold flex items-center justify-center gap-2">
+                {parentMsgLoading ? (
+                  <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Generating…</>
+                ) : '✨ Generate Message'}
+              </button>
+              {parentMsg && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                  <p className="text-xs font-bold text-blue-700 mb-2">Generated Message — copy and send via WhatsApp/SMS</p>
+                  <p className="text-sm text-blue-900 leading-relaxed">{parentMsg}</p>
+                  <button onClick={() => navigator.clipboard?.writeText(parentMsg)}
+                    className="mt-2 text-xs text-blue-600 hover:underline">Copy to clipboard</button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}

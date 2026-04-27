@@ -3,13 +3,17 @@ import pool from './db'
 // ── Point values per action ───────────────────────────────────────────────────
 export const POINT_VALUES: Record<string, number> = {
   task_submitted: 5,
-  task_scored_high: 10,   // score >= 80% of max_marks
+  task_scored_high: 10,        // score >= 80% of max_marks
   doubt_resolved: 5,
-  newspaper_read: 1,          // base reading point
-  newspaper_quiz_correct: 2,  // bonus for correct quiz answer
-  newspaper_quiz_wrong: -1,   // penalty for wrong answer
+  newspaper_read: 1,           // base reading point
+  newspaper_quiz_correct: 2,   // bonus for correct quiz answer
+  newspaper_quiz_wrong: -1,    // penalty for wrong answer
   streak_7days: 20,
   streak_30days: 50,
+  weekly_test: 2,              // base: just for completing (overridden by tier below)
+  weekly_test_good: 5,         // 50–79%
+  weekly_test_excellent: 10,   // ≥80%
+  weekly_test_perfect: 15,     // 100%
 }
 
 // ── Badge definitions ─────────────────────────────────────────────────────────
@@ -25,6 +29,10 @@ export const BADGE_DEFS = [
   { type: 'reader_20',        label: 'Knowledge Seeker', emoji: '📚', desc: 'Read 20 newspapers' },
   { type: 'points_100',       label: 'Century',          emoji: '💎', desc: 'Earned 100 points' },
   { type: 'points_500',       label: 'Champion',         emoji: '👑', desc: 'Earned 500 points' },
+  { type: 'test_first',       label: 'Test Taker',       emoji: '📝', desc: 'Completed first weekly test' },
+  { type: 'test_5',           label: 'Test Regular',     emoji: '📋', desc: 'Completed 5 weekly tests' },
+  { type: 'test_perfect',     label: 'Perfect Score',    emoji: '🎯', desc: 'Scored 100% on a weekly test' },
+  { type: 'test_streak_4',    label: 'Consistent',       emoji: '📆', desc: 'Submitted 4 tests in a row' },
 ]
 
 // ── Core: award points ────────────────────────────────────────────────────────
@@ -146,6 +154,31 @@ async function checkAndAwardBadges(student_id: number, school_id: number, action
 
   if (action_type === 'streak_7days') await grantBadge(student_id, school_id, 'streak_7')
   if (action_type === 'streak_30days') await grantBadge(student_id, school_id, 'streak_30')
+
+  // Weekly test badges
+  if (action_type.startsWith('weekly_test')) {
+    const { rows: [{ cnt }] } = await pool.query(
+      `SELECT COUNT(*) AS cnt FROM student_points
+       WHERE student_id = $1 AND action_type LIKE 'weekly_test%'`,
+      [student_id]
+    )
+    const testCount = parseInt(cnt)
+    if (testCount >= 1) await grantBadge(student_id, school_id, 'test_first')
+    if (testCount >= 5) await grantBadge(student_id, school_id, 'test_5')
+
+    if (action_type === 'weekly_test_perfect') {
+      await grantBadge(student_id, school_id, 'test_perfect')
+    }
+
+    // 4-week consecutive test streak: check last 4 Mondays all have submissions
+    const { rows: weeks } = await pool.query(
+      `SELECT DISTINCT reference_type FROM student_points
+       WHERE student_id = $1 AND action_type LIKE 'weekly_test%'
+         AND earned_at >= NOW() - INTERVAL '28 days'`,
+      [student_id]
+    )
+    if (weeks.length >= 4) await grantBadge(student_id, school_id, 'test_streak_4')
+  }
 
   // Points milestones
   const { rows: [{ total }] } = await pool.query(

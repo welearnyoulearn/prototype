@@ -1,7 +1,34 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(npx vercel *)",
+      "Bash(node scripts/setup-test-school.js)",
+      "Bash(npx next *)",
+      "Bash(findstr \":3000\")",
+      "Bash(findstr LISTENING)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/)",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" -X POST \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AQ.Ab8RN6LdYpmhRCqD7WBBwhrIwbuEHYc-Wh-AXlQo3B3xMMg9lg\" -H \"Content-Type: application/json\" -d \"{\\\\\"contents\\\\\":[{\\\\\"parts\\\\\":[{\\\\\"text\\\\\":\\\\\"Say hello\\\\\"}]}]}\")",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" -X POST \"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=AQ.Ab8RN6LdYpmhRCqD7WBBwhrIwbuEHYc-Wh-AXlQo3B3xMMg9lg\" -H \"Content-Type: application/json\" -d \"{\\\\\"contents\\\\\":[{\\\\\"parts\\\\\":[{\\\\\"text\\\\\":\\\\\"Say hello in one word\\\\\"}]}]}\")",
+      "Bash(curl -s \"https://generativelanguage.googleapis.com/v1beta/models?key=AQ.Ab8RN6LdYpmhRCqD7WBBwhrIwbuEHYc-Wh-AXlQo3B3xMMg9lg\")",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" -X POST \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=AQ.Ab8RN6LdYpmhRCqD7WBBwhrIwbuEHYc-Wh-AXlQo3B3xMMg9lg\" -H \"Content-Type: application/json\" -d \"{\\\\\"contents\\\\\":[{\\\\\"parts\\\\\":[{\\\\\"text\\\\\":\\\\\"Say hello in one word\\\\\"}]}]}\")",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" -X POST \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AQ.Ab8RN6JkhH18fnr7sDh8glPjGtaxBAYiSb9Ta10ftFStfpAkAA\" -H \"Content-Type: application/json\" -d \"{\\\\\"contents\\\\\":[{\\\\\"parts\\\\\":[{\\\\\"text\\\\\":\\\\\"Say hello in one word\\\\\"}]}]}\")",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" -X POST \"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AQ.Ab8RN6KCQ9rirCJoGBv7DZC7cWdi2TEAh-u31nofkIYledIUxA\" -H \"Content-Type: application/json\" -d \"{\\\\\"contents\\\\\":[{\\\\\"parts\\\\\":[{\\\\\"text\\\\\":\\\\\"Say hello\\\\\"}]}]}\")",
+      "Bash(curl -s -w \"\\\\nHTTP_STATUS:%{http_code}\" -X POST \"https://api.groq.com/openai/v1/chat/completions\" -H \"Content-Type: application/json\" -H \"Authorization: Bearer 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\" -d \"{\\\\\"model\\\\\":\\\\\"llama-3.3-70b-versatile\\\\\",\\\\\"messages\\\\\":[{\\\\\"role\\\\\":\\\\\"user\\\\\",\\\\\"content\\\\\":\\\\\"Say hello in 3 words\\\\\"}],\\\\\"max_tokens\\\\\":20}\")",
+      "Bash(taskkill /F /PID 21056)",
+      "Bash(cmd /c \"taskkill /F /PID 21056\")",
+      "Bash(cmd /c \"wmic process where ProcessId=21056 get ProcessId,Name,CommandLine 2>&1\")",
+      "Bash(cmd /c \"del /f /q \\\\\"d:\\\\wlyl\\\\prototype\\\\.next\\\\dev\\\\lock\\\\\" 2>&1\")",
+      "Bash(PORT=3002 npx next dev --webpack --port 3002)",
+      "Bash(powershell -Command \"Stop-Process -Id 21056 -Force -ErrorAction SilentlyContinue; Start-Sleep 2; Write-Host 'done'\")",
+      "Bash(xargs grep *)",
+      "Bash(awk '{print $NF}')",
+      "Bash(grep -v \"^$\")",
+      "Bash(curl -s \"http://localhost:3000/api/teachers?school_id=1\")",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); try{const j=JSON.parse\\(d\\); console.log\\('Count:',j.length,'First:',JSON.stringify\\(j[0]?.subject\\), 'Dept:', JSON.stringify\\(j[0]?.department\\)\\)}catch\\(e\\){console.log\\('Response \\(first 300\\):', d.slice\\(0,300\\)\\)}\")",
+      "Bash(grep -v \"await\\\\|//\")",
+      "Bash(git pull *)",
+      "Bash(git stash *)"
     ]
   }
 }

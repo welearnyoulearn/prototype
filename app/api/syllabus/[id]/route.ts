@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 
-// PATCH /api/syllabus/[id] — update status or topic details
-// Body: { school_id, status, covered_by?, topic_name?, chapter_order?, topic_order? }
+// PATCH /api/syllabus/[id] — update status, target dates, delay reasons, HOD remarks, topic details
+// Body: { school_id, status?, covered_by?, topic_name?, chapter_order?, topic_order?,
+//         target_date?, delay_reason?, hod_remark?, hod_remark_by? }
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-
+  await ensureDB()
   const { id } = await params
   const body = await req.json()
-  const { school_id, status, covered_by, topic_name, chapter_name, chapter_order, topic_order } = body
+  const {
+    school_id, status, covered_by,
+    topic_name, chapter_name, chapter_order, topic_order,
+    target_date, delay_reason, hod_remark, hod_remark_by,
+  } = body
 
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 
@@ -28,6 +33,7 @@ export async function PATCH(
         if (covered_by) {
           args.push(covered_by)
           setClauses.push(`covered_by = $${args.length}`)
+          setClauses.push(`last_teacher_id = $${args.length}`)
         }
       } else {
         setClauses.push(`covered_date = NULL`)
@@ -35,10 +41,29 @@ export async function PATCH(
       }
     }
 
-    if (topic_name !== undefined) { args.push(topic_name); setClauses.push(`topic_name = $${args.length}`) }
+    if (topic_name !== undefined)   { args.push(topic_name);   setClauses.push(`topic_name = $${args.length}`) }
     if (chapter_name !== undefined) { args.push(chapter_name); setClauses.push(`chapter_name = $${args.length}`) }
-    if (chapter_order !== undefined) { args.push(chapter_order); setClauses.push(`chapter_order = $${args.length}`) }
-    if (topic_order !== undefined) { args.push(topic_order); setClauses.push(`topic_order = $${args.length}`) }
+    if (chapter_order !== undefined){ args.push(chapter_order);setClauses.push(`chapter_order = $${args.length}`) }
+    if (topic_order !== undefined)  { args.push(topic_order);  setClauses.push(`topic_order = $${args.length}`) }
+
+    // HOD governance fields
+    if (target_date !== undefined) {
+      args.push(target_date || null)
+      setClauses.push(`target_date = $${args.length}`)
+    }
+    if (delay_reason !== undefined) {
+      args.push(delay_reason || null)
+      setClauses.push(`delay_reason = $${args.length}`)
+    }
+    if (hod_remark !== undefined) {
+      args.push(hod_remark || null)
+      setClauses.push(`hod_remark = $${args.length}`)
+      if (hod_remark_by) {
+        args.push(hod_remark_by)
+        setClauses.push(`hod_remark_by = $${args.length}`)
+      }
+      setClauses.push(`hod_remark_at = NOW()`)
+    }
 
     if (!setClauses.length) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
 
@@ -64,7 +89,7 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-
+  await ensureDB()
   const { id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
 

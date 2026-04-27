@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { CURRICULA } from '@/lib/curricula'
+import StudentSyllabus from '../../student/components/StudentSyllabus'
 
 type Props = { schoolId: number; onNavigate?: (tab: string) => void }
 
@@ -587,7 +588,7 @@ function ClassDetail({
   onClassUpdated: (updates: Partial<ClassRow> & { id: number }) => void
   onNavigate?: (tab: string) => void
 }) {
-  const [tab, setTab] = useState<'overview' | 'subjects' | 'timetable' | 'students'>('overview')
+  const [tab, setTab] = useState<'overview' | 'subjects' | 'timetable' | 'students' | 'syllabus'>('overview')
   const [attSummary, setAttSummary] = useState<{ date: string; present: number; absent: number; late: number }[]>([])
   const [attLoading, setAttLoading] = useState(false)
   const [subjects, setSubjects] = useState<Subject[]>([])
@@ -976,12 +977,12 @@ function ClassDetail({
 
         {/* Tabs */}
         <div className="flex gap-0 mt-3 -mb-4">
-          {(['overview', 'subjects', 'timetable', 'students'] as const).map(t => (
+          {(['overview', 'subjects', 'timetable', 'students', 'syllabus'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
                 tab === t ? 'border-violet-600 text-violet-700' : 'border-transparent text-gray-500 hover:text-gray-800'
               }`}>
-              {t === 'overview' ? 'Overview' : t === 'subjects' ? `Subjects (${subjects.length})` : t === 'timetable' ? 'Timetable' : `Students (${cls.student_count})`}
+              {t === 'overview' ? 'Overview' : t === 'subjects' ? `Subjects (${subjects.length})` : t === 'timetable' ? 'Timetable' : t === 'students' ? `Students (${cls.student_count})` : 'Syllabus'}
             </button>
           ))}
         </div>
@@ -1507,6 +1508,11 @@ function ClassDetail({
               )}
             </div>
           </div>
+        )}
+
+        {/* ── SYLLABUS ── */}
+        {tab === 'syllabus' && (
+          <StudentSyllabus schoolId={schoolId} classId={cls.id} />
         )}
       </div>
     </div>

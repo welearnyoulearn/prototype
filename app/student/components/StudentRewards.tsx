@@ -32,6 +32,12 @@ type RewardsData = {
   recent_transactions: Transaction[]
   leaderboard: LeaderboardEntry[]
   my_rank: number | null
+  weekly_tests: {
+    tests_taken: number
+    avg_pct: number | null
+    best_pct: number | null
+    excellent_count: number
+  }
 }
 
 type Props = {
@@ -41,12 +47,16 @@ type Props = {
 }
 
 const ACTION_LABELS: Record<string, string> = {
-  task_submitted: 'Submitted a task',
-  task_scored_high: 'High score on a task',
-  doubt_resolved: 'Got a doubt resolved',
-  newspaper_read: 'Read today\'s newspaper',
-  streak_7days: '7-day streak bonus',
-  streak_30days: '30-day streak bonus',
+  task_submitted:        'Submitted a task',
+  task_scored_high:      'High score on a task',
+  doubt_resolved:        'Got a doubt resolved',
+  newspaper_read:        'Read today\'s newspaper',
+  streak_7days:          '7-day streak bonus',
+  streak_30days:         '30-day streak bonus',
+  weekly_test:           'Completed weekly test',
+  weekly_test_good:      'Weekly test — Good (50–79%)',
+  weekly_test_excellent: 'Weekly test — Excellent (≥80%)',
+  weekly_test_perfect:   'Weekly test — Perfect score! 🎯',
 }
 
 export default function StudentRewards({ studentId, schoolId, classId }: Props) {
@@ -125,6 +135,76 @@ export default function StudentRewards({ studentId, schoolId, classId }: Props) 
             ? `${data.streak.current} day streak! Keep it going!`
             : 'Complete an activity today to start your streak!'}
         </p>
+      </div>
+
+      {/* Weekly Test Performance */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-700">Weekly AI Tests</h3>
+          <span className="text-xs text-gray-400">{data.weekly_tests.tests_taken} test{data.weekly_tests.tests_taken !== 1 ? 's' : ''} taken</span>
+        </div>
+
+        {data.weekly_tests.tests_taken === 0 ? (
+          <div className="text-center py-4">
+            <p className="text-3xl mb-2">📝</p>
+            <p className="text-sm text-gray-500">No weekly tests submitted yet</p>
+            <p className="text-xs text-gray-400 mt-1">Complete your first test to earn up to 15 points</p>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="text-center">
+                <p className={`text-2xl font-black ${
+                  (data.weekly_tests.avg_pct ?? 0) >= 80 ? 'text-green-600' :
+                  (data.weekly_tests.avg_pct ?? 0) >= 50 ? 'text-yellow-600' : 'text-red-500'
+                }`}>
+                  {data.weekly_tests.avg_pct !== null ? `${data.weekly_tests.avg_pct}%` : '—'}
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">Avg Score</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-black text-blue-600">
+                  {data.weekly_tests.best_pct !== null ? `${data.weekly_tests.best_pct}%` : '—'}
+                </p>
+                <p className="text-xs text-gray-500 mt-0.5">Best Score</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-black text-purple-600">{data.weekly_tests.excellent_count}</p>
+                <p className="text-xs text-gray-500 mt-0.5">Excellent</p>
+              </div>
+            </div>
+
+            {/* Avg score bar */}
+            {data.weekly_tests.avg_pct !== null && (
+              <div>
+                <div className="flex justify-between text-xs text-gray-400 mb-1">
+                  <span>Average performance</span>
+                  <span className="font-medium">{data.weekly_tests.avg_pct}%</span>
+                </div>
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      data.weekly_tests.avg_pct >= 80 ? 'bg-green-400' :
+                      data.weekly_tests.avg_pct >= 50 ? 'bg-yellow-400' : 'bg-red-400'
+                    }`}
+                    style={{ width: `${data.weekly_tests.avg_pct}%` }}
+                  />
+                </div>
+                <div className="flex justify-between text-[10px] text-gray-300 mt-1">
+                  <span>0%</span><span>50%</span><span>100%</span>
+                </div>
+              </div>
+            )}
+
+            {/* Points per test explanation */}
+            <div className="mt-3 bg-gray-50 rounded-xl p-3 flex gap-4 text-xs text-gray-500">
+              <span className="flex items-center gap-1"><span className="font-bold text-gray-700">2 pts</span> completed</span>
+              <span className="flex items-center gap-1"><span className="font-bold text-yellow-600">5 pts</span> ≥50%</span>
+              <span className="flex items-center gap-1"><span className="font-bold text-green-600">10 pts</span> ≥80%</span>
+              <span className="flex items-center gap-1"><span className="font-bold text-purple-600">15 pts</span> 100%</span>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Earned Badges */}

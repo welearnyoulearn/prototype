@@ -82,8 +82,6 @@ type PaymentForm = {
 }
 
 const GRADES = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
-const CURRENT_YEAR = '2025-26'
-const ACADEMIC_YEARS = ['2025-26', '2026-27', '2024-25']
 
 const STATUS_COLORS: Record<string, string> = {
   paid: 'bg-green-100 text-green-700',
@@ -104,14 +102,15 @@ function pct(num: number, den: number) {
 
 export default function FeeManagement({ schoolId }: { schoolId: number }) {
   const [activeTab, setActiveTab] = useState<'structure' | 'ledger' | 'collect' | 'defaulters' | 'reports'>('reports')
-  const [academicYear, setAcademicYear] = useState(CURRENT_YEAR)
+  const [academicYear, setAcademicYear] = useState('')
+  const [academicYears, setAcademicYears] = useState<string[]>([])
   const [stats, setStats] = useState<FeeStats | null>(null)
   const [statsLoading, setStatsLoading] = useState(true)
 
   // Structure state
   const [categories, setCategories] = useState<FeeCategory[]>([])
   const [structures, setStructures] = useState<FeeStructure[]>([])
-  const [structureYear, setStructureYear] = useState(CURRENT_YEAR)
+  const [structureYear, setStructureYear] = useState('')
   const [newCategory, setNewCategory] = useState({ name: '', frequency: 'monthly', description: '' })
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [editAmounts, setEditAmounts] = useState<Record<string, string>>({})
@@ -125,7 +124,7 @@ export default function FeeManagement({ schoolId }: { schoolId: number }) {
   const [ledgerGrade, setLedgerGrade] = useState('')
   const [ledgerStatus, setLedgerStatus] = useState('')
   const [ledgerSearch, setLedgerSearch] = useState('')
-  const [ledgerYear, setLedgerYear] = useState(CURRENT_YEAR)
+  const [ledgerYear, setLedgerYear] = useState('')
 
   // Collect payment state
   const [collectSearch, setCollectSearch] = useState('')
@@ -157,7 +156,28 @@ export default function FeeManagement({ schoolId }: { schoolId: number }) {
     setStatsLoading(false)
   }, [schoolId, academicYear])
 
-  useEffect(() => { loadStats() }, [loadStats])
+  // ——— Load academic years from DB ———
+  useEffect(() => {
+    Promise.all([
+      fetch(`/api/academic-year/current?school_id=${schoolId}`).then(r => r.ok ? r.json() : null),
+      fetch(`/api/academic-years?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
+    ]).then(([current, all]) => {
+      const allLabels: string[] = Array.isArray(all) ? all.map((y: { label: string }) => y.label) : []
+      const currentLabel: string = current?.label ?? allLabels[0] ?? '2025-26'
+      if (!allLabels.length) allLabels.push(currentLabel)
+      setAcademicYears(allLabels)
+      setAcademicYear(currentLabel)
+      setStructureYear(currentLabel)
+      setLedgerYear(currentLabel)
+    }).catch(() => {
+      setAcademicYears(['2025-26'])
+      setAcademicYear('2025-26')
+      setStructureYear('2025-26')
+      setLedgerYear('2025-26')
+    })
+  }, [schoolId])
+
+  useEffect(() => { if (academicYear) loadStats() }, [loadStats, academicYear])
 
   // ——— Categories + Structures ———
   const loadStructures = useCallback(async () => {
@@ -253,7 +273,7 @@ export default function FeeManagement({ schoolId }: { schoolId: number }) {
   async function searchStudent(q: string) {
     if (!q.trim()) { setCollectStudentLedger([]); return }
     setCollectSearchLoading(true)
-    const r = await fetch(`/api/fees/ledger?school_id=${schoolId}&academic_year=${CURRENT_YEAR}`)
+    const r = await fetch(`/api/fees/ledger?school_id=${schoolId}&academic_year=${academicYear}`)
     const all: LedgerEntry[] = await r.json()
     const filtered = all.filter(e =>
       e.student_name.toLowerCase().includes(q.toLowerCase()) ||
@@ -356,7 +376,7 @@ export default function FeeManagement({ schoolId }: { schoolId: number }) {
             onChange={e => setAcademicYear(e.target.value)}
             className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            {ACADEMIC_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+            {academicYears.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
       </div>
@@ -541,7 +561,7 @@ export default function FeeManagement({ schoolId }: { schoolId: number }) {
                 onChange={e => setStructureYear(e.target.value)}
                 className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white"
               >
-                {ACADEMIC_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+                {academicYears.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
               <span className="text-sm text-gray-400">Configure fee amounts per grade per category</span>
             </div>
@@ -667,7 +687,7 @@ export default function FeeManagement({ schoolId }: { schoolId: number }) {
               onChange={e => setLedgerYear(e.target.value)}
               className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white"
             >
-              {ACADEMIC_YEARS.map(y => <option key={y} value={y}>{y}</option>)}
+              {academicYears.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
             <select
               value={ledgerGrade}

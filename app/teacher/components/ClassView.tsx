@@ -5,6 +5,7 @@ import Tasks from './Tasks'
 import ClassDoubts from './ClassDoubts'
 import ClassPerformance from './ClassPerformance'
 import ExamMarks from './ExamMarks'
+import WeeklyTestResults from './WeeklyTestResults'
 import { SCHEDULE } from '@/lib/schedule'
 
 type Subject = {
@@ -114,7 +115,7 @@ type Props = {
   openExamId?: number
 }
 
-const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Performance', 'Attendance', 'Timetable', 'Marks & Results', 'Tasks', 'Doubts']
+const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Performance', 'Attendance', 'Timetable', 'Marks & Results', 'Weekly Tests', 'Tasks', 'Doubts']
 const SUBJECT_TEACHER_TABS = ['My Overview', 'Marks & Results', 'Tasks', 'Doubts', 'Timetable']
 const TABS = CLASS_TEACHER_TABS // kept for reference
 
@@ -1281,6 +1282,16 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         <div className="bg-white rounded-xl border border-gray-200 py-20 text-center">
           <p className="text-sm text-gray-400">Loading teacher info...</p>
         </div>
+      )}
+
+      {/* ── WEEKLY TESTS TAB ────────────────────────────────────────────────── */}
+      {activeTab === 'Weekly Tests' && (
+        <WeeklyTestResults
+          classId={classId}
+          schoolId={schoolId}
+          grade={grade}
+          section={section}
+        />
       )}
 
       {/* ── OTHER TABS ──────────────────────────────────────────────────────── */}

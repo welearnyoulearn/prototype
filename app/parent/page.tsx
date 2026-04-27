@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import StudentSyllabus from '../student/components/StudentSyllabus'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Student = {
@@ -77,11 +78,14 @@ const STATUS_COLOR: Record<string, string> = {
 const NAV = [
   { key: 'overview',    label: 'Overview',         icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
   { key: 'today',       label: "Today's Schedule",  icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+  { key: 'syllabus',    label: 'Syllabus',          icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
   { key: 'attendance',  label: 'Attendance',        icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
   { key: 'fees',        label: 'Fees',              icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z' },
   { key: 'exams',       label: 'Exam Calendar',     icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
   { key: 'results',     label: 'Results',           icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+  { key: 'weekly-tests', label: 'Weekly Tests',     icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01' },
   { key: 'activity',    label: 'Activity Log',      icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2' },
+  { key: 'ai-chats',    label: 'AI Chat History',   icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z' },
 ]
 
 function fmt(n: number | string) { return `₹${Number(n).toLocaleString('en-IN')}` }
@@ -126,7 +130,8 @@ export default function ParentDashboard() {
   const [feePayments, setFeePayments] = useState<FeePayment[]>([])
   const [feeSummary, setFeeSummary] = useState<FeeSummary | null>(null)
   const [feeLoading, setFeeLoading] = useState(false)
-  const [feeAcYear, setFeeAcYear] = useState('2025-26')
+  const [feeAcYear, setFeeAcYear] = useState('')
+  const [feeAcYears, setFeeAcYears] = useState<string[]>([])
   const [payingLedger, setPayingLedger] = useState<FeeLedger | null>(null)
   const [payAmount, setPayAmount] = useState('')
   const [payUPI, setPayUPI] = useState('')
@@ -137,6 +142,35 @@ export default function ParentDashboard() {
   const [actSummary, setActSummary] = useState<ActivitySummary | null>(null)
   const [actLoading, setActLoading] = useState(false)
   const [actDays, setActDays] = useState(7)
+
+  type WeeklyTestHistory = { id: number; week_start: string; status: string; score: number | null; max_score: number | null; submitted_at: string | null }
+  const [weeklyTests, setWeeklyTests] = useState<WeeklyTestHistory[]>([])
+  const [weeklyTestsLoading, setWeeklyTestsLoading] = useState(false)
+
+  type AIChatSession = { id: number; subject: string | null; messages: { role: string; content: string }[]; created_at: string }
+  const [aiChatSessions, setAiChatSessions] = useState<AIChatSession[]>([])
+  const [aiChatsLoading, setAiChatsLoading] = useState(false)
+  const [aiChatExpanded, setAiChatExpanded] = useState<number | null>(null)
+
+  const loadWeeklyTests = useCallback(async (s: Student) => {
+    setWeeklyTestsLoading(true)
+    try {
+      const r = await fetch(`/api/weekly-test/history?student_id=${s.id}&school_id=${s.school_id}&limit=10`)
+      const d = await r.json()
+      setWeeklyTests(d.tests || [])
+    } catch { setWeeklyTests([]) }
+    setWeeklyTestsLoading(false)
+  }, [])
+
+  const loadAiChats = useCallback(async (s: Student) => {
+    setAiChatsLoading(true)
+    try {
+      const r = await fetch(`/api/ai/chat-sessions?school_id=${s.school_id}&student_id=${s.id}&limit=20`)
+      const d = await r.json()
+      setAiChatSessions(d.sessions || [])
+    } catch { setAiChatSessions([]) }
+    setAiChatsLoading(false)
+  }, [])
 
   const [ackingId, setAckingId] = useState<number | null>(null)
   const [ackName, setAckName]   = useState('')
@@ -190,7 +224,7 @@ export default function ParentDashboard() {
     setAttLoading(false)
   }, [])
 
-  const loadFees = useCallback(async (s: Student, year = '2025-26') => {
+  const loadFees = useCallback(async (s: Student, year: string) => {
     setFeeLoading(true)
     try {
       const r = await fetch(`/api/parent/fees?school_id=${s.school_id}&student_id=${s.id}&academic_year=${year}`)
@@ -219,7 +253,9 @@ export default function ParentDashboard() {
     if (activeNav === 'today' && !timetable.length && !timetableLoading) loadTimetable(student)
     if (activeNav === 'attendance' && !attDays.length && !attLoading) loadAttendance(student)
     if (activeNav === 'fees' && !feeLedger.length && !feeLoading) loadFees(student, feeAcYear)
+    if (activeNav === 'weekly-tests' && !weeklyTests.length && !weeklyTestsLoading) loadWeeklyTests(student)
     if (activeNav === 'activity' && !activity.length && !actLoading) loadActivity(student, actDays)
+    if (activeNav === 'ai-chats' && !aiChatSessions.length && !aiChatsLoading) loadAiChats(student)
   }, [activeNav, student]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -248,6 +284,19 @@ export default function ParentDashboard() {
       if (!res.ok) { setAuthError(data.error || 'Not found'); setAuthLoading(false); return }
       setStudent(data.student)
       await loadSummary(data.student)
+      // Load weekly tests eagerly so overview card shows immediately
+      loadWeeklyTests(data.student)
+      // Load academic years for fee selector
+      Promise.all([
+        fetch(`/api/academic-year/current?school_id=${data.student.school_id}`).then(r => r.ok ? r.json() : null),
+        fetch(`/api/academic-years?school_id=${data.student.school_id}`).then(r => r.ok ? r.json() : []),
+      ]).then(([current, all]) => {
+        const allLabels: string[] = Array.isArray(all) ? all.map((y: { label: string }) => y.label) : []
+        const currentLabel: string = current?.label ?? allLabels[0] ?? '2025-26'
+        if (!allLabels.length) allLabels.push(currentLabel)
+        setFeeAcYears(allLabels)
+        setFeeAcYear(currentLabel)
+      }).catch(() => { setFeeAcYears(['2025-26']); setFeeAcYear('2025-26') })
       setStep('portal')
     } catch { setAuthError('Connection error. Please try again.') }
     setAuthLoading(false)
@@ -481,6 +530,32 @@ export default function ParentDashboard() {
               </button>
             </div>
 
+            {/* This week's test result — shown only after student submits */}
+            {weeklyTests.length > 0 && weeklyTests[0].status === 'submitted' && (() => {
+              const t = weeklyTests[0]
+              const pct = t.score !== null && t.max_score ? Math.round(t.score / t.max_score * 100) : null
+              if (pct === null) return null
+              const bg = pct >= 80 ? 'from-green-50 to-green-100 border-green-200' : pct >= 50 ? 'from-yellow-50 to-yellow-100 border-yellow-200' : 'from-red-50 to-red-100 border-red-200'
+              const col = pct >= 80 ? 'text-green-700' : pct >= 50 ? 'text-yellow-700' : 'text-red-700'
+              return (
+                <button onClick={() => navigateTo('weekly-tests')}
+                  className={`w-full text-left bg-gradient-to-r ${bg} border rounded-xl p-4 hover:shadow-sm transition-all`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">This Week&apos;s Test</p>
+                      <p className={`text-sm font-bold ${col}`}>
+                        {pct >= 80 ? '🌟 Excellent!' : pct >= 50 ? '👍 Good effort' : '📖 Needs revision'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-3xl font-black ${col}`}>{pct}%</p>
+                      <p className="text-xs text-gray-400">{t.score}/{t.max_score}</p>
+                    </div>
+                  </div>
+                </button>
+              )
+            })()}
+
             {/* Latest result */}
             {latestResult && (
               <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -630,6 +705,17 @@ export default function ParentDashboard() {
                 )}
               </div>
             )}
+          </div>
+          )}
+
+          {/* ── SYLLABUS ──────────────────────────────────────────────────── */}
+          {visited.has('syllabus') && (
+          <div hidden={activeNav !== 'syllabus'}>
+            <div className="max-w-2xl mb-5">
+              <h2 className="text-lg font-bold text-gray-900 mb-0.5">Syllabus Progress</h2>
+              <p className="text-sm text-gray-400">Track what topics your child has covered in each subject</p>
+            </div>
+            <StudentSyllabus schoolId={student.school_id} classId={student.class_id} />
           </div>
           )}
 
@@ -796,8 +882,7 @@ export default function ParentDashboard() {
               <div className="flex gap-2">
                 <select value={feeAcYear} onChange={e => { setFeeAcYear(e.target.value); loadFees(student, e.target.value) }}
                   className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
-                  <option value="2025-26">2025-26</option>
-                  <option value="2024-25">2024-25</option>
+                  {feeAcYears.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
                 <button onClick={() => loadFees(student, feeAcYear)} className="text-xs text-pink-600 border border-pink-200 px-3 py-1.5 rounded-lg">Refresh</button>
               </div>
@@ -1044,6 +1129,72 @@ export default function ParentDashboard() {
           </div>
           )}
 
+          {/* ── WEEKLY TESTS ──────────────────────────────────────────────── */}
+          {visited.has('weekly-tests') && (
+          <div hidden={activeNav !== 'weekly-tests'} className="max-w-2xl space-y-4">
+            <h2 className="text-base font-bold text-gray-800">Weekly AI Tests</h2>
+            <p className="text-xs text-gray-500">AI-generated tests from covered syllabus topics · 1 test per week</p>
+
+            {weeklyTestsLoading ? (
+              <div className="space-y-3">
+                {[1,2,3].map(i => <div key={i} className="h-16 bg-gray-100 rounded-xl animate-pulse" />)}
+              </div>
+            ) : weeklyTests.length === 0 ? (
+              <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
+                <div className="text-3xl mb-2">📝</div>
+                <p className="text-sm text-gray-500 font-medium">No tests taken yet</p>
+                <p className="text-xs text-gray-400 mt-1">Tests appear here once your child takes them</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {weeklyTests.map(t => {
+                  const pct = t.score !== null && t.max_score ? Math.round(t.score / t.max_score * 100) : null
+                  const weekLabel = new Date(t.week_start).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                  const scoreColor = pct === null ? 'text-gray-400' : pct >= 80 ? 'text-green-600' : pct >= 50 ? 'text-yellow-600' : 'text-red-600'
+                  const scoreBg    = pct === null ? 'bg-gray-50 border-gray-200' : pct >= 80 ? 'bg-green-50 border-green-200' : pct >= 50 ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'
+                  return (
+                    <div key={t.id} className={`rounded-xl border p-4 ${scoreBg}`}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-800">Week of {weekLabel}</p>
+                          {t.submitted_at && (
+                            <p className="text-xs text-gray-400 mt-0.5">
+                              Submitted {new Date(t.submitted_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                            </p>
+                          )}
+                        </div>
+                        {t.status === 'submitted' && pct !== null ? (
+                          <div className="text-right">
+                            <p className={`text-2xl font-black ${scoreColor}`}>{pct}%</p>
+                            <p className="text-xs text-gray-500">{t.score}/{t.max_score}</p>
+                          </div>
+                        ) : (
+                          <span className="text-xs font-medium text-yellow-600 bg-yellow-50 border border-yellow-200 px-2.5 py-1 rounded-full">
+                            Not submitted
+                          </span>
+                        )}
+                      </div>
+                      {pct !== null && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <div className="flex-1 h-1.5 bg-white/60 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${pct >= 80 ? 'bg-green-500' : pct >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className={`text-xs font-semibold ${scoreColor}`}>
+                            {pct >= 80 ? 'Excellent' : pct >= 50 ? 'Good' : 'Needs revision'}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+          )}
+
           {/* ── ACTIVITY LOG ──────────────────────────────────────────────── */}
           {visited.has('activity') && (
           <div hidden={activeNav !== 'activity'} className="max-w-2xl space-y-5">
@@ -1125,6 +1276,96 @@ export default function ParentDashboard() {
                   </div>
                 )}
               </>
+            )}
+          </div>
+          )}
+
+          {/* ── AI CHAT HISTORY ────────────────────────────────────────────── */}
+          {visited.has('ai-chats') && (
+          <div hidden={activeNav !== 'ai-chats'} className="max-w-2xl space-y-5">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-bold text-gray-800">AI Chat History</h2>
+                <p className="text-xs text-gray-400">{student.name.split(' ')[0]}&apos;s conversations with the AI tutor</p>
+              </div>
+              <button onClick={() => loadAiChats(student)} className="text-xs text-pink-600 border border-pink-200 px-3 py-1.5 rounded-lg">Refresh</button>
+            </div>
+
+            {/* Info banner */}
+            <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 flex items-start gap-3">
+              <span className="text-violet-500 text-lg flex-shrink-0">✨</span>
+              <div>
+                <p className="text-sm font-semibold text-violet-800">AI Tutor conversations</p>
+                <p className="text-xs text-violet-600 mt-0.5">Every time {student.name.split(' ')[0]} chats with the AI Tutor in their portal, those conversations are saved here so you can see what they&apos;re studying and what doubts they have.</p>
+              </div>
+            </div>
+
+            {aiChatsLoading ? (
+              <div className="space-y-2">{[...Array(3)].map((_, i) => (
+                <div key={i} className="bg-white rounded-xl border border-gray-100 p-4 animate-pulse h-16" />
+              ))}</div>
+            ) : aiChatSessions.length === 0 ? (
+              <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
+                <p className="text-2xl mb-2">✨</p>
+                <p className="text-gray-400 text-sm">No AI chat sessions yet</p>
+                <p className="text-gray-300 text-xs mt-1">{student.name.split(' ')[0]} hasn&apos;t used the AI Tutor yet</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {aiChatSessions.map(session => {
+                  const msgCount = Array.isArray(session.messages) ? session.messages.length : 0
+                  const firstMsg = Array.isArray(session.messages) ? session.messages.find(m => m.role === 'user') : null
+                  const isOpen = aiChatExpanded === session.id
+                  return (
+                    <div key={session.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                      <button
+                        onClick={() => setAiChatExpanded(isOpen ? null : session.id)}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="w-8 h-8 bg-violet-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                          <span className="text-sm">✨</span>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            {session.subject && (
+                              <span className="text-[10px] bg-violet-100 text-violet-700 font-semibold px-2 py-0.5 rounded-full">
+                                {session.subject}
+                              </span>
+                            )}
+                            <span className="text-[10px] text-gray-400">{msgCount} messages</span>
+                          </div>
+                          {firstMsg && (
+                            <p className="text-sm text-gray-700 truncate mt-0.5">{firstMsg.content}</p>
+                          )}
+                        </div>
+                        <div className="text-right shrink-0 ml-2">
+                          <p className="text-xs text-gray-400">{relTime(session.created_at)}</p>
+                          <svg className={`w-3.5 h-3.5 text-gray-300 mt-1 ml-auto transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                            fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </div>
+                      </button>
+
+                      {isOpen && Array.isArray(session.messages) && (
+                        <div className="border-t border-gray-100 p-4 bg-gray-50 space-y-3 max-h-80 overflow-y-auto">
+                          {session.messages.map((m, i) => (
+                            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                              <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${
+                                m.role === 'user'
+                                  ? 'bg-violet-600 text-white rounded-br-sm'
+                                  : 'bg-white border border-gray-200 text-gray-800 rounded-bl-sm'
+                              }`}>
+                                {m.content}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             )}
           </div>
           )}

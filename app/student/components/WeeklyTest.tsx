@@ -47,6 +47,8 @@ export default function WeeklyTest({ student, classId, schoolId }: Props) {
   const [submitting, setSubmitting] = useState(false)
   const [results, setResults] = useState<ResultItem[] | null>(null)
   const [finalScore, setFinalScore] = useState<{ score: number; max: number } | null>(null)
+  const [diagnosis, setDiagnosis] = useState('')
+  const [diagnosisLoading, setDiagnosisLoading] = useState(false)
 
   useEffect(() => {
     setLoading(true)
@@ -81,6 +83,21 @@ export default function WeeklyTest({ student, classId, schoolId }: Props) {
       setResults(data.results)
       setFinalScore({ score: data.score, max: data.max_score })
       setTest(prev => prev ? { ...prev, status: 'submitted' } : prev)
+
+      // Fire AI diagnosis after submit (non-blocking)
+      const wrongQs = (data.results as ResultItem[])
+        .filter(r => !r.is_correct)
+        .map(r => ({ question: r.question, subject: r.subject, correct: r.correct_answer, chosen: r.student_answer }))
+      setDiagnosisLoading(true)
+      fetch('/api/ai/test-diagnosis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grade: student.grade, score: data.score, max_score: data.max_score, wrong_questions: wrongQs }),
+      })
+        .then(r => r.json())
+        .then(d => { if (d.diagnosis) setDiagnosis(d.diagnosis) })
+        .catch(() => {})
+        .finally(() => setDiagnosisLoading(false))
     } catch {
       alert('Submit failed. Please try again.')
     } finally {
@@ -95,15 +112,38 @@ export default function WeeklyTest({ student, classId, schoolId }: Props) {
     </div>
   )
 
-  if (error) return (
-    <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-6 text-center">
-      <div className="text-2xl mb-2">📚</div>
-      <p className="text-yellow-800 font-medium text-sm">{error}</p>
-      {error.includes('syllabus') && (
-        <p className="text-yellow-600 text-xs mt-1">Weekly tests are generated from topics your teacher marks as covered.</p>
-      )}
-    </div>
-  )
+  if (error) {
+    // No test yet — show a friendly "coming on Sunday" card
+    const today = new Date().getDay()   // 0=Sun 1=Mon … 6=Sat
+    const daysToSunday = today === 0 ? 7 : 7 - today
+    const isSunday = today === 0
+
+    return (
+      <div className="space-y-4">
+        <div className="bg-violet-50 border border-violet-200 rounded-2xl p-6 text-center">
+          <div className="text-3xl mb-3">📅</div>
+          {isSunday ? (
+            <>
+              <p className="text-violet-800 font-semibold text-sm">Your test is being prepared…</p>
+              <p className="text-violet-600 text-xs mt-1">It will be ready shortly — check back in a few minutes.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-violet-800 font-semibold text-sm">Next Weekly Test: Sunday</p>
+              <p className="text-violet-600 text-xs mt-1">
+                {daysToSunday === 1 ? 'Tomorrow!' : `In ${daysToSunday} days`} · Tests are auto-generated every Sunday based on this week&apos;s topics
+              </p>
+            </>
+          )}
+        </div>
+        {error.includes('syllabus') && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-center">
+            <p className="text-yellow-700 text-xs">Your teacher hasn&apos;t marked any topics as covered yet. Tests generate once syllabus topics are covered.</p>
+          </div>
+        )}
+      </div>
+    )
+  }
 
   if (!test) return null
 
@@ -130,6 +170,28 @@ export default function WeeklyTest({ student, classId, schoolId }: Props) {
             {pct >= 80 ? '🌟 Excellent! Keep it up!' : pct >= 50 ? '👍 Good effort. Review the wrong ones.' : '📖 Review your syllabus and try next week!'}
           </p>
         </div>
+
+        {/* AI Diagnosis */}
+        {(diagnosisLoading || diagnosis) && (
+          <div className="bg-violet-50 border border-violet-200 rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-base">✨</span>
+              <p className="text-sm font-bold text-violet-800">AI Tutor's Personal Feedback</p>
+            </div>
+            {diagnosisLoading ? (
+              <div className="flex items-center gap-2">
+                <div className="flex gap-1">
+                  {[0,1,2].map(i => (
+                    <div key={i} className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />
+                  ))}
+                </div>
+                <p className="text-xs text-violet-600">Analysing your test...</p>
+              </div>
+            ) : (
+              <p className="text-sm text-violet-800 leading-relaxed">{diagnosis}</p>
+            )}
+          </div>
+        )}
 
         {results && (
           <div className="space-y-3">

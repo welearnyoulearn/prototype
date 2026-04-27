@@ -6,8 +6,10 @@ export async function GET(req: NextRequest) {
   const p = req.nextUrl.searchParams
   const school_id   = p.get('school_id')
   const student_id  = p.get('student_id')
-  const academic_year = p.get('academic_year') || '2025-26'
   if (!school_id || !student_id) return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
+  const academic_year = p.get('academic_year') || await pool.query(
+    `SELECT label FROM academic_years WHERE school_id=$1 AND is_current=TRUE LIMIT 1`, [school_id]
+  ).then(r => r.rows[0]?.label ?? '2025-26').catch(() => '2025-26')
 
   try {
     // Auto-mark overdue

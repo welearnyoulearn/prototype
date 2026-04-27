@@ -81,6 +81,17 @@ export async function POST(req: NextRequest) {
       [school.id]
     )
 
+    // Auto-create current academic year based on today's date
+    const now = new Date()
+    const yearStart = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1  // April = new year
+    const yearLabel = `${yearStart}-${String(yearStart + 1).slice(2)}`
+    await client.query(
+      `INSERT INTO academic_years (school_id, label, start_date, end_date, is_current)
+       VALUES ($1, $2, $3, $4, TRUE)
+       ON CONFLICT DO NOTHING`,
+      [school.id, yearLabel, `${yearStart}-04-01`, `${yearStart + 1}-03-31`]
+    )
+
     await client.query('COMMIT')
 
     if (email) {
