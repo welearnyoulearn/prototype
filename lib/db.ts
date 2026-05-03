@@ -32,7 +32,21 @@ export function ensureDB(): Promise<void> {
   return _initPromise
 }
 
+// Sentinel: the last column added in the most recent migration.
+// One fast round-trip replaces 100+ ALTER TABLE round-trips on every cold start.
+const SCHEMA_SENTINEL_TABLE  = 'class_timetable'
+const SCHEMA_SENTINEL_COLUMN = 'template_id'
+
 export async function initDB() {
+  // Check if schema is already fully applied — skip all migrations if so.
+  const { rows } = await pool.query(`
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name   = $1
+      AND column_name  = $2
+    LIMIT 1
+  `, [SCHEMA_SENTINEL_TABLE, SCHEMA_SENTINEL_COLUMN])
+  if (rows.length > 0) return   // schema is current — nothing to do
   await pool.query(`
     CREATE TABLE IF NOT EXISTS schools (
       id SERIAL PRIMARY KEY,
