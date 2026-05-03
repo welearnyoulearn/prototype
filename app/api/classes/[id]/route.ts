@@ -52,17 +52,26 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   try {
-    const { rows: [cls] } = await pool.query('SELECT school_id FROM classes WHERE id=$1', [id])
-    // Cascade cleanup — delete all data associated with this class before deleting the class
+    const { rows: [cls] } = await pool.query('SELECT school_id, grade, section FROM classes WHERE id=$1', [id])
+    if (!cls) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+    // Deactivate all students in this class so autoSync won't recreate it
+    await pool.query(
+      `UPDATE students SET status = 'inactive' WHERE school_id = $1 AND grade = $2 AND section = $3 AND status = 'active'`,
+      [cls.school_id, cls.grade, cls.section]
+    )
+
+    // Clear associated data
     await pool.query('DELETE FROM class_timetable WHERE class_id = $1', [id])
     await pool.query('DELETE FROM class_subjects WHERE class_id = $1', [id])
     await pool.query('DELETE FROM substitute_assignments WHERE class_id = $1', [id])
-    await pool.query('DELETE FROM classes WHERE id = $1', [id])
-    if (cls?.school_id) {
-      invalidateCache(`classes:${cls.school_id}`)
-      invalidateCache(`timetable:school:${cls.school_id}`)
-      invalidateCache(`health:${cls.school_id}`)
-    }
+
+    // Soft-delete: mark deleted_at instead of hard deleting so it appears in "Removed" list
+    await pool.query('UPDATE classes SET deleted_at = NOW() WHERE id = $1', [id])
+
+    invalidateCache(`classes:${cls.school_id}`)
+    invalidateCache(`timetable:school:${cls.school_id}`)
+    invalidateCache(`health:${cls.school_id}`)
     invalidateCache(`timetable:class:${id}`)
     invalidateCache(`subjects:class:${id}`)
     return NextResponse.json({ success: true })

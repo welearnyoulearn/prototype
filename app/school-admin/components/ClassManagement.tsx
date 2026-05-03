@@ -39,9 +39,11 @@ function canTeachGrade(teachesGrades: string | null | undefined, grade: string):
 
 export default function ClassManagement({ schoolId, onNavigate }: Props) {
   const [classes, setClasses] = useState<ClassRow[]>([])
+  const [removedClasses, setRemovedClasses] = useState<{ id: number; grade: string; section: string; student_count: number; deleted_at: string }[]>([])
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [showRemoved, setShowRemoved] = useState(false)
 
   // Selected class
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -88,11 +90,13 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
   async function loadData() {
     setLoading(true)
     try {
-      const [cls, tch] = await Promise.all([
+      const [cls, tch, removed] = await Promise.all([
         fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()),
         fetch(`/api/teachers?school_id=${schoolId}`).then(r => r.json()),
+        fetch(`/api/classes?school_id=${schoolId}&removed=true`).then(r => r.json()),
       ])
       setClasses(Array.isArray(cls) ? cls : [])
+      setRemovedClasses(Array.isArray(removed) ? removed : [])
       if (Array.isArray(tch)) {
         const seen = new Set<number>()
         setTeachers(tch.filter((t: Teacher) => { if (seen.has(t.id)) return false; seen.add(t.id); return true }))
@@ -142,11 +146,14 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
 
   async function deleteClass(e: React.MouseEvent, id: number) {
     e.stopPropagation()
-    if (!confirm('Delete this class and all its data?')) return
+    if (!confirm('Delete this class? All students in this class will be deactivated.')) return
     try {
       await fetch(`/api/classes/${id}`, { method: 'DELETE' })
       setClasses(prev => prev.filter(c => c.id !== id))
       if (selectedId === id) setSelectedId(null)
+      // Refresh removed list so it appears immediately
+      const removed = await fetch(`/api/classes?school_id=${schoolId}&removed=true`).then(r => r.json())
+      setRemovedClasses(Array.isArray(removed) ? removed : [])
     } catch { setError('Failed to delete class') }
   }
 
@@ -339,6 +346,30 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
             ))
           )}
         </div>
+
+        {/* ── Removed Classes section ── */}
+        {removedClasses.length > 0 && (
+          <div className="border-t border-gray-100 mt-1">
+            <button onClick={() => setShowRemoved(v => !v)}
+              className="w-full flex items-center justify-between px-4 py-2 text-[10px] font-bold text-red-400 uppercase tracking-wider hover:bg-red-50 transition-colors">
+              <span>Removed ({removedClasses.length})</span>
+              <span>{showRemoved ? '▲' : '▼'}</span>
+            </button>
+            {showRemoved && (
+              <div className="pb-2">
+                {removedClasses.map(rc => (
+                  <div key={rc.id} className="flex items-center justify-between px-4 py-2 opacity-60">
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 line-through">{rc.grade}-{rc.section}</p>
+                      <p className="text-[10px] text-gray-400">{rc.student_count} student{Number(rc.student_count) !== 1 ? 's' : ''} deactivated</p>
+                    </div>
+                    <span className="text-[9px] text-red-300 bg-red-50 px-1.5 py-0.5 rounded-full">Removed</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Right panel: class detail or default sets ── */}

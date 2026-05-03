@@ -65,8 +65,9 @@ export async function POST(req: NextRequest) {
   try {
 
     const body = await req.json()
-    const { school_id, class_id, force_replace = false, schedule_settings: bodySettings, template_id = null } = body
+    const { school_id, class_id, force_replace = false, schedule_settings: bodySettings, template_id = null, custom_mode = false } = body
     // template_id: null = school default, number = specific template
+    // custom_mode: true = create blank empty slots (no subject/teacher assignment)
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 
@@ -115,19 +116,23 @@ export async function POST(req: NextRequest) {
         class_id ? [school_id, class_id] : [school_id]
       )
 
-      // Filter to only classes with subjects — no curriculum_assignments dependency
-      const { rows: classesWithSubjects } = await client.query<{ class_id: number }>(
-        'SELECT DISTINCT class_id FROM class_subjects WHERE class_id = ANY($1)',
-        [allClasses.map(c => c.id)]
-      )
-      const hasSubjectsSet = new Set(classesWithSubjects.map(r => r.class_id))
-      const classes = allClasses.filter(c => hasSubjectsSet.has(c.id))
+      // In custom_mode, allow any class (no subjects required — user fills in manually)
+      let classes = allClasses
+      if (!custom_mode) {
+        // Filter to only classes with subjects — no curriculum_assignments dependency
+        const { rows: classesWithSubjects } = await client.query<{ class_id: number }>(
+          'SELECT DISTINCT class_id FROM class_subjects WHERE class_id = ANY($1)',
+          [allClasses.map(c => c.id)]
+        )
+        const hasSubjectsSet = new Set(classesWithSubjects.map(r => r.class_id))
+        classes = allClasses.filter(c => hasSubjectsSet.has(c.id))
 
-      if (classes.length === 0) {
-        await client.query('ROLLBACK')
-        return NextResponse.json({
-          error: 'No subjects assigned to any class yet. Add subjects to classes first.',
-        }, { status: 400 })
+        if (classes.length === 0) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({
+            error: 'No subjects assigned to any class yet. Add subjects to classes first.',
+          }, { status: 400 })
+        }
       }
 
       // ── Determine which classes to generate ────────────────────────────────
@@ -373,8 +378,8 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        if (subjects.length === 0) {
-          // No subjects — insert empty academic slots
+        if (subjects.length === 0 || custom_mode) {
+          // No subjects, or custom mode — insert empty academic slots for manual editing
           for (const day of DAYS) {
             for (const s of ACADEMIC_SLOTS) {
               await client.query(

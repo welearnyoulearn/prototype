@@ -337,6 +337,39 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
             ))}
           </div>
         )}
+
+        {/* Removed Classes section — shows class-groups from inactive students */}
+        {statusFilter === 'active' && inactiveStudents.length > 0 && (() => {
+          const removedGroups: Record<string, number> = {}
+          inactiveStudents.forEach(s => {
+            const sec = (s.section ?? '').toUpperCase()
+            if (s.grade && sec) {
+              const key = `${s.grade}-${sec}`
+              removedGroups[key] = (removedGroups[key] || 0) + 1
+            }
+          })
+          const keys = Object.keys(removedGroups).sort((a, b) => {
+            const [ag] = a.split('-'); const [bg] = b.split('-')
+            return (parseInt(ag) || 0) - (parseInt(bg) || 0)
+          })
+          if (keys.length === 0) return null
+          return (
+            <div className="mt-4 bg-white rounded-xl border border-red-100 overflow-hidden">
+              <div className="px-5 py-3 bg-red-50 border-b border-red-100 flex items-center justify-between">
+                <span className="font-semibold text-red-700 text-sm">Removed Classes</span>
+                <span className="text-xs text-red-500">{keys.length} class{keys.length !== 1 ? 'es' : ''} · {inactiveStudents.length} students deactivated</span>
+              </div>
+              <div className="divide-y divide-gray-100">
+                {keys.map(k => (
+                  <div key={k} className="flex items-center justify-between px-5 py-2.5">
+                    <span className="text-sm font-medium text-gray-500 line-through">Grade {k.split('-')[0]} – Section {k.split('-')[1]}</span>
+                    <span className="text-xs text-gray-400">{removedGroups[k]} student{removedGroups[k] !== 1 ? 's' : ''}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
       </div>
 
       {/* Right: Detail panel */}

@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
     await client.query('BEGIN')
 
     // Step 1: Create missing classes from student data
+    // — skip if a class already exists (even soft-deleted) to prevent recreating removed classes
     const createResult = await client.query(
       `INSERT INTO classes (school_id, grade, section)
        SELECT DISTINCT s.school_id, s.grade, s.section
@@ -33,9 +34,11 @@ export async function POST(req: NextRequest) {
     )
 
     // Step 2: Remove classes that have no active students, no subjects, no timetable
+    // — but skip any already soft-deleted (deleted_at IS NOT NULL) so they stay in the removed list
     const deleteResult = await client.query(
       `DELETE FROM classes
        WHERE school_id = $1
+         AND deleted_at IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM students s
            WHERE s.school_id = classes.school_id

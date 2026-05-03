@@ -34,8 +34,8 @@ export function ensureDB(): Promise<void> {
 
 // Sentinel: the last column added in the most recent migration.
 // One fast round-trip replaces 100+ ALTER TABLE round-trips on every cold start.
-const SCHEMA_SENTINEL_TABLE  = 'class_timetable'
-const SCHEMA_SENTINEL_COLUMN = 'template_id'
+const SCHEMA_SENTINEL_TABLE  = 'classes'
+const SCHEMA_SENTINEL_COLUMN = 'deleted_at'
 
 export async function initDB() {
   // Check if schema is already fully applied — skip all migrations if so.
@@ -997,6 +997,10 @@ export async function initDB() {
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS hod_remark_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL`,
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS hod_remark_at TIMESTAMPTZ`,
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS last_teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL`,
+
+    // ── Soft-delete for classes ───────────────────────────────────────────────
+    `ALTER TABLE classes ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
+    `CREATE INDEX IF NOT EXISTS idx_classes_deleted ON classes(deleted_at) WHERE deleted_at IS NOT NULL`,
   ]
 
   for (const sql of migrations) {

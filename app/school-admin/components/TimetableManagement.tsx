@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { SCHEDULE, DAYS, ACADEMIC_SLOTS, ScheduleSlot, buildScheduleFromSettings, DEFAULT_SCHEDULE_SETTINGS, SchoolScheduleSettings } from '@/lib/schedule'
 
 function canTeachGrade(teachesGrades: string | null | undefined, grade: string): boolean {
@@ -210,6 +210,14 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   const [deletingTt, setDeletingTt]             = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
+  // Custom timetable mode
+  const [showCustomModal, setShowCustomModal] = useState(false)
+  const [customTemplateId, setCustomTemplateId] = useState<number | 'default'>('default')
+  const [creatingCustom, setCreatingCustom] = useState(false)
+
+  // Ref for scrolling back to top on class selection
+  const rightPanelRef = useRef<HTMLDivElement>(null)
+
   async function deleteTimetable() {
     if (!selected) return
     setDeletingTt(true); setShowDeleteConfirm(false)
@@ -307,6 +315,11 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     setSelected(cls); setTtLoading(true)
     setEditSlot(null); setSelectedSlot(null); setSwapMsg(null)
     setRegenMsg(null); setCirculateMsg(null); setEditMode(false); setConflictCount(0); setHasChanges(false)
+    // Scroll to the top of the timetable panel on every class click
+    setTimeout(() => {
+      rightPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }, 50)
     // Reset to school default schedule when switching classes so the grid always
     // reflects the schedule the class was generated with (avoids stale template bleed)
     setSelectedTemplateId('default')
@@ -643,6 +656,43 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     } finally { setRegenerating(false) }
   }
 
+  // ── Create custom blank timetable ────────────────────────────────────────
+  async function createCustomTimetable() {
+    if (!selected) return
+    setCreatingCustom(true)
+    try {
+      const tmpl = customTemplateId !== 'default' ? savedTemplates.find(t => t.id === customTemplateId) : null
+      const res = await fetch('/api/class-timetable/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId, class_id: selected.id,
+          force_replace: true, custom_mode: true,
+          template_id: customTemplateId !== 'default' ? customTemplateId : null,
+          schedule_settings: tmpl ? tmpl.settings : undefined,
+        }),
+      })
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error) }
+      // Reload timetable
+      const tmplParam = customTemplateId !== 'default' ? customTemplateId : 'default'
+      const data = await fetch(`/api/class-timetable?class_id=${selected.id}&school_id=${schoolId}&template_id=${tmplParam}`).then(r => r.json())
+      const slots: TimetableSlot[] = Array.isArray(data) ? data : []
+      setTimetable(slots)
+      setConflictCount(0)
+      setHasChanges(false)
+      setSelectedTemplateId(customTemplateId)
+      if (tmpl) { setActiveSchedule(buildScheduleFromSettings(tmpl.settings)); setActiveAcademicSlots(buildScheduleFromSettings(tmpl.settings).filter(s => !s.is_break)) }
+      setShowCustomModal(false)
+      setEditMode(true)  // auto-enter edit mode so admin can fill in subjects
+      setClasses(prev => prev.map(c => c.id === selected.id ? { ...c, timetable_generated_at: new Date().toISOString() } : c))
+      refreshAllSlots(); loadHealth()
+    } catch (e) {
+      setRegenMsg({ text: e instanceof Error ? e.message : 'Failed to create custom timetable', ok: false })
+      setShowCustomModal(false)
+    } finally {
+      setCreatingCustom(false)
+    }
+  }
+
   // ── Circulate timetable ───────────────────────────────────────────────────
   async function circulate() {
     if (!selected) return
@@ -880,7 +930,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
       </div>
 
       {/* Timetable grid */}
-      <div className="flex-1 min-w-0">
+      <div ref={rightPanelRef} className="flex-1 min-w-0">
         {!selected ? (
           <div className="bg-white rounded-xl border border-gray-200 py-24 text-center">
             <p className="text-gray-400 text-sm">Select a class to view its timetable</p>
@@ -958,6 +1008,14 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                     🗑 Delete
                   </button>
                 )}
+                {/* Custom timetable button */}
+                <button onClick={() => { setShowCustomModal(true); setCustomTemplateId('default') }}
+                  disabled={editMode}
+                  title="Create a blank timetable and fill in subjects manually"
+                  className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-violet-300 text-violet-700 hover:bg-violet-50 disabled:opacity-40 transition-colors">
+                  ✦ Custom
+                </button>
+
                 {/* Generate (first time) or Regenerate (already exists) */}
                 {(() => {
                   const tmplName = selectedTemplateId !== 'default'
@@ -983,8 +1041,11 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                         className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
                         ✏ Edit Timetable
                       </button>
-                      <button onClick={circulate} disabled={circulating || conflictCount > 0}
-                        title={conflictCount > 0 ? 'Resolve all conflicts before circulating' : 'Publish timetable to staff and students'}
+                      <button onClick={circulate}
+                        disabled={circulating || conflictCount > 0 || (!!selected.timetable_circulated_at && !hasChanges)}
+                        title={conflictCount > 0 ? 'Resolve all conflicts before circulating'
+                          : (!!selected.timetable_circulated_at && !hasChanges) ? 'Already circulated — make changes to re-circulate'
+                          : 'Publish timetable to staff and students'}
                         className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-40 ${
                           hasChanges
                             ? 'bg-emerald-600 text-white hover:bg-emerald-700 ring-2 ring-emerald-300'
@@ -1009,6 +1070,49 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                 )}
               </div>
             </div>
+
+            {/* ── Custom Timetable modal ── */}
+            {showCustomModal && selected && (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
+                  <div className="mb-4">
+                    <h3 className="font-bold text-gray-900 text-sm">Create Custom Timetable</h3>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Creates a blank grid for <strong>Grade {selected.grade} – Section {selected.section}</strong>.
+                      No subjects are auto-assigned — you fill in each slot manually.
+                    </p>
+                  </div>
+                  <div className="mb-4">
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">Schedule Template</label>
+                    <select
+                      value={String(customTemplateId)}
+                      onChange={e => setCustomTemplateId(e.target.value === 'default' ? 'default' : Number(e.target.value))}
+                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300">
+                      <option value="default">School Default Schedule</option>
+                      {savedTemplates.map(t => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                    {savedTemplates.length === 0 && (
+                      <p className="text-[10px] text-gray-400 mt-1">No named templates yet — using school default schedule.</p>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-amber-600 bg-amber-50 rounded-lg px-3 py-2 mb-4">
+                    This will replace the existing timetable for this class, if any.
+                  </p>
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={() => setShowCustomModal(false)}
+                      className="px-4 py-2 rounded-lg text-sm text-gray-600 border border-gray-200 hover:bg-gray-50 transition-colors">
+                      Cancel
+                    </button>
+                    <button onClick={createCustomTimetable} disabled={creatingCustom}
+                      className="px-4 py-2 rounded-lg text-sm font-semibold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                      {creatingCustom ? 'Creating…' : 'Create Blank Grid'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* ── Delete confirmation modal ── */}
             {showDeleteConfirm && selected && (
