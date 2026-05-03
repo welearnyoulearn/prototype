@@ -309,7 +309,8 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
       setSavedTemplates(Array.isArray(tmpls) ? tmpls : [])
     }).finally(() => setLoading(false))
     loadHealth()
-  }, [schoolId, loadHealth])
+    loadConflicts()  // eagerly load school-wide conflicts for the top banner
+  }, [schoolId, loadHealth, loadConflicts])
 
   const selectClass = useCallback(async (cls: ClassRow) => {
     setSelected(cls); setTtLoading(true)
@@ -708,7 +709,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
         setCirculateMsg({ text: data.error || 'Circulation failed', ok: false })
       } else {
         const circulatedAt = data.circulated_at ?? new Date().toISOString()
-        setCirculateMsg({ text: `Timetable is now LIVE — ${data.staff_notified} staff and all students notified`, ok: true })
+        setCirculateMsg({ text: `Published — ${data.staff_notified} staff and all students notified`, ok: true })
         setEditMode(false); setHasChanges(false)
         // Stamp circulation time locally so LIVE badge appears immediately
         setClasses(prev => prev.map(c => c.id === selected.id
@@ -842,6 +843,25 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
         )}
       </div>
 
+    {/* ── School-wide conflict banner ── */}
+    {conflicts.length > 0 && (
+      <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-3">
+        <span className="w-6 h-6 bg-red-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 mt-0.5">!</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-bold text-red-800">
+            {conflicts.length} teacher conflict{conflicts.length !== 1 ? 's' : ''} across school — cannot publish affected classes until resolved
+          </p>
+          <p className="text-xs text-red-500 mt-0.5">
+            {[...new Set(conflicts.map(c => c.teacher_name))].join(', ')} — double-booked in multiple classes at the same time
+          </p>
+        </div>
+        <button onClick={() => { setShowConflictPanel(true); if (conflicts.length > 0 && !selected) selectClass(classes.find(c => conflicts.some(cf => cf.slots.some(s => s.class_id === c.id))) ?? classes[0]) }}
+          className="flex-shrink-0 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg transition-colors">
+          Fix Now →
+        </button>
+      </div>
+    )}
+
     <div className="flex gap-5">
       {/* Class sidebar */}
       <div className="w-60 flex-shrink-0 space-y-2">
@@ -854,19 +874,21 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
               </div>
               {gradeClasses.map(c => {
                 const h = healthMap[c.id]
-                // Derive overall status
                 const hasConflict   = h && h.conflict_count > 0
                 const hasUnassigned = h && (h.no_teacher_count > 0 || h.subjects_unassigned > 0)
                 const noTimetable   = h ? !h.timetable_exists : !c.timetable_generated_at
-                const allGood       = h && h.timetable_exists && !hasConflict && !hasUnassigned
-                const isLive        = !!c.timetable_circulated_at
+                const isPublished   = !!c.timetable_circulated_at
 
-                const statusDot = hasConflict   ? 'bg-red-500'
-                                : noTimetable   ? 'bg-gray-300'
-                                : hasUnassigned ? 'bg-amber-400'
-                                : isLive        ? 'bg-emerald-500'
-                                : allGood       ? 'bg-emerald-400'
-                                : 'bg-gray-300'
+                // Single clear status pill — most critical state wins
+                const pill = !h || noTimetable
+                  ? { label: 'No timetable',  bg: 'bg-gray-100',    text: 'text-gray-400'    }
+                  : hasConflict
+                  ? { label: `⚠ ${h.conflict_count} conflict${h.conflict_count > 1 ? 's' : ''}`, bg: 'bg-red-100', text: 'text-red-600' }
+                  : hasUnassigned
+                  ? { label: '◐ Incomplete',  bg: 'bg-amber-100',   text: 'text-amber-700'   }
+                  : isPublished
+                  ? { label: '● Published',   bg: 'bg-emerald-100', text: 'text-emerald-700' }
+                  : { label: '○ Draft',       bg: 'bg-blue-100',    text: 'text-blue-700'    }
 
                 return (
                   <button key={c.id} onClick={() => selectClass(c)}
@@ -875,51 +897,18 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                         ? 'bg-blue-50 border-l-[3px] border-l-blue-500'
                         : hasConflict ? 'hover:bg-red-50' : 'hover:bg-gray-50'
                     }`}>
-                    {/* Row 1: section name + LIVE badge + status dot */}
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <p className={`text-sm font-semibold truncate ${selected?.id === c.id ? 'text-blue-700' : 'text-gray-800'}`}>
-                          Section {c.section}
-                        </p>
-                        {isLive && (
-                          <span className="flex-shrink-0 text-[9px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full tracking-wide">LIVE</span>
-                        )}
-                      </div>
-                      <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ml-1 ${statusDot}`} />
+                    <div className="flex items-center justify-between gap-1">
+                      <p className={`text-sm font-semibold truncate ${selected?.id === c.id ? 'text-blue-700' : 'text-gray-800'}`}>
+                        Section {c.section}
+                      </p>
+                      <span className={`flex-shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded-full ${pill.bg} ${pill.text}`}>
+                        {pill.label}
+                      </span>
                     </div>
-                    {/* Row 2: health glimpse points */}
-                    {!h ? (
-                      <p className="text-[10px] text-gray-300">Loading...</p>
-                    ) : noTimetable ? (
-                      <p className="text-[10px] text-gray-400 font-medium">No timetable generated</p>
-                    ) : (
-                      <div className="space-y-0.5">
-                        {hasConflict && (
-                          <p className="text-[10px] text-red-500 font-semibold flex items-center gap-1">
-                            <span>⚠</span> {h.conflict_count} teacher conflict{h.conflict_count > 1 ? 's' : ''}
-                          </p>
-                        )}
-                        {h.no_teacher_count > 0 && (
-                          <p className="text-[10px] text-amber-600 font-medium flex items-center gap-1">
-                            <span>·</span> {h.no_teacher_count} slot{h.no_teacher_count > 1 ? 's' : ''} no teacher
-                          </p>
-                        )}
-                        {h.subjects_unassigned > 0 && (
-                          <p className="text-[10px] text-orange-500 font-medium flex items-center gap-1">
-                            <span>·</span> {h.subjects_unassigned} subject{h.subjects_unassigned > 1 ? 's' : ''} unassigned
-                          </p>
-                        )}
-                        {isLive && !hasConflict && !hasUnassigned && (
-                          <p className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
-                            <span>●</span> Live &amp; circulated
-                          </p>
-                        )}
-                        {!isLive && allGood && (
-                          <p className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
-                            <span>✓</span> Ready to circulate
-                          </p>
-                        )}
-                      </div>
+                    {h && hasUnassigned && !hasConflict && (
+                      <p className="text-[10px] text-amber-600 mt-0.5">
+                        {h.no_teacher_count > 0 ? `${h.no_teacher_count} slots missing teacher` : `${h.subjects_unassigned} subjects unassigned`}
+                      </p>
                     )}
                   </button>
                 )
@@ -944,23 +933,26 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
             {/* ── Header ── */}
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-wrap gap-3">
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="font-semibold text-gray-800">Grade {selected.grade} – Section {selected.section}</h3>
-                  {selected.timetable_circulated_at && !hasChanges && (
-                    <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full tracking-wide">● LIVE</span>
-                  )}
-                  {selected.timetable_circulated_at && hasChanges && (
-                    <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full tracking-wide">Changes pending</span>
-                  )}
+                  {timetable.length > 0 && (() => {
+                    if (selected.timetable_circulated_at && !hasChanges)
+                      return <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">● Published</span>
+                    if (selected.timetable_circulated_at && hasChanges)
+                      return <span className="text-[10px] font-bold bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">⚠ Re-publish needed</span>
+                    return <span className="text-[10px] font-bold bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">○ Draft — not published</span>
+                  })()}
                 </div>
                 <p className="text-xs text-gray-400 mt-0.5">
                   {timetable.filter(s => !s.is_break && s.subject_name).length} of {activeAcademicSlots.length * DAYS.length} slots filled
-                  {conflictCount > 0 && <span className="ml-2 text-red-500 font-medium">· {conflictCount} conflict(s)</span>}
+                  {conflictCount > 0 && <span className="ml-2 text-red-500 font-medium">· {conflictCount} teacher conflict{conflictCount !== 1 ? 's' : ''}</span>}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                {/* Template selector — switches grid preview + generation settings live */}
+                {/* Schedule variant selector — half-day, full-day, custom period counts, etc. */}
                 {savedTemplates.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-gray-400 font-medium whitespace-nowrap">Schedule:</span>
                   <select
                     value={String(selectedTemplateId)}
                     onChange={async e => {
@@ -994,12 +986,13 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                         ? 'border border-violet-300 text-violet-700 bg-violet-50 ring-1 ring-violet-200'
                         : 'border border-blue-200 text-blue-700 bg-blue-50'
                     }`}
-                    title="Select schedule template — grid and generation both update instantly">
-                    <option value="default">School Default</option>
+                    title="Choose schedule variant — defines period times and breaks (e.g. half-day vs full-day)">
+                    <option value="default">Default (School-wide)</option>
                     {savedTemplates.map(t => (
                       <option key={t.id} value={t.id}>{t.name}</option>
                     ))}
                   </select>
+                  </div>
                 )}
                 {timetable.length > 0 && (
                   <button onClick={() => setShowDeleteConfirm(true)} disabled={deletingTt || editMode}
@@ -1008,50 +1001,52 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                     🗑 Delete
                   </button>
                 )}
-                {/* Custom timetable button */}
+                {/* Fill Manually: blank grid, admin assigns each slot */}
                 <button onClick={() => { setShowCustomModal(true); setCustomTemplateId('default') }}
                   disabled={editMode}
-                  title="Create a blank timetable and fill in subjects manually"
+                  title="Create a blank timetable — you choose subject and teacher for every slot"
                   className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-violet-300 text-violet-700 hover:bg-violet-50 disabled:opacity-40 transition-colors">
-                  ✦ Custom
+                  ✏ Fill Manually
                 </button>
 
-                {/* Generate (first time) or Regenerate (already exists) */}
+                {/* Auto-Generate (first time) or Re-generate (already exists) */}
                 {(() => {
                   const tmplName = selectedTemplateId !== 'default'
                     ? (savedTemplates.find(t => t.id === selectedTemplateId)?.name ?? '')
                     : ''
                   return timetable.length === 0 ? (
                     <button onClick={regenerate} disabled={regenerating}
+                      title="Auto-fill all slots using subjects and teacher assignments"
                       className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">
-                      {regenerating ? 'Generating…' : tmplName ? `Generate · ${tmplName}` : 'Generate Timetable'}
+                      {regenerating ? 'Generating…' : tmplName ? `⚡ Auto-Generate · ${tmplName}` : '⚡ Auto-Generate'}
                     </button>
                   ) : (
                     <button onClick={regenerate} disabled={regenerating || editMode}
+                      title="Re-run auto-generation — replaces all slots (manual edits kept if not force-replaced)"
                       className="px-4 py-1.5 rounded-lg text-xs font-medium border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-40 transition-colors">
-                      {regenerating ? 'Regenerating…' : tmplName ? `↻ Regen · ${tmplName}` : '↻ Regenerate'}
+                      {regenerating ? 'Generating…' : tmplName ? `↻ Re-generate · ${tmplName}` : '↻ Re-generate'}
                     </button>
                   )
                 })()}
-                {/* Edit + Circulate — only when timetable exists */}
+                {/* Edit Slots + Publish — only when timetable exists */}
                 {timetable.length > 0 && (
                   !editMode ? (
                     <>
                       <button onClick={() => { setEditMode(true); setSwapMsg(null); setCirculateMsg(null) }}
                         className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors">
-                        ✏ Edit Timetable
+                        ✏ Edit Slots
                       </button>
                       <button onClick={circulate}
                         disabled={circulating || conflictCount > 0 || (!!selected.timetable_circulated_at && !hasChanges)}
-                        title={conflictCount > 0 ? 'Resolve all conflicts before circulating'
-                          : (!!selected.timetable_circulated_at && !hasChanges) ? 'Already circulated — make changes to re-circulate'
-                          : 'Publish timetable to staff and students'}
+                        title={conflictCount > 0 ? 'Fix teacher conflicts before publishing'
+                          : (!!selected.timetable_circulated_at && !hasChanges) ? 'Already published — edit slots first to re-publish'
+                          : 'Notify all staff and students with this timetable'}
                         className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-40 ${
                           hasChanges
                             ? 'bg-emerald-600 text-white hover:bg-emerald-700 ring-2 ring-emerald-300'
                             : 'border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
                         }`}>
-                        {circulating ? 'Circulating...' : selected.timetable_circulated_at && !hasChanges ? '✓ Circulated' : 'Circulate'}
+                        {circulating ? 'Publishing...' : selected.timetable_circulated_at && !hasChanges ? '✓ Published' : 'Publish'}
                       </button>
                     </>
                   ) : (
@@ -1061,9 +1056,9 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                         Done Editing
                       </button>
                       <button onClick={circulate} disabled={circulating || conflictCount > 0}
-                        title={conflictCount > 0 ? 'Resolve all conflicts before circulating' : ''}
+                        title={conflictCount > 0 ? 'Fix teacher conflicts before publishing' : 'Notify all staff and students'}
                         className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 transition-colors ring-2 ring-emerald-300">
-                        {circulating ? 'Circulating...' : 'Circulate'}
+                        {circulating ? 'Publishing...' : 'Publish'}
                       </button>
                     </>
                   )
@@ -1076,10 +1071,10 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
               <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
                 <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full">
                   <div className="mb-4">
-                    <h3 className="font-bold text-gray-900 text-sm">Create Custom Timetable</h3>
+                    <h3 className="font-bold text-gray-900 text-sm">Fill Manually — Blank Grid</h3>
                     <p className="text-xs text-gray-500 mt-1">
-                      Creates a blank grid for <strong>Grade {selected.grade} – Section {selected.section}</strong>.
-                      No subjects are auto-assigned — you fill in each slot manually.
+                      Creates an empty timetable for <strong>Grade {selected.grade} – Section {selected.section}</strong>.
+                      All slots start blank — you choose subject and teacher for each one.
                     </p>
                   </div>
                   <div className="mb-4">
@@ -1150,13 +1145,13 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
             {/* ── Edit mode banner ── */}
             {editMode && (
               <div className="mx-4 mt-3 px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg text-xs text-orange-700 flex items-center gap-2">
-                <span className="font-semibold">Edit Mode ON</span>
-                <span>— <strong>Click a period to select it</strong>, then click another to swap · Click a selected period again to deselect · Press <kbd className="bg-orange-100 px-1 rounded">Esc</kbd> to exit · Hit <strong>Circulate</strong> to publish when done.</span>
+                <span className="font-semibold">Editing</span>
+                <span>— <strong>Click a slot to select it</strong>, then click another to swap them · Click a selected slot again to deselect · Press <kbd className="bg-orange-100 px-1 rounded">Esc</kbd> to exit · Click <strong>Publish</strong> when done to notify staff.</span>
               </div>
             )}
             {!editMode && timetable.length > 0 && (
               <div className="mx-4 mt-3 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-700">
-                Click any period to change the teacher. Enable <strong>Edit Timetable</strong> to swap periods.
+                Click any slot to assign or change the teacher. Use <strong>Edit Slots</strong> to swap periods.
               </div>
             )}
 
@@ -1192,9 +1187,9 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                     <div className="flex items-center gap-2">
                       <span className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0">!</span>
                       <span className="text-sm font-semibold text-red-800">
-                        {conflictCount} conflict{conflictCount !== 1 ? 's' : ''} — teacher double-booked
+                        {conflictCount} teacher conflict{conflictCount !== 1 ? 's' : ''} — double-booked
                       </span>
-                      <span className="text-xs text-red-500">(Cannot circulate until resolved)</span>
+                      <span className="text-xs text-red-500">(Fix before publishing)</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-red-600 font-medium">{showConflictPanel ? 'Hide' : 'Resolve →'}</span>
