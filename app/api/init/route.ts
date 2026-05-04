@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
-import { initDB } from '@/lib/db'
+import { ensureDB } from '@/lib/db'
 
 export async function GET() {
   try {
-    await initDB()
+    await ensureDB()
     return NextResponse.json({ message: 'Database initialized successfully' })
   } catch (error) {
     console.error('DB init error:', error)

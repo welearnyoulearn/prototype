@@ -70,7 +70,6 @@ export default function SchoolDetailPage() {
   useEffect(() => {
     async function load() {
       try {
-        await fetch('/api/init')
         const [schoolRes, featRes] = await Promise.all([
           fetch(`/api/schools/${schoolId}`),
           fetch('/api/platform/features'),

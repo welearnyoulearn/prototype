@@ -96,8 +96,7 @@ export default function PlatformAdmin() {
   }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    fetch('/api/init')
-      .then(() => Promise.all([fetchSchools(tab), fetchStats()]))
+    Promise.all([fetchSchools(tab), fetchStats()])
       .catch(() => setError('Cannot connect to database.'))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

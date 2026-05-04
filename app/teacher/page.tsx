@@ -132,8 +132,7 @@ export default function TeacherPortal() {
 
   // Load schools, then auto-restore saved session from localStorage
   useEffect(() => {
-    fetch('/api/init')
-      .then(() => fetch('/api/schools'))
+    fetch('/api/schools')
       .then(r => r.json())
       .then((data: School[]) => {
         const active = data.filter(s => s.status === 'active')

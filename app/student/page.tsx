@@ -84,8 +84,7 @@ export default function StudentPortal() {
   const pendingRestore = useRef<{ schoolId: string; classId: string; studentId: string } | null>(null)
 
   useEffect(() => {
-    fetch('/api/init')
-      .then(() => fetch('/api/schools'))
+    fetch('/api/schools')
       .then(r => r.json())
       .then((data: School[]) => {
         const active = data.filter((s: School) => s.status === 'active')

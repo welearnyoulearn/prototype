@@ -20,7 +20,7 @@ const pool = new Pool({
 
 export default pool
 
-// Lazy singleton — ensures migrations run exactly once per process
+// Lazy singleton — ensures bootstrap runs at most once per server process.
 let _initPromise: Promise<void> | null = null
 export function ensureDB(): Promise<void> {
   if (!_initPromise) {
@@ -36,9 +36,24 @@ export function ensureDB(): Promise<void> {
 // One fast round-trip replaces 100+ ALTER TABLE round-trips on every cold start.
 const SCHEMA_SENTINEL_TABLE  = 'classes'
 const SCHEMA_SENTINEL_COLUMN = 'deleted_at'
+const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 
 export async function initDB() {
-  // Check if schema is already fully applied — skip all migrations if so.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS app_bootstrap_state (
+      key TEXT PRIMARY KEY,
+      completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+
+  const bootstrap = await pool.query(
+    `SELECT 1 FROM app_bootstrap_state WHERE key = $1 LIMIT 1`,
+    [BOOTSTRAP_MARKER_KEY]
+  )
+  if (bootstrap.rows.length > 0) return
+
+  // Check if schema is already fully applied. If yes, record the durable marker
+  // so future Vercel cold starts never scan the full migration list again.
   const { rows } = await pool.query(`
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public'
@@ -46,7 +61,14 @@ export async function initDB() {
       AND column_name  = $2
     LIMIT 1
   `, [SCHEMA_SENTINEL_TABLE, SCHEMA_SENTINEL_COLUMN])
-  if (rows.length > 0) return   // schema is current — nothing to do
+  if (rows.length > 0) {
+    await pool.query(
+      `INSERT INTO app_bootstrap_state (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
+      [BOOTSTRAP_MARKER_KEY]
+    )
+    return
+  }
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS schools (
       id SERIAL PRIMARY KEY,
@@ -1006,4 +1028,9 @@ export async function initDB() {
   for (const sql of migrations) {
     await pool.query(sql).catch(() => { /* column already exists */ })
   }
+
+  await pool.query(
+    `INSERT INTO app_bootstrap_state (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
+    [BOOTSTRAP_MARKER_KEY]
+  )
 }

@@ -345,7 +345,6 @@ export default function SchoolAdmin() {
   useEffect(() => {
     async function init() {
       try {
-        await fetch('/api/init')
         const res = await fetch('/api/schools')
         const data: School[] = await res.json()
         const active = data.filter(s => s.status === 'active')
