@@ -321,13 +321,9 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
       rightPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }, 50)
-    // Reset to school default schedule when switching classes so the grid always
-    // reflects the schedule the class was generated with (avoids stale template bleed)
-    setSelectedTemplateId('default')
-    setActiveSchedule(schedule)
-    setActiveAcademicSlots(academicSlots)
+    const tmplParam = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
     const [data, subjsData] = await Promise.all([
-      fetch(`/api/class-timetable?class_id=${cls.id}&school_id=${schoolId}&template_id=default`).then(r => r.json()),
+      fetch(`/api/class-timetable?class_id=${cls.id}&school_id=${schoolId}&template_id=${tmplParam}`).then(r => r.json()),
       fetch(`/api/classes/${cls.id}/subjects`).then(r => r.json()),
     ])
     const slots: TimetableSlot[] = Array.isArray(data) ? data : []
@@ -345,7 +341,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     }
     setBusyMap(bm)
     setTtLoading(false)
-  }, [schoolId, allSchoolSlots, schedule, academicSlots])
+  }, [schoolId, allSchoolSlots, selectedTemplateId])
 
   // ── Fetch busy teachers + subject assignment when assign-teacher modal opens ──
   useEffect(() => {

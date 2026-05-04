@@ -92,7 +92,9 @@
       "Bash(npx vercel@48 list)",
       "Bash(git pull *)",
       "Bash(git stash *)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(npx vercel@48 deploy --archive=tgz)",
+      "Bash(npx vercel@48 inspect https://prototype-160h2gatr-sunny3005s-projects.vercel.app)"
     ],
     "additionalDirectories": [
       "d:\\wlyl\\prototype\\node_modules",
