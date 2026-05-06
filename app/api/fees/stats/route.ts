@@ -84,10 +84,8 @@ export async function GET(req: NextRequest) {
       `SELECT payment_mode, COUNT(*) AS count, SUM(amount) AS total
        FROM fee_payments
        WHERE school_id = $1 AND payment_status = 'completed'
-         AND EXTRACT(YEAR FROM paid_date) IN (
-           SELECT EXTRACT(YEAR FROM TO_DATE(SPLIT_PART($2, '-', 1), 'YYYY'))::int,
-                  EXTRACT(YEAR FROM TO_DATE(SPLIT_PART($2, '-', 1), 'YYYY'))::int + 1
-         )
+         AND paid_date >= TO_DATE(SPLIT_PART($2, '-', 1) || '-04-01', 'YYYY-MM-DD')
+         AND paid_date <  TO_DATE(SPLIT_PART($2, '-', 1) || '-04-01', 'YYYY-MM-DD') + INTERVAL '1 year'
        GROUP BY payment_mode ORDER BY total DESC`,
       [school_id, academic_year]
     )

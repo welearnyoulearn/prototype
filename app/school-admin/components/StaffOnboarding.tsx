@@ -17,6 +17,13 @@ type TeacherRow = {
   teaches_grades: string
 }
 
+type BulkStaffError = {
+  row: number
+  field?: string
+  code?: string
+  message: string
+}
+
 const EMPTY_ROW: TeacherRow = {
   name: '', email: '', subject: '', phone: '',
   department: '', qualification: '', date_of_joining: '', staff_type: 'teaching',
@@ -35,6 +42,18 @@ const ALL_GRADES = Array.from({ length: 12 }, (_, i) => String(i + 1))
 function normalizeStaffType(raw: string): string {
   const v = raw.toLowerCase().replace(/[\s\-]/g, '_')
   return v.includes('non') ? 'non_teaching' : 'teaching'
+}
+
+function normalizeDate(raw: string): string {
+  const value = raw.trim()
+  if (!value) return ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+
+  const match = value.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/)
+  if (!match) return value
+
+  const [, dd, mm, yyyy] = match
+  return `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`
 }
 
 function downloadTemplate() {
@@ -106,7 +125,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
   const [rows, setRows] = useState<TeacherRow[]>([{ ...EMPTY_ROW }])
   const [mode, setMode] = useState<'manual' | 'csv'>('manual')
   const [submitting, setSubmitting] = useState(false)
-  const [result, setResult] = useState<{ inserted: number; teachers: { employee_id: string }[]; errors: { row: number; message: string }[] } | null>(null)
+  const [result, setResult] = useState<{ inserted: number; teachers: { employee_id: string }[]; errors: BulkStaffError[] } | null>(null)
   const [error, setError] = useState('')
   const [csvWarn, setCsvWarn] = useState('')
   const [staffCount, setStaffCount] = useState<number | null>(null)
@@ -152,7 +171,8 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
       }
     }
 
-    const dataRows = hasHeader ? allRows.slice(1) : allRows
+    const dataRows = (hasHeader ? allRows.slice(1) : allRows)
+      .filter(cols => !cols[0]?.trim().startsWith('#'))
     const parsed: TeacherRow[] = dataRows.map(cols => {
       // Grades recovery: if user wrote 8,9,10 without quotes, CSV parser spills them into cols 8,9,10...
       // Detect: col 8 onwards are all grade numbers (1–12), merge them back
@@ -169,7 +189,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
         phone:           cols[3] ?? '',
         department:      cols[4] ?? '',
         qualification:   cols[5] ?? '',
-        date_of_joining: cols[6] ?? '',
+        date_of_joining: normalizeDate(cols[6] ?? ''),
         staff_type:      normalizeStaffType(cols[7] ?? ''),
         teaches_grades:  teachesGrades,
       }
@@ -203,7 +223,13 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
         body: JSON.stringify({ school_id: schoolId, teachers: valid }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
+      if (!res.ok) {
+        if (Array.isArray(data.errors) && data.errors.length > 0) {
+          setResult({ inserted: data.inserted ?? 0, teachers: data.teachers ?? [], errors: data.errors })
+          throw new Error('Some rows need correction. See row-level errors below.')
+        }
+        throw new Error(data.error)
+      }
       setResult(data)
       setRows([{ ...EMPTY_ROW }])
       setShowErrors(false)
@@ -294,7 +320,11 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
               )}
               {result.errors.length > 0 && (
                 <div className="mt-2 space-y-0.5">
-                  {result.errors.map((e, i) => <p key={i} className="text-orange-600 text-xs">Row {e.row}: {e.message}</p>)}
+                  {result.errors.map((e, i) => (
+                    <p key={i} className="text-orange-600 text-xs">
+                      Row {e.row}{e.field ? ` · ${e.field}` : ''}{e.code ? ` · ${e.code}` : ''}: {e.message}
+                    </p>
+                  ))}
                 </div>
               )}
             </div>

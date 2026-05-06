@@ -161,6 +161,33 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     if (mainTab === 'hod') loadHODData()
   }, [mainTab, schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  async function readJsonOrThrow(res: Response, fallback: string) {
+    const text = await res.text()
+    let data: unknown = null
+    try {
+      data = text ? JSON.parse(text) : null
+    } catch {
+      data = null
+    }
+    if (!res.ok) {
+      const message = data && typeof data === 'object' && 'error' in data && typeof data.error === 'string'
+        ? data.error
+        : `${fallback} (${res.status})`
+      throw new Error(message)
+    }
+    return data
+  }
+
+  async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 20000) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      return await fetch(input, { ...init, signal: controller.signal })
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
   async function loadTeachers() {
     setLoading(true)
     try {
@@ -179,7 +206,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     setError('')
     try {
       const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 12000)
+      const timer = setTimeout(() => controller.abort(), 20000)
 
       const [hodRes, classRes] = await Promise.all([
         fetch(`/api/hod?school_id=${schoolId}`, { signal: controller.signal }),
@@ -187,8 +214,8 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       ])
       clearTimeout(timer)
 
-      const hodData = await hodRes.json()
-      const classData = await classRes.json()
+      const hodData = await readJsonOrThrow(hodRes, 'Failed to load HOD assignments') as { hods?: HODAssignment[]; subjects?: string[] }
+      const classData = await readJsonOrThrow(classRes, 'Failed to load classes')
 
       const hods: HODAssignment[] = Array.isArray(hodData.hods) ? hodData.hods : []
       setHodAssignments(hods)
@@ -212,7 +239,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       setClassOptions(sorted)
     } catch (err) {
       const msg = err instanceof Error && err.name === 'AbortError'
-        ? 'Request timed out. Check server connection.'
+        ? 'Request timed out while loading HOD data. Please retry.'
         : 'Failed to load HOD data'
       setError(msg)
       // Build subjects from already-loaded teachers so UI stays usable
@@ -230,18 +257,20 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     if (!hodModal || !hodForm.teacher_id) return
     setHodSaving(true)
     try {
-      const res = await fetch('/api/hod', {
-        method: 'POST',
+      const isEdit = !!hodModal.editId
+      const res = await fetchWithTimeout(isEdit ? `/api/hod?id=${hodModal.editId}` : '/api/hod', {
+        method: isEdit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(isEdit ? {
+          class_ids: hodForm.class_ids,
+        } : {
           school_id: schoolId,
           department: hodModal.subject,
           teacher_id: parseInt(hodForm.teacher_id),
           class_ids: hodForm.class_ids,
         }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
+      const data = await readJsonOrThrow(res, hodModal.editId ? 'Failed to update HOD classes' : 'Failed to save HOD') as HODAssignment
       // Replace if same id, otherwise append
       setHodAssignments(prev => {
         const idx = prev.findIndex(h => h.id === data.id)
@@ -249,8 +278,12 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
         return [...prev, data]
       })
       setHodModal(null)
+      await loadHODData()
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to save HOD')
+      const msg = err instanceof Error && err.name === 'AbortError'
+        ? 'Request timed out while saving HOD. Please retry.'
+        : err instanceof Error ? err.message : 'Failed to save HOD'
+      setError(msg)
     } finally {
       setHodSaving(false)
     }
@@ -258,10 +291,14 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
 
   async function removeHOD(id: number) {
     try {
-      await fetch(`/api/hod?id=${id}`, { method: 'DELETE' })
+      const res = await fetchWithTimeout(`/api/hod?id=${id}`, { method: 'DELETE' })
+      await readJsonOrThrow(res, 'Failed to remove HOD')
       setHodAssignments(prev => prev.filter(h => h.id !== id))
-    } catch {
-      setError('Failed to remove HOD')
+    } catch (err) {
+      const msg = err instanceof Error && err.name === 'AbortError'
+        ? 'Request timed out while removing HOD. Please retry.'
+        : 'Failed to remove HOD'
+      setError(msg)
     }
   }
 

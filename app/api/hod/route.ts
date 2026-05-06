@@ -3,22 +3,35 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 
 // Ensure department_hods table exists (lightweight, no full ensureDB call)
+let hodTableReady = false
+let hodTablePromise: Promise<void> | null = null
+
 async function ensureHODTable() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS department_hods (
-      id SERIAL PRIMARY KEY,
-      school_id INTEGER NOT NULL,
-      department VARCHAR(100) NOT NULL,
-      teacher_id INTEGER NOT NULL,
-      class_ids INTEGER[] NOT NULL DEFAULT '{}',
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `).catch(() => {})
-  await pool.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_department_hods_school_dept_teacher
-    ON department_hods(school_id, department, teacher_id)
-  `).catch(() => {})
+  if (hodTableReady) return
+  if (!hodTablePromise) {
+    hodTablePromise = (async () => {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS department_hods (
+          id SERIAL PRIMARY KEY,
+          school_id INTEGER NOT NULL,
+          department VARCHAR(100) NOT NULL,
+          teacher_id INTEGER NOT NULL,
+          class_ids INTEGER[] NOT NULL DEFAULT '{}',
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        )
+      `)
+      await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_department_hods_school_dept_teacher
+        ON department_hods(school_id, department, teacher_id)
+      `)
+      hodTableReady = true
+    })().catch(error => {
+      hodTablePromise = null
+      throw error
+    })
+  }
+  await hodTablePromise
 }
 
 export async function GET(req: NextRequest) {
