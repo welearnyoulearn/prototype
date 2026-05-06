@@ -75,7 +75,8 @@ export default function StudentPortal() {
   const [student, setStudent] = useState<Student | null>(null)
   const [activeNav, setActiveNav] = useState('dashboard')
   const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set(['dashboard']))
-  function navigateTo(key: string) { setActiveNav(key); setVisitedNav(prev => new Set([...prev, key])) }
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  function navigateTo(key: string) { setActiveNav(key); setVisitedNav(prev => new Set([...prev, key])); setSidebarOpen(false) }
   const [loading, setLoading] = useState(true)
   const [studentLoading, setStudentLoading] = useState(false)
   const [error, setError] = useState('')
@@ -240,20 +241,26 @@ export default function StudentPortal() {
   return (
     <div className="min-h-screen flex flex-col bg-gray-100">
       {/* Top bar */}
-      <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0 z-30">
-        <div className="flex items-center gap-3">
-          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Home</Link>
-          <span className="text-gray-200">|</span>
-          <nav className="flex items-center gap-1 text-sm text-gray-400">
+      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between flex-shrink-0 z-30">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button onClick={() => setSidebarOpen(o => !o)} className="lg:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+          </button>
+          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm hidden sm:inline">← Home</Link>
+          <span className="text-gray-200 hidden sm:inline">|</span>
+          <nav className="hidden sm:flex items-center gap-1 text-sm text-gray-400">
             <span>Home</span>
             <span>/</span>
             <span className="text-gray-700 font-medium">
               {NAV_ITEMS.find(i => i.key === activeNav)?.label || 'Dashboard'}
             </span>
           </nav>
+          <span className="sm:hidden text-sm font-medium text-gray-700">
+            {NAV_ITEMS.find(i => i.key === activeNav)?.label || 'Dashboard'}
+          </span>
         </div>
-        <div className="flex items-center gap-3">
-          <p className="text-sm font-medium text-gray-800">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <p className="hidden sm:block text-sm font-medium text-gray-800">
             {student.name} · Grade {student.grade}-{student.section}
           </p>
           <NotificationBell
@@ -267,9 +274,10 @@ export default function StudentPortal() {
         </div>
       </div>
 
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 relative">
+        {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
         {/* Sidebar */}
-        <aside className="w-52 bg-slate-900 flex-shrink-0 flex flex-col">
+        <aside className={`fixed inset-y-0 left-0 z-40 lg:relative lg:inset-y-auto lg:left-auto w-52 bg-slate-900 flex-shrink-0 flex flex-col transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
           <div className="px-4 py-4 border-b border-slate-700">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-yellow-500 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -334,7 +342,7 @@ export default function StudentPortal() {
         />
 
         {/* Main content */}
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-6">
           <div className="max-w-4xl mx-auto">
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={parseInt(selectedClassId)} schoolId={parseInt(selectedSchoolId)} onNavigate={navigateTo} /></div>}
             {visitedNav.has('tasks')       && <div hidden={activeNav !== 'tasks'}><StudentTasks student={student} classId={parseInt(selectedClassId)} schoolId={parseInt(selectedSchoolId)} /></div>}

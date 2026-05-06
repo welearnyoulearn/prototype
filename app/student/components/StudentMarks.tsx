@@ -200,6 +200,7 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
           {expanded === exam.exam_id && (
             <div className="border-t border-gray-100 px-4 py-3">
               {/* Subject marks table */}
+              <div className="overflow-x-auto">
               <table className="w-full text-sm mb-4">
                 <thead>
                   <tr className="text-xs text-gray-400 uppercase tracking-wide">
@@ -261,6 +262,7 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
                   </tfoot>
                 )}
               </table>
+              </div>
 
               {/* Parent acknowledgement */}
               <div className="border-t border-gray-100 pt-3">

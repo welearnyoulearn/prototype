@@ -424,7 +424,7 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
       })()}
 
       {/* Stats row */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {/* Next Class card */}
         <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
           <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Next Class</p>

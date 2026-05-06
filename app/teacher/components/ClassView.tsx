@@ -641,9 +641,9 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
       {/* ── OVERVIEW TAB ─────────────────────────────────────────────────────── */}
       {activeTab === 'Overview' && (
         <div className="space-y-4">
-          <div className="grid grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
             {/* Today's attendance — morning + afternoon 1st period */}
-            <div className="bg-white rounded-xl border border-gray-200 px-4 py-4 col-span-2">
+            <div className="bg-white rounded-xl border border-gray-200 px-4 py-4 sm:col-span-2">
               <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Today&apos;s Attendance</p>
               <div className="grid grid-cols-2 gap-3">
                 {/* Morning */}
@@ -725,7 +725,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
 
           {/* Subject cards */}
           {subjects.length > 0 && (
-            <div className={`grid gap-4 ${subjects.length <= 3 ? 'grid-cols-3' : subjects.length === 4 ? 'grid-cols-4' : 'grid-cols-5'}`}>
+            <div className={`grid gap-4 grid-cols-2 ${subjects.length <= 3 ? 'sm:grid-cols-3' : subjects.length === 4 ? 'sm:grid-cols-4' : 'sm:grid-cols-5'}`}>
               {subjects.map(subj => (
                 <div key={subj.id} className="bg-white rounded-xl border border-gray-200 px-5 py-4">
                   <div className="flex items-start justify-between mb-1">
@@ -746,8 +746,8 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           )}
 
           {/* Student overview + right panels */}
-          <div className="grid grid-cols-5 gap-4">
-            <div className="col-span-3 bg-white rounded-xl border border-gray-200">
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+            <div className="sm:col-span-3 bg-white rounded-xl border border-gray-200">
               <div className="px-5 py-4 border-b border-gray-100">
                 <h3 className="font-semibold text-gray-800 text-sm">Student Overview</h3>
               </div>
@@ -795,7 +795,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                 </table>
               )}
             </div>
-            <div className="col-span-2 space-y-4">
+            <div className="sm:col-span-2 space-y-4">
               <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
                 <h3 className="font-semibold text-gray-800 text-sm mb-3">Attendance Heatmap</h3>
                 <div className="grid grid-cols-7 gap-1 mb-2">

@@ -181,9 +181,12 @@ export default function ParentDashboard() {
   const [announcements, setAnnouncements] = useState<AnnouncementItem[]>([])
   const [annExpanded, setAnnExpanded] = useState<number | null>(null)
 
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
   function navigateTo(key: string) {
     setActiveNav(key)
     setVisited(prev => new Set([...prev, key]))
+    setSidebarOpen(false)
   }
 
   // ── Data loaders ─────────────────────────────────────────────────────────────
@@ -426,10 +429,13 @@ export default function ParentDashboard() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-6 py-3.5 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Home</Link>
-          <span className="text-gray-300">|</span>
+      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3.5 flex items-center justify-between">
+        <div className="flex items-center gap-3 sm:gap-4">
+          <button onClick={() => setSidebarOpen(o => !o)} className="lg:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+          </button>
+          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm hidden sm:inline">← Home</Link>
+          <span className="text-gray-300 hidden sm:inline">|</span>
           <div>
             <p className="text-sm font-bold text-gray-900">{student.name}</p>
             <p className="text-xs text-gray-400">Grade {student.grade}-{student.section} · {selectedSchool?.name}</p>
@@ -455,9 +461,10 @@ export default function ParentDashboard() {
         </div>
       </div>
 
-      <div className="flex h-[calc(100vh-57px)]">
+      <div className="flex h-[calc(100vh-57px)] relative">
+        {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
         {/* Sidebar */}
-        <nav className="w-48 bg-white border-r border-gray-100 flex flex-col py-3 shrink-0 overflow-y-auto">
+        <nav className={`fixed inset-y-0 left-0 z-40 lg:relative lg:inset-y-auto lg:left-auto w-48 bg-white border-r border-gray-100 flex flex-col py-3 shrink-0 overflow-y-auto transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
           {NAV.map(item => (
             <button key={item.key} onClick={() => navigateTo(item.key)}
               className={`flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium transition-colors mx-2 rounded-lg ${
@@ -482,7 +489,7 @@ export default function ParentDashboard() {
         </nav>
 
         {/* Main */}
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-6">
 
           {/* ── OVERVIEW ───────────────────────────────────────────────────── */}
           {visited.has('overview') && (
@@ -507,7 +514,7 @@ export default function ParentDashboard() {
             </div>
 
             {/* Quick stats */}
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <button onClick={() => navigateTo('today')} className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-pink-300 transition-colors group">
                 <div className="text-2xl font-black text-blue-600 group-hover:text-pink-600">{timetable.length || '—'}</div>
                 <div className="text-xs text-gray-500 mt-1">Today's Periods</div>
@@ -796,13 +803,13 @@ export default function ParentDashboard() {
             </div>
 
             {attLoading ? (
-              <div className="grid grid-cols-4 gap-4">{[...Array(4)].map((_, i) => (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">{[...Array(4)].map((_, i) => (
                 <div key={i} className="bg-white rounded-xl border border-gray-100 p-4 animate-pulse h-20" />
               ))}</div>
             ) : attSummary ? (
               <>
                 {/* Summary cards */}
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   {[
                     { label: 'Present', value: attSummary.presentDays, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100' },
                     { label: 'Absent',  value: attSummary.absentDays,  color: 'text-red-600',   bg: 'bg-red-50',   border: 'border-red-100' },

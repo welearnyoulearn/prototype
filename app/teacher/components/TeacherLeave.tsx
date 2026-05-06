@@ -200,6 +200,7 @@ export default function TeacherLeave({ teacherId, schoolId }: Props) {
             <p className="text-gray-300 text-sm mt-1">Click &quot;Apply for Leave&quot; to submit</p>
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
@@ -229,6 +230,7 @@ export default function TeacherLeave({ teacherId, schoolId }: Props) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

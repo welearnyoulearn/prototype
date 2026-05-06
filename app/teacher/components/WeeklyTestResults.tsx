@@ -118,7 +118,7 @@ export default function WeeklyTestResults({ classId, schoolId, grade, section }:
       ) : (
         <>
           {/* Stats row */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-white rounded-xl border border-gray-200 p-4 text-center">
               <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Submitted</p>
               <p className="text-3xl font-black text-blue-600">{data.submitted_count}</p>

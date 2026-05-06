@@ -101,7 +101,8 @@ export default function TeacherPortal() {
   const [teacher, setTeacher] = useState<Teacher | null>(null)
   const [activeNav, setActiveNav] = useState('snapshot')
   const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set(['snapshot']))
-  function navigateTo(key: string) { setActiveNav(key); setVisitedNav(prev => new Set([...prev, key])) }
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  function navigateTo(key: string) { setActiveNav(key); setVisitedNav(prev => new Set([...prev, key])); setSidebarOpen(false) }
   const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null } | null>(null)
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
   const [classViewOpenExamId, setClassViewOpenExamId] = useState<number | undefined>(undefined)
@@ -238,11 +239,14 @@ export default function TeacherPortal() {
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-100">
-      <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0 z-30">
-        <div className="flex items-center gap-3">
-          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Home</Link>
-          <span className="text-gray-200">|</span>
-          <nav className="flex items-center gap-1 text-sm text-gray-400">
+      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between flex-shrink-0 z-30">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button onClick={() => setSidebarOpen(o => !o)} className="lg:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+          </button>
+          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm hidden sm:inline">← Home</Link>
+          <span className="text-gray-200 hidden sm:inline">|</span>
+          <nav className="hidden sm:flex items-center gap-1 text-sm text-gray-400">
             <span>Home</span>
             <span>/</span>
             {activeNav === 'class-view' && selectedClass ? (
@@ -258,8 +262,8 @@ export default function TeacherPortal() {
             )}
           </nav>
         </div>
-        <div className="flex items-center gap-3">
-          <p className="text-sm font-medium text-gray-800">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <p className="hidden sm:block text-sm font-medium text-gray-800">
             Good {new Date().getHours() < 12 ? 'Morning' : new Date().getHours() < 17 ? 'Afternoon' : 'Evening'}, {teacher.name}
           </p>
           <NotificationBell teacherId={teacher.id} onNavigate={handleNavigate} />
@@ -270,8 +274,9 @@ export default function TeacherPortal() {
         </div>
       </div>
 
-      <div className="flex flex-1 min-h-0">
-        <aside className="w-52 bg-slate-900 flex-shrink-0 flex flex-col">
+      <div className="flex flex-1 min-h-0 relative">
+        {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+        <aside className={`fixed inset-y-0 left-0 z-40 lg:relative lg:inset-y-auto lg:left-auto w-52 bg-slate-900 flex-shrink-0 flex flex-col transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
           <div className="px-4 py-4 border-b border-slate-700">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
@@ -341,7 +346,7 @@ export default function TeacherPortal() {
           teacherSubject={teacher.subject}
         />
 
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-6">
           {visitedNav.has('snapshot') && <div hidden={activeNav !== 'snapshot'}><SmartSnapshot teacher={teacher} schoolId={parseInt(selectedSchoolId)} onNavigate={navigateTo} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} /></div>}
           {/* class-view remounts on class change via key */}
           {visitedNav.has('class-view') && selectedClass && <div hidden={activeNav !== 'class-view'}><ClassView key={selectedClass.id} classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section} schoolId={parseInt(selectedSchoolId)} teacherName={teacher.name} teacherId={teacher.id} isClassTeacher={teacher.class_teacher_grade === selectedClass.grade && teacher.class_teacher_section === selectedClass.section} teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} onBack={() => navigateTo('snapshot')} initialTab={classViewInitialTab} openExamId={classViewOpenExamId} /></div>}

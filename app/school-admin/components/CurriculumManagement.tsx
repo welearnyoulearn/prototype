@@ -529,6 +529,7 @@ export default function CurriculumManagement({ schoolId }: Props) {
                 <p className="text-xs text-gray-300 mt-1">Select a grade and curriculum on the left to get started</p>
               </div>
             ) : (
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b border-gray-100">
                   <tr>
@@ -575,6 +576,7 @@ export default function CurriculumManagement({ schoolId }: Props) {
                   })}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
 

@@ -605,6 +605,7 @@ export default function DoubtsCenter({ teacher, schoolId }: Props) {
           {myDoubts.length > 0 && (
             <div>
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="bg-slate-800 text-white text-left">
@@ -704,6 +705,7 @@ export default function DoubtsCenter({ teacher, schoolId }: Props) {
                     })}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
           )}
@@ -719,6 +721,7 @@ export default function DoubtsCenter({ teacher, schoolId }: Props) {
                 <div className="flex-1 h-px bg-gray-200" />
               </div>
               <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <div className="overflow-x-auto">
                 <table className="w-full">
                   <tbody className="divide-y divide-gray-100">
                     {viewOnly.map(d => (
@@ -765,6 +768,7 @@ export default function DoubtsCenter({ teacher, schoolId }: Props) {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
           )}

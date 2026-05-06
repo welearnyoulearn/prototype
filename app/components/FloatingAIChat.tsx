@@ -150,7 +150,7 @@ export default function FloatingAIChat({
     return (
       <>
         {!open && (
-          <div className="fixed bottom-5 left-5 z-50">
+          <div className="fixed bottom-5 right-5 z-50">
             <button
               onClick={() => setOpen(true)}
               className={`flex items-center gap-2 bg-gradient-to-br ${gradientFrom} ${gradientTo} text-white rounded-2xl px-4 py-2.5 shadow-lg hover:shadow-xl transition-all ring-2 ring-white/30 hover:scale-105`}>
@@ -166,7 +166,7 @@ export default function FloatingAIChat({
         )}
 
         {open && (
-          <div className="fixed bottom-5 left-5 z-50 w-80 flex flex-col rounded-2xl shadow-2xl border border-gray-100 overflow-hidden"
+          <div className="fixed bottom-5 right-5 z-50 w-80 max-w-[calc(100vw-2.5rem)] flex flex-col rounded-2xl shadow-2xl border border-gray-100 overflow-hidden"
             style={{ height: '480px' }}>
             <div className={`bg-gradient-to-r ${gradientFrom} ${gradientTo} px-4 py-3 flex items-center justify-between flex-shrink-0`}>
               <div className="flex items-center gap-2.5">
@@ -243,7 +243,7 @@ export default function FloatingAIChat({
     <>
       {/* Floating trigger button */}
       {!open && (
-        <div className="fixed bottom-5 left-5 z-50">
+        <div className="fixed bottom-5 right-5 z-50">
           <button
             onClick={() => setOpen(true)}
             className="flex items-center gap-2 bg-gradient-to-br from-violet-600 to-purple-700 text-white rounded-2xl px-4 py-2.5 shadow-lg hover:shadow-xl transition-all ring-2 ring-white/30 hover:scale-105">

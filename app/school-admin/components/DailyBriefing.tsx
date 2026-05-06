@@ -155,7 +155,7 @@ export default function DailyBriefing({
           )}
 
           {/* ── Main grid ─────────────────────────────────────────── */}
-          <div className="grid grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
 
             {/* Attendance card */}
             <div className="col-span-1 bg-white border border-gray-100 rounded-2xl shadow-sm p-5 flex flex-col items-center gap-3 cursor-pointer hover:shadow-md transition-shadow"
@@ -278,7 +278,7 @@ export default function DailyBriefing({
           )}
 
           {/* ── Bottom stat row ───────────────────────────────────── */}
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {[
               { label: 'Active Announcements', value: data.active_announcements, action: 'announcements', icon: '📢' },
               { label: 'Low Syllabus Coverage', value: data.low_syllabus_classes, action: 'academic-analytics', icon: '📚', warn: data.low_syllabus_classes > 0 },

@@ -306,6 +306,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                   <span className="font-semibold text-green-800 text-sm">{group}</span>
                   <span className="text-xs text-green-600 font-medium">{members.length} student{members.length !== 1 ? 's' : ''}</span>
                 </div>
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-100">
                     <tr>
@@ -333,6 +334,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             ))}
           </div>

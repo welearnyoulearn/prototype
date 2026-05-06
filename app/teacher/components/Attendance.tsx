@@ -738,7 +738,7 @@ export default function Attendance({ teacherId, schoolId }: Props) {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="bg-white rounded-xl border border-gray-200 px-4 py-3 text-center">
           <p className="text-2xl font-bold text-gray-900">{students.length}</p>
           <p className="text-xs text-gray-400">Total</p>

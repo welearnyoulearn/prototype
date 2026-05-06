@@ -315,7 +315,7 @@ export default function SchoolDetailPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-4 gap-4 mt-5 pt-4 border-t border-gray-100">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5 pt-4 border-t border-gray-100">
                 <div>
                   <p className="text-xs text-gray-400">School ID</p>
                   <code className="text-xs font-mono text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded mt-0.5 block truncate">{school.school_code || '—'}</code>
@@ -358,7 +358,7 @@ export default function SchoolDetailPage() {
             </button>
           </div>
           <div className="px-6 py-5">
-            <div className="grid grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
               <div>
                 <p className="text-xs text-gray-400 mb-1">Login ID (School Code)</p>
                 <code className="text-sm font-mono text-purple-700 bg-purple-50 border border-purple-100 px-2 py-1 rounded block truncate">

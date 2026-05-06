@@ -126,7 +126,7 @@ export default function ClassPerformance({ classId, schoolId, grade, section }: 
 
       {/* Class Average Strip */}
       {class_avg && (
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
             { label: 'Avg Attendance', value: class_avg.attendance_pct },
             { label: 'Avg Submission', value: class_avg.task_submission_rate },

@@ -631,6 +631,7 @@ export default function FeeManagement({ schoolId }: { schoolId: number }) {
             </div>
           ) : (
             <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
@@ -669,6 +670,7 @@ export default function FeeManagement({ schoolId }: { schoolId: number }) {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
@@ -1081,6 +1083,7 @@ export default function FeeManagement({ schoolId }: { schoolId: number }) {
               <div className="px-4 py-3 border-b border-gray-100 bg-red-50">
                 <p className="text-sm font-semibold text-red-700">{stats.top_defaulters.length} Defaulters · Total Outstanding: {fmt(stats.top_defaulters.reduce((s, d) => s + Number(d.outstanding), 0))}</p>
               </div>
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
@@ -1126,6 +1129,7 @@ export default function FeeManagement({ schoolId }: { schoolId: number }) {
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </div>

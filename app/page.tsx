@@ -60,11 +60,11 @@ const roles = [
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col items-center justify-center p-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col items-center justify-center p-4 sm:p-8">
       <div className="max-w-2xl w-full">
-        <div className="text-center mb-10">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">WLYL</h1>
-          <p className="text-gray-600 text-lg">School Management &amp; Learning Platform</p>
+        <div className="text-center mb-8 sm:mb-10">
+          <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-2">WLYL</h1>
+          <p className="text-gray-600 text-base sm:text-lg">School Management &amp; Learning Platform</p>
           <p className="text-gray-500 mt-1 text-sm">Select your role to continue</p>
         </div>
 

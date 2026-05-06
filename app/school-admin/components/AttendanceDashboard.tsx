@@ -422,7 +422,7 @@ export default function AttendanceDashboard({ schoolId }: Props) {
       )}
 
       {/* Summary stat cards */}
-      <div className="grid grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         <div className="bg-white border border-gray-200 rounded-xl px-4 py-3">
           <p className="text-2xl font-bold text-gray-900">{totalClasses}</p>
           <p className="text-xs text-gray-400 mt-0.5">Total Classes</p>

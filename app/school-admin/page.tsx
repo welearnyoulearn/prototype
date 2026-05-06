@@ -321,11 +321,12 @@ export default function SchoolAdmin() {
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
   const [activeNav, setActiveNav] = useState('overview')
   const [visited, setVisited] = useState<Set<string>>(new Set(['overview']))
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   function navigateTo(key: string) {
     setActiveNav(key)
     setVisited(prev => new Set([...prev, key]))
-    // Reset sub-tabs when navigating to hub pages
+    setSidebarOpen(false)
     if (key === 'staff') setStaffSubTab('directory')
     if (key === 'students') setStudentsSubTab('list')
   }
@@ -414,10 +415,13 @@ export default function SchoolAdmin() {
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-slate-50">
       {/* Top bar */}
-      <div className="bg-white border-b border-slate-200 px-5 py-3 flex items-center justify-between flex-shrink-0 z-30 shadow-sm">
+      <div className="bg-white border-b border-slate-200 px-3 sm:px-5 py-3 flex items-center justify-between flex-shrink-0 z-30 shadow-sm">
         <div className="flex items-center gap-3">
-          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Home</Link>
-          <span className="text-gray-200">|</span>
+          <button onClick={() => setSidebarOpen(o => !o)} className="lg:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+          </button>
+          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm hidden sm:inline">← Home</Link>
+          <span className="text-gray-200 hidden sm:inline">|</span>
 
           {/* School switcher */}
           {schools.length > 0 ? (
@@ -462,7 +466,7 @@ export default function SchoolAdmin() {
 
         <div className="flex items-center gap-3">
           {tier !== 'none' && (
-            <span className={`text-xs font-medium px-2.5 py-1 rounded-full capitalize ${
+            <span className={`hidden sm:inline-flex text-xs font-medium px-2.5 py-1 rounded-full capitalize ${
               tier === 'basic' ? 'bg-green-100 text-green-700' :
               tier === 'standard' ? 'bg-blue-100 text-blue-700' :
               'bg-purple-100 text-purple-700'
@@ -483,7 +487,7 @@ export default function SchoolAdmin() {
             Search
             <kbd className="text-[10px] bg-gray-100 px-1 rounded font-mono">Ctrl K</kbd>
           </button>
-          <span className="bg-blue-100 text-blue-700 text-xs font-medium px-3 py-1 rounded-full">School Admin</span>
+          <span className="hidden sm:inline-flex bg-blue-100 text-blue-700 text-xs font-medium px-3 py-1 rounded-full">School Admin</span>
           <button onClick={handleLogout}
             className="text-sm text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition-colors">
             Logout
@@ -511,9 +515,10 @@ export default function SchoolAdmin() {
           </div>
         </div>
       ) : (
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden relative">
+          {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
           {/* Sidebar */}
-          <aside className="w-60 bg-slate-900 flex-shrink-0 flex flex-col shadow-xl">
+          <aside className={`fixed inset-y-0 left-0 z-40 lg:relative lg:inset-y-auto lg:left-auto w-60 bg-slate-900 flex-shrink-0 flex flex-col shadow-xl transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
             {/* School branding */}
             <div className="px-4 py-4 border-b border-slate-700/60">
               <div className="flex items-center gap-3">
@@ -626,7 +631,7 @@ export default function SchoolAdmin() {
           </aside>
 
           {/* Main content */}
-          <main className="flex-1 overflow-y-auto p-6">
+          <main className="flex-1 overflow-y-auto p-3 sm:p-6">
             {tier === 'none' ? (
               <div className="flex items-center justify-center h-full min-h-[400px]">
                 <div className="text-center max-w-sm">

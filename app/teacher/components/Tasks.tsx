@@ -283,9 +283,9 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
           </div>
         )}
 
-        <div className="grid grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
           {/* Left: Task Details */}
-          <div className="col-span-2 space-y-4">
+          <div className="sm:col-span-2 space-y-4">
             {/* Task Details card */}
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <div className="flex items-center gap-2 mb-4">
@@ -532,7 +532,7 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
       </div>
 
       {/* Stats cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
           { label: 'TOTAL TASKS', value: visibleTasks.length, color: 'text-gray-900', border: 'border-l-gray-400' },
           { label: 'YOUR TASKS', value: ownTasks.filter(t => t.status === 'published').length, color: 'text-orange-500', border: 'border-l-orange-400' },
@@ -565,6 +565,7 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
             </button>
           </div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-800 text-slate-200">
@@ -599,6 +600,7 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
               })()}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

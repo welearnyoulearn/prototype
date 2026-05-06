@@ -385,7 +385,7 @@ export default function MyStudents({ teacher, schoolId }: Props) {
                   <p className="text-sm text-gray-400">No published tasks for this class</p>
                 ) : (
                   <>
-                    <div className="grid grid-cols-4 gap-3 mb-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                       {[
                         { label: 'Assigned', val: tasks.length, cls: 'text-gray-700' },
                         { label: 'Submitted', val: submitted, cls: 'text-blue-600' },

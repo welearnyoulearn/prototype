@@ -424,7 +424,7 @@ export default function ExportCenter({ schoolId }: { schoolId: number }) {
                   </div>
 
                   {/* Marks table */}
-                  <div className="px-8 py-4">
+                  <div className="px-8 py-4 overflow-x-auto">
                     <table className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="border-b-2 border-gray-200">

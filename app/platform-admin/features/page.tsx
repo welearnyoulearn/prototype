@@ -111,7 +111,7 @@ export default function FeaturePlansPage() {
         </div>
 
         {/* Plan summary */}
-        <div className="grid grid-cols-3 gap-4 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
           {TIERS.map(t => (
             <div key={t.key} className={`rounded-xl border-2 p-5 ${t.bg} border-${t.key === 'basic' ? 'green' : t.key === 'standard' ? 'blue' : 'purple'}-200`}>
               <p className={`text-sm font-bold uppercase tracking-wide ${t.color}`}>{t.label}</p>
