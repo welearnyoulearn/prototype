@@ -99,6 +99,24 @@ export async function GET(req: NextRequest) {
       [school_id]
     )
 
+    // For each conflicting slot, find the permanently assigned teacher from class_subjects
+    const conflictClassIds = [...new Set(conflictRows.map(r => r.class_id))]
+    const { rows: classSubjRows } = await pool.query<{
+      class_id: number; subject_name: string; teacher_id: number; teacher_name: string
+    }>(
+      `SELECT cs.class_id, cs.subject_name, cs.teacher_id, t.name AS teacher_name
+       FROM class_subjects cs
+       JOIN teachers t ON t.id = cs.teacher_id
+       WHERE cs.class_id = ANY($1) AND cs.teacher_id IS NOT NULL`,
+      [conflictClassIds]
+    )
+    // Map: classId -> subjectName.lower -> { teacher_id, teacher_name }
+    const classSubjMap: Record<number, Record<string, { teacher_id: number; teacher_name: string }>> = {}
+    for (const r of classSubjRows) {
+      if (!classSubjMap[r.class_id]) classSubjMap[r.class_id] = {}
+      classSubjMap[r.class_id][r.subject_name.toLowerCase()] = { teacher_id: r.teacher_id, teacher_name: r.teacher_name }
+    }
+
     // Build busy map scoped to the same template
     const { rows: allSlots } = await pool.query<{
       teacher_id: number; day_of_week: string; period_number: number
@@ -133,6 +151,34 @@ export async function GET(req: NextRequest) {
       })
       const altMap = new Map(alternatives.map(a => [a.id, a]))
 
+      // Enrich slots with the class_subjects-assigned teacher (preferred reassignment)
+      const enrichedSlots = slots.map(s => {
+        const assigned = classSubjMap[s.class_id]?.[s.subject_name.toLowerCase()] ?? null
+        return {
+          slot_id:      s.slot_id,
+          class_id:     s.class_id,
+          grade:        s.grade,
+          section:      s.section,
+          subject_name: s.subject_name,
+          is_manual:    s.is_manual,
+          assigned_teacher_id:   assigned?.teacher_id   ?? null,
+          assigned_teacher_name: assigned?.teacher_name ?? null,
+        }
+      })
+
+      // Prepend free class_subjects teachers to alternatives so they appear first
+      const assignedAlts: { id: number; name: string; subject: string; is_assigned?: boolean }[] = []
+      for (const s of enrichedSlots) {
+        if (!s.assigned_teacher_id) continue
+        const tid = s.assigned_teacher_id
+        if (tid === first.teacher_id) continue // is the conflicting teacher themselves
+        if (!busyMap[tid]?.has(dayPeriodKey) && !altMap.has(tid)) {
+          const t = allTeachers.find(x => x.id === tid)
+          assignedAlts.push({ id: tid, name: s.assigned_teacher_name!, subject: t?.subject ?? '', is_assigned: true })
+          altMap.set(tid, { id: tid, name: s.assigned_teacher_name!, subject: t?.subject ?? '' })
+        }
+      }
+
       return {
         teacher_id:   first.teacher_id,
         teacher_name: first.teacher_name,
@@ -140,15 +186,11 @@ export async function GET(req: NextRequest) {
         period_number: first.period_number,
         time_from:    first.time_from,
         time_to:      first.time_to,
-        slots: slots.map(s => ({
-          slot_id:      s.slot_id,
-          class_id:     s.class_id,
-          grade:        s.grade,
-          section:      s.section,
-          subject_name: s.subject_name,
-          is_manual:    s.is_manual,
-        })),
-        alternatives: [...altMap.values()],
+        slots: enrichedSlots,
+        alternatives: [
+          ...assignedAlts,
+          ...[...altMap.values()].filter(a => !assignedAlts.find(aa => aa.id === a.id)),
+        ],
       }
     })
 

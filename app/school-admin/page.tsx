@@ -549,7 +549,9 @@ export default function SchoolAdmin() {
               ) : (
                 <>
                   {NAV_SECTIONS.map(section => {
-                    const sectionEnabled = enabledNavItems.filter(i => section.keys.includes(i.key))
+                    const sectionEnabled = section.keys
+                      .map(key => enabledNavItems.find(i => i.key === key))
+                      .filter((i): i is NavItem => i !== undefined)
                     if (sectionEnabled.length === 0) return null
                     return (
                       <div key={section.label} className="mb-1">

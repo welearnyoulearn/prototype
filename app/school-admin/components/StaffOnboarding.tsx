@@ -152,7 +152,8 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
       }
     }
 
-    const dataRows = hasHeader ? allRows.slice(1) : allRows
+    const dataRows = (hasHeader ? allRows.slice(1) : allRows)
+      .filter(cols => !(cols[0] ?? '').trim().startsWith('#'))
     const parsed: TeacherRow[] = dataRows.map(cols => {
       // Grades recovery: if user wrote 8,9,10 without quotes, CSV parser spills them into cols 8,9,10...
       // Detect: col 8 onwards are all grade numbers (1–12), merge them back

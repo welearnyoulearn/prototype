@@ -29,16 +29,17 @@ function canTeachGrade(teachesGrades: string | null, grade: string, section: str
   return allowed.some(g => g === gradeUpper || g === classKey)
 }
 
-// Distribute academic slots proportionally among subjects based on periods_per_week
+// Use exact ppw values — only scale DOWN if total exceeds available slots.
+// Do NOT inflate ppw to fill all slots (that caused inaccurate frequency distribution).
 function buildRequiredCounts(subjects: { name: string; ppw: number }[], totalAcademicPerWeek: number): Record<string, number> {
   const total = subjects.reduce((s, x) => s + x.ppw, 0)
   const counts: Record<string, number> = {}
-  let assigned = 0
 
   if (total === 0) {
     // Fallback: distribute equally, weighted by core status
     const weights: [string, number][] = subjects.map(x => [x.name, isCore(x.name) ? 1.5 : 1.0])
     const totalW = weights.reduce((s, [, w]) => s + w, 0)
+    let assigned = 0
     for (const [name, w] of weights) {
       counts[name] = Math.floor((w / totalW) * totalAcademicPerWeek)
       assigned += counts[name]
@@ -48,15 +49,25 @@ function buildRequiredCounts(subjects: { name: string; ppw: number }[], totalAca
     return counts
   }
 
-  // Scale proportionally to fill exactly the available slots
-  for (const x of subjects) {
-    counts[x.name] = Math.floor((x.ppw / total) * totalAcademicPerWeek)
-    assigned += counts[x.name]
+  if (total <= totalAcademicPerWeek) {
+    // Exact ppw values — leave remaining slots empty rather than inflate
+    for (const x of subjects) counts[x.name] = x.ppw
+  } else {
+    // Total exceeds available slots — scale proportionally down
+    let assigned = 0
+    for (const x of subjects) {
+      counts[x.name] = Math.max(1, Math.floor((x.ppw / total) * totalAcademicPerWeek))
+      assigned += counts[x.name]
+    }
+    // If we over-assigned due to minimums, trim the lowest-ppw subjects
+    const sorted = [...subjects].sort((a, b) => a.ppw - b.ppw)
+    let i = 0
+    while (assigned > totalAcademicPerWeek && i < sorted.length) {
+      const name = sorted[i].name
+      if (counts[name] > 1) { counts[name]--; assigned-- }
+      else i++
+    }
   }
-  // Distribute remainder to subjects with highest ppw
-  const remainder = totalAcademicPerWeek - assigned
-  const sorted = [...subjects].sort((a, b) => b.ppw - a.ppw)
-  for (let i = 0; i < remainder; i++) counts[sorted[i % sorted.length].name]++
 
   return counts
 }
@@ -402,7 +413,10 @@ export async function POST(req: NextRequest) {
         type GridSlot = { subject_name: string | null; teacher_id: number | null; room: string }
         const grid: Record<string, Record<number, GridSlot>> = {}
 
-        for (const day of DAYS) {
+        // Shuffle day processing order per class to avoid Monday-bias (Mon always fullest)
+        const shuffledDays = [...DAYS].sort(() => Math.random() - 0.5)
+
+        for (const day of shuffledDays) {
           grid[day] = {}
           const dayUsed: Record<string, number> = {}
           let prevSubject: string | null = null

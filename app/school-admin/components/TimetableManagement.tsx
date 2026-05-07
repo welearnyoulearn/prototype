@@ -194,12 +194,21 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   // Track unsaved changes made after last circulation (swap / teacher edit / regenerate)
   const [hasChanges, setHasChanges]         = useState(false)
 
+  // Undo stack for swap edits
+  type UndoEntry = { label: string; snapshot: TimetableSlot[]; apiReverse: () => Promise<void> }
+  const [undoStack, setUndoStack]           = useState<UndoEntry[]>([])
+  const [undoing, setUndoing]               = useState(false)
+
+  // Track which class IDs were modified in this session (for Publish All)
+  const [changedClassIds, setChangedClassIds] = useState<Set<number>>(new Set())
+  const [publishingAll, setPublishingAll]     = useState(false)
+
   // Conflict resolution panel
   type ConflictGroup = {
     teacher_id: number; teacher_name: string
     day_of_week: string; period_number: number; time_from: string; time_to: string
-    slots: { slot_id: number; class_id: number; grade: string; section: string; subject_name: string; is_manual: boolean }[]
-    alternatives: { id: number; name: string; subject: string }[]
+    slots: { slot_id: number; class_id: number; grade: string; section: string; subject_name: string; is_manual: boolean; assigned_teacher_id: number | null; assigned_teacher_name: string | null }[]
+    alternatives: { id: number; name: string; subject: string; is_assigned?: boolean }[]
   }
   const [showConflictPanel, setShowConflictPanel]   = useState(false)
   const [conflicts, setConflicts]                   = useState<ConflictGroup[]>([])
@@ -316,6 +325,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     setSelected(cls); setTtLoading(true)
     setEditSlot(null); setSelectedSlot(null); setSwapMsg(null)
     setRegenMsg(null); setCirculateMsg(null); setEditMode(false); setConflictCount(0); setHasChanges(false)
+    setUndoStack([])
     // Scroll to the top of the timetable panel on every class click
     setTimeout(() => {
       rightPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -410,7 +420,9 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
         const freshSlots: TimetableSlot[] = Array.isArray(freshData) ? freshData : []
         setTimetable(freshSlots)
         setConflictCount(freshSlots.filter(s => (s as TimetableSlot & { has_conflict?: boolean }).has_conflict).length)
-        setHasChanges(true); loadHealth(); refreshAllSlots()
+        setHasChanges(true)
+        setChangedClassIds(prev => new Set([...prev, selected.id]))
+        loadHealth(); refreshAllSlots()
         setEditSlot(null)
       }
     } finally { setSwapping(false) }
@@ -499,6 +511,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     setTimetable(freshSlots)
     setConflictCount(freshSlots.filter(s => (s as TimetableSlot & { has_conflict?: boolean }).has_conflict).length)
     setSaving(false); setEditSlot(null); setHasChanges(true)
+    if (selected) setChangedClassIds(prev => new Set([...prev, selected.id]))
     // Refresh cached school slots + health
     refreshAllSlots(); loadHealth()
   }
@@ -538,6 +551,24 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     if (!selected) return
     const pA = Math.round(Number(slotA.period_number))
     const pB = Math.round(Number(slotB.period_number))
+    const classId = selected.id
+    // Push undo entry before modifying
+    const preSwapSnapshot = [...timetable]
+    setUndoStack(prev => [...prev.slice(-9), {
+      label: `${slotA.subject_name || '?'} ↔ ${slotB.subject_name || '?'}`,
+      snapshot: preSwapSnapshot,
+      apiReverse: async () => {
+        const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
+        await fetch('/api/class-timetable/swap', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            school_id: schoolId, class_id: classId, template_id: tmplIdForBody,
+            slot_a: { day: slotB.day_of_week, period_number: pB },
+            slot_b: { day: slotA.day_of_week, period_number: pA },
+          }),
+        })
+      },
+    }])
     // Optimistic update — show result immediately
     setTimetable(prev => prev.map(s => {
       const aMatch = s.day_of_week === slotA.day_of_week && Math.round(Number(s.period_number)) === pA
@@ -547,6 +578,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
       return s
     }))
     setSelectedSlot(null); setHasChanges(true)
+    setChangedClassIds(prev => new Set([...prev, classId]))
     setSwapMsg({ text: 'Periods swapped', ok: true })
     setTimeout(() => setSwapMsg(null), 3000)
     // Fire-and-forget save; revert on failure, refresh health on success
@@ -647,6 +679,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
         if (newConflicts > 0 && showConflictPanel) loadConflicts()
         setClasses(prev => prev.map(c => c.id === selected.id ? { ...c, timetable_generated_at: new Date().toISOString() } : c))
         setHasChanges(true)
+        if (selected) setChangedClassIds(prev => new Set([...prev, selected.id]))
         refreshAllSlots(); loadHealth()
         setTimeout(() => setRegenMsg(null), 6000)
       }
@@ -706,7 +739,8 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
       } else {
         const circulatedAt = data.circulated_at ?? new Date().toISOString()
         setCirculateMsg({ text: `Published — ${data.staff_notified} staff and all students notified`, ok: true })
-        setEditMode(false); setHasChanges(false)
+        setEditMode(false); setHasChanges(false); setUndoStack([])
+        setChangedClassIds(prev => { const next = new Set(prev); next.delete(selected.id); return next })
         // Stamp circulation time locally so LIVE badge appears immediately
         setClasses(prev => prev.map(c => c.id === selected.id
           ? { ...c, timetable_circulated_at: circulatedAt }
@@ -717,6 +751,44 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
         setTimeout(() => setCirculateMsg(null), 6000)
       }
     } finally { setCirculating(false) }
+  }
+
+  // ── Undo last swap ────────────────────────────────────────────────────────
+  async function undo() {
+    const last = undoStack[undoStack.length - 1]
+    if (!last || undoing) return
+    setUndoing(true)
+    try {
+      await last.apiReverse()
+      setTimetable(last.snapshot)
+      setUndoStack(prev => prev.slice(0, -1))
+    } finally { setUndoing(false) }
+  }
+
+  // ── Publish all classes that were changed in this session ─────────────────
+  async function publishAll() {
+    if (changedClassIds.size === 0) return
+    setPublishingAll(true)
+    try {
+      const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
+      for (const classId of changedClassIds) {
+        const res = await fetch('/api/class-timetable/circulate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ school_id: schoolId, class_id: classId, template_id: tmplIdForBody }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          const circulatedAt = data.circulated_at ?? new Date().toISOString()
+          setClasses(prev => prev.map(c => c.id === classId ? { ...c, timetable_circulated_at: circulatedAt } : c))
+          setChangedClassIds(prev => { const next = new Set(prev); next.delete(classId); return next })
+          if (selected?.id === classId) {
+            setSelected(prev => prev ? { ...prev, timetable_circulated_at: circulatedAt } : prev)
+            setHasChanges(false)
+          }
+        }
+      }
+      loadHealth()
+    } finally { setPublishingAll(false) }
   }
 
   // Group by grade
@@ -741,7 +813,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
               <p className="text-xs text-gray-400">Check if any teacher is overcommitted before generating — prevents conflicts at the root</p>
             </div>
           </div>
-          <div className="flex items-center gap-3 flex-shrink-0">
+          <div className="flex items-center gap-3 flex-shrink-0 flex-wrap justify-end">
             {loadData?.summary && (
               <div className="flex items-center gap-2 text-xs">
                 {loadData.summary.high_risk > 0   && <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold">{loadData.summary.high_risk} High risk</span>}
@@ -751,6 +823,25 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                 )}
               </div>
             )}
+            {/* Publish All: enabled when any class was edited this session */}
+            {(() => {
+              const allGenPublished = classes.filter(c => c.timetable_generated_at).every(c => c.timetable_circulated_at)
+              const hasChangedClasses = changedClassIds.size > 0
+              if (!hasChangedClasses && allGenPublished && classes.filter(c => c.timetable_generated_at).length > 0) {
+                return (
+                  <span className="text-xs text-emerald-600 font-medium px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50">
+                    ✓ All Published
+                  </span>
+                )
+              }
+              return (
+                <button onClick={publishAll} disabled={!hasChangedClasses || publishingAll}
+                  title={hasChangedClasses ? `Publish ${changedClassIds.size} changed timetable${changedClassIds.size !== 1 ? 's' : ''}` : 'No recent changes to publish'}
+                  className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:bg-gray-200 disabled:text-gray-400 transition-colors">
+                  {publishingAll ? 'Publishing…' : hasChangedClasses ? `Publish All (${changedClassIds.size})` : 'Publish All'}
+                </button>
+              )
+            })()}
             <button onClick={runLoadAnalysis} disabled={loadAnalysing}
               className="px-3 py-1.5 text-xs font-medium rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-40 transition-colors">
               {loadAnalysing ? 'Analysing…' : loadData ? '↻ Re-check' : 'Check Now'}
@@ -1047,7 +1138,14 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                     </>
                   ) : (
                     <>
-                      <button onClick={() => { setEditMode(false); setSwapMsg(null) }}
+                      <button
+                        onClick={undo}
+                        disabled={undoStack.length === 0 || undoing}
+                        title={undoStack.length > 0 ? `Undo: ${undoStack[undoStack.length - 1].label}` : 'Nothing to undo'}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-30 transition-colors">
+                        {undoing ? '…' : '↶ Undo'}
+                      </button>
+                      <button onClick={() => { setEditMode(false); setSwapMsg(null); setUndoStack([]) }}
                         className="px-4 py-1.5 rounded-lg text-xs font-semibold border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors">
                         Done Editing
                       </button>
@@ -1239,13 +1337,17 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                               ))}
                               {cg.alternatives.length > 0 && (
                                 <>
-                                  <span className="text-[11px] text-gray-400 font-medium ml-1">Or reassign:</span>
-                                  {cg.alternatives.slice(0, 3).map(alt => (
+                                  <span className="text-[11px] text-gray-400 font-medium ml-1">Reassign to:</span>
+                                  {cg.alternatives.slice(0, 4).map(alt => (
                                     <button key={alt.id}
                                       onClick={() => fixConflict(cg.slots.find(s => !s.is_manual)?.slot_id ?? cg.slots[0].slot_id, alt.id)}
                                       disabled={!!fixingSlot}
-                                      className="text-[11px] px-2.5 py-1 rounded-lg border border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-40 transition-colors">
-                                      {fixingSlot ? '…' : alt.name}
+                                      className={`text-[11px] px-2.5 py-1 rounded-lg border disabled:opacity-40 transition-colors ${
+                                        alt.is_assigned
+                                          ? 'border-blue-400 text-blue-800 bg-blue-100 hover:bg-blue-200 font-semibold'
+                                          : 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                                      }`}>
+                                      {fixingSlot ? '…' : alt.is_assigned ? `↩ ${alt.name}` : alt.name}
                                     </button>
                                   ))}
                                 </>

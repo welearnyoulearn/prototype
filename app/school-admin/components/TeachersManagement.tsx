@@ -193,14 +193,13 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       const hods: HODAssignment[] = Array.isArray(hodData.hods) ? hodData.hods : []
       setHodAssignments(hods)
 
-      // Subjects: from API (teachers.subject) merged with already-assigned subjects
+      // Departments: from API merged with already-assigned departments + teacher.department field
       const apiSubjects: string[] = Array.isArray(hodData.subjects) ? hodData.subjects : []
-      const assignedSubjects: string[] = hods.map(h => h.department)
-      // Also pull from teachers already in state (fallback if API returns empty)
-      const teacherSubjects: string[] = teachers
-        .filter(t => (t.staff_type || 'teaching') === 'teaching' && t.status === 'active' && t.subject)
-        .map(t => t.subject)
-      const merged = Array.from(new Set([...apiSubjects, ...assignedSubjects, ...teacherSubjects])).sort()
+      const assignedDepts: string[] = hods.map(h => h.department)
+      const teacherDepts: string[] = teachers
+        .filter(t => (t.staff_type || 'teaching') === 'teaching' && t.status === 'active' && t.department)
+        .map(t => t.department)
+      const merged = Array.from(new Set([...apiSubjects, ...assignedDepts, ...teacherDepts])).sort()
       setHodSubjects(merged)
 
       const sorted = Array.isArray(classData)
@@ -215,12 +214,12 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
         ? 'Request timed out. Check server connection.'
         : 'Failed to load HOD data'
       setError(msg)
-      // Build subjects from already-loaded teachers so UI stays usable
-      const teacherSubjects = Array.from(new Set(
+      // Build departments from already-loaded teachers so UI stays usable
+      const teacherDepts = Array.from(new Set(
         teachers.filter(t => (t.staff_type || 'teaching') === 'teaching' && t.status === 'active')
-          .flatMap(t => [t.subject, t.department].filter(Boolean))
+          .map(t => t.department).filter(Boolean)
       )).sort()
-      setHodSubjects(teacherSubjects)
+      setHodSubjects(teacherDepts)
     } finally {
       setHodLoading(false)
     }
@@ -439,12 +438,12 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
 
   if (loading) return <div className="py-12 text-center text-gray-400">Loading staff...</div>
 
-  // All unique subjects for HOD management: from API + teachers' subject + department as fallback
+  // All unique departments for HOD management: from API + teachers' department field
   const allSubjects = Array.from(new Set([
     ...hodSubjects,
     ...teachers
       .filter(t => (t.staff_type || 'teaching') === 'teaching' && t.status === 'active')
-      .flatMap(t => [t.subject, t.department].filter(Boolean)),
+      .map(t => t.department).filter(Boolean),
   ])).filter(Boolean).sort()
 
   return (
@@ -492,21 +491,21 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
           ) : (
             <div className="space-y-4">
               <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 text-sm text-blue-700">
-                <p className="font-semibold mb-1">HOD assignment is per subject — multiple HODs allowed per subject for different class sets.</p>
-                <p className="text-blue-500 text-xs">e.g. Physics HOD-1 manages Grade 9A, 9B · Physics HOD-2 manages Grade 10A, 10B. Each HOD sees Syllabus Management in their teacher portal for their assigned classes only.</p>
+                <p className="font-semibold mb-1">HOD assignment is per department — multiple HODs allowed per department for different class sets.</p>
+                <p className="text-blue-500 text-xs">e.g. Science HOD-1 manages Grade 9A, 9B · Science HOD-2 manages Grade 10A, 10B. Each HOD sees Syllabus Management in their teacher portal for their assigned classes only.</p>
               </div>
 
               {allSubjects.length === 0 ? (
                 <div className="bg-white rounded-xl border border-gray-200 py-10 text-center">
-                  <p className="text-gray-400 text-sm">No subjects found. Add teachers with subject names first.</p>
+                  <p className="text-gray-400 text-sm">No departments found. Add teachers with a department assigned first.</p>
                 </div>
               ) : (
                 <div className="space-y-4">
                   {allSubjects.map(subject => {
                     const subjectHODs = hodAssignments.filter(h => h.department === subject)
-                    // Teachers who teach this subject
+                    // Teachers in this department
                     const subjectTeachers = teachers.filter(t =>
-                      (t.subject === subject || t.department === subject) &&
+                      t.department === subject &&
                       (t.staff_type || 'teaching') === 'teaching' && t.status === 'active'
                     )
                     return (
@@ -520,7 +519,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                             <div>
                               <p className="font-semibold text-gray-900 text-sm">{subject}</p>
                               <p className="text-xs text-gray-400">
-                                {subjectTeachers.length} teacher{subjectTeachers.length !== 1 ? 's' : ''}
+                                {subjectTeachers.length} staff in department
                                 {subjectHODs.length > 0 && ` · ${subjectHODs.length} HOD${subjectHODs.length !== 1 ? 's' : ''} assigned`}
                               </p>
                             </div>
@@ -616,9 +615,9 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                       onChange={e => setHodForm(f => ({ ...f, teacher_id: e.target.value }))}
                       disabled={!!hodModal.editId}
                       className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:bg-gray-50 disabled:text-gray-500">
-                      <option value="">— Select {hodModal.subject} teacher —</option>
+                      <option value="">— Select teacher from {hodModal.subject} dept —</option>
                       {teachers.filter(t =>
-                        (t.subject === hodModal.subject || t.department === hodModal.subject) &&
+                        t.department === hodModal.subject &&
                         (t.staff_type || 'teaching') === 'teaching' &&
                         t.status === 'active' &&
                         (!hodAssignments.find(h => h.department === hodModal.subject && h.teacher_id === t.id) || hodModal.editId)
@@ -628,8 +627,8 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                         </option>
                       ))}
                     </select>
-                    {!hodModal.editId && teachers.filter(t => (t.subject === hodModal.subject || t.department === hodModal.subject) && t.status === 'active').length === 0 && (
-                      <p className="text-xs text-amber-600 mt-1">No active teachers with subject &quot;{hodModal.subject}&quot; found. Check teacher profiles.</p>
+                    {!hodModal.editId && teachers.filter(t => t.department === hodModal.subject && t.status === 'active').length === 0 && (
+                      <p className="text-xs text-amber-600 mt-1">No active teachers in &quot;{hodModal.subject}&quot; department. Check teacher profiles.</p>
                     )}
                   </div>
 
