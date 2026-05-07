@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import StudentSyllabus from '../student/components/StudentSyllabus'
+import { TRANSLATIONS, type Lang } from './translations'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Student = {
@@ -183,6 +184,14 @@ export default function ParentDashboard() {
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
+  const [lang, setLang] = useState<Lang>('en')
+  useEffect(() => {
+    const saved = localStorage.getItem('parent_lang') as Lang | null
+    if (saved === 'en' || saved === 'te') setLang(saved)
+  }, [])
+  function changeLang(l: Lang) { setLang(l); localStorage.setItem('parent_lang', l) }
+  const T = TRANSLATIONS[lang]
+
   function navigateTo(key: string) {
     setActiveNav(key)
     setVisited(prev => new Set([...prev, key]))
@@ -346,10 +355,20 @@ export default function ParentDashboard() {
   if (step === 'school') return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50">
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4">
-        <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Home</Link>
+        <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">{T.home}</Link>
         <span className="text-gray-300">|</span>
-        <h1 className="text-lg font-semibold text-gray-800">Parent Portal</h1>
-        <span className="bg-pink-100 text-pink-700 text-xs font-medium px-3 py-1 rounded-full ml-auto">Parent</span>
+        <h1 className="text-lg font-semibold text-gray-800">{T.parentPortal}</h1>
+        <div className="ml-auto flex items-center gap-2">
+          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+            {(['en', 'te'] as Lang[]).map(l => (
+              <button key={l} onClick={() => changeLang(l)}
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${lang === l ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                {l === 'en' ? 'EN' : 'తె'}
+              </button>
+            ))}
+          </div>
+          <span className="bg-pink-100 text-pink-700 text-xs font-medium px-3 py-1 rounded-full">Parent</span>
+        </div>
       </div>
       <div className="max-w-md mx-auto px-6 py-16">
         <div className="text-center mb-10">
@@ -358,15 +377,15 @@ export default function ParentDashboard() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Parent Portal</h2>
-          <p className="text-gray-500 text-sm">Track your child&apos;s schedule, fees, exams, and more</p>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">{T.parentPortal}</h2>
+          <p className="text-gray-500 text-sm">{T.tagline}</p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Search your school</label>
-          <input type="text" placeholder="Type school name..." value={schoolSearch}
+          <label className="block text-sm font-semibold text-gray-700 mb-2">{T.searchSchool}</label>
+          <input type="text" placeholder={T.typeSchool} value={schoolSearch}
             onChange={e => searchSchools(e.target.value)}
             className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-pink-300" />
-          {loadingSchools && <p className="text-xs text-gray-400 mt-2">Searching...</p>}
+          {loadingSchools && <p className="text-xs text-gray-400 mt-2">{T.searching}</p>}
           {schools.length > 0 && (
             <div className="mt-2 border border-gray-100 rounded-xl overflow-hidden divide-y divide-gray-50">
               {schools.map(s => (
@@ -387,31 +406,39 @@ export default function ParentDashboard() {
   if (step === 'auth') return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50">
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4">
-        <button onClick={() => setStep('school')} className="text-gray-400 hover:text-gray-600 text-sm">← Back</button>
+        <button onClick={() => setStep('school')} className="text-gray-400 hover:text-gray-600 text-sm">{T.back}</button>
         <span className="text-gray-300">|</span>
         <h1 className="text-lg font-semibold text-gray-800">{selectedSchool?.name}</h1>
+        <div className="ml-auto flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+          {(['en', 'te'] as Lang[]).map(l => (
+            <button key={l} onClick={() => changeLang(l)}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${lang === l ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              {l === 'en' ? 'EN' : 'తె'}
+            </button>
+          ))}
+        </div>
       </div>
       <div className="max-w-md mx-auto px-6 py-16">
         <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-          <h2 className="text-lg font-bold text-gray-900 mb-1">Verify your child</h2>
-          <p className="text-sm text-gray-500 mb-6">Enter your child&apos;s roll number and your registered phone number</p>
+          <h2 className="text-lg font-bold text-gray-900 mb-1">{T.verifyChild}</h2>
+          <p className="text-sm text-gray-500 mb-6">{T.verifySubtitle}</p>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">Child&apos;s Roll Number</label>
-              <input type="text" placeholder="e.g. 2024-08A-001" value={rollNumber}
+              <label className="block text-sm font-semibold text-gray-700 mb-1">{T.rollNumber}</label>
+              <input type="text" placeholder={T.rollPlaceholder} value={rollNumber}
                 onChange={e => setRollNumber(e.target.value)}
                 className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-pink-300" />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">Your Phone Number</label>
-              <input type="tel" placeholder="Registered parent phone" value={parentPhone}
+              <label className="block text-sm font-semibold text-gray-700 mb-1">{T.phoneNumber}</label>
+              <input type="tel" placeholder={T.phonePlaceholder} value={parentPhone}
                 onChange={e => setParentPhone(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuth()}
                 className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-pink-300" />
             </div>
             {authError && <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">{authError}</div>}
             <button onClick={handleAuth} disabled={authLoading || !rollNumber.trim() || !parentPhone.trim()}
               className="w-full bg-pink-600 text-white rounded-xl py-3 font-semibold text-sm disabled:opacity-50 hover:bg-pink-700 transition-colors">
-              {authLoading ? 'Verifying...' : 'Access Dashboard'}
+              {authLoading ? T.verifying : T.accessDashboard}
             </button>
           </div>
         </div>
@@ -434,29 +461,37 @@ export default function ParentDashboard() {
           <button onClick={() => setSidebarOpen(o => !o)} className="lg:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
-          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm hidden sm:inline">← Home</Link>
+          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm hidden sm:inline">{T.home}</Link>
           <span className="text-gray-300 hidden sm:inline">|</span>
           <div>
             <p className="text-sm font-bold text-gray-900">{student.name}</p>
-            <p className="text-xs text-gray-400">Grade {student.grade}-{student.section} · {selectedSchool?.name}</p>
+            <p className="text-xs text-gray-400">{T.grade} {student.grade}-{student.section} · {selectedSchool?.name}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           {summary?.unacknowledged_count ? (
             <button onClick={() => navigateTo('results')}
               className="bg-red-100 text-red-700 text-xs font-bold px-2.5 py-1 rounded-full hover:bg-red-200">
-              {summary.unacknowledged_count} result{summary.unacknowledged_count > 1 ? 's' : ''} to sign ✍
+              {T.resultsToSign(summary.unacknowledged_count)}
             </button>
           ) : null}
           {(feeSummary?.overdue_count ?? 0) > 0 && (
             <button onClick={() => navigateTo('fees')}
               className="bg-amber-100 text-amber-700 text-xs font-bold px-2.5 py-1 rounded-full hover:bg-amber-200">
-              {feeSummary!.overdue_count} fee overdue
+              {T.feeOverdue(feeSummary!.overdue_count)}
             </button>
           )}
+          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+            {(['en', 'te'] as Lang[]).map(l => (
+              <button key={l} onClick={() => changeLang(l)}
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${lang === l ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                {l === 'en' ? 'EN' : 'తె'}
+              </button>
+            ))}
+          </div>
           <button onClick={() => { setStep('auth'); setStudent(null); setSummary(null) }}
             className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-3 py-1.5 rounded-lg">
-            Switch child
+            {T.switchChild}
           </button>
         </div>
       </div>
@@ -473,7 +508,7 @@ export default function ParentDashboard() {
               <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
               </svg>
-              {item.label}
+              {T.nav[item.key as keyof typeof T.nav]}
               {item.key === 'fees' && (feeSummary?.overdue_count ?? 0) > 0 && (
                 <span className="ml-auto bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
                   {feeSummary!.overdue_count}
@@ -498,15 +533,15 @@ export default function ParentDashboard() {
             <div className="bg-gradient-to-r from-pink-500 to-purple-600 rounded-2xl p-5 text-white">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-pink-200 text-xs font-semibold uppercase tracking-wide mb-1">Your Child</p>
+                  <p className="text-pink-200 text-xs font-semibold uppercase tracking-wide mb-1">{T.yourChild}</p>
                   <h2 className="text-xl font-black">{student.name}</h2>
-                  <p className="text-pink-200 text-sm mt-0.5">Grade {student.grade} · Section {student.section} · Roll {student.roll_number}</p>
+                  <p className="text-pink-200 text-sm mt-0.5">{T.grade} {student.grade} · {T.section} {student.section} · {T.roll} {student.roll_number}</p>
                 </div>
                 <div className="text-right">
                   {summary?.attendance_pct !== null && summary?.attendance_pct !== undefined && (
                     <div>
                       <div className="text-3xl font-black">{summary.attendance_pct}%</div>
-                      <div className="text-pink-200 text-xs">This month</div>
+                      <div className="text-pink-200 text-xs">{T.thisMonth}</div>
                     </div>
                   )}
                 </div>
@@ -517,23 +552,23 @@ export default function ParentDashboard() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <button onClick={() => navigateTo('today')} className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-pink-300 transition-colors group">
                 <div className="text-2xl font-black text-blue-600 group-hover:text-pink-600">{timetable.length || '—'}</div>
-                <div className="text-xs text-gray-500 mt-1">Today's Periods</div>
+                <div className="text-xs text-gray-500 mt-1">{T.todaysPeriods}</div>
               </button>
               <button onClick={() => navigateTo('exams')} className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-pink-300 transition-colors group">
                 <div className="text-2xl font-black text-purple-600 group-hover:text-pink-600">{summary?.upcoming_exams?.length ?? 0}</div>
-                <div className="text-xs text-gray-500 mt-1">Upcoming Exams</div>
+                <div className="text-xs text-gray-500 mt-1">{T.upcomingExams}</div>
               </button>
               <button onClick={() => navigateTo('results')} className={`bg-white rounded-xl border p-4 text-center hover:border-pink-300 transition-colors group ${summary?.unacknowledged_count ? 'border-red-200 bg-red-50' : 'border-gray-200'}`}>
                 <div className={`text-2xl font-black group-hover:text-pink-600 ${summary?.unacknowledged_count ? 'text-red-600' : 'text-gray-400'}`}>
                   {summary?.unacknowledged_count ?? 0}
                 </div>
-                <div className="text-xs text-gray-500 mt-1">Pending Sign-off</div>
+                <div className="text-xs text-gray-500 mt-1">{T.pendingSignoff}</div>
               </button>
               <button onClick={() => navigateTo('fees')} className={`bg-white rounded-xl border p-4 text-center hover:border-pink-300 transition-colors group ${(feeSummary?.overdue_count ?? 0) > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-200'}`}>
                 <div className={`text-lg font-black group-hover:text-pink-600 ${(feeSummary?.overdue_count ?? 0) > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
                   {feeSummary ? fmt(feeSummary.total_outstanding) : '—'}
                 </div>
-                <div className="text-xs text-gray-500 mt-1">Outstanding Fees</div>
+                <div className="text-xs text-gray-500 mt-1">{T.outstandingFees}</div>
               </button>
             </div>
 
@@ -549,9 +584,9 @@ export default function ParentDashboard() {
                   className={`w-full text-left bg-gradient-to-r ${bg} border rounded-xl p-4 hover:shadow-sm transition-all`}>
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">This Week&apos;s Test</p>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">{T.thisWeeksTest}</p>
                       <p className={`text-sm font-bold ${col}`}>
-                        {pct >= 80 ? '🌟 Excellent!' : pct >= 50 ? '👍 Good effort' : '📖 Needs revision'}
+                        {pct >= 80 ? T.excellent : pct >= 50 ? T.goodEffort : T.needsRevision}
                       </p>
                     </div>
                     <div className="text-right">
@@ -566,7 +601,7 @@ export default function ParentDashboard() {
             {/* Latest result */}
             {latestResult && (
               <div className="bg-white rounded-xl border border-gray-200 p-4">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Latest Result</p>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{T.latestResult}</p>
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-semibold text-gray-800">{latestResult.exam_name}</p>
@@ -585,7 +620,7 @@ export default function ParentDashboard() {
             {/* Upcoming exams */}
             {summary?.upcoming_exams && summary.upcoming_exams.length > 0 && (
               <div className="bg-white rounded-xl border border-gray-200 p-4">
-                <p className="text-sm font-bold text-gray-800 mb-3">Upcoming Exams</p>
+                <p className="text-sm font-bold text-gray-800 mb-3">{T.upcomingExams}</p>
                 <div className="space-y-2">
                   {summary.upcoming_exams.slice(0, 5).map(e => {
                     const days = Math.round((new Date(e.exam_date).getTime() - new Date().setHours(0,0,0,0)) / 86400000)
@@ -598,14 +633,14 @@ export default function ParentDashboard() {
                         <div className="text-right">
                           <p className="text-xs font-semibold text-gray-600">{new Date(e.exam_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
                           <p className={`text-[10px] font-bold ${days <= 3 ? 'text-red-600' : days <= 7 ? 'text-orange-500' : 'text-gray-400'}`}>
-                            {days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `${days} days`}
+                            {days === 0 ? T.today : days === 1 ? T.tomorrow : T.daysAway(days)}
                           </p>
                         </div>
                       </div>
                     )
                   })}
                 </div>
-                <button onClick={() => navigateTo('exams')} className="mt-3 text-xs text-pink-600 font-semibold hover:underline">View full calendar →</button>
+                <button onClick={() => navigateTo('exams')} className="mt-3 text-xs text-pink-600 font-semibold hover:underline">{T.viewFullCalendar}</button>
               </div>
             )}
 
@@ -615,12 +650,12 @@ export default function ParentDashboard() {
               return (
                 <div key={r.id} className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-bold text-amber-900">{r.exam_name} — sign-off needed</p>
+                    <p className="text-sm font-bold text-amber-900">{r.exam_name} — {T.signOffNeeded}</p>
                     <p className="text-xs text-amber-700 mt-0.5">{EXAM_TYPE_LABELS[r.exam_type] || r.exam_type} · {r.exam_date}{p !== null ? ` · Score: ${p}%` : ''}</p>
                   </div>
                   <button onClick={() => { setAckingId(r.id); navigateTo('results') }}
                     className="shrink-0 bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-amber-700">
-                    Sign now
+                    {T.signNow}
                   </button>
                 </div>
               )
@@ -629,16 +664,16 @@ export default function ParentDashboard() {
             {/* Recent tasks */}
             {summary?.recent_tasks && summary.recent_tasks.length > 0 && (
               <div className="bg-white rounded-xl border border-gray-200 p-4">
-                <p className="text-sm font-bold text-gray-800 mb-3">Recent Tasks</p>
+                <p className="text-sm font-bold text-gray-800 mb-3">{T.recentTasks}</p>
                 <div className="space-y-1.5">
                   {summary.recent_tasks.map((t, i) => (
                     <div key={i} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
                       <div>
                         <p className="text-sm text-gray-700">{t.title}</p>
-                        <p className="text-xs text-gray-400">{t.task_type} · Due {t.due_date}</p>
+                        <p className="text-xs text-gray-400">{t.task_type} · {T.due} {t.due_date}</p>
                       </div>
                       <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${t.submitted ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                        {t.submitted ? 'Done' : 'Pending'}
+                        {t.submitted ? T.done : T.pending}
                       </span>
                     </div>
                   ))}
@@ -654,14 +689,14 @@ export default function ParentDashboard() {
                     <svg className="w-4 h-4 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
                     </svg>
-                    <p className="text-sm font-bold text-gray-800">School Notices</p>
+                    <p className="text-sm font-bold text-gray-800">{T.schoolNotices}</p>
                     {announcements.filter(a => a.priority === 'urgent').length > 0 && (
                       <span className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-full">
-                        {announcements.filter(a => a.priority === 'urgent').length} urgent
+                        {announcements.filter(a => a.priority === 'urgent').length} {T.urgent}
                       </span>
                     )}
                   </div>
-                  <span className="text-xs text-gray-400">{announcements.length} notice{announcements.length > 1 ? 's' : ''}</span>
+                  <span className="text-xs text-gray-400">{T.notices(announcements.length)}</span>
                 </div>
                 <div className="divide-y divide-gray-50">
                   {announcements.slice(0, 4).map(a => {
@@ -678,7 +713,7 @@ export default function ParentDashboard() {
                             isUrgent ? 'bg-red-500' : isHigh ? 'bg-amber-400' : 'bg-gray-300'}`} />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 mb-0.5">
-                              {isUrgent && <span className="text-[9px] bg-red-100 text-red-600 font-bold px-1.5 py-0.5 rounded uppercase">Urgent</span>}
+                              {isUrgent && <span className="text-[9px] bg-red-100 text-red-600 font-bold px-1.5 py-0.5 rounded uppercase">{T.urgent}</span>}
                               <span className="text-[10px] text-gray-400">
                                 {new Date(a.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                               </span>
@@ -696,7 +731,7 @@ export default function ParentDashboard() {
                             <p className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">{a.content}</p>
                             {a.expires_at && (
                               <p className="text-xs text-amber-500 mt-1.5">
-                                Expires: {new Date(a.expires_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })}
+                                {T.expires} {new Date(a.expires_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })}
                               </p>
                             )}
                           </div>
@@ -707,7 +742,7 @@ export default function ParentDashboard() {
                 </div>
                 {announcements.length > 4 && (
                   <div className="px-4 py-2.5 border-t border-gray-50 text-center">
-                    <p className="text-xs text-gray-400">+{announcements.length - 4} more notice{announcements.length - 4 > 1 ? 's' : ''}</p>
+                    <p className="text-xs text-gray-400">{T.moreNotices(announcements.length - 4)}</p>
                   </div>
                 )}
               </div>
@@ -719,8 +754,8 @@ export default function ParentDashboard() {
           {visited.has('syllabus') && (
           <div hidden={activeNav !== 'syllabus'}>
             <div className="max-w-2xl mb-5">
-              <h2 className="text-lg font-bold text-gray-900 mb-0.5">Syllabus Progress</h2>
-              <p className="text-sm text-gray-400">Track what topics your child has covered in each subject</p>
+              <h2 className="text-lg font-bold text-gray-900 mb-0.5">{T.syllabusProgress}</h2>
+              <p className="text-sm text-gray-400">{T.syllabusSubtitle}</p>
             </div>
             <StudentSyllabus schoolId={student.school_id} classId={student.class_id} />
           </div>
@@ -731,10 +766,10 @@ export default function ParentDashboard() {
           <div hidden={activeNav !== 'today'} className="max-w-2xl space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-base font-bold text-gray-800">Today&apos;s Schedule</h2>
-                {timetableDay && <p className="text-xs text-gray-400">{timetableDay} · Grade {student.grade}-{student.section}</p>}
+                <h2 className="text-base font-bold text-gray-800">{T.nav.today}</h2>
+                {timetableDay && <p className="text-xs text-gray-400">{timetableDay} · {T.grade} {student.grade}-{student.section}</p>}
               </div>
-              <button onClick={() => loadTimetable(student)} className="text-xs text-pink-600 hover:text-pink-800 border border-pink-200 px-3 py-1.5 rounded-lg">Refresh</button>
+              <button onClick={() => loadTimetable(student)} className="text-xs text-pink-600 hover:text-pink-800 border border-pink-200 px-3 py-1.5 rounded-lg">{T.refresh}</button>
             </div>
 
             {timetableLoading ? (
@@ -746,8 +781,8 @@ export default function ParentDashboard() {
               ))}</div>
             ) : timetable.length === 0 ? (
               <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-                <p className="text-gray-400 text-sm">No timetable for today</p>
-                <p className="text-gray-300 text-xs mt-1">It may be a holiday or timetable is not set up yet</p>
+                <p className="text-gray-400 text-sm">{T.noTimetableToday}</p>
+                <p className="text-gray-300 text-xs mt-1">{T.noTimetableHint}</p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -772,7 +807,7 @@ export default function ParentDashboard() {
                             }`}>{p.period_number}</div>
                             <div>
                               <p className={`font-semibold text-sm ${isNow ? 'text-pink-800' : 'text-gray-800'}`}>
-                                {p.subject_name || 'Free Period'}
+                                {p.subject_name || T.freePeriod}
                               </p>
                               {p.teacher_name && <p className="text-xs text-gray-400">{p.teacher_name}</p>}
                             </div>
@@ -781,8 +816,8 @@ export default function ParentDashboard() {
                             <p className={`text-xs font-semibold ${isNow ? 'text-pink-600' : 'text-gray-500'}`}>
                               {timeStr(p.time_from)} – {timeStr(p.time_to)}
                             </p>
-                            {isNow && <span className="text-[10px] font-bold text-pink-600 bg-pink-100 px-1.5 py-0.5 rounded-full">NOW</span>}
-                            {isDone && <span className="text-[10px] text-gray-400">Done</span>}
+                            {isNow && <span className="text-[10px] font-bold text-pink-600 bg-pink-100 px-1.5 py-0.5 rounded-full">{T.now}</span>}
+                            {isDone && <span className="text-[10px] text-gray-400">{T.done}</span>}
                           </div>
                         </div>
                       </div>
@@ -798,8 +833,8 @@ export default function ParentDashboard() {
           {visited.has('attendance') && (
           <div hidden={activeNav !== 'attendance'} className="max-w-3xl space-y-5">
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-gray-800">Attendance</h2>
-              <button onClick={() => loadAttendance(student)} className="text-xs text-pink-600 border border-pink-200 px-3 py-1.5 rounded-lg">Refresh</button>
+              <h2 className="text-base font-bold text-gray-800">{T.nav.attendance}</h2>
+              <button onClick={() => loadAttendance(student)} className="text-xs text-pink-600 border border-pink-200 px-3 py-1.5 rounded-lg">{T.refresh}</button>
             </div>
 
             {attLoading ? (
@@ -811,10 +846,10 @@ export default function ParentDashboard() {
                 {/* Summary cards */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   {[
-                    { label: 'Present', value: attSummary.presentDays, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100' },
-                    { label: 'Absent',  value: attSummary.absentDays,  color: 'text-red-600',   bg: 'bg-red-50',   border: 'border-red-100' },
-                    { label: 'Late',    value: attSummary.lateDays,    color: 'text-orange-500', bg: 'bg-orange-50', border: 'border-orange-100' },
-                    { label: 'Attendance %', value: attSummary.pct !== null ? `${attSummary.pct}%` : '—', color: attSummary.pct !== null ? (attSummary.pct >= 75 ? 'text-green-600' : 'text-red-600') : 'text-gray-400', bg: 'bg-white', border: 'border-gray-200' },
+                    { label: T.present,      value: attSummary.presentDays, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100' },
+                    { label: T.absent,       value: attSummary.absentDays,  color: 'text-red-600',   bg: 'bg-red-50',   border: 'border-red-100' },
+                    { label: T.late,         value: attSummary.lateDays,    color: 'text-orange-500', bg: 'bg-orange-50', border: 'border-orange-100' },
+                    { label: T.attendancePct, value: attSummary.pct !== null ? `${attSummary.pct}%` : '—', color: attSummary.pct !== null ? (attSummary.pct >= 75 ? 'text-green-600' : 'text-red-600') : 'text-gray-400', bg: 'bg-white', border: 'border-gray-200' },
                   ].map(c => (
                     <div key={c.label} className={`${c.bg} border ${c.border} rounded-xl p-4 text-center`}>
                       <div className={`text-2xl font-black ${c.color}`}>{c.value}</div>
@@ -826,7 +861,7 @@ export default function ParentDashboard() {
                 {/* Monthly breakdown */}
                 {attMonthly.length > 0 && (
                   <div className="bg-white rounded-xl border border-gray-100 p-4">
-                    <p className="text-sm font-bold text-gray-700 mb-3">Monthly Breakdown</p>
+                    <p className="text-sm font-bold text-gray-700 mb-3">{T.monthlyBreakdown}</p>
                     <div className="space-y-3">
                       {attMonthly.map(m => (
                         <div key={m.month}>
@@ -851,7 +886,7 @@ export default function ParentDashboard() {
                 {/* Day-by-day calendar view */}
                 {attDays.length > 0 && (
                   <div className="bg-white rounded-xl border border-gray-100 p-4">
-                    <p className="text-sm font-bold text-gray-700 mb-3">Recent Days</p>
+                    <p className="text-sm font-bold text-gray-700 mb-3">{T.recentDays}</p>
                     <div className="flex flex-wrap gap-1.5">
                       {attDays.slice(0, 60).map(d => (
                         <div key={d.date} title={`${d.date}: ${d.morning || 'no data'}`}
@@ -865,17 +900,17 @@ export default function ParentDashboard() {
                       ))}
                     </div>
                     <div className="flex gap-3 mt-3 text-xs text-gray-500">
-                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-500" />Present</span>
-                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-400" />Absent</span>
-                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-orange-400" />Late</span>
-                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-gray-100" />No data</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-500" />{T.present}</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-400" />{T.absent}</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-orange-400" />{T.late}</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-gray-100" />{T.noData}</span>
                     </div>
                   </div>
                 )}
               </>
             ) : (
               <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-                <p className="text-gray-400 text-sm">No attendance data available</p>
+                <p className="text-gray-400 text-sm">{T.noAttendance}</p>
               </div>
             )}
           </div>
@@ -885,13 +920,13 @@ export default function ParentDashboard() {
           {visited.has('fees') && (
           <div hidden={activeNav !== 'fees'} className="max-w-3xl space-y-5">
             <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-gray-800">Fee Details</h2>
+              <h2 className="text-base font-bold text-gray-800">{T.feeDetails}</h2>
               <div className="flex gap-2">
                 <select value={feeAcYear} onChange={e => { setFeeAcYear(e.target.value); loadFees(student, e.target.value) }}
                   className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
                   {feeAcYears.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
-                <button onClick={() => loadFees(student, feeAcYear)} className="text-xs text-pink-600 border border-pink-200 px-3 py-1.5 rounded-lg">Refresh</button>
+                <button onClick={() => loadFees(student, feeAcYear)} className="text-xs text-pink-600 border border-pink-200 px-3 py-1.5 rounded-lg">{T.refresh}</button>
               </div>
             </div>
 
@@ -899,8 +934,8 @@ export default function ParentDashboard() {
             {paySuccess && (
               <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-bold text-green-800">Payment submitted successfully!</p>
-                  <p className="text-xs text-green-600 mt-0.5">Receipt: <span className="font-mono font-bold">{paySuccess.receipt_number}</span> · Admin will verify shortly</p>
+                  <p className="text-sm font-bold text-green-800">{T.paymentSuccess}</p>
+                  <p className="text-xs text-green-600 mt-0.5">{T.receipt} <span className="font-mono font-bold">{paySuccess.receipt_number}</span> · {T.adminVerify}</p>
                 </div>
                 <button onClick={() => setPaySuccess(null)} className="text-green-400 hover:text-green-600 text-lg font-bold">×</button>
               </div>
@@ -916,15 +951,15 @@ export default function ParentDashboard() {
                 {feeSummary && (
                   <div className="grid grid-cols-3 gap-3">
                     <div className="bg-white border border-gray-100 rounded-xl p-4 text-center">
-                      <p className="text-xs text-gray-400">Total Due</p>
+                      <p className="text-xs text-gray-400">{T.totalDue}</p>
                       <p className="text-xl font-black text-gray-800 mt-1">{fmt(feeSummary.total_due)}</p>
                     </div>
                     <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center">
-                      <p className="text-xs text-green-600">Paid</p>
+                      <p className="text-xs text-green-600">{T.paid}</p>
                       <p className="text-xl font-black text-green-700 mt-1">{fmt(feeSummary.total_paid)}</p>
                     </div>
                     <div className={`${feeSummary.total_outstanding > 0 ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'} border rounded-xl p-4 text-center`}>
-                      <p className={`text-xs ${feeSummary.total_outstanding > 0 ? 'text-red-500' : 'text-gray-400'}`}>Outstanding</p>
+                      <p className={`text-xs ${feeSummary.total_outstanding > 0 ? 'text-red-500' : 'text-gray-400'}`}>{T.outstanding}</p>
                       <p className={`text-xl font-black mt-1 ${feeSummary.total_outstanding > 0 ? 'text-red-600' : 'text-gray-400'}`}>{fmt(feeSummary.total_outstanding)}</p>
                     </div>
                   </div>
@@ -933,18 +968,18 @@ export default function ParentDashboard() {
                 {/* Payment form */}
                 {payingLedger && (
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
-                    <p className="text-sm font-bold text-blue-900 mb-1">Pay Online — {payingLedger.category_name} · {payingLedger.period_label}</p>
-                    <p className="text-xs text-blue-600 mb-4">Balance: {fmt(payingLedger.balance)} · Payment will be verified by school admin</p>
+                    <p className="text-sm font-bold text-blue-900 mb-1">{T.payOnline} — {payingLedger.category_name} · {payingLedger.period_label}</p>
+                    <p className="text-xs text-blue-600 mb-4">{T.balance} {fmt(payingLedger.balance)} · {T.paymentVerifyHint}</p>
                     <div className="space-y-3">
                       <div className="grid grid-cols-2 gap-3">
                         <div>
-                          <label className="text-xs font-medium text-gray-600">Amount (₹)</label>
+                          <label className="text-xs font-medium text-gray-600">{T.amount}</label>
                           <input type="number" value={payAmount} onChange={e => setPayAmount(e.target.value)}
                             placeholder={String(payingLedger.balance)}
                             className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-gray-600">UPI ID / Ref (optional)</label>
+                          <label className="text-xs font-medium text-gray-600">{T.upiRef}</label>
                           <input type="text" value={payUPI} onChange={e => setPayUPI(e.target.value)}
                             placeholder="yourname@upi"
                             className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
@@ -953,10 +988,10 @@ export default function ParentDashboard() {
                       <div className="flex gap-2">
                         <button onClick={submitPayment} disabled={payLoading || !payAmount}
                           className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-50">
-                          {payLoading ? 'Submitting…' : `Submit Payment of ${payAmount ? fmt(payAmount) : '₹0'}`}
+                          {payLoading ? T.submitting : T.submitPayment(payAmount ? fmt(payAmount) : '₹0')}
                         </button>
                         <button onClick={() => { setPayingLedger(null); setPayAmount(''); setPayUPI('') }}
-                          className="px-4 border border-gray-200 text-gray-500 rounded-lg text-sm">Cancel</button>
+                          className="px-4 border border-gray-200 text-gray-500 rounded-lg text-sm">{T.cancel}</button>
                       </div>
                     </div>
                   </div>
@@ -965,24 +1000,24 @@ export default function ParentDashboard() {
                 {/* Ledger */}
                 {feeLedger.length === 0 ? (
                   <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-                    <p className="text-gray-400 text-sm">No fee entries for {feeAcYear}</p>
+                    <p className="text-gray-400 text-sm">{T.noFeeEntries(feeAcYear)}</p>
                   </div>
                 ) : (
                   <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                     <div className="px-4 py-3 border-b border-gray-100">
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Fee Ledger — {feeAcYear}</p>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{T.feeLedger} — {feeAcYear}</p>
                     </div>
                     <div className="divide-y divide-gray-50">
                       {feeLedger.map(entry => (
                         <div key={entry.id} className="px-4 py-3 flex items-center justify-between hover:bg-gray-50">
                           <div>
                             <p className="text-sm font-medium text-gray-800">{entry.category_name}</p>
-                            <p className="text-xs text-gray-400">{entry.period_label} · Due {entry.due_date}</p>
+                            <p className="text-xs text-gray-400">{entry.period_label} · {T.dueDate} {entry.due_date}</p>
                           </div>
                           <div className="flex items-center gap-3">
                             <div className="text-right">
                               <p className="text-sm font-bold text-gray-800">{fmt(entry.amount_due)}</p>
-                              {Number(entry.balance) > 0 && <p className="text-xs text-red-500">Balance: {fmt(entry.balance)}</p>}
+                              {Number(entry.balance) > 0 && <p className="text-xs text-red-500">{T.balance} {fmt(entry.balance)}</p>}
                             </div>
                             <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${STATUS_COLOR[entry.status] || 'bg-gray-100 text-gray-600'}`}>
                               {entry.status}
@@ -990,7 +1025,7 @@ export default function ParentDashboard() {
                             {['pending', 'partial', 'overdue'].includes(entry.status) && !payingLedger && (
                               <button onClick={() => { setPayingLedger(entry); setPayAmount(String(entry.balance)) }}
                                 className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 font-medium">
-                                Pay
+                                {T.pay}
                               </button>
                             )}
                           </div>
@@ -1004,7 +1039,7 @@ export default function ParentDashboard() {
                 {feePayments.length > 0 && (
                   <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                     <div className="px-4 py-3 border-b border-gray-100">
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Payment History</p>
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{T.paymentHistory}</p>
                     </div>
                     <div className="divide-y divide-gray-50">
                       {feePayments.map(pmt => (
@@ -1018,7 +1053,7 @@ export default function ParentDashboard() {
                             <div className="flex items-center gap-1.5 justify-end mt-0.5">
                               <span className="text-[10px] font-mono text-gray-400">{pmt.receipt_number}</span>
                               <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${STATUS_COLOR[pmt.payment_status] || 'bg-gray-100 text-gray-600'}`}>
-                                {pmt.payment_status === 'pending_verification' ? 'Pending verify' : 'Confirmed'}
+                                {pmt.payment_status === 'pending_verification' ? T.pendingVerify : T.confirmed}
                               </span>
                             </div>
                           </div>
@@ -1035,7 +1070,7 @@ export default function ParentDashboard() {
           {/* ── EXAM CALENDAR ─────────────────────────────────────────────── */}
           {visited.has('exams') && (
           <div hidden={activeNav !== 'exams'} className="max-w-3xl space-y-4">
-            <h2 className="text-base font-bold text-gray-800">Exam Calendar</h2>
+            <h2 className="text-base font-bold text-gray-800">{T.examCalendar}</h2>
             {summary?.upcoming_exams && summary.upcoming_exams.length > 0 ? (
               <div className="space-y-3">
                 {summary.upcoming_exams.map(e => {
@@ -1057,7 +1092,7 @@ export default function ParentDashboard() {
                         <div className="text-right shrink-0 ml-3">
                           <p className="text-sm font-bold text-gray-700">{new Date(e.exam_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
                           <p className={`text-xs font-bold mt-0.5 ${days === 0 ? 'text-red-600' : days <= 3 ? 'text-red-500' : days <= 7 ? 'text-amber-500' : 'text-gray-400'}`}>
-                            {days === 0 ? 'Today!' : days === 1 ? 'Tomorrow' : `${days} days away`}
+                            {days === 0 ? `${T.today}!` : days === 1 ? T.tomorrow : T.daysAway(days)}
                           </p>
                         </div>
                       </div>
@@ -1067,7 +1102,7 @@ export default function ParentDashboard() {
               </div>
             ) : (
               <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-                <p className="text-gray-400 text-sm">No upcoming exams in the next 60 days</p>
+                <p className="text-gray-400 text-sm">{T.noUpcomingExams}</p>
               </div>
             )}
           </div>
@@ -1076,10 +1111,10 @@ export default function ParentDashboard() {
           {/* ── RESULTS ───────────────────────────────────────────────────── */}
           {visited.has('results') && (
           <div hidden={activeNav !== 'results'} className="max-w-2xl space-y-4">
-            <h2 className="text-base font-bold text-gray-800">Results & Sign-off</h2>
+            <h2 className="text-base font-bold text-gray-800">{T.nav.results} & {T.parentSignoff}</h2>
             {(!summary?.published_results || summary.published_results.length === 0) ? (
               <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
-                <p className="text-gray-400 text-sm">No published results yet</p>
+                <p className="text-gray-400 text-sm">{T.noResults}</p>
               </div>
             ) : summary.published_results.map(r => {
               const p = r.total_obtained !== null && r.total_max ? Math.round((r.total_obtained / r.total_max) * 100) : null
@@ -1095,7 +1130,7 @@ export default function ParentDashboard() {
                       {p !== null && (
                         <>
                           <div className={`text-xl font-black ${pass ? 'text-green-600' : 'text-red-600'}`}>{p}%</div>
-                          <div className={`text-xs font-bold ${pass ? 'text-green-500' : 'text-red-400'}`}>{pass ? 'PASS' : 'FAIL'} · {r.total_obtained}/{r.total_max}</div>
+                          <div className={`text-xs font-bold ${pass ? 'text-green-500' : 'text-red-400'}`}>{pass ? T.passing.toUpperCase() : 'FAIL'} · {r.total_obtained}/{r.total_max}</div>
                         </>
                       )}
                     </div>
@@ -1106,27 +1141,27 @@ export default function ParentDashboard() {
                         <svg className="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        You have acknowledged this result
+                        {T.acknowledged}
                       </div>
                     ) : ackingId === r.id ? (
                       <div className="space-y-2">
-                        <input type="text" placeholder="Your name (parent / guardian) *" value={ackName}
+                        <input type="text" placeholder={`${T.yourName} *`} value={ackName}
                           onChange={e => setAckName(e.target.value)}
                           className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
                         {ackError && <p className="text-xs text-red-600">{ackError}</p>}
                         <div className="flex gap-2">
                           <button onClick={() => acknowledgeMarks(r.id)} disabled={ackSaving}
                             className="flex-1 bg-blue-600 text-white text-sm rounded-lg py-2 font-semibold disabled:opacity-50">
-                            {ackSaving ? 'Saving...' : 'Confirm & Sign'}
+                            {ackSaving ? T.saving : T.confirm}
                           </button>
                           <button onClick={() => { setAckingId(null); setAckName(''); setAckError('') }}
-                            className="px-4 text-sm text-gray-500 border border-gray-200 rounded-lg">Cancel</button>
+                            className="px-4 text-sm text-gray-500 border border-gray-200 rounded-lg">{T.cancel}</button>
                         </div>
                       </div>
                     ) : (
                       <button onClick={() => setAckingId(r.id)}
                         className="w-full flex items-center justify-center gap-2 border border-dashed border-amber-300 text-amber-700 text-xs font-semibold rounded-lg py-2 hover:bg-amber-50 transition-colors">
-                        ✍ I have seen this result — tap to acknowledge
+                        ✍ {T.signoffHint}
                       </button>
                     )}
                   </div>
@@ -1139,7 +1174,7 @@ export default function ParentDashboard() {
           {/* ── WEEKLY TESTS ──────────────────────────────────────────────── */}
           {visited.has('weekly-tests') && (
           <div hidden={activeNav !== 'weekly-tests'} className="max-w-2xl space-y-4">
-            <h2 className="text-base font-bold text-gray-800">Weekly AI Tests</h2>
+            <h2 className="text-base font-bold text-gray-800">{T.weeklyTests}</h2>
             <p className="text-xs text-gray-500">AI-generated tests from covered syllabus topics · 1 test per week</p>
 
             {weeklyTestsLoading ? (
@@ -1149,8 +1184,7 @@ export default function ParentDashboard() {
             ) : weeklyTests.length === 0 ? (
               <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
                 <div className="text-3xl mb-2">📝</div>
-                <p className="text-sm text-gray-500 font-medium">No tests taken yet</p>
-                <p className="text-xs text-gray-400 mt-1">Tests appear here once your child takes them</p>
+                <p className="text-sm text-gray-500 font-medium">{T.noTestHistory}</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -1166,7 +1200,7 @@ export default function ParentDashboard() {
                           <p className="text-sm font-semibold text-gray-800">Week of {weekLabel}</p>
                           {t.submitted_at && (
                             <p className="text-xs text-gray-400 mt-0.5">
-                              Submitted {new Date(t.submitted_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                              {T.submitted} {new Date(t.submitted_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                             </p>
                           )}
                         </div>
@@ -1177,7 +1211,7 @@ export default function ParentDashboard() {
                           </div>
                         ) : (
                           <span className="text-xs font-medium text-yellow-600 bg-yellow-50 border border-yellow-200 px-2.5 py-1 rounded-full">
-                            Not submitted
+                            {T.missed}
                           </span>
                         )}
                       </div>
@@ -1190,7 +1224,7 @@ export default function ParentDashboard() {
                             />
                           </div>
                           <span className={`text-xs font-semibold ${scoreColor}`}>
-                            {pct >= 80 ? 'Excellent' : pct >= 50 ? 'Good' : 'Needs revision'}
+                            {pct >= 80 ? T.excellent : pct >= 50 ? T.goodEffort : T.needsRevision}
                           </span>
                         </div>
                       )}
@@ -1207,17 +1241,17 @@ export default function ParentDashboard() {
           <div hidden={activeNav !== 'activity'} className="max-w-2xl space-y-5">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-base font-bold text-gray-800">Activity Log</h2>
+                <h2 className="text-base font-bold text-gray-800">{T.activityLog}</h2>
                 <p className="text-xs text-gray-400">What {student.name.split(' ')[0]} has been doing in the student portal</p>
               </div>
               <div className="flex gap-2">
                 <select value={actDays} onChange={e => { const d = parseInt(e.target.value); setActDays(d); loadActivity(student, d) }}
                   className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
-                  <option value={7}>Last 7 days</option>
-                  <option value={14}>Last 14 days</option>
-                  <option value={30}>Last 30 days</option>
+                  <option value={7}>{T.lastDays(7)}</option>
+                  <option value={14}>{T.lastDays(14)}</option>
+                  <option value={30}>{T.lastDays(30)}</option>
                 </select>
-                <button onClick={() => loadActivity(student, actDays)} className="text-xs text-pink-600 border border-pink-200 px-3 py-1.5 rounded-lg">Refresh</button>
+                <button onClick={() => loadActivity(student, actDays)} className="text-xs text-pink-600 border border-pink-200 px-3 py-1.5 rounded-lg">{T.refresh}</button>
               </div>
             </div>
 
@@ -1232,11 +1266,11 @@ export default function ParentDashboard() {
                   <div className="grid grid-cols-3 gap-3">
                     <div className="bg-white border border-gray-100 rounded-xl p-4 text-center">
                       <p className="text-xl font-black text-gray-800">{actSummary.totalSessions}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">Login sessions</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{T.sessions}</p>
                     </div>
                     <div className="bg-white border border-gray-100 rounded-xl p-4 text-center">
                       <p className="text-xl font-black text-gray-800">{actSummary.totalMinutes}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">Minutes active</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{T.minutes}</p>
                     </div>
                     <div className="bg-white border border-gray-100 rounded-xl p-4 text-center">
                       <p className="text-xs font-bold text-gray-700">{actSummary.lastSeen ? relTime(actSummary.lastSeen) : '—'}</p>
@@ -1262,7 +1296,7 @@ export default function ParentDashboard() {
                 {/* Timeline */}
                 {activity.length === 0 ? (
                   <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-                    <p className="text-gray-400 text-sm">No activity in the last {actDays} days</p>
+                    <p className="text-gray-400 text-sm">{T.noActivity}</p>
                     <p className="text-gray-300 text-xs mt-1">Activity is logged when {student.name.split(' ')[0]} uses the student portal</p>
                   </div>
                 ) : (
@@ -1292,10 +1326,10 @@ export default function ParentDashboard() {
           <div hidden={activeNav !== 'ai-chats'} className="max-w-2xl space-y-5">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-base font-bold text-gray-800">AI Chat History</h2>
+                <h2 className="text-base font-bold text-gray-800">{T.aiChatHistory}</h2>
                 <p className="text-xs text-gray-400">{student.name.split(' ')[0]}&apos;s conversations with the AI tutor</p>
               </div>
-              <button onClick={() => loadAiChats(student)} className="text-xs text-pink-600 border border-pink-200 px-3 py-1.5 rounded-lg">Refresh</button>
+              <button onClick={() => loadAiChats(student)} className="text-xs text-pink-600 border border-pink-200 px-3 py-1.5 rounded-lg">{T.refresh}</button>
             </div>
 
             {/* Info banner */}
@@ -1314,7 +1348,7 @@ export default function ParentDashboard() {
             ) : aiChatSessions.length === 0 ? (
               <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
                 <p className="text-2xl mb-2">✨</p>
-                <p className="text-gray-400 text-sm">No AI chat sessions yet</p>
+                <p className="text-gray-400 text-sm">{T.noChats}</p>
                 <p className="text-gray-300 text-xs mt-1">{student.name.split(' ')[0]} hasn&apos;t used the AI Tutor yet</p>
               </div>
             ) : (
