@@ -803,6 +803,27 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   return (
     <div className="space-y-4">
 
+      {/* ── Publish All row ── */}
+      {(() => {
+        const allGenPublished = classes.filter(c => c.timetable_generated_at).every(c => c.timetable_circulated_at)
+        const hasChangedClasses = changedClassIds.size > 0
+        return (
+          <div className="flex items-center justify-end">
+            {!hasChangedClasses && allGenPublished && classes.filter(c => c.timetable_generated_at).length > 0 ? (
+              <span className="text-xs text-emerald-600 font-medium px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50">
+                ✓ All Published
+              </span>
+            ) : (
+              <button onClick={publishAll} disabled={!hasChangedClasses || publishingAll}
+                title={hasChangedClasses ? `Publish ${changedClassIds.size} changed timetable${changedClassIds.size !== 1 ? 's' : ''}` : 'No recent changes to publish'}
+                className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:bg-gray-200 disabled:text-gray-400 transition-colors">
+                {publishingAll ? 'Publishing…' : hasChangedClasses ? `Publish All (${changedClassIds.size})` : 'Publish All'}
+              </button>
+            )}
+          </div>
+        )
+      })()}
+
       {/* ── Teacher Load Analysis Banner ── */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="px-4 py-3 flex items-center justify-between gap-4">
@@ -823,25 +844,6 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                 )}
               </div>
             )}
-            {/* Publish All: enabled when any class was edited this session */}
-            {(() => {
-              const allGenPublished = classes.filter(c => c.timetable_generated_at).every(c => c.timetable_circulated_at)
-              const hasChangedClasses = changedClassIds.size > 0
-              if (!hasChangedClasses && allGenPublished && classes.filter(c => c.timetable_generated_at).length > 0) {
-                return (
-                  <span className="text-xs text-emerald-600 font-medium px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50">
-                    ✓ All Published
-                  </span>
-                )
-              }
-              return (
-                <button onClick={publishAll} disabled={!hasChangedClasses || publishingAll}
-                  title={hasChangedClasses ? `Publish ${changedClassIds.size} changed timetable${changedClassIds.size !== 1 ? 's' : ''}` : 'No recent changes to publish'}
-                  className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:bg-gray-200 disabled:text-gray-400 transition-colors">
-                  {publishingAll ? 'Publishing…' : hasChangedClasses ? `Publish All (${changedClassIds.size})` : 'Publish All'}
-                </button>
-              )
-            })()}
             <button onClick={runLoadAnalysis} disabled={loadAnalysing}
               className="px-3 py-1.5 text-xs font-medium rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 disabled:opacity-40 transition-colors">
               {loadAnalysing ? 'Analysing…' : loadData ? '↻ Re-check' : 'Check Now'}
