@@ -230,7 +230,7 @@ export default function StudentTasks({ student, classId, schoolId }: Props) {
       <div className="flex flex-col gap-4 max-w-2xl">
         <button onClick={() => setSelected(null)} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 self-start">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-          Back to Tasks
+          Back to Homework
         </button>
 
         <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -370,8 +370,8 @@ export default function StudentTasks({ student, classId, schoolId }: Props) {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2 className="text-xl font-bold text-gray-900">My Tasks</h2>
-        <p className="text-sm text-gray-500 mt-0.5">{tasks.length} tasks assigned · Grade {student.grade}-{student.section}</p>
+        <h2 className="text-xl font-bold text-gray-900">My Homework</h2>
+        <p className="text-sm text-gray-500 mt-0.5">{tasks.length} assigned · Grade {student.grade}-{student.section}</p>
       </div>
 
       {/* Filter tabs */}

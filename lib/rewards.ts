@@ -42,14 +42,16 @@ export async function awardPoints(
   action_type: string,
   reference_id?: number,
   reference_type?: string,
+  customPoints?: number,
+  points_type: 'academic' | 'marketplace' = 'academic',
 ): Promise<number> {
-  const pts = POINT_VALUES[action_type] ?? 0
+  const pts = customPoints ?? POINT_VALUES[action_type] ?? 0
   if (pts <= 0) return 0
 
   await pool.query(
-    `INSERT INTO student_points (student_id, school_id, action_type, points, reference_id, reference_type)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [student_id, school_id, action_type, pts, reference_id ?? null, reference_type ?? null]
+    `INSERT INTO student_points (student_id, school_id, action_type, points, reference_id, reference_type, points_type)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [student_id, school_id, action_type, pts, reference_id ?? null, reference_type ?? null, points_type]
   )
 
   // Update streak

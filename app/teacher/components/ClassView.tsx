@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Tasks from './Tasks'
 import ClassDoubts from './ClassDoubts'
 import ClassPerformance from './ClassPerformance'
@@ -115,8 +115,8 @@ type Props = {
   openExamId?: number
 }
 
-const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Performance', 'Attendance', 'Timetable', 'Marks & Results', 'Weekly Tests', 'Tasks', 'Doubts']
-const SUBJECT_TEACHER_TABS = ['My Overview', 'Marks & Results', 'Tasks', 'Doubts', 'Timetable']
+const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Performance', 'Attendance', 'Timetable', 'Marks & Results', 'Weekly Tests', 'Homework', 'Doubts', 'Syllabus']
+const SUBJECT_TEACHER_TABS = ['My Overview', 'Marks & Results', 'Homework', 'Doubts', 'Timetable', 'Syllabus']
 const TABS = CLASS_TEACHER_TABS // kept for reference
 
 // API returns: { id, exam_name, exam_type, exam_date, status, subject_name, subject_status, max_marks, ... }
@@ -187,7 +187,7 @@ function SubjectTeacherOverview({
           </div>
           <div>
             <div className="text-xl font-black">{myTasks.length}</div>
-            <div className="text-indigo-200 text-[10px]">Tasks</div>
+            <div className="text-indigo-200 text-[10px]">Homework</div>
           </div>
           <div>
             <div className={`text-xl font-black ${myDoubts.length > 0 ? 'text-yellow-300' : 'text-white'}`}>{myDoubts.length}</div>
@@ -250,7 +250,7 @@ function SubjectTeacherOverview({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
             </svg>
           </div>
-          <p className="text-sm font-bold text-gray-800">Tasks</p>
+          <p className="text-sm font-bold text-gray-800">Homework</p>
           <p className="text-xs text-gray-400 mt-0.5">{myTasks.length} assigned</p>
         </button>
 
@@ -389,6 +389,382 @@ function getWeekOffsetForDate(dateStr: string): number {
 
 function getDaysInMonth(year: number, month: number) {
   return new Date(year, month + 1, 0).getDate()
+}
+
+// ─── Syllabus Tracking ────────────────────────────────────────────────────────
+type SylTopic = {
+  id: number
+  topic_name: string
+  topic_order: number
+  chapter_name: string
+  chapter_order: number
+  status: string
+  covered_date: string | null
+  covered_by_name: string | null
+}
+type SylChapter = {
+  chapter_name: string
+  chapter_order: number
+  total: number
+  covered: number
+  topics: SylTopic[]
+}
+type SylSubject = {
+  subject: string
+  total: number
+  covered: number
+  completion_pct: number
+  chapters: SylChapter[]
+}
+type HomeworkSuggestion = {
+  title: string
+  instructions: string
+  task_type: string
+  max_marks: number
+  estimated_time_minutes: number
+  topicId: number
+}
+
+function SyllabusTracking({
+  classId, schoolId, grade, teacher, isClassTeacher, onGoToHomework,
+}: {
+  classId: number
+  schoolId: number
+  grade: string
+  teacher: TeacherObj | undefined
+  isClassTeacher: boolean
+  onGoToHomework: () => void
+}) {
+  const [subjects, setSubjects] = useState<SylSubject[]>([])
+  const [selectedSubject, setSelectedSubject] = useState<string>('')
+  const [expandedChapter, setExpandedChapter] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [markingId, setMarkingId] = useState<number | null>(null)
+  const [suggestion, setSuggestion] = useState<HomeworkSuggestion | null>(null)
+  const [suggestLoading, setSuggestLoading] = useState(false)
+  const [suggestError, setSuggestError] = useState(false)
+  const [assigning, setAssigning] = useState(false)
+  const [assignedMsg, setAssignedMsg] = useState('')
+  const suggestionRef = useRef<HTMLDivElement>(null)
+
+  // Scroll suggestion banner into view whenever it appears
+  useEffect(() => {
+    if ((suggestion || suggestLoading) && suggestionRef.current) {
+      suggestionRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }, [suggestion, suggestLoading])
+
+  const loadSyllabus = useCallback(async () => {
+    setLoading(true)
+    try {
+      const subjectParam = selectedSubject ? `&subject=${encodeURIComponent(selectedSubject)}` : ''
+      const res = await fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}${subjectParam}`)
+      const data = await res.json()
+      const list: SylSubject[] = Array.isArray(data.subjects) ? data.subjects : []
+      setSubjects(list)
+      // Auto-select: subject teacher gets their own subject, class teacher gets first
+      if (!selectedSubject && list.length > 0) {
+        const own = teacher && !isClassTeacher ? list.find(s => s.subject === teacher.subject) : null
+        setSelectedSubject(own ? own.subject : list[0].subject)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [classId, schoolId, selectedSubject, teacher, isClassTeacher])
+
+  useEffect(() => { loadSyllabus() }, [classId, schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const currentSubject = subjects.find(s => s.subject === selectedSubject)
+
+  async function markCovered(topic: SylTopic) {
+    if (!teacher) return
+    const newStatus = topic.status === 'covered' ? 'pending' : 'covered'
+    setMarkingId(topic.id)
+    setSuggestion(null)
+    try {
+      await fetch(`/api/syllabus/${topic.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, status: newStatus, covered_by: teacher.id }),
+      })
+      // Reload to sync counts
+      const subjectParam = `&subject=${encodeURIComponent(selectedSubject)}`
+      const res = await fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}${subjectParam}`)
+      const data = await res.json()
+      setSubjects(prev => {
+        const list: SylSubject[] = Array.isArray(data.subjects) ? data.subjects : prev
+        return list
+      })
+      // AI homework suggestion on cover
+      if (newStatus === 'covered') {
+        setSuggestError(false)
+        setSuggestLoading(true)
+        try {
+          const sg = await fetch('/api/ai/suggest-homework', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subject: selectedSubject, chapter_name: topic.chapter_name, topic_name: topic.topic_name, grade }),
+          })
+          if (sg.ok) {
+            const s = await sg.json()
+            setSuggestion({ ...s, topicId: topic.id })
+          } else {
+            setSuggestError(true)
+          }
+        } catch {
+          setSuggestError(true)
+        } finally {
+          setSuggestLoading(false)
+        }
+      }
+    } finally {
+      setMarkingId(null)
+    }
+  }
+
+  async function assignHomework() {
+    if (!suggestion || !teacher) return
+    setAssigning(true)
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
+    const due = tomorrow.toISOString().slice(0, 10)
+    try {
+      await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId,
+          class_id: classId,
+          teacher_id: teacher.id,
+          subject: selectedSubject,
+          title: suggestion.title,
+          instructions: suggestion.instructions,
+          task_type: 'homework',
+          max_marks: suggestion.max_marks,
+          due_date: due,
+          status: 'published',
+          assigned_to: 'all',
+        }),
+      })
+      setAssignedMsg('Homework assigned to all students!')
+      setSuggestion(null)
+    } finally {
+      setAssigning(false)
+    }
+  }
+
+  if (loading) return (
+    <div className="py-16 text-center">
+      <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+      <p className="text-gray-400 text-sm">Loading syllabus...</p>
+    </div>
+  )
+
+  if (subjects.length === 0) return (
+    <div className="bg-white rounded-xl border border-dashed border-gray-300 py-14 text-center">
+      <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center mx-auto mb-3">
+        <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+        </svg>
+      </div>
+      <p className="text-gray-500 font-medium mb-1">No syllabus loaded yet</p>
+      <p className="text-gray-400 text-sm">Ask the school admin to load the board syllabus in School Settings.</p>
+    </div>
+  )
+
+  return (
+    <div>
+      {/* Subject tabs */}
+      {subjects.length > 1 && (
+        <div className="flex gap-2 flex-wrap mb-5">
+          {subjects.map(s => (
+            <button key={s.subject}
+              onClick={() => { setSelectedSubject(s.subject); setSuggestion(null); setSuggestError(false); setExpandedChapter(null) }}
+              className={`px-4 py-2 rounded-xl text-sm font-medium border transition-colors ${
+                selectedSubject === s.subject
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'bg-white text-gray-700 border-gray-200 hover:border-blue-300 hover:text-blue-600'
+              }`}>
+              {s.subject}
+              <span className={`ml-2 text-xs ${selectedSubject === s.subject ? 'text-blue-200' : 'text-gray-400'}`}>
+                {s.completion_pct}%
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Overall progress bar */}
+      {currentSubject && (
+        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4 mb-5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-semibold text-gray-800">{selectedSubject}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500">{currentSubject.covered}/{currentSubject.total} topics covered</span>
+              <button onClick={onGoToHomework}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold transition-colors">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Add Homework
+              </button>
+            </div>
+          </div>
+          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-500 rounded-full transition-all"
+              style={{ width: `${currentSubject.completion_pct}%` }} />
+          </div>
+          <p className="text-xs text-gray-400 mt-1.5">{currentSubject.completion_pct}% complete · {currentSubject.chapters.length} chapters</p>
+        </div>
+      )}
+
+      {/* AI homework suggestion */}
+      <div ref={suggestionRef}>
+      {suggestLoading && (
+        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 flex items-center gap-3">
+          <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+          <p className="text-sm text-amber-700">Generating AI homework suggestion...</p>
+        </div>
+      )}
+      {suggestError && !suggestLoading && (
+        <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-5 py-3 flex items-center justify-between">
+          <p className="text-sm text-red-600">AI suggestion failed. Use the Homework tab to add manually.</p>
+          <div className="flex gap-2">
+            <button onClick={onGoToHomework} className="text-xs px-3 py-1.5 bg-slate-800 text-white rounded-lg font-medium">Add Homework</button>
+            <button onClick={() => setSuggestError(false)} className="text-red-400 hover:text-red-600 text-lg leading-none">✕</button>
+          </div>
+        </div>
+      )}
+      {suggestion && !suggestLoading && (
+        <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">AI Homework Suggestion</p>
+              <p className="font-semibold text-gray-900 text-sm">{suggestion.title}</p>
+              <p className="text-xs text-gray-600 mt-1 leading-relaxed">{suggestion.instructions}</p>
+              <div className="flex gap-3 mt-2">
+                <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">{suggestion.estimated_time_minutes} min</span>
+                <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">{suggestion.max_marks} marks</span>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 flex-shrink-0">
+              <button onClick={assignHomework} disabled={assigning}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-sm font-semibold disabled:opacity-50">
+                {assigning ? 'Assigning...' : 'Assign to All'}
+              </button>
+              <button onClick={() => { setSuggestion(null); onGoToHomework() }}
+                className="px-4 py-2 border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl text-sm font-medium">
+                ✏️ Edit Manually
+              </button>
+              <button onClick={() => setSuggestion(null)}
+                className="px-4 py-2 border border-gray-200 text-gray-400 rounded-xl text-sm hover:bg-gray-50">
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {assignedMsg && (
+        <div className="mb-4 bg-emerald-50 border border-emerald-200 rounded-xl px-5 py-3 flex items-center justify-between">
+          <p className="text-sm text-emerald-700 font-medium">{assignedMsg}</p>
+          <button onClick={() => setAssignedMsg('')} className="text-emerald-400 hover:text-emerald-600 text-lg leading-none">✕</button>
+        </div>
+      )}
+      </div>
+
+      {/* Chapter accordion — textbook index style */}
+      {currentSubject && (
+        <div className="space-y-2">
+          {currentSubject.chapters.map((ch, chIdx) => {
+            const isExpanded = expandedChapter === ch.chapter_name
+            const pct = ch.total > 0 ? Math.round(100 * ch.covered / ch.total) : 0
+
+            return (
+              <div key={ch.chapter_name} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                {/* Chapter header */}
+                <button
+                  onClick={() => setExpandedChapter(isExpanded ? null : ch.chapter_name)}
+                  className="w-full px-5 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors text-left">
+                  {/* Chapter number badge */}
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm font-black flex-shrink-0 ${
+                    pct === 100 ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-50 text-blue-700'
+                  }`}>
+                    {chIdx + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400 font-medium">Ch {ch.chapter_order}</span>
+                      <span className="font-semibold text-gray-900 text-sm truncate">{ch.chapter_name}</span>
+                      {pct === 100 && (
+                        <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">Done</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 mt-1.5">
+                      <div className="flex-1 max-w-[160px] h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                          style={{ width: `${pct}%` }} />
+                      </div>
+                      <span className="text-xs text-gray-400">{ch.covered}/{ch.total}</span>
+                    </div>
+                  </div>
+                  <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {/* Topics list */}
+                {isExpanded && (
+                  <div className="border-t border-gray-100 divide-y divide-gray-50">
+                    {ch.topics.map((topic, tIdx) => {
+                      const isCovered = topic.status === 'covered'
+                      const isMarking = markingId === topic.id
+
+                      return (
+                        <button
+                          key={topic.id}
+                          onClick={() => markCovered(topic)}
+                          disabled={isMarking}
+                          className={`w-full px-5 py-3 flex items-center gap-3 text-left transition-colors ${
+                            isCovered ? 'hover:bg-emerald-50/50' : 'hover:bg-blue-50/40'
+                          } ${isMarking ? 'opacity-50' : ''}`}>
+                          {/* Topic check circle */}
+                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+                            isCovered ? 'bg-emerald-500 border-emerald-500' : 'border-gray-300 hover:border-blue-400'
+                          }`}>
+                            {isCovered && (
+                              <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-gray-300">{tIdx + 1}.</span>
+                              <span className={`text-sm ${isCovered ? 'text-gray-400 line-through' : 'text-gray-800 font-medium'}`}>
+                                {topic.topic_name}
+                              </span>
+                            </div>
+                            {isCovered && topic.covered_date && (
+                              <p className="text-[10px] text-emerald-500 mt-0.5 ml-5">
+                                Covered {topic.covered_date}{topic.covered_by_name ? ` · ${topic.covered_by_name}` : ''}
+                              </p>
+                            )}
+                          </div>
+                          {isMarking && (
+                            <div className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function ClassView({ classId, grade, section, schoolId, teacherName, teacherId, isClassTeacher, teacher, onBack, initialTab, openExamId }: Props) {
@@ -633,7 +1009,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           section={section}
           teacher={teacher!}
           onGoToMarks={() => setActiveTab('Marks & Results')}
-          onGoToTasks={() => setActiveTab('Tasks')}
+          onGoToTasks={() => setActiveTab('Homework')}
           onGoToDoubts={() => setActiveTab('Doubts')}
         />
       )}
@@ -1254,7 +1630,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
       })()}
 
       {/* ── TASKS TAB ───────────────────────────────────────────────────────── */}
-      {activeTab === 'Tasks' && teacher && (
+      {activeTab === 'Homework' && teacher && (
         <Tasks
           classId={classId}
           grade={grade}
@@ -1263,7 +1639,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           teacher={teacher}
         />
       )}
-      {activeTab === 'Tasks' && !teacher && (
+      {activeTab === 'Homework' && !teacher && (
         <div className="bg-white rounded-xl border border-gray-200 py-20 text-center">
           <p className="text-sm text-gray-400">Loading teacher info...</p>
         </div>
@@ -1310,6 +1686,18 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         <div className="bg-white rounded-xl border border-gray-200 py-10 text-center">
           <p className="text-sm text-gray-400">Loading teacher info...</p>
         </div>
+      )}
+
+      {/* ── SYLLABUS TAB ────────────────────────────────────────────────────── */}
+      {activeTab === 'Syllabus' && (
+        <SyllabusTracking
+          classId={classId}
+          schoolId={schoolId}
+          grade={grade}
+          teacher={teacher}
+          isClassTeacher={isClassTeacher}
+          onGoToHomework={() => setActiveTab('Homework')}
+        />
       )}
     </div>
   )

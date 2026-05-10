@@ -238,7 +238,7 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: 'Tasks Assigned', val: tasks.length, icon: '📋', bg: 'bg-blue-50', txt: 'text-blue-700' },
+          { label: 'Homework', val: tasks.length, icon: '📋', bg: 'bg-blue-50', txt: 'text-blue-700' },
           { label: 'Submitted', val: submitted, icon: '✅', bg: 'bg-green-50', txt: 'text-green-700' },
           { label: 'Pending', val: pending, icon: '⏳', bg: 'bg-amber-50', txt: 'text-amber-700' },
           { label: 'Reviewed', val: reviewed, icon: '⭐', bg: 'bg-purple-50', txt: 'text-purple-700' },
@@ -252,11 +252,11 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Recent tasks */}
+        {/* Recent homework */}
         <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <h3 className="font-semibold text-gray-800 mb-3 text-sm">Recent Tasks</h3>
+          <h3 className="font-semibold text-gray-800 mb-3 text-sm">Recent Homework</h3>
           {tasks.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-4">No tasks assigned yet</p>
+            <p className="text-sm text-gray-400 text-center py-4">No homework assigned yet</p>
           ) : (
             <div className="space-y-2">
               {tasks.slice(0, 4).map(t => {

@@ -48,6 +48,7 @@ const ParentEngagement      = dynamic(() => import('./components/ParentEngagemen
 const YearRollover          = dynamic(() => import('./components/YearRollover'),           { loading: () => <ModuleSkeleton /> })
 const FeeManagement         = dynamic(() => import('./components/FeeManagement'),          { loading: () => <ModuleSkeleton /> })
 const YearReview            = dynamic(() => import('./components/YearReview'),             { loading: () => <ModuleSkeleton /> })
+const MarketplaceOrders     = dynamic(() => import('./components/MarketplaceOrders'),      { loading: () => <ModuleSkeleton /> })
 
 type School = {
   id: number
@@ -71,7 +72,7 @@ type NavItem = {
 const NAV_SECTIONS = [
   { label: 'OVERVIEW',    keys: ['overview', 'briefing'] },
   { label: 'PEOPLE',      keys: ['staff', 'students', 'class-management'] },
-  { label: 'MANAGEMENT',  keys: ['fee-management', 'parent-engagement', 'year-rollover'] },
+  { label: 'MANAGEMENT',  keys: ['fee-management', 'parent-engagement', 'year-rollover', 'marketplace-orders'] },
   { label: 'SCHEDULING',  keys: ['timetable', 'attendance', 'leave-requests', 'emergency-cover', 'exam-schedule'] },
   { label: 'ANALYTICS',   keys: ['class-analytics', 'academic-analytics', 'analysis', 'year-review'] },
   { label: 'COMMUNICATION', keys: ['announcements', 'notifications', 'leaderboard'] },
@@ -297,6 +298,16 @@ const NAV_ITEMS: NavItem[] = [
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'marketplace-orders',
+    label: 'Marketplace Orders',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
       </svg>
     ),
   },
@@ -716,6 +727,7 @@ export default function SchoolAdmin() {
                 {visited.has('year-rollover')       && <div hidden={activeNav !== 'year-rollover'}><YearRollover schoolId={selectedSchool.id} /></div>}
                 {visited.has('fee-management')      && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} /></div>}
                 {visited.has('year-review')         && <div hidden={activeNav !== 'year-review'}><YearReview schoolId={selectedSchool.id} /></div>}
+                {visited.has('marketplace-orders')  && <div hidden={activeNav !== 'marketplace-orders'}><MarketplaceOrders schoolId={selectedSchool.id} /></div>}
               </FeaturesProvider>
             )}
           </main>

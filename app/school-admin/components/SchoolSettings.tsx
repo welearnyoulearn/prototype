@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { getBoardLabels } from '@/lib/board-syllabus/data'
 
 type SchoolData = {
   id: number
@@ -14,7 +15,10 @@ type SchoolData = {
   logo_url: string
   school_code: string
   grading_scheme: GradeRow[]
+  board?: string
 }
+
+const BOARDS = getBoardLabels()
 
 type GradeRow = { grade: string; min: number; max: number }
 
@@ -43,7 +47,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
   // Profile form
   const [profile, setProfile] = useState({
-    name: '', type: '', city: '', country: '', phone: '', email: '', address: '', logo_url: '',
+    name: '', type: '', city: '', country: '', phone: '', email: '', address: '', logo_url: '', board: '',
   })
 
   // Grading scheme form
@@ -150,6 +154,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
         email:    d.email ?? '',
         address:  d.address ?? '',
         logo_url: d.logo_url ?? '',
+        board:    d.board ?? '',
       })
       if (d.grading_scheme && Array.isArray(d.grading_scheme) && d.grading_scheme.length > 0) {
         setScheme(d.grading_scheme)
@@ -166,7 +171,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       const r = await fetch(`/api/schools/${schoolId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(profile),
+        body: JSON.stringify({ ...profile, board: profile.board || null }),
       })
       if (!r.ok) throw new Error((await r.json()).error)
       setSaved(true)
@@ -344,6 +349,26 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               value={profile.address}
               onChange={e => setProfile(f => ({ ...f, address: e.target.value }))}
             />
+          </div>
+
+          {/* Board / Curriculum */}
+          <div className="border-t border-gray-100 pt-5 space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700">Curriculum Board</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Select your board. HODs can load and publish the syllabus class-by-class from their dashboard.
+              </p>
+            </div>
+            <div className="max-w-xs">
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Board / Curriculum</label>
+              <select
+                value={profile.board}
+                onChange={e => setProfile(f => ({ ...f, board: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                <option value="">— Select Board —</option>
+                {BOARDS.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
+              </select>
+            </div>
           </div>
 
           {/* Read-only info */}

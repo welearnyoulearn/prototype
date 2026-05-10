@@ -31,7 +31,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params
   try {
     const body = await req.json()
-    const { name, type, city, country, status, phone, email, address, logo_url, grading_scheme, restore } = body
+    const { name, type, city, country, status, phone, email, address, logo_url, grading_scheme, board, restore } = body
 
     // Restore a soft-deleted school
     if (restore) {
@@ -52,11 +52,13 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         email          = COALESCE($7,  email),
         address        = COALESCE($8,  address),
         logo_url       = COALESCE($9,  logo_url),
-        grading_scheme = COALESCE($10, grading_scheme)
-       WHERE id = $11 RETURNING *`,
+        grading_scheme = COALESCE($10, grading_scheme),
+        board          = COALESCE($11, board)
+       WHERE id = $12 RETURNING *`,
       [name, type, city, country, status, phone, email, address,
        logo_url,
        grading_scheme !== undefined ? JSON.stringify(grading_scheme) : null,
+       board ?? null,
        id]
     )
     if (result.rowCount === 0) return NextResponse.json({ error: 'School not found' }, { status: 404 })

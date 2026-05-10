@@ -38,6 +38,7 @@ const en = {
     'weekly-tests': 'Weekly Tests',
     activity:     'Activity Log',
     'ai-chats':   'AI Chat History',
+    marketplace:  'Marketplace',
   },
 
   // Language
@@ -58,7 +59,7 @@ const en = {
   viewFullCalendar: 'View full calendar →',
   signOffNeeded: 'sign-off needed',
   signNow: 'Sign now',
-  recentTasks: 'Recent Tasks',
+  recentTasks: 'Recent Homework',
   due: 'Due',
   done: 'Done',
   pending: 'Pending',
@@ -191,6 +192,7 @@ const te: typeof en = {
     'weekly-tests': 'వారపు పరీక్షలు',
     activity:     'కార్యకలాప నమోదు',
     'ai-chats':   'AI చాట్ చరిత్ర',
+    marketplace:  'మార్కెట్‌ప్లేస్',
   },
 
   // Language
@@ -211,7 +213,7 @@ const te: typeof en = {
   viewFullCalendar: 'పూర్తి పంచాంగం చూడండి →',
   signOffNeeded: 'సంతకం అవసరం',
   signNow: 'ఇప్పుడే సంతకం',
-  recentTasks: 'ఇటీవలి పనులు',
+  recentTasks: 'ఇటీవలి హోంవర్క్',
   due: 'గడువు',
   done: 'పూర్తయింది',
   pending: 'పెండింగ్',

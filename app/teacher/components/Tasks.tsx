@@ -142,7 +142,9 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
 
   function openCreate() {
     setEditingTask(null)
-    setForm({ ...DEFAULT_FORM, subject: teacher.subject })
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
+    const due = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth()+1).padStart(2,'0')}-${String(tomorrow.getDate()).padStart(2,'0')}`
+    setForm({ ...DEFAULT_FORM, subject: teacher.subject, due_date: due })
     setFormError('')
     setView('create')
   }
@@ -171,7 +173,7 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
 
   async function saveTask(publishStatus: 'draft' | 'published') {
     setFormError('')
-    if (!form.title.trim()) { setFormError('Task title is required'); return }
+    if (!form.title.trim()) { setFormError('Homework title is required'); return }
     if (!form.subject) { setFormError('Subject is required'); return }
     if (publishStatus === 'published' && !form.due_date) { setFormError('Due date is required to publish'); return }
     if (publishStatus === 'published' && !form.instructions.trim()) { setFormError('Instructions are required to publish'); return }
@@ -243,250 +245,99 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
     )
   }
 
+  const SUBJECTS = ['Maths', 'Science', 'English', 'Hindi', 'Social', 'Physics', 'Chemistry', 'Biology', 'Computer']
+
   // ── CREATE / EDIT VIEW ────────────────────────────────────────────────────
   if (view === 'create') {
-    const checklist = [
-      { label: 'Task Title', ok: !!form.title.trim() },
-      { label: 'Subject Selected', ok: !!form.subject },
-      { label: 'Due Date Set', ok: !!form.due_date },
-      { label: 'Instructions Added', ok: !!form.instructions.trim() },
-    ]
-
     return (
-      <div className="space-y-0">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setView('list')}
-              className="text-gray-400 hover:text-gray-600 text-sm flex items-center gap-1">
-              ← Back
-            </button>
-            <h2 className="text-xl font-bold text-gray-900">
-              {editingTask ? 'Edit Task' : 'Create New Task'}
-            </h2>
-          </div>
-          <div className="flex items-center gap-3">
-            <button onClick={() => saveTask('draft')} disabled={saving}
-              className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50 transition-colors">
-              Save Draft
-            </button>
-            <button onClick={() => saveTask('published')} disabled={saving}
-              className="px-5 py-2 bg-slate-800 text-white rounded-lg text-sm font-semibold hover:bg-slate-700 disabled:opacity-50 transition-colors flex items-center gap-2">
-              {saving ? 'Saving...' : 'Publish Task →'}
-            </button>
-          </div>
+      <div className="space-y-5 max-w-2xl">
+        <div className="flex items-center gap-3">
+          <button onClick={() => setView('list')}
+            className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <h2 className="text-lg font-bold text-gray-900">
+            {editingTask ? 'Edit Homework' : 'Add Homework'}
+          </h2>
         </div>
 
-        {formError && (
-          <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
-            {formError}
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-          {/* Left: Task Details */}
-          <div className="sm:col-span-2 space-y-4">
-            {/* Task Details card */}
-            <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <span className="w-3 h-3 rounded-full bg-orange-400 inline-block" />
-                <h3 className="font-bold text-gray-800">Task Details</h3>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">
-                    Task Title
-                  </label>
-                  <input
-                    type="text"
-                    value={form.title}
-                    onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                    placeholder="e.g. Maths Practice — Quadratic Equations"
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">
-                      Subject
-                    </label>
-                    <div className="flex gap-2 flex-wrap">
-                      {[teacher.subject, ...(teacher.subject !== teacher.department ? [teacher.department] : [])].filter(Boolean).map(sub => (
-                        <button key={sub}
-                          onClick={() => setForm(f => ({ ...f, subject: sub }))}
-                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
-                            form.subject === sub
-                              ? `${subjectColor(sub)} text-white border-transparent`
-                              : 'bg-white border-gray-300 text-gray-600 hover:border-gray-400'
-                          }`}>
-                          {sub}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">
-                      Assign to Class
-                    </label>
-                    <div className="flex items-center gap-2 mt-1">
-                      <input type="checkbox" checked readOnly className="w-4 h-4 accent-blue-600" />
-                      <span className="text-sm font-medium text-gray-700">Class {grade}{section}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">
-                      Task Type
-                    </label>
-                    <div className="flex gap-2">
-                      {(['practice', 'homework', 'test'] as const).map(type => (
-                        <button key={type}
-                          onClick={() => setForm(f => ({ ...f, task_type: type }))}
-                          className={`px-3 py-1.5 rounded-full text-xs font-semibold border capitalize transition-all ${
-                            form.task_type === type
-                              ? 'bg-slate-800 text-white border-slate-800'
-                              : 'bg-white border-gray-300 text-gray-600 hover:border-gray-400'
-                          }`}>
-                          {type}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">
-                      Marks
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-gray-500">Out of:</span>
-                      <select
-                        value={form.max_marks}
-                        onChange={e => setForm(f => ({ ...f, max_marks: parseInt(e.target.value) }))}
-                        className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
-                        {MARKS_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">
-                      Due Date
-                    </label>
-                    <input type="date" value={form.due_date}
-                      min={(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}` })()}
-                      onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5 block">
-                      Due Time
-                    </label>
-                    <input type="time" value={form.due_time}
-                      onChange={e => setForm(f => ({ ...f, due_time: e.target.value }))}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Instructions card */}
-            <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-orange-400 inline-block" />
-                  <h3 className="font-bold text-gray-800">Instructions</h3>
-                </div>
-                <span className="text-xs font-semibold bg-amber-100 text-amber-700 px-2 py-0.5 rounded">
-                  {form.status === 'published' ? 'REQUIRED' : 'REQUIRED TO PUBLISH'}
-                </span>
-              </div>
-              <textarea
-                value={form.instructions}
-                onChange={e => setForm(f => ({ ...f, instructions: e.target.value.slice(0, 2000) }))}
-                placeholder="Write task instructions here..."
-                rows={8}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"
-              />
-              <p className="text-xs text-gray-400 text-right mt-1">
-                {form.instructions.length}/2000 characters
-              </p>
-            </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1.5">Homework Title *</label>
+            <input type="text" value={form.title}
+              onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+              placeholder="e.g. Chapter 5 Exercise 1-10"
+              autoFocus
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
           </div>
 
-          {/* Right: Preview + Options */}
-          <div className="space-y-4">
-            {/* Student View Preview */}
-            <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <p className="text-xs text-gray-400 font-medium mb-3">Student View Preview</p>
-              <div className="bg-gray-50 rounded-lg p-3 border border-gray-100">
-                <div className="flex items-start gap-2.5">
-                  <div className="w-8 h-8 bg-gray-200 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-gray-800 leading-tight">
-                      {form.title || 'Task Title'}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Class {grade}{section} {form.due_date ? `· Due ${new Date(form.due_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}, ${form.due_time}` : ''}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 mt-3 pt-3 border-t border-gray-200">
-                  <div>
-                    <p className="text-[10px] text-gray-400 uppercase font-semibold">Max Score</p>
-                    <p className="text-sm font-bold text-gray-800">{form.max_marks} Marks</p>
-                  </div>
-                  <div className="ml-4">
-                    <p className="text-[10px] text-gray-400 uppercase font-semibold">Type</p>
-                    <p className="text-sm font-bold text-gray-800 capitalize">{form.task_type}</p>
-                  </div>
-                </div>
-                <button className="w-full mt-3 bg-gray-200 text-gray-400 text-sm font-medium py-2 rounded-lg cursor-not-allowed">
-                  Submit Task
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1.5">Subject *</label>
+            <div className="flex flex-wrap gap-2">
+              {SUBJECTS.map(s => (
+                <button key={s} type="button"
+                  onClick={() => setForm(f => ({ ...f, subject: s }))}
+                  className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                    form.subject.toLowerCase() === s.toLowerCase()
+                      ? `${subjectColor(s)} text-white border-transparent`
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                  }`}>
+                  {s}
                 </button>
-              </div>
+              ))}
             </div>
+          </div>
 
-            {/* Assign to Students */}
-            <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <p className="text-sm font-bold text-gray-800 mb-3">Assign to Students</p>
-              <select
-                value={form.assigned_to}
-                onChange={e => setForm(f => ({ ...f, assigned_to: e.target.value }))}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
-                <option value="all">All Students (Class {grade}{section})</option>
-              </select>
-              <p className="text-xs text-emerald-600 font-medium mt-2 flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
-                All students in Class {grade}-{section} will receive this task
-              </p>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1.5">Instructions</label>
+            <textarea value={form.instructions}
+              onChange={e => setForm(f => ({ ...f, instructions: e.target.value }))}
+              rows={5} placeholder="What should students do?"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400 resize-none" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Due Date</label>
+              <input type="date" value={form.due_date}
+                onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400" />
             </div>
-
-            {/* Summary Checklist */}
-            <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <p className="text-sm font-bold text-gray-800 mb-3">Summary Checklist</p>
-              <div className="space-y-2.5">
-                {checklist.map(item => (
-                  <div key={item.label} className="flex items-center justify-between">
-                    <span className="text-sm text-gray-600">{item.label}</span>
-                    <div className={`w-5 h-5 rounded-full flex items-center justify-center ${item.ok ? 'bg-green-500' : 'bg-gray-200'}`}>
-                      {item.ok
-                        ? <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
-                        : <span className="w-1.5 h-1.5 bg-gray-400 rounded-full" />
-                      }
-                    </div>
-                  </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1.5">Marks</label>
+              <div className="flex flex-wrap gap-1.5">
+                {MARKS_OPTIONS.map(m => (
+                  <button key={m} type="button"
+                    onClick={() => setForm(f => ({ ...f, max_marks: m }))}
+                    className={`px-2.5 py-1 rounded-lg text-sm font-semibold border transition-colors ${
+                      form.max_marks === m
+                        ? 'bg-slate-800 text-white border-transparent'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                    }`}>
+                    {m}
+                  </button>
                 ))}
               </div>
             </div>
+          </div>
+
+          {formError && <p className="text-red-600 text-sm font-medium">{formError}</p>}
+
+          <div className="flex gap-3 pt-1">
+            <button onClick={() => setView('list')}
+              className="border border-gray-200 text-gray-600 px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-colors">
+              Cancel
+            </button>
+            <button onClick={() => saveTask('draft')} disabled={saving}
+              className="border border-gray-300 text-gray-700 px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-gray-50 transition-colors disabled:opacity-50">
+              Save Draft
+            </button>
+            <button onClick={() => saveTask('published')} disabled={saving}
+              className="bg-slate-800 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-slate-700 transition-colors disabled:opacity-50">
+              {saving ? 'Saving…' : 'Publish Now'}
+            </button>
           </div>
         </div>
       </div>
@@ -503,7 +354,7 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
             <path d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
           <p className="text-sm text-orange-700">
-            As Class Teacher you can view all tasks across subjects. You can only take action on your own subject
+            As Class Teacher you can view all homework across subjects. You can only take action on your own subject
             (<span className="font-semibold">{teacher.subject}</span>).
           </p>
         </div>
@@ -527,15 +378,15 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
         </select>
         <button onClick={openCreate}
           className="ml-auto flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
-          <span className="text-lg leading-none">+</span> Create Task
+          <span className="text-lg leading-none">+</span> Add Homework
         </button>
       </div>
 
       {/* Stats cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: 'TOTAL TASKS', value: visibleTasks.length, color: 'text-gray-900', border: 'border-l-gray-400' },
-          { label: 'YOUR TASKS', value: ownTasks.filter(t => t.status === 'published').length, color: 'text-orange-500', border: 'border-l-orange-400' },
+          { label: 'TOTAL', value: visibleTasks.length, color: 'text-gray-900', border: 'border-l-gray-400' },
+          { label: 'MINE', value: ownTasks.filter(t => t.status === 'published').length, color: 'text-orange-500', border: 'border-l-orange-400' },
           { label: 'PENDING REVIEW', value: pendingReview, color: 'text-orange-600', border: 'border-l-orange-500' },
           { label: 'OVERDUE', value: overdueTasks, color: 'text-red-600', border: 'border-l-red-400' },
         ].map(stat => (
@@ -546,10 +397,10 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
         ))}
       </div>
 
-      {/* Tasks table */}
+      {/* Homework table */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         {loading ? (
-          <div className="py-16 text-center text-gray-400 text-sm">Loading tasks...</div>
+          <div className="py-16 text-center text-gray-400 text-sm">Loading homework...</div>
         ) : visibleTasks.length === 0 ? (
           <div className="py-16 text-center">
             <div className="w-14 h-14 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
@@ -557,11 +408,11 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
               </svg>
             </div>
-            <p className="text-gray-500 font-medium">No tasks yet</p>
-            <p className="text-gray-400 text-sm mt-1">Create your first task for this class</p>
+            <p className="text-gray-500 font-medium">No homework yet</p>
+            <p className="text-gray-400 text-sm mt-1">Add the first homework for this class</p>
             <button onClick={openCreate}
               className="mt-3 bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-700 transition-colors">
-              + Create Task
+              + Add Homework
             </button>
           </div>
         ) : (
@@ -569,7 +420,7 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-800 text-slate-200">
-                <th className="text-left px-4 py-3 font-semibold">Task Name</th>
+                <th className="text-left px-4 py-3 font-semibold">Homework</th>
                 <th className="text-left px-3 py-3 font-semibold">Subject</th>
                 <th className="text-left px-3 py-3 font-semibold">Teacher</th>
                 <th className="text-left px-3 py-3 font-semibold">Assigned</th>

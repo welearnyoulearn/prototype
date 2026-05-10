@@ -130,7 +130,7 @@ export default function TasksPage({ teacher, schoolId }: Props) {
         </div>
       )}
 
-      {/* Tasks component */}
+      {/* Homework component */}
       {selectedClass ? (
         <div className="flex-1 min-h-0">
           <Tasks
@@ -145,7 +145,7 @@ export default function TasksPage({ teacher, schoolId }: Props) {
       ) : (
         <div className="flex items-center justify-center h-full min-h-[300px] bg-white rounded-xl border border-gray-200">
           <div className="text-center">
-            <p className="text-gray-500 font-medium mb-1">Select a class above to manage tasks</p>
+            <p className="text-gray-500 font-medium mb-1">Select a class above to manage homework</p>
             <p className="text-gray-400 text-sm">You teach {classes.length} classes</p>
           </div>
         </div>

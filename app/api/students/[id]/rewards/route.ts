@@ -16,10 +16,13 @@ export async function GET(
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 
   try {
-    const [pointsRes, badgesRes, streakRes, recentRes, weeklyTestRes, leaderboardRes] = await Promise.all([
-      // Total points
+    const [pointsRes, badgesRes, streakRes, recentRes, weeklyTestRes, leaderboardRes, marketplaceRes] = await Promise.all([
+      // Academic points (default or explicit 'academic')
       pool.query(
-        `SELECT COALESCE(SUM(points), 0) AS total FROM student_points WHERE student_id = $1 AND school_id = $2`,
+        `SELECT
+           COALESCE(SUM(points) FILTER (WHERE points_type = 'academic' OR points_type IS NULL), 0)::int AS academic,
+           COALESCE(SUM(points) FILTER (WHERE points_type = 'marketplace'), 0)::int AS marketplace_earned
+         FROM student_points WHERE student_id = $1 AND school_id = $2`,
         [student_id, school_id]
       ),
 
@@ -35,11 +38,11 @@ export async function GET(
         [student_id]
       ),
 
-      // Recent point transactions (last 10)
+      // Recent point transactions (last 15) — include points_type
       pool.query(
-        `SELECT action_type, points, earned_at FROM student_points
+        `SELECT action_type, points, points_type, earned_at FROM student_points
          WHERE student_id = $1 AND school_id = $2
-         ORDER BY earned_at DESC LIMIT 10`,
+         ORDER BY earned_at DESC LIMIT 15`,
         [student_id, school_id]
       ),
 
@@ -55,9 +58,10 @@ export async function GET(
         [student_id, school_id]
       ),
 
-      // Class leaderboard (top 10 by points in same class)
+      // Class leaderboard ranked by academic points only
       class_id ? pool.query(
-        `SELECT s.id, s.name, COALESCE(SUM(sp.points), 0) AS total_points
+        `SELECT s.id, s.name,
+           COALESCE(SUM(sp.points) FILTER (WHERE sp.points_type = 'academic' OR sp.points_type IS NULL), 0)::int AS total_points
          FROM students s
          LEFT JOIN student_points sp ON sp.student_id = s.id AND sp.school_id = s.school_id
          WHERE s.school_id = $1
@@ -69,9 +73,21 @@ export async function GET(
          LIMIT 10`,
         [school_id, student_id]
       ) : Promise.resolve({ rows: [] }),
+
+      // Marketplace points spent (pending/approved/delivered orders)
+      pool.query(
+        `SELECT COALESCE(SUM(points_spent), 0)::int AS spent
+         FROM marketplace_orders
+         WHERE student_id = $1 AND school_id = $2 AND status IN ('pending','approved','delivered')`,
+        [student_id, school_id]
+      ),
     ])
 
-    const totalPoints = parseInt(pointsRes.rows[0].total)
+    const academicPoints    = pointsRes.rows[0]?.academic ?? 0
+    const marketplaceEarned = pointsRes.rows[0]?.marketplace_earned ?? 0
+    const marketplaceSpent  = marketplaceRes.rows[0]?.spent ?? 0
+    const marketplaceBalance = Math.max(0, marketplaceEarned - marketplaceSpent)
+    const totalPoints = academicPoints  // leaderboard & rank use academic only
     const streak = streakRes.rows[0] || { current_streak: 0, longest_streak: 0, last_activity_date: null }
 
     // Enrich badges with display info
@@ -100,6 +116,9 @@ export async function GET(
 
     return NextResponse.json({
       total_points: totalPoints,
+      academic_points: academicPoints,
+      marketplace_balance: marketplaceBalance,
+      marketplace_earned: marketplaceEarned,
       streak: {
         current: parseInt(streak.current_streak) || 0,
         longest: parseInt(streak.longest_streak) || 0,
