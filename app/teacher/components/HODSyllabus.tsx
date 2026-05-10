@@ -1,6 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ChangeEvent } from 'react'
 
 type HODAssignmentItem = {
   id: number
@@ -23,6 +24,7 @@ type Topic = {
   topic_name: string
   topic_order: number
   status: string
+  published: boolean
   covered_date: string | null
   covered_by_name: string | null
   target_date: string | null
@@ -78,12 +80,38 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
   const [editingRemark, setEditingRemark] = useState<number | null>(null)
   const [editVal, setEditVal] = useState('')
 
-  // Reset class selection when subject changes
+  // Load/publish state
+  const [loadMsg, setLoadMsg] = useState('')
+  const [publishing, setPublishing] = useState(false)
+  const [publishedMsg, setPublishedMsg] = useState('')
+
+  // PDF syllabus load (inline panel)
+  const [loadPdfOpen, setLoadPdfOpen] = useState(false)
+  const [pdfFile, setPdfFile]         = useState<File | null>(null)
+  const [pdfUploading, setPdfUploading] = useState(false)
+  const [pdfMsg, setPdfMsg]           = useState<string>('')
+  const [pdfProgress, setPdfProgress] = useState(0)
+  const pdfInputRef = useRef<HTMLInputElement>(null)
+
+  // AI homework suggestion
+  type HWSuggestion = { title: string; instructions: string; max_marks: number; estimated_time_minutes: number }
+  const [suggestion, setSuggestion] = useState<HWSuggestion | null>(null)
+  const [suggestLoading, setSuggestLoading] = useState(false)
+  const [suggestError, setSuggestError] = useState(false)
+  const [assigning, setAssigning] = useState(false)
+  const [assignedMsg, setAssignedMsg] = useState('')
+  const suggestionRef = useRef<HTMLDivElement>(null)
+
+  // Reset class selection + suggestion when subject changes
   useEffect(() => {
     setSelectedClassId(null)
     setClasses([])
     setStagedChapter(null)
     setExpandedChapter(null)
+    setSuggestion(null)
+    setSuggestError(false)
+    setLoadMsg('')
+    setPublishedMsg('')
   }, [selectedSubject])
 
   // Load assigned classes for the selected subject
@@ -110,7 +138,7 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
     setError('')
     try {
       const res = await fetch(
-        `/api/syllabus?school_id=${teacher.school_id}&class_id=${selectedClassId}&subject=${encodeURIComponent(selectedSubject)}`
+        `/api/syllabus?school_id=${teacher.school_id}&class_id=${selectedClassId}&subject=${encodeURIComponent(selectedSubject)}&hod=1`
       )
       const data = await res.json()
       const today = new Date().toISOString().slice(0, 10)
@@ -134,6 +162,12 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
 
   useEffect(() => { loadSyllabus() }, [loadSyllabus])
 
+  useEffect(() => {
+    if ((suggestion || suggestLoading) && suggestionRef.current) {
+      suggestionRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }, [suggestion, suggestLoading])
+
   async function patchTopic(id: number, payload: Record<string, unknown>) {
     setSaving(id)
     try {
@@ -146,6 +180,60 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
       await loadSyllabus()
     } catch { setError('Failed to save') }
     finally { setSaving(null) }
+  }
+
+  async function coverTopic(topic: Topic, chapterName: string) {
+    const newStatus = topic.status === 'covered' ? 'pending' : 'covered'
+    setSuggestion(null)
+    setSuggestError(false)
+    await patchTopic(topic.id, { status: newStatus, covered_by: teacher.id })
+    if (newStatus === 'covered') {
+      const selectedClass = classes.find(c => c.id === selectedClassId)
+      setSuggestLoading(true)
+      try {
+        const sg = await fetch('/api/ai/suggest-homework', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            subject: selectedSubject,
+            chapter_name: chapterName,
+            topic_name: topic.topic_name,
+            grade: selectedClass?.grade ?? '',
+            school_id: teacher.school_id,
+          }),
+        })
+        if (sg.ok) setSuggestion(await sg.json())
+        else setSuggestError(true)
+      } catch { setSuggestError(true) }
+      finally { setSuggestLoading(false) }
+    }
+  }
+
+  async function assignHomework() {
+    if (!suggestion || !selectedClassId) return
+    setAssigning(true)
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
+    try {
+      await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: teacher.school_id,
+          class_id: selectedClassId,
+          teacher_id: teacher.id,
+          subject: selectedSubject,
+          title: suggestion.title,
+          instructions: suggestion.instructions,
+          task_type: 'homework',
+          max_marks: suggestion.max_marks,
+          due_date: tomorrow.toISOString().slice(0, 10),
+          status: 'published',
+          assigned_to: 'all',
+        }),
+      })
+      setAssignedMsg('Homework assigned to all students!')
+      setSuggestion(null)
+    } finally { setAssigning(false) }
   }
 
   // Stage a new chapter locally — no DB write yet (1b)
@@ -234,7 +322,79 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
     await loadSyllabus()
   }
 
+  async function deleteChapter(chapterName: string) {
+    if (!confirm(`Delete chapter "${chapterName}" and all its topics? This cannot be undone.`)) return
+    try {
+      await fetch(
+        `/api/syllabus?school_id=${teacher.school_id}&class_id=${selectedClassId}&subject=${encodeURIComponent(selectedSubject)}&chapter_name=${encodeURIComponent(chapterName)}`,
+        { method: 'DELETE' }
+      )
+      await loadSyllabus()
+    } catch { setError('Failed to delete chapter') }
+  }
+
+  async function loadFromPDF() {
+    if (!pdfFile || !selectedClassId) return
+    const cls = classes.find(c => c.id === selectedClassId)
+    if (!cls) return
+    setPdfUploading(true)
+    setPdfMsg('')
+    setPdfProgress(10)
+    const fd = new FormData()
+    fd.append('school_id', String(teacher.school_id))
+    fd.append('class_id', String(selectedClassId))
+    fd.append('grade', cls.grade)
+    fd.append('subject', selectedSubject)
+    fd.append('uploaded_by_name', teacher.name || 'HOD')
+    fd.append('file', pdfFile)
+    try {
+      const ticker = setInterval(() => setPdfProgress(p => Math.min(p + 5, 80)), 1000)
+      const res  = await fetch('/api/syllabus/pdf-load', { method: 'POST', body: fd })
+      const data = await res.json()
+      clearInterval(ticker)
+      setPdfProgress(100)
+      if (!res.ok) {
+        setPdfMsg(`Error: ${data.error || 'Failed to process PDF'}`)
+      } else {
+        setLoadPdfOpen(false)
+        setPdfFile(null)
+        if (pdfInputRef.current) pdfInputRef.current.value = ''
+        setPdfMsg('')
+        setLoadMsg(`${data.inserted} topics loaded from PDF (${data.chapters_count} chapters, ${data.pages} pages) — review and publish when ready`)
+        await loadSyllabus()
+      }
+    } catch {
+      setPdfMsg('Upload failed — please check the file and try again')
+    } finally {
+      setPdfUploading(false)
+      setTimeout(() => setPdfProgress(0), 1500)
+    }
+  }
+
+  async function publishSyllabus() {
+    if (!selectedClassId) return
+    setPublishing(true)
+    setPublishedMsg('')
+    try {
+      const res = await fetch('/api/syllabus/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: teacher.school_id, class_id: selectedClassId, subject: selectedSubject }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setPublishedMsg(`Syllabus published — ${data.published} topics now visible to teachers`)
+      setLoadMsg('')
+      await loadSyllabus()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to publish')
+    } finally {
+      setPublishing(false)
+    }
+  }
+
   const today = new Date().toISOString().slice(0, 10)
+  const hasDraft = chapters.some(ch => ch.topics.some(t => !t.published))
   const totalTopics   = chapters.reduce((s, c) => s + c.total, 0)
   const coveredTopics = chapters.reduce((s, c) => s + c.covered, 0)
   const behindTopics  = chapters.reduce((s, c) => s + c.behind, 0)
@@ -283,19 +443,109 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
             </div>
           )}
         </div>
-        <button
-          onClick={() => { setShowAddChapter(v => !v); setNewChapterName('') }}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium transition-colors">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Add Chapter
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => { setLoadPdfOpen(v => !v); setPdfMsg('') }}
+            disabled={!selectedClassId}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+            </svg>
+            Load Syllabus from PDF
+          </button>
+          <button
+            onClick={() => { setShowAddChapter(v => !v); setNewChapterName('') }}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium transition-colors">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Add Chapter
+          </button>
+        </div>
       </div>
 
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex justify-between">
           {error}<button onClick={() => setError('')} className="text-red-400 hover:text-red-600 ml-4">✕</button>
+        </div>
+      )}
+
+      {loadMsg && (
+        <div className="mb-4 bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl text-sm flex items-center justify-between gap-3">
+          <span>{loadMsg}</span>
+          <button onClick={() => setLoadMsg('')} className="text-amber-400 hover:text-amber-600 flex-shrink-0">✕</button>
+        </div>
+      )}
+
+      {publishedMsg && (
+        <div className="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl text-sm flex items-center justify-between gap-3">
+          <span>{publishedMsg}</span>
+          <button onClick={() => setPublishedMsg('')} className="text-emerald-400 hover:text-emerald-600 flex-shrink-0">✕</button>
+        </div>
+      )}
+
+      {/* Inline PDF syllabus loader */}
+      {loadPdfOpen && (
+        <div className="mb-5 bg-emerald-50 border border-emerald-300 rounded-xl p-5">
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div>
+              <p className="font-semibold text-emerald-900 text-sm">Load {selectedSubject} Syllabus from PDF</p>
+              <p className="text-xs text-emerald-700 mt-0.5">
+                Upload the textbook PDF — AI will read it and automatically create chapters and topics as a draft syllabus.
+                AI also stores the book content to improve homework suggestions and student Q&amp;A.
+              </p>
+            </div>
+            <button onClick={() => { setLoadPdfOpen(false); setPdfMsg(''); setPdfFile(null) }}
+              className="text-emerald-400 hover:text-emerald-700 text-lg leading-none flex-shrink-0">✕</button>
+          </div>
+
+          <label className={`flex items-center gap-3 border-2 border-dashed rounded-xl px-4 py-4 cursor-pointer transition-colors mb-3
+            ${pdfUploading ? 'border-emerald-400 bg-emerald-100' : 'border-emerald-300 hover:border-emerald-500 hover:bg-emerald-100'}`}>
+            <svg className="w-8 h-8 text-emerald-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+            <div>
+              <p className="text-sm font-medium text-gray-800">{pdfFile ? pdfFile.name : 'Click to select PDF textbook'}</p>
+              <p className="text-xs text-gray-500 mt-0.5">PDF only · text-based (not scanned image) · max 50 MB</p>
+            </div>
+            <input ref={pdfInputRef} type="file" accept=".pdf" className="hidden"
+              onChange={(e: ChangeEvent<HTMLInputElement>) => { setPdfFile(e.target.files?.[0] ?? null); setPdfMsg('') }} />
+          </label>
+
+          {pdfUploading && (
+            <div className="h-1.5 bg-emerald-100 rounded-full mb-3 overflow-hidden">
+              <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${pdfProgress}%` }} />
+            </div>
+          )}
+
+          {pdfMsg && (
+            <p className={`text-sm mb-3 px-3 py-2 rounded-lg ${pdfMsg.startsWith('Error') ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
+              {pdfMsg}
+            </p>
+          )}
+
+          <div className="flex items-center gap-2">
+            <button onClick={loadFromPDF} disabled={!pdfFile || pdfUploading}
+              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold px-5 py-2 rounded-xl text-sm transition-colors">
+              {pdfUploading ? `Analysing PDF… ${pdfProgress}%` : 'Upload & Generate Syllabus'}
+            </button>
+            <p className="text-xs text-emerald-600">AI will extract chapters and topics — you review, then publish</p>
+          </div>
+        </div>
+      )}
+
+      {hasDraft && (
+        <div className="mb-4 bg-orange-50 border border-orange-300 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-orange-800">Draft syllabus — not visible to teachers yet</p>
+            <p className="text-xs text-orange-600 mt-0.5">Review the topics below, then publish to make them visible.</p>
+          </div>
+          <button
+            onClick={publishSyllabus}
+            disabled={publishing}
+            className="flex-shrink-0 px-5 py-2 bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50">
+            {publishing ? 'Publishing…' : 'Publish Syllabus'}
+          </button>
         </div>
       )}
 
@@ -339,6 +589,53 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
         </div>
       )}
 
+      {/* AI Homework Suggestion */}
+      <div ref={suggestionRef}>
+        {suggestLoading && (
+          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 flex items-center gap-3">
+            <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <p className="text-sm text-amber-700">Generating AI homework suggestion...</p>
+          </div>
+        )}
+        {suggestError && !suggestLoading && (
+          <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-5 py-3 flex items-center justify-between">
+            <p className="text-sm text-red-600">AI suggestion failed. Add homework manually from the Homework tab.</p>
+            <button onClick={() => setSuggestError(false)} className="text-red-400 hover:text-red-600 text-lg leading-none ml-4">✕</button>
+          </div>
+        )}
+        {suggestion && !suggestLoading && (
+          <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">AI Homework Suggestion</p>
+                <p className="font-semibold text-gray-900 text-sm">{suggestion.title}</p>
+                <p className="text-xs text-gray-600 mt-1 leading-relaxed">{suggestion.instructions}</p>
+                <div className="flex gap-3 mt-2">
+                  <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">{suggestion.estimated_time_minutes} min</span>
+                  <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">{suggestion.max_marks} marks</span>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 flex-shrink-0">
+                <button onClick={assignHomework} disabled={assigning}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-sm font-semibold disabled:opacity-50">
+                  {assigning ? 'Assigning...' : 'Assign to All'}
+                </button>
+                <button onClick={() => setSuggestion(null)}
+                  className="px-4 py-2 border border-gray-200 text-gray-400 rounded-xl text-sm hover:bg-gray-50">
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        {assignedMsg && (
+          <div className="mb-4 bg-emerald-50 border border-emerald-200 rounded-xl px-5 py-3 flex items-center justify-between">
+            <p className="text-sm text-emerald-700 font-medium">{assignedMsg}</p>
+            <button onClick={() => setAssignedMsg('')} className="text-emerald-400 hover:text-emerald-600 text-lg leading-none">✕</button>
+          </div>
+        )}
+      </div>
+
       {/* Add chapter form */}
       {showAddChapter && (
         <div className="mb-5 bg-blue-50 border border-blue-200 rounded-xl p-4">
@@ -372,14 +669,23 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
           <p className="text-gray-400 text-sm">Loading syllabus...</p>
         </div>
       ) : visibleChapters.length === 0 ? (
-        <div className="bg-white rounded-xl border border-dashed border-gray-300 py-14 text-center">
+        <div className="bg-white rounded-xl border border-dashed border-gray-300 py-14 text-center px-6">
           <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center mx-auto mb-3">
             <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
             </svg>
           </div>
           <p className="text-gray-500 font-medium mb-1">No syllabus yet for this class</p>
-          <p className="text-gray-400 text-sm">Click <strong>Add Chapter</strong> to start building the {selectedSubject} syllabus</p>
+          <div className="space-y-2 mt-3">
+            <button onClick={() => { setLoadPdfOpen(true); setPdfMsg('') }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-semibold transition-colors">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              Load Syllabus from PDF
+            </button>
+            <p className="text-gray-400 text-xs">or click <strong>Add Chapter</strong> to build manually</p>
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
@@ -388,13 +694,16 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
             const isExpanded = expandedChapter === ch.chapter_name
             const pct = ch.total > 0 ? Math.round(100 * ch.covered / ch.total) : 0
 
+            const chapterHasDraft = !isStaged && 'topics' in ch && ch.topics.some((t: Topic) => !t.published)
+
             return (
-              <div key={ch.chapter_name} className={`bg-white rounded-xl border overflow-hidden ${isStaged ? 'border-blue-300 ring-1 ring-blue-200' : 'border-gray-200'}`}>
+              <div key={ch.chapter_name} className={`bg-white rounded-xl border overflow-hidden ${isStaged ? 'border-blue-300 ring-1 ring-blue-200' : chapterHasDraft ? 'border-orange-200' : 'border-gray-200'}`}>
                 {/* Chapter header */}
+                <div className="flex items-center">
                 <button
                   onClick={() => setExpandedChapter(isExpanded ? null : ch.chapter_name)}
-                  className="w-full px-5 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors text-left">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0 ${isStaged ? 'bg-blue-200 text-blue-800' : 'bg-blue-100 text-blue-700'}`}>
+                  className="flex-1 px-5 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors text-left min-w-0">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0 ${isStaged ? 'bg-blue-200 text-blue-800' : chapterHasDraft ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
                     {chIdx + 1}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -404,6 +713,9 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
                         <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">
                           Add topics to save
                         </span>
+                      )}
+                      {chapterHasDraft && (
+                        <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-medium">DRAFT</span>
                       )}
                       {'behind' in ch && ch.behind > 0 && (
                         <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-medium">
@@ -426,6 +738,15 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
+                {!isStaged && (
+                  <button onClick={() => deleteChapter(ch.chapter_name)} title="Delete chapter"
+                    className="px-3 py-4 text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors flex-shrink-0">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                )}
+                </div>
 
                 {/* Topics */}
                 {isExpanded && (
@@ -443,10 +764,7 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
                           <div className="flex items-start gap-3">
                             {/* Cover toggle */}
                             <button
-                              onClick={() => patchTopic(topic.id, {
-                                status: topic.status === 'covered' ? 'pending' : 'covered',
-                                covered_by: teacher.id,
-                              })}
+                              onClick={() => coverTopic(topic, ch.chapter_name)}
                               disabled={isSaving}
                               title={topic.status === 'covered' ? 'Mark as pending' : 'Mark as covered'}
                               className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${

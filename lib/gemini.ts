@@ -83,12 +83,16 @@ async function callAIChat(
 export async function generateDoubtAnswer(
   subject: string,
   question: string,
-  grade: string
+  grade: string,
+  textbookContext?: string
 ): Promise<string> {
+  const tbSection = textbookContext
+    ? `\n\nRelevant textbook content:\n${textbookContext}\n\nUse this to give a curriculum-aligned answer.`
+    : ''
   return callAI(
-    `You are a helpful school teacher. Give clear, simple answers suitable for Grade ${grade} students. Keep answers under 120 words. Plain text only, no markdown.`,
+    `You are a helpful school teacher. Give clear, simple answers suitable for Grade ${grade} students. Keep answers under 150 words. Plain text only, no markdown.${tbSection}`,
     `A Grade ${grade} student asked this ${subject} question: "${question}"`,
-    300
+    350
   )
 }
 
@@ -484,4 +488,106 @@ Rules:
 
   const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
   return JSON.parse(cleaned) as MCQQuestion[]
+}
+
+// ─── Homework suggestion ──────────────────────────────────────────────────────
+
+export type HomeworkSuggestion = {
+  title: string
+  instructions: string
+  task_type: 'homework'
+  max_marks: number
+  estimated_time_minutes: number
+}
+
+export async function suggestHomework(
+  subject: string,
+  chapterName: string,
+  topicName: string,
+  grade: string,
+  textbookContext?: string
+): Promise<HomeworkSuggestion> {
+  const tbSection = textbookContext
+    ? `\n\nRelevant passage from the student's textbook:\n${textbookContext}\n\nUse this content to create homework that references specific examples, definitions, or exercises from the textbook. If there are exercise numbers (e.g. Exercise 1.1 Q3), mention them in the instructions.`
+    : ''
+
+  const raw = await callAI(
+    `You are an experienced school teacher creating homework assignments for Indian school students. Always respond with valid JSON only, no markdown.${tbSection}`,
+    `Create a homework assignment for:
+- Grade: ${grade}
+- Subject: ${subject}
+- Chapter: ${chapterName}
+- Topic just covered in class: ${topicName}
+
+Return JSON with exactly these fields:
+{
+  "title": "Short homework title (max 60 chars)",
+  "instructions": "Clear homework instructions (2-4 sentences, practical and specific to this topic${textbookContext ? ', referencing the textbook content where relevant' : ''})",
+  "task_type": "homework",
+  "max_marks": 10,
+  "estimated_time_minutes": 20
+}
+
+Rules:
+- Instructions should be practical and directly reinforce today's topic
+- Appropriate difficulty for Grade ${grade}
+- max_marks between 5 and 20 based on complexity
+- estimated_time_minutes between 15 and 45
+${textbookContext ? '- Reference specific textbook content (examples, exercises, definitions) in the instructions' : ''}`,
+    600,
+    true
+  )
+
+  const c = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
+  return { ...JSON.parse(c), task_type: 'homework' } as HomeworkSuggestion
+}
+
+// ─── PDF Syllabus Extractor ───────────────────────────────────────────────────
+
+export interface SyllabusChapter {
+  name: string
+  order: number
+  topics: { name: string; order: number }[]
+}
+
+export async function extractSyllabusFromPDF(
+  pdfText: string,
+  subject: string,
+  grade: string
+): Promise<SyllabusChapter[]> {
+  // Trim to fit in context while keeping enough to identify all chapters
+  const text = pdfText.slice(0, 40000)
+
+  const raw = await callAI(
+    'You are an expert curriculum analyst. Extract the complete chapter and topic structure from the given textbook content. Always respond with valid JSON only, no markdown, no code fences.',
+    `Extract the full syllabus structure from this Grade ${grade} ${subject} textbook content.
+
+Textbook content:
+${text}
+
+Return a JSON array of chapters:
+[
+  {
+    "name": "Chapter name exactly as in textbook",
+    "order": 1,
+    "topics": [
+      { "name": "Topic or section name", "order": 1 },
+      { "name": "Topic or section name", "order": 2 }
+    ]
+  }
+]
+
+Rules:
+- Extract real chapter names and topics as they appear in the textbook
+- Each chapter should have 3-12 topics (key concepts, sections, or subtopics)
+- Topics should be specific enough to track teaching progress
+- Order chapters and topics as they appear in the book
+- Return all chapters found — do not truncate
+- If exact chapters cannot be identified, group related topics logically into chapters`,
+    3000,
+    true
+  )
+
+  const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
+  return JSON.parse(cleaned) as SyllabusChapter[]
 }

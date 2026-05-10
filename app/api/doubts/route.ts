@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { generateDoubtAnswer } from '@/lib/gemini'
+import { getTextbookContext } from '@/lib/textbook-search'
 
 // AUTH DISABLED FOR TESTING — will be re-enabled when all features are complete
 
@@ -123,7 +124,8 @@ export async function POST(req: NextRequest) {
       'SELECT grade FROM classes WHERE id = $1', [class_id]
     )
     const grade = cls?.grade ?? '8'
-    generateDoubtAnswer(subject.trim(), question.trim(), grade)
+    getTextbookContext(Number(school_id), grade, question.trim(), subject.trim(), 2)
+      .then(tbCtx => generateDoubtAnswer(subject.trim(), question.trim(), grade, tbCtx || undefined))
       .then(async (aiAnswer) => {
         if (aiAnswer) {
           await pool.query(

@@ -410,12 +410,16 @@ export default function CurriculumManagement({ schoolId }: Props) {
           {/* Extra subjects panel */}
           {extraPanel && (
             <div className="bg-white rounded-xl border border-violet-200 overflow-hidden">
-              <div className="px-5 py-4 border-b border-violet-100 flex items-center justify-between bg-violet-50">
-                <div>
-                  <h3 className="font-semibold text-gray-800">Grade {extraPanel.grade} — Class Subjects</h3>
-                  <p className="text-xs text-gray-500 mt-0.5">Add extra subjects per class beyond the curriculum. Timetable auto-updates.</p>
+              <div className="px-5 py-4 border-b border-violet-100 bg-violet-50">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold text-gray-800">Grade {extraPanel.grade} — Class Subjects</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Add extra subjects per class beyond the curriculum. Timetable auto-updates.</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setExtraPanel(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+                  </div>
                 </div>
-                <button onClick={() => setExtraPanel(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
               </div>
 
               {extraPanel.classes.length === 0 ? (
@@ -428,11 +432,13 @@ export default function CurriculumManagement({ schoolId }: Props) {
                     <div key={cls.id} className="p-5">
                       <div className="flex items-center justify-between mb-3">
                         <p className="font-semibold text-gray-800 text-sm">Section {cls.section}</p>
-                        <button
-                          onClick={() => { setAddingExtraFor(addingExtraFor === cls.id ? null : cls.id); setExtraForm({ subject_name: '', teacher_id: '' }) }}
-                          className="text-xs bg-violet-600 hover:bg-violet-700 text-white px-3 py-1 rounded-lg transition-colors">
-                          + Add Subject
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => { setAddingExtraFor(addingExtraFor === cls.id ? null : cls.id); setExtraForm({ subject_name: '', teacher_id: '' }) }}
+                            className="text-xs bg-violet-600 hover:bg-violet-700 text-white px-3 py-1 rounded-lg transition-colors">
+                            + Add Subject
+                          </button>
+                        </div>
                       </div>
 
                       {/* Subjects list */}

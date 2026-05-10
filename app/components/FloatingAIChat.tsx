@@ -53,6 +53,27 @@ export default function FloatingAIChat({
   const isStudent = mode === 'student'
   const displayName = isStudent ? (studentName?.split(' ')[0] || 'there') : (teacherName?.split(' ')[0] || 'there')
 
+  function renderMessage(text: string) {
+    const urlRegex = /(https?:\/\/[^\s]+)/g
+    const parts = text.split(urlRegex)
+    return parts.map((part, i) => {
+      if (urlRegex.test(part)) {
+        urlRegex.lastIndex = 0
+        const isYT = part.includes('youtube.com') || part.includes('youtu.be')
+        return (
+          <a key={i} href={part} target="_blank" rel="noopener noreferrer"
+            className={`inline-flex items-center gap-1 underline font-medium break-all ${
+              isYT ? 'text-red-600 hover:text-red-800' : 'text-blue-600 hover:text-blue-800'
+            }`}>
+            {isYT && <span className="text-[10px] bg-red-100 text-red-700 px-1 py-0.5 rounded font-bold flex-shrink-0">▶ YT</span>}
+            {part.replace('https://www.youtube.com/results?search_query=', 'YouTube: ').replace(/\+/g, ' ')}
+          </a>
+        )
+      }
+      return <span key={i}>{part}</span>
+    })
+  }
+
   // Fetch syllabus summary once for student context
   useEffect(() => {
     if (!isStudent || !schoolId || !classId) return
@@ -101,6 +122,7 @@ export default function FloatingAIChat({
           grade: grade || undefined,
           name: isStudent ? studentName : teacherName,
           syllabusContext: syllabusContext || undefined,
+          school_id: schoolId || undefined,
         }),
       })
       const data = await res.json()
@@ -205,7 +227,7 @@ export default function FloatingAIChat({
                 <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${
                     m.role === 'user' ? `${bubbleUser} rounded-br-sm` : `${bubbleAI} rounded-bl-sm`
-                  }`}>{m.content}</div>
+                  }`}>{renderMessage(m.content)}</div>
                 </div>
               ))}
               {thinking && (
@@ -333,7 +355,7 @@ export default function FloatingAIChat({
                     ? 'bg-gradient-to-br from-violet-600 to-purple-700 text-white rounded-br-sm'
                     : 'bg-white text-gray-800 border border-violet-100 rounded-bl-sm'
                 }`}>
-                  {m.content}
+                  {renderMessage(m.content)}
                 </div>
                 {m.role === 'user' && (
                   <div className="w-8 h-8 rounded-xl bg-violet-100 flex items-center justify-center flex-shrink-0 mt-0.5">

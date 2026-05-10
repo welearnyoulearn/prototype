@@ -46,6 +46,87 @@ export async function initDB() {
     )
   `)
 
+  // Always-run incremental migrations — idempotent columns added after the bootstrap
+  // sentinel was set. These run on every cold start (fast: IF NOT EXISTS guard).
+  await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS board VARCHAR(20)`)
+
+  // ── Two-tier rewards: points_type splits academic vs marketplace ──────────────
+  await pool.query(`ALTER TABLE student_points ADD COLUMN IF NOT EXISTS points_type VARCHAR(20) DEFAULT 'academic'`)
+
+  // ── Marketplace tables ────────────────────────────────────────────────────────
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS marketplace_items (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100) UNIQUE NOT NULL,
+      description TEXT,
+      emoji VARCHAR(10) DEFAULT '🎁',
+      cost_points INTEGER NOT NULL,
+      active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS marketplace_orders (
+      id SERIAL PRIMARY KEY,
+      student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL,
+      item_id INTEGER REFERENCES marketplace_items(id),
+      item_name VARCHAR(100),
+      item_emoji VARCHAR(10),
+      points_spent INTEGER NOT NULL,
+      status VARCHAR(20) DEFAULT 'pending',
+      student_name VARCHAR(255),
+      grade VARCHAR(20),
+      section VARCHAR(10),
+      ordered_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  // Seed default marketplace items
+  await pool.query(`
+    INSERT INTO marketplace_items (name, description, emoji, cost_points) VALUES
+      ('Eraser',       'Good quality rubber eraser',            '🔲', 100),
+      ('Pen',          'Ball point pen',                        '🖊️', 200),
+      ('Notebook',     'A4 ruled notebook (100 pages)',         '📔', 500),
+      ('Pencil Box',   'Coloured pencils set with box',         '🎨', 750),
+      ('Geometry Box', 'Complete geometry instruments set',     '📐', 1000)
+    ON CONFLICT (name) DO NOTHING
+  `)
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hub_daily_content (
+      id SERIAL PRIMARY KEY,
+      content_date DATE UNIQUE NOT NULL,
+      gk_questions JSONB,
+      word_of_day JSONB,
+      riddle JSONB,
+      fact_myth_questions JSONB,
+      debate_statement JSONB,
+      challenge_problem JSONB,
+      generated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS riddle JSONB`)
+  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS fact_myth_questions JSONB`)
+  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS debate_statement JSONB`)
+  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS challenge_problem JSONB`)
+  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS reading_passage JSONB`)
+  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS writing_prompt JSONB`)
+  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS speaking_sentences JSONB`)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS student_hub_completions (
+      id SERIAL PRIMARY KEY,
+      student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL,
+      activity_type VARCHAR(50) NOT NULL,
+      completed_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      score INTEGER DEFAULT 0,
+      points_earned INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(student_id, activity_type, completed_date)
+    )
+  `)
+
   const bootstrap = await pool.query(
     `SELECT 1 FROM app_bootstrap_state WHERE key = $1 LIMIT 1`,
     [BOOTSTRAP_MARKER_KEY]
@@ -1023,6 +1104,44 @@ export async function initDB() {
     // ── Soft-delete for classes ───────────────────────────────────────────────
     `ALTER TABLE classes ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
     `CREATE INDEX IF NOT EXISTS idx_classes_deleted ON classes(deleted_at) WHERE deleted_at IS NOT NULL`,
+
+    // ── Syllabus publish workflow: HODs load → review → publish ───────────────
+    // Default TRUE so existing topics stay visible. Board-load sets FALSE (draft).
+    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT TRUE`,
+    `CREATE INDEX IF NOT EXISTS idx_syllabus_published ON syllabus_topics(class_id, subject, published)`,
+
+    // ── Textbook Library: store extracted PDF text for AI context ─────────────
+    // One row per uploaded PDF, keyed by school + grade + subject.
+    `CREATE TABLE IF NOT EXISTS textbook_library (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      grade VARCHAR(10) NOT NULL,
+      subject VARCHAR(100) NOT NULL,
+      book_title VARCHAR(255),
+      file_name VARCHAR(255) NOT NULL,
+      file_path VARCHAR(500),
+      total_chunks INTEGER DEFAULT 0,
+      total_chars INTEGER DEFAULT 0,
+      uploaded_by_name VARCHAR(100),
+      uploaded_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, grade, subject, file_name)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_textbook_library_school ON textbook_library(school_id, grade, subject)`,
+
+    // Chunks: extracted text split into ~1500-char pieces; full-text search via GIN
+    `CREATE TABLE IF NOT EXISTS textbook_chunks (
+      id SERIAL PRIMARY KEY,
+      textbook_id INTEGER NOT NULL REFERENCES textbook_library(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL,
+      grade VARCHAR(10) NOT NULL,
+      subject VARCHAR(100) NOT NULL,
+      chunk_index INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      page_hint INTEGER
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_textbook_chunks_book ON textbook_chunks(textbook_id, chunk_index)`,
+    `CREATE INDEX IF NOT EXISTS idx_textbook_chunks_school ON textbook_chunks(school_id, grade, subject)`,
+    `CREATE INDEX IF NOT EXISTS idx_textbook_chunks_fts ON textbook_chunks USING GIN (to_tsvector('english', content))`,
   ]
 
   for (const sql of migrations) {

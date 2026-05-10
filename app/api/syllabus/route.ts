@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 
-// GET /api/syllabus?school_id=&class_id=&subject=
+// GET /api/syllabus?school_id=&class_id=&subject=&hod=1
 // Returns syllabus topics grouped by subject > chapter > topics with coverage stats.
+// Pass hod=1 to include unpublished (draft) topics — HOD review mode.
 export async function GET(req: NextRequest) {
 
   const school_id = req.nextUrl.searchParams.get('school_id')
   const class_id = req.nextUrl.searchParams.get('class_id')
   const subject = req.nextUrl.searchParams.get('subject')
+  const isHod = req.nextUrl.searchParams.get('hod') === '1'
 
   if (!school_id || !class_id) {
     return NextResponse.json({ error: 'school_id and class_id required' }, { status: 400 })
@@ -23,6 +25,7 @@ export async function GET(req: NextRequest) {
       LEFT JOIN teachers ht ON ht.id = st.hod_remark_by
       WHERE st.school_id = $1 AND st.class_id = $2
     `
+    if (!isHod) query += ` AND st.published = TRUE`
     const args: (string | number)[] = [school_id, class_id]
 
     if (subject) {
@@ -81,6 +84,27 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error('Syllabus GET error:', err)
     return NextResponse.json({ error: 'Failed to fetch syllabus' }, { status: 500 })
+  }
+}
+
+// DELETE /api/syllabus?school_id=&class_id=&subject=&chapter_name= — delete all topics in a chapter
+export async function DELETE(req: NextRequest) {
+  const sp = req.nextUrl.searchParams
+  const school_id = sp.get('school_id')
+  const class_id  = sp.get('class_id')
+  const subject   = sp.get('subject')
+  const chapter   = sp.get('chapter_name')
+  if (!school_id || !class_id || !subject || !chapter)
+    return NextResponse.json({ error: 'school_id, class_id, subject, chapter_name required' }, { status: 400 })
+  try {
+    await pool.query(
+      `DELETE FROM syllabus_topics WHERE school_id=$1 AND class_id=$2 AND subject=$3 AND chapter_name=$4`,
+      [school_id, class_id, subject, chapter]
+    )
+    return NextResponse.json({ ok: true })
+  } catch (err) {
+    console.error('Syllabus DELETE chapter error:', err)
+    return NextResponse.json({ error: 'Failed to delete chapter' }, { status: 500 })
   }
 }
 
