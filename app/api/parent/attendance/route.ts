@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { getAnySession } from '@/lib/auth'
 
 // GET /api/parent/attendance?school_id=X&student_id=Y&months=3
 export async function GET(req: NextRequest) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const p = req.nextUrl.searchParams
   const school_id  = p.get('school_id')
   const student_id = p.get('student_id')

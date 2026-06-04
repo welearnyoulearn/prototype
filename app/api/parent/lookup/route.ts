@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 
+// No auth required — this IS the login endpoint (parent looks up account before logging in)
 export async function POST(req: NextRequest) {
 
   const body = await req.json()

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getAnySession } from '@/lib/auth'
 import pool, { ensureDB } from '@/lib/db'
 
 // GET /api/exams/[id]/marks?school_id=
@@ -7,6 +8,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: exam_id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')

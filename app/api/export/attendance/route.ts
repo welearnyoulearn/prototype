@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { requireSchoolAdmin } from '@/lib/auth'
 
 // GET /api/export/attendance?school_id=&class_id=&from=YYYY-MM-DD&to=YYYY-MM-DD
 // Returns CSV: Date, Student Name, Roll No, Grade, Section, Morning, Afternoon
 export async function GET(req: NextRequest) {
+  if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
   const school_id = searchParams.get('school_id')

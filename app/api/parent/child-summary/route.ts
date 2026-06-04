@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { getAnySession } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
   const school_id = searchParams.get('school_id')
@@ -19,7 +21,6 @@ export async function GET(req: NextRequest) {
   let upcoming_exams: unknown[] = []
   let published_results: unknown[] = []
   let unacknowledged_count = 0
-  let recent_tasks: unknown[] = []
   let attendance_pct: number | null = null
 
   try {
@@ -110,24 +111,6 @@ export async function GET(req: NextRequest) {
     }
 
     try {
-      const { rows } = await pool.query(`
-        SELECT
-          t.title,
-          TO_CHAR(t.due_date, 'YYYY-MM-DD') AS due_date,
-          t.task_type,
-          (ts.id IS NOT NULL AND ts.status != 'pending') AS submitted
-        FROM tasks t
-        LEFT JOIN task_submissions ts ON ts.task_id = t.id AND ts.student_id = $1
-        WHERE t.class_id = $2 AND t.school_id = $3 AND t.status = 'published'
-        ORDER BY t.created_at DESC
-        LIMIT 5
-      `, [sid, cid, scid])
-      recent_tasks = rows
-    } catch (_) {
-      recent_tasks = []
-    }
-
-    try {
       const now = new Date()
       const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
       const { rows } = await pool.query(`
@@ -151,7 +134,6 @@ export async function GET(req: NextRequest) {
       upcoming_exams,
       published_results,
       unacknowledged_count,
-      recent_tasks,
       attendance_pct,
     })
   } catch (err) {

@@ -387,55 +387,6 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
               </div>
             )}
 
-            {/* AI Draft Banner */}
-            <div className="bg-gradient-to-r from-violet-50 to-purple-50 border border-violet-200 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">✨</span>
-                  <span className="text-sm font-semibold text-violet-800">Draft with AI</span>
-                  <span className="text-[10px] bg-violet-100 text-violet-600 px-2 py-0.5 rounded-full font-medium">Gemini</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => { setShowAIDraft(v => !v); setAiDraftError('') }}
-                  className="text-xs text-violet-600 hover:text-violet-800 font-semibold"
-                >
-                  {showAIDraft ? 'Cancel' : 'Use AI →'}
-                </button>
-              </div>
-              {!showAIDraft && (
-                <p className="text-xs text-violet-600">Describe your announcement topic and let AI write the title and content for you.</p>
-              )}
-              {showAIDraft && (
-                <div className="space-y-2 mt-1">
-                  <input
-                    type="text"
-                    value={aiTopic}
-                    onChange={e => setAiTopic(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); draftWithAI() } }}
-                    placeholder="e.g. School closed on Friday for sports day"
-                    className="w-full border border-violet-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white"
-                    autoFocus
-                  />
-                  {aiDraftError && <p className="text-xs text-red-600">{aiDraftError}</p>}
-                  <button
-                    type="button"
-                    onClick={draftWithAI}
-                    disabled={aiDrafting || !aiTopic.trim()}
-                    className="w-full py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40 text-white text-sm font-semibold rounded-lg flex items-center justify-center gap-2 transition-colors"
-                  >
-                    {aiDrafting ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                        Generating…
-                      </>
-                    ) : (
-                      <>✨ Generate Draft</>
-                    )}
-                  </button>
-                </div>
-              )}
-            </div>
 
             <div>
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Title *</label>

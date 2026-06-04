@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { notifyTimetableChange } from '@/lib/notifyTimetable'
 import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
+import { getAnySession } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   await ensureDB()
 
   const { searchParams } = new URL(req.url)

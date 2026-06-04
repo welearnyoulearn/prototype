@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import QRCode from 'qrcode'
 import pool from '@/lib/db'
+import { getAnySession } from '@/lib/auth'
 
 // GET /api/fees/upi-qr?amount=1000&school_id=X — returns PNG QR code for school's UPI ID
 export async function GET(req: NextRequest) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const p = req.nextUrl.searchParams
   const amount    = p.get('amount') || '0'
   const school_id = p.get('school_id')

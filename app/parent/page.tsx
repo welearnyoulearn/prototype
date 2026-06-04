@@ -3,9 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import StudentSyllabus from '../student/components/StudentSyllabus'
 import { TRANSLATIONS, type Lang } from './translations'
-import ParentMarketplace from './components/ParentMarketplace'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Child = { id: number; name: string; grade: string; section: string; roll_number: string; school_id: number }
@@ -146,39 +144,6 @@ export default function ParentDashboard() {
   const [payTimerSecs, setPayTimerSecs] = useState(0)
   const payTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const [activity, setActivity] = useState<Activity[]>([])
-  const [actSummary, setActSummary] = useState<ActivitySummary | null>(null)
-  const [actLoading, setActLoading] = useState(false)
-  const [actDays, setActDays] = useState(7)
-
-  type WeeklyTestHistory = { id: number; week_start: string; status: string; score: number | null; max_score: number | null; submitted_at: string | null }
-  const [weeklyTests, setWeeklyTests] = useState<WeeklyTestHistory[]>([])
-  const [weeklyTestsLoading, setWeeklyTestsLoading] = useState(false)
-
-  type AIChatSession = { id: number; subject: string | null; messages: { role: string; content: string }[]; created_at: string }
-  const [aiChatSessions, setAiChatSessions] = useState<AIChatSession[]>([])
-  const [aiChatsLoading, setAiChatsLoading] = useState(false)
-  const [aiChatExpanded, setAiChatExpanded] = useState<number | null>(null)
-
-  const loadWeeklyTests = useCallback(async (s: Student) => {
-    setWeeklyTestsLoading(true)
-    try {
-      const r = await fetch(`/api/weekly-test/history?student_id=${s.id}&school_id=${s.school_id}&limit=10`)
-      const d = await r.json()
-      setWeeklyTests(d.tests || [])
-    } catch { setWeeklyTests([]) }
-    setWeeklyTestsLoading(false)
-  }, [])
-
-  const loadAiChats = useCallback(async (s: Student) => {
-    setAiChatsLoading(true)
-    try {
-      const r = await fetch(`/api/ai/chat-sessions?school_id=${s.school_id}&student_id=${s.id}&limit=20`)
-      const d = await r.json()
-      setAiChatSessions(d.sessions || [])
-    } catch { setAiChatSessions([]) }
-    setAiChatsLoading(false)
-  }, [])
 
   const [ackingId, setAckingId] = useState<number | null>(null)
   const [ackName, setAckName]   = useState('')
@@ -256,16 +221,6 @@ export default function ParentDashboard() {
     setFeeLoading(false)
   }, [])
 
-  const loadActivity = useCallback(async (s: Student, days = 7) => {
-    setActLoading(true)
-    try {
-      const r = await fetch(`/api/parent/activity?school_id=${s.school_id}&student_id=${s.id}&days=${days}`)
-      const d = await r.json()
-      setActivity(d.activity || [])
-      setActSummary(d.summary || null)
-    } catch { setActivity([]) }
-    setActLoading(false)
-  }, [])
 
   // Load section data on first visit
   useEffect(() => {
@@ -294,11 +249,9 @@ export default function ParentDashboard() {
     setShowChildPicker(false)
     setSummary(null); setFeeLedger([]); setFeePayments([]); setFeeWaivers([]); setFeeSummary(null)
     setTimetable([]); setAttDays([]); setAttMonthly([]); setAttSummary(null)
-    setActivity([]); setActSummary(null); setWeeklyTests([]); setAiChatSessions([])
     setActiveNav('overview'); setVisited(new Set(['overview']))
 
     await loadSummary(s)
-    loadWeeklyTests(s)
     Promise.all([
       fetch(`/api/academic-year/current?school_id=${child.school_id}`).then(r => r.ok ? r.json() : null),
       fetch(`/api/academic-years?school_id=${child.school_id}`).then(r => r.ok ? r.json() : []),
@@ -625,31 +578,6 @@ export default function ParentDashboard() {
               </button>
             </div>
 
-            {/* This week's test result — shown only after student submits */}
-            {weeklyTests.length > 0 && weeklyTests[0].status === 'submitted' && (() => {
-              const t = weeklyTests[0]
-              const pct = t.score !== null && t.max_score ? Math.round(t.score / t.max_score * 100) : null
-              if (pct === null) return null
-              const bg = pct >= 80 ? 'from-green-50 to-green-100 border-green-200' : pct >= 50 ? 'from-yellow-50 to-yellow-100 border-yellow-200' : 'from-red-50 to-red-100 border-red-200'
-              const col = pct >= 80 ? 'text-green-700' : pct >= 50 ? 'text-yellow-700' : 'text-red-700'
-              return (
-                <button onClick={() => navigateTo('weekly-tests')}
-                  className={`w-full text-left bg-gradient-to-r ${bg} border rounded-xl p-4 hover:shadow-sm transition-all`}>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-0.5">{T.thisWeeksTest}</p>
-                      <p className={`text-sm font-bold ${col}`}>
-                        {pct >= 80 ? T.excellent : pct >= 50 ? T.goodEffort : T.needsRevision}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className={`text-3xl font-black ${col}`}>{pct}%</p>
-                      <p className="text-xs text-gray-400">{t.score}/{t.max_score}</p>
-                    </div>
-                  </div>
-                </button>
-              )
-            })()}
 
             {/* Latest result */}
             {latestResult && (
@@ -803,16 +731,6 @@ export default function ParentDashboard() {
           </div>
           )}
 
-          {/* ── SYLLABUS ──────────────────────────────────────────────────── */}
-          {visited.has('syllabus') && (
-          <div hidden={activeNav !== 'syllabus'}>
-            <div className="max-w-2xl mb-5">
-              <h2 className="text-lg font-bold text-gray-900 mb-0.5">{T.syllabusProgress}</h2>
-              <p className="text-sm text-gray-400">{T.syllabusSubtitle}</p>
-            </div>
-            <StudentSyllabus schoolId={student.school_id} classId={student.class_id} />
-          </div>
-          )}
 
           {/* ── TODAY'S SCHEDULE ───────────────────────────────────────────── */}
           {visited.has('today') && (

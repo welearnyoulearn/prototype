@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getAnySession } from '@/lib/auth'
 import pool, { ensureDB } from '@/lib/db'
 
 // POST /api/exams/[id]/subjects
@@ -8,6 +9,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: exam_id } = await params
   const body = await req.json()

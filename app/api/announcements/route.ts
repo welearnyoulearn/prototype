@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { getAnySession } from '@/lib/auth'
 
 // GET /api/announcements?school_id=&audience=teachers|students|parents|all
 // Returns active announcements filtered by audience.
 // audience param: if provided, returns announcements targeted to 'all' OR that specific audience.
 export async function GET(req: NextRequest) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const school_id = req.nextUrl.searchParams.get('school_id')
   const audience  = req.nextUrl.searchParams.get('audience') // 'teachers' | 'students' | 'parents' | 'all' | null
 

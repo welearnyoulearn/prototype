@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { getAnySession } from '@/lib/auth'
 
 // GET /api/substitutes?school_id=X&leave_request_id=Y       → get all substitute assignments for a leave request
 // GET /api/substitutes?school_id=X&date=YYYY-MM-DD          → get substitutes active on a date (for visibility)
@@ -7,6 +8,7 @@ import pool, { ensureDB } from '@/lib/db'
 // GET /api/substitutes?school_id=X&substitute_teacher_id=Y  → get this teacher's substitute duties (optionally &date=)
 // GET /api/substitutes?school_id=X&day=Monday&period=N      → get free teachers for a day+period slot
 export async function GET(req: NextRequest) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = req.nextUrl
   const school_id = searchParams.get('school_id')

@@ -109,7 +109,11 @@
       "Bash(kill -9 20720 20904 27012)",
       "Bash(cmd /c \"for %p in \\(20720 20904 27012\\) do taskkill /PID %p /T /F\")",
       "Bash(cd \"d:/wlyl/prototype\" && rm -rf .next && npm run build 2>&1 | grep -A5 \"Failed to compile\\\\|Type error\\\\|error TS\" | head -50)",
-      "Bash(Remove-Item -Recurse -Force .next)"
+      "Bash(Remove-Item -Recurse -Force .next)",
+      "Bash(git -C \"D:/wlyl/prototype\" branch --show-current)",
+      "Bash(awk 'NR>=631 && NR<=710 {print NR\": \"$0}' app/school-admin/components/TimetableManagement.tsx)",
+      "Bash(python3 -c ' *)",
+      "Bash(python3)"
     ],
     "additionalDirectories": [
       "d:\\wlyl\\prototype\\app\\api\\fees\\ledger",

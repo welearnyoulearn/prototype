@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { requireSchoolAdmin } from '@/lib/auth'
 
 // GET /api/export/marks?school_id=&exam_id=
 // Returns CSV with per-student per-subject marks for the given exam.
 export async function GET(req: NextRequest) {
+  if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
   const school_id = searchParams.get('school_id')

@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { getAnySession } from '@/lib/auth'
 
 // GET /api/parent/timetable?school_id=X&class_id=Y
-// Returns today's timetable for the student's class
+// Returns today's timetable for the student's class (reads class_timetable directly)
 export async function GET(req: NextRequest) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const p = req.nextUrl.searchParams
   const school_id = p.get('school_id')
   const class_id  = p.get('class_id')
@@ -13,38 +16,26 @@ export async function GET(req: NextRequest) {
   const today = dayNames[new Date().getDay()]
 
   try {
-    // Get active timetable version
-    const { rows: [version] } = await pool.query(
-      `SELECT tv.id FROM timetable_versions tv
-       WHERE tv.school_id = $1 AND tv.is_active = TRUE
-       ORDER BY tv.created_at DESC LIMIT 1`,
-      [school_id]
-    )
-
-    if (!version) return NextResponse.json({ periods: [], day: today, message: 'No timetable configured' })
-
     const { rows: periods } = await pool.query(
       `SELECT ct.period_number, ct.day_of_week, ct.time_from, ct.time_to,
-              s.name AS subject_name, t.name AS teacher_name, t.department
+              ct.subject_name, t.name AS teacher_name, t.department,
+              ct.is_break, ct.break_label
        FROM class_timetable ct
-       LEFT JOIN subjects s ON s.id = ct.subject_id
        LEFT JOIN teachers t ON t.id = ct.teacher_id
        WHERE ct.school_id = $1 AND ct.class_id = $2
-         AND ct.version_id = $3 AND ct.day_of_week = $4
+         AND ct.day_of_week = $3 AND ct.template_id IS NULL
        ORDER BY ct.period_number`,
-      [school_id, class_id, version.id, today]
+      [school_id, class_id, today]
     )
 
-    // Also get full week for weekly view
     const { rows: weekPeriods } = await pool.query(
       `SELECT ct.period_number, ct.day_of_week, ct.time_from, ct.time_to,
-              s.name AS subject_name, t.name AS teacher_name
+              ct.subject_name, t.name AS teacher_name, ct.is_break, ct.break_label
        FROM class_timetable ct
-       LEFT JOIN subjects s ON s.id = ct.subject_id
        LEFT JOIN teachers t ON t.id = ct.teacher_id
-       WHERE ct.school_id = $1 AND ct.class_id = $2 AND ct.version_id = $3
+       WHERE ct.school_id = $1 AND ct.class_id = $2 AND ct.template_id IS NULL
        ORDER BY ct.day_of_week, ct.period_number`,
-      [school_id, class_id, version.id]
+      [school_id, class_id]
     )
 
     return NextResponse.json({ periods, week_periods: weekPeriods, day: today })
