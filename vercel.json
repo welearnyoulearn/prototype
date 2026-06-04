@@ -1,3 +1,9 @@
 {
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "crons": [
+    {
+      "path": "/api/cron/weekly-test",
+      "schedule": "30 1 * * 0"
+    }
+  ]
 }

@@ -5,8 +5,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { generateCoverageSuggestion } from '@/lib/gemini'
+import { getAnySession } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { school_id, leave_request_id } = await req.json()
   if (!school_id || !leave_request_id)
     return NextResponse.json({ error: 'school_id, leave_request_id required' }, { status: 400 })

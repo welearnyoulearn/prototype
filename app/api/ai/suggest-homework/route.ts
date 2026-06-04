@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { suggestHomework } from '@/lib/gemini'
 import { getTextbookContext } from '@/lib/textbook-search'
+import { getAnySession } from '@/lib/auth'
 
 // POST /api/ai/suggest-homework
 // Body: { subject, chapter_name, topic_name, grade, school_id? }
 // Returns: { title, instructions, task_type, max_marks, estimated_time_minutes }
 export async function POST(req: NextRequest) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const { subject, chapter_name, topic_name, grade, school_id } = await req.json()
 

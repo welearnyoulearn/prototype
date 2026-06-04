@@ -326,7 +326,6 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function SchoolAdmin() {
   const router = useRouter()
-  const [schools, setSchools] = useState<School[]>([])
   const [selectedSchool, setSelectedSchool] = useState<School | null>(null)
   const [tier, setTier] = useState<Tier>('none')
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
@@ -341,7 +340,6 @@ export default function SchoolAdmin() {
     if (key === 'staff') setStaffSubTab('directory')
     if (key === 'students') setStudentsSubTab('list')
   }
-  const [dropdownOpen, setDropdownOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [staffSubTab, setStaffSubTab] = useState<'directory' | 'onboard'>('directory')
@@ -357,12 +355,16 @@ export default function SchoolAdmin() {
   useEffect(() => {
     async function init() {
       try {
-        const res = await fetch('/api/schools')
-        const data: School[] = await res.json()
-        const active = data.filter(s => s.status === 'active')
-        setSchools(active)
-        if (active.length > 0) {
-          setSelectedSchool(active[0])
+        const meRes = await fetch('/api/auth/me')
+        if (meRes.status === 401) { router.push('/login?role=school'); return }
+        const me = await meRes.json()
+        const schoolRoles = ['school_admin', 'principal', 'vice_principal']
+        if (!schoolRoles.includes(me.role) || !me.school_id) { router.push('/login?role=school'); return }
+        const schoolRes = await fetch(`/api/schools/${me.school_id}`)
+        if (schoolRes.ok) {
+          setSelectedSchool(await schoolRes.json())
+        } else {
+          setSelectedSchool({ id: me.school_id, name: me.school_name, type: '', city: '', country: '', status: 'active' })
         }
       } catch {
         setError('Cannot connect to database. Make sure PostgreSQL is running.')
@@ -371,7 +373,7 @@ export default function SchoolAdmin() {
       }
     }
     init()
-  }, [])
+  }, [router])
 
   useEffect(() => {
     if (!selectedSchool) return
@@ -390,13 +392,6 @@ export default function SchoolAdmin() {
       })
       .catch(() => setTier('none'))
   }, [selectedSchool])
-
-  function switchSchool(school: School) {
-    setSelectedSchool(school)
-    setDropdownOpen(false)
-    setActiveNav('overview')
-    setVisited(new Set(['overview']))
-  }
 
   // Only show nav items that are enabled in platform feature config for this tier
   const enabledNavItems = NAV_ITEMS.filter(item =>
@@ -426,7 +421,7 @@ export default function SchoolAdmin() {
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-slate-50">
       {/* Top bar */}
-      <div className="bg-white border-b border-slate-200 px-3 sm:px-5 py-3 flex items-center justify-between flex-shrink-0 z-30 shadow-sm">
+      <div className="bg-white border-b border-slate-200 px-3 sm:px-5 py-3 flex items-center justify-between flex-shrink-0 z-50 relative shadow-sm">
         <div className="flex items-center gap-3">
           <button onClick={() => setSidebarOpen(o => !o)} className="lg:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
@@ -434,44 +429,12 @@ export default function SchoolAdmin() {
           <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm hidden sm:inline">← Home</Link>
           <span className="text-gray-200 hidden sm:inline">|</span>
 
-          {/* School switcher */}
-          {schools.length > 0 ? (
-            <div className="relative">
-              <button
-                onClick={() => setDropdownOpen(o => !o)}
-                className="flex items-center gap-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
-              >
-                <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
-                {selectedSchool?.name || 'Select School'}
-                <svg className={`w-4 h-4 transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-              {dropdownOpen && (
-                <div className="absolute left-0 top-full mt-1 w-64 bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
-                  <div className="px-3 py-2 border-b border-gray-100">
-                    <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">Switch School</p>
-                  </div>
-                  {schools.map(school => (
-                    <button
-                      key={school.id}
-                      onClick={() => switchSchool(school)}
-                      className={`w-full text-left px-4 py-3 text-sm hover:bg-gray-50 transition-colors flex items-center gap-3 ${
-                        selectedSchool?.id === school.id ? 'bg-blue-50 text-blue-700' : 'text-gray-700'
-                      }`}
-                    >
-                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${selectedSchool?.id === school.id ? 'bg-blue-500' : 'bg-gray-300'}`} />
-                      <div>
-                        <div className="font-medium">{school.name}</div>
-                        <div className="text-xs text-gray-400">{[school.city, school.country].filter(Boolean).join(', ') || school.type}</div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
+          {/* School name */}
+          {selectedSchool && (
+            <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-800 px-3 py-1.5 rounded-lg text-sm font-medium">
+              <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
+              {selectedSchool.name}
             </div>
-          ) : (
-            <span className="text-sm text-gray-400">No active schools</span>
           )}
         </div>
 
@@ -505,8 +468,6 @@ export default function SchoolAdmin() {
           </button>
         </div>
       </div>
-
-      {dropdownOpen && <div className="fixed inset-0 z-20" onClick={() => setDropdownOpen(false)} />}
 
       {error && (
         <div className="bg-red-50 border-b border-red-200 text-red-700 px-6 py-3 text-sm flex justify-between">

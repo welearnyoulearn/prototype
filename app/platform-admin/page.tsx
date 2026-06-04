@@ -76,6 +76,35 @@ export default function PlatformAdmin() {
   const [filterTier, setFilterTier]       = useState<string>('all')
   const [highlightId, setHighlightId]     = useState<number | null>(null)
   const [createdSchool, setCreatedSchool] = useState<{ id: number; name: string; code: string; pass: string } | null>(null)
+
+  // Admin team modal
+  const [showAdminModal, setShowAdminModal]         = useState(false)
+  const [adminList, setAdminList]                   = useState<{ id: number; full_name: string; email: string; status: string; created_at: string }[]>([])
+  const [adminForm, setAdminForm]                   = useState({ full_name: '', email: '' })
+  const [adminSubmitting, setAdminSubmitting]       = useState(false)
+  const [adminError, setAdminError]                 = useState('')
+
+  async function openAdminModal() {
+    setShowAdminModal(true); setAdminError('')
+    const res = await fetch('/api/platform/admins')
+    if (res.ok) setAdminList(await res.json())
+  }
+
+  async function handleAddAdmin(e: React.FormEvent) {
+    e.preventDefault()
+    if (!adminForm.full_name.trim() || !adminForm.email.trim()) { setAdminError('Name and email required'); return }
+    setAdminSubmitting(true); setAdminError('')
+    const res = await fetch('/api/platform/admins', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(adminForm),
+    })
+    const data = await res.json()
+    if (!res.ok) { setAdminError(data.error || 'Failed'); setAdminSubmitting(false); return }
+    setAdminList(prev => [...prev, data])
+    setAdminForm({ full_name: '', email: '' })
+    setAdminSubmitting(false)
+  }
+
   const [form, setForm] = useState<FormData>({
     name: '', type: 'Private', city: '', country: '', phone: '', email: '', address: '',
   })
@@ -232,6 +261,10 @@ export default function PlatformAdmin() {
           <h1 className="text-sm font-semibold text-gray-700">Platform Admin</h1>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={openAdminModal}
+            className="text-xs text-purple-600 hover:text-purple-800 border border-purple-200 bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg transition-colors font-medium">
+            👥 Admin Team
+          </button>
           <Link href="/platform-admin/features"
             className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors font-medium">
             Feature Plans
@@ -694,9 +727,57 @@ export default function PlatformAdmin() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Country <span className="text-red-500">*</span></label>
-                <input type="text" required value={form.country}
+                <select required value={form.country}
                   onChange={e => setForm(f => ({ ...f, country: e.target.value }))}
-                  placeholder="India" className={inputCls} />
+                  className={inputCls}>
+                  <option value="">— Select country —</option>
+                  <option value="India">India</option>
+                  <option disabled>──────────</option>
+                  <option value="Afghanistan">Afghanistan</option>
+                  <option value="Australia">Australia</option>
+                  <option value="Bangladesh">Bangladesh</option>
+                  <option value="Bhutan">Bhutan</option>
+                  <option value="Brazil">Brazil</option>
+                  <option value="Canada">Canada</option>
+                  <option value="China">China</option>
+                  <option value="Egypt">Egypt</option>
+                  <option value="Ethiopia">Ethiopia</option>
+                  <option value="France">France</option>
+                  <option value="Germany">Germany</option>
+                  <option value="Ghana">Ghana</option>
+                  <option value="Indonesia">Indonesia</option>
+                  <option value="Iran">Iran</option>
+                  <option value="Iraq">Iraq</option>
+                  <option value="Japan">Japan</option>
+                  <option value="Jordan">Jordan</option>
+                  <option value="Kenya">Kenya</option>
+                  <option value="Malaysia">Malaysia</option>
+                  <option value="Maldives">Maldives</option>
+                  <option value="Mexico">Mexico</option>
+                  <option value="Morocco">Morocco</option>
+                  <option value="Myanmar">Myanmar</option>
+                  <option value="Nepal">Nepal</option>
+                  <option value="Nigeria">Nigeria</option>
+                  <option value="Pakistan">Pakistan</option>
+                  <option value="Philippines">Philippines</option>
+                  <option value="Qatar">Qatar</option>
+                  <option value="Russia">Russia</option>
+                  <option value="Saudi Arabia">Saudi Arabia</option>
+                  <option value="Singapore">Singapore</option>
+                  <option value="South Africa">South Africa</option>
+                  <option value="South Korea">South Korea</option>
+                  <option value="Sri Lanka">Sri Lanka</option>
+                  <option value="Tanzania">Tanzania</option>
+                  <option value="Thailand">Thailand</option>
+                  <option value="Turkey">Turkey</option>
+                  <option value="Uganda">Uganda</option>
+                  <option value="Ukraine">Ukraine</option>
+                  <option value="United Arab Emirates">United Arab Emirates</option>
+                  <option value="United Kingdom">United Kingdom</option>
+                  <option value="United States">United States</option>
+                  <option value="Vietnam">Vietnam</option>
+                  <option value="Zimbabwe">Zimbabwe</option>
+                </select>
               </div>
 
               <div>
@@ -710,15 +791,15 @@ export default function PlatformAdmin() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number</label>
-                <input type="tel" value={form.phone}
+                <label className="block text-sm font-medium text-gray-700 mb-1">Phone Number <span className="text-red-500">*</span></label>
+                <input type="tel" required value={form.phone}
                   onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
                   placeholder="+91 98765 43210" className={inputCls} />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Full Address</label>
-                <textarea value={form.address}
+                <label className="block text-sm font-medium text-gray-700 mb-1">Full Address <span className="text-red-500">*</span></label>
+                <textarea required value={form.address}
                   onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
                   rows={2} placeholder="Street, Area, City, State, PIN"
                   className={`${inputCls} resize-none`} />
@@ -783,6 +864,71 @@ export default function PlatformAdmin() {
               >
                 Done — Go to school in list
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Admin Team Modal ───────────────────────────────────────────────── */}
+      {showAdminModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <div>
+                <h2 className="font-bold text-gray-900 text-lg">Platform Admin Team</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Credentials are sent to their email automatically</p>
+              </div>
+              <button onClick={() => setShowAdminModal(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+
+            {/* Existing admins list */}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {adminList.length === 0 ? (
+                <p className="text-sm text-gray-400 text-center py-4">No admins yet</p>
+              ) : (
+                <div className="space-y-2 mb-4">
+                  {adminList.map(a => (
+                    <div key={a.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                      <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center flex-shrink-0">
+                        <span className="text-purple-600 text-sm font-bold">{(a.full_name || a.email).charAt(0).toUpperCase()}</span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-gray-900 truncate">{a.full_name || '—'}</p>
+                        <p className="text-xs text-gray-400 truncate">{a.email}</p>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${a.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
+                        {a.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add admin form */}
+              <div className="border-t border-gray-100 pt-4">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Invite New Admin</p>
+                {adminError && (
+                  <div className="mb-3 bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm">{adminError}</div>
+                )}
+                <form onSubmit={handleAddAdmin} className="space-y-3">
+                  <input
+                    type="text" placeholder="Full name" value={adminForm.full_name}
+                    onChange={e => setAdminForm(f => ({ ...f, full_name: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    required
+                  />
+                  <input
+                    type="email" placeholder="Email address" value={adminForm.email}
+                    onChange={e => setAdminForm(f => ({ ...f, email: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    required
+                  />
+                  <button type="submit" disabled={adminSubmitting}
+                    className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">
+                    {adminSubmitting ? 'Sending invite…' : 'Send Invite Email'}
+                  </button>
+                </form>
+              </div>
             </div>
           </div>
         </div>

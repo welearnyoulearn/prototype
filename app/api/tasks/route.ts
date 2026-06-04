@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-
-// AUTH DISABLED FOR TESTING — will be re-enabled when all features are complete
+import { getAnySession } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
-
+  const session = await getAnySession()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = new URL(req.url)
   const school_id = searchParams.get('school_id')
@@ -66,7 +66,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-
+  const session = await getAnySession()
+  if (!session || session.role !== 'teacher') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
   const {

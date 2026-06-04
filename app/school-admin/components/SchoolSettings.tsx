@@ -16,6 +16,7 @@ type SchoolData = {
   school_code: string
   grading_scheme: GradeRow[]
   board?: string
+  upi_id?: string
 }
 
 const BOARDS = getBoardLabels()
@@ -37,8 +38,12 @@ type SubjectTemplate = {
   id: number; name: string; from_grade: number; to_grade: number; subjects: SubjectEntry[]
 }
 
+type StaffAccount = { id: number; full_name: string; email: string; role: string; status: string; first_login: boolean; created_at: string }
+const ROLE_LABELS: Record<string, string> = { school_admin: 'School Admin', principal: 'Principal', vice_principal: 'Vice Principal' }
+const ROLE_COLORS: Record<string, string> = { school_admin: 'bg-blue-100 text-blue-700', principal: 'bg-purple-100 text-purple-700', vice_principal: 'bg-indigo-100 text-indigo-700' }
+
 export default function SchoolSettings({ schoolId }: { schoolId: number }) {
-  const [tab, setTab]         = useState<'profile' | 'grading' | 'subjects'>('profile')
+  const [tab, setTab]         = useState<'profile' | 'grading' | 'subjects' | 'staff'>('profile')
   const [data, setData]       = useState<SchoolData | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
@@ -47,7 +52,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
   // Profile form
   const [profile, setProfile] = useState({
-    name: '', type: '', city: '', country: '', phone: '', email: '', address: '', logo_url: '', board: '',
+    name: '', type: '', city: '', country: '', phone: '', email: '', address: '', logo_url: '', board: '', upi_id: '',
   })
 
   // Grading scheme form
@@ -56,6 +61,47 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   // Subject templates
   const [templates, setTemplates]       = useState<SubjectTemplate[]>([])
   const [tmplLoading, setTmplLoading]   = useState(false)
+
+  // Staff accounts
+  const [staffList, setStaffList]       = useState<StaffAccount[]>([])
+  const [staffLoading, setStaffLoading] = useState(false)
+  const [staffForm, setStaffForm]       = useState({ full_name: '', email: '', role: 'principal' })
+  const [staffSaving, setStaffSaving]   = useState(false)
+  const [staffError, setStaffError]     = useState('')
+  const [staffSuccess, setStaffSuccess] = useState('')
+
+  async function loadStaff() {
+    setStaffLoading(true)
+    try {
+      const res = await fetch(`/api/school-admin/staff-accounts?school_id=${schoolId}`)
+      if (res.ok) setStaffList(await res.json())
+    } finally { setStaffLoading(false) }
+  }
+
+  async function handleAddStaff(e: React.FormEvent) {
+    e.preventDefault()
+    if (!staffForm.full_name.trim() || !staffForm.email.trim()) { setStaffError('Name and email are required'); return }
+    setStaffSaving(true); setStaffError(''); setStaffSuccess('')
+    const res = await fetch('/api/school-admin/staff-accounts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...staffForm, school_id: schoolId }),
+    })
+    const data = await res.json()
+    if (!res.ok) { setStaffError(data.error || 'Failed'); setStaffSaving(false); return }
+    setStaffList(prev => [...prev, data])
+    setStaffForm({ full_name: '', email: '', role: 'principal' })
+    setStaffSuccess(`✓ Account created — login credentials sent to ${data.email}`)
+    setStaffSaving(false)
+  }
+
+  async function deactivateStaff(id: number) {
+    if (!confirm('Deactivate this account? They will lose access.')) return
+    await fetch('/api/school-admin/staff-accounts', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
+    setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s))
+  }
   const [editingTmpl, setEditingTmpl]   = useState<SubjectTemplate | null>(null)
   const [newTmpl, setNewTmpl]           = useState({ name: '', from_grade: '1', to_grade: '5' })
   const [newSubjectName, setNewSubjectName] = useState('')
@@ -65,6 +111,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
   useEffect(() => { loadSchool() }, [schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (tab === 'subjects') loadTemplates() }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (tab === 'staff') loadStaff() }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadTemplates() {
     setTmplLoading(true)
@@ -155,6 +202,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
         address:  d.address ?? '',
         logo_url: d.logo_url ?? '',
         board:    d.board ?? '',
+        upi_id:   d.upi_id ?? '',
       })
       if (d.grading_scheme && Array.isArray(d.grading_scheme) && d.grading_scheme.length > 0) {
         setScheme(d.grading_scheme)
@@ -171,7 +219,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       const r = await fetch(`/api/schools/${schoolId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...profile, board: profile.board || null }),
+        body: JSON.stringify({ ...profile, board: profile.board || null, upi_id: profile.upi_id || null }),
       })
       if (!r.ok) throw new Error((await r.json()).error)
       setSaved(true)
@@ -231,9 +279,9 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
-        {([['profile', 'School Profile'], ['grading', 'Grading Scheme'], ['subjects', 'Default Subjects']] as const).map(([key, label]) => (
-          <button key={key} onClick={() => { setTab(key); setError('') }}
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit flex-wrap">
+        {([['profile', 'School Profile'], ['grading', 'Grading Scheme'], ['subjects', 'Default Subjects'], ['staff', 'Staff Accounts']] as const).map(([key, label]) => (
+          <button key={key} onClick={() => { setTab(key); setError(''); setStaffError(''); setStaffSuccess('') }}
             className={`px-5 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === key ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
             {label}
           </button>
@@ -368,6 +416,26 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                 <option value="">— Select Board —</option>
                 {BOARDS.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
               </select>
+            </div>
+          </div>
+
+          {/* UPI Payment Settings */}
+          <div className="border-t border-gray-100 pt-5 space-y-4">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700">Fee Payment — UPI ID</h3>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Parents scan a QR code to pay fees. Set your school&apos;s UPI ID here so payments go to the correct account.
+              </p>
+            </div>
+            <div className="max-w-sm">
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">School UPI ID</label>
+              <input
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                placeholder="schoolname@upi or schoolname@ybl"
+                value={profile.upi_id}
+                onChange={e => setProfile(f => ({ ...f, upi_id: e.target.value.trim() }))}
+              />
+              <p className="text-xs text-gray-400 mt-1">Enter the UPI ID registered with your school&apos;s bank account</p>
             </div>
           </div>
 
@@ -629,6 +697,78 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Staff Accounts Tab ─────────────────────────────────────────────── */}
+      {tab === 'staff' && (
+        <div className="space-y-6">
+          <div>
+            <h3 className="text-base font-bold text-gray-800">Staff Accounts</h3>
+            <p className="text-sm text-gray-400 mt-0.5">Add Principal or Vice Principal — login credentials are emailed automatically</p>
+          </div>
+
+          {/* Existing staff list */}
+          {staffLoading ? (
+            <p className="text-sm text-gray-400">Loading…</p>
+          ) : (
+            <div className="space-y-2">
+              {staffList.length === 0 && <p className="text-sm text-gray-400">No staff accounts yet. Add one below.</p>}
+              {staffList.map(s => (
+                <div key={s.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                  <div className="w-9 h-9 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <span className="text-indigo-600 text-sm font-bold">{(s.full_name || s.email).charAt(0).toUpperCase()}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold text-gray-900">{s.full_name}</p>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${ROLE_COLORS[s.role] || 'bg-gray-100 text-gray-600'}`}>
+                        {ROLE_LABELS[s.role] || s.role}
+                      </span>
+                      {s.first_login && <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">Awaiting first login</span>}
+                      {s.status === 'inactive' && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Deactivated</span>}
+                    </div>
+                    <p className="text-xs text-gray-400 truncate">{s.email}</p>
+                  </div>
+                  {s.status === 'active' && (
+                    <button onClick={() => deactivateStaff(s.id)}
+                      className="text-xs text-red-400 hover:text-red-600 border border-red-100 hover:border-red-300 px-2 py-1 rounded-lg transition-colors flex-shrink-0">
+                      Deactivate
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Add staff form */}
+          <div className="border-t border-gray-100 pt-5">
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-4">Add Staff Account</p>
+            {staffError && <div className="mb-3 bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm">{staffError}</div>}
+            {staffSuccess && <div className="mb-3 bg-green-50 border border-green-200 text-green-700 px-3 py-2 rounded-lg text-sm">{staffSuccess}</div>}
+            <form onSubmit={handleAddStaff} className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <input type="text" placeholder="Full name *" value={staffForm.full_name} required
+                  onChange={e => setStaffForm(f => ({ ...f, full_name: e.target.value }))}
+                  className="border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                <input type="email" placeholder="Email address *" value={staffForm.email} required
+                  onChange={e => setStaffForm(f => ({ ...f, email: e.target.value }))}
+                  className="border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+              </div>
+              <div className="flex gap-3">
+                <select value={staffForm.role} onChange={e => setStaffForm(f => ({ ...f, role: e.target.value }))}
+                  className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                  <option value="principal">Principal</option>
+                  <option value="vice_principal">Vice Principal</option>
+                  <option value="school_admin">School Administrator</option>
+                </select>
+                <button type="submit" disabled={staffSaving}
+                  className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold px-6 py-2.5 rounded-xl text-sm transition-colors whitespace-nowrap">
+                  {staffSaving ? 'Sending…' : '+ Add & Send Email'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

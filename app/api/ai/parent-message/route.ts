@@ -5,8 +5,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { generateParentMessage } from '@/lib/gemini'
+import { getAnySession } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { school_id, student_id, concern } = await req.json()
   if (!school_id || !student_id)
     return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })

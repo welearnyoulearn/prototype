@@ -96,8 +96,9 @@ function InlineGrades({ value, onChange }: { value: string; onChange: (v: string
 function rowErrors(row: TeacherRow): string[] {
   const errs: string[] = []
   if (!row.name.trim()) errs.push('Name required')
-  if (row.staff_type === 'teaching' && !row.subject.trim()) errs.push('Subject required for teaching staff')
+  if (!row.email.trim()) errs.push('Email required — login credentials will be sent here')
   if (row.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email.trim())) errs.push('Invalid email')
+  if (row.staff_type === 'teaching' && !row.subject.trim()) errs.push('Subject required for teaching staff')
   if (row.phone.trim() && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(row.phone.trim())) errs.push('Invalid phone')
   return errs
 }
@@ -367,7 +368,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                       <td className="px-3 py-2">
                         <input className={cellCls(row, 'name')} placeholder="Full name *" value={row.name} onChange={e => updateRow(i, 'name', e.target.value)} />
                       </td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="Email" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input className={cellCls(row, 'email')} placeholder="Email *" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
                       <td className="px-3 py-2">
                         <input className={cellCls(row, 'subject')} placeholder={row.staff_type === 'teaching' ? 'Required *' : 'N/A'} value={row.subject} onChange={e => updateRow(i, 'subject', e.target.value)} />
                       </td>

@@ -93,11 +93,11 @@ async function run(req: NextRequest) {
         )
         if (existing) { skipped++; continue }
 
-        // All active students in this class
+        // All active students in this class (students use grade+section, not class_id FK)
         const { rows: students } = await pool.query(
           `SELECT id FROM students
-           WHERE class_id = $1 AND school_id = $2 AND status = 'active'`,
-          [cls.class_id, school.id]
+           WHERE grade = $1 AND section = $2 AND school_id = $3 AND status = 'active'`,
+          [cls.grade, cls.section, school.id]
         )
         if (!students.length) { skipped++; continue }
 
@@ -124,9 +124,9 @@ async function run(req: NextRequest) {
         const { rows: doubtRows } = await pool.query(
           `SELECT DISTINCT subject FROM doubts d
            INNER JOIN students s ON s.id = d.student_id
-           WHERE s.class_id = $1 AND d.school_id = $2
-             AND d.created_at::date BETWEEN $3 AND $4`,
-          [cls.class_id, school.id, weekMonday, weekSaturday]
+           WHERE s.grade = $1 AND s.section = $2 AND d.school_id = $3
+             AND d.created_at::date BETWEEN $4 AND $5`,
+          [cls.grade, cls.section, school.id, weekMonday, weekSaturday]
         ).catch(() => ({ rows: [] }))
 
         const weekContext: WeeklyTestContext = {

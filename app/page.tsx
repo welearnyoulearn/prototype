@@ -26,7 +26,7 @@ const roles = [
   {
     title: "Teacher",
     description: "View timetable, manage attendance, and communicate with students",
-    href: "/teacher",
+    href: "/teacher/login",
     color: "bg-emerald-600 hover:bg-emerald-700",
     icon: (
       <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -37,7 +37,7 @@ const roles = [
   {
     title: "Student",
     description: "View classes, access content, and complete tasks",
-    href: "/student",
+    href: "/student/login",
     color: "bg-orange-500 hover:bg-orange-600",
     icon: (
       <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -48,7 +48,7 @@ const roles = [
   {
     title: "Parent",
     description: "Monitor your child's progress and attendance",
-    href: "/parent",
+    href: "/parent/login",
     color: "bg-teal-600 hover:bg-teal-700",
     icon: (
       <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">

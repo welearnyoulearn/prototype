@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireSchoolAdmin } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
+  if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const sp  = req.nextUrl.searchParams
   const sid = sp.get('school_id')
   if (!sid) return NextResponse.json({ error: 'school_id required' }, { status: 400 })

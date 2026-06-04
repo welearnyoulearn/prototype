@@ -5,7 +5,7 @@ import { CURRICULA, CURRICULUM_NAMES, getSubjectsForGrade } from '@/lib/curricul
 
 type Props = { schoolId: number }
 type Assignment = { id: number; grade: string; curriculum_type: string }
-type SubjectRow = { id: number; subject_name: string; teacher_id: number | null; teacher_name: string | null }
+type SubjectRow = { id: number; subject_name: string; teacher_id: number | null; teacher_name: string | null; periods_per_week: number | null }
 type ClassSubjectRow = { id: number; section: string; subjects: SubjectRow[] }
 type TeacherOpt = { id: number; name: string; subject: string }
 
@@ -27,8 +27,9 @@ export default function CurriculumManagement({ schoolId }: Props) {
   const [teachers, setTeachers] = useState<TeacherOpt[]>([])
   const [extraPanel, setExtraPanel] = useState<{ grade: string; classes: ClassSubjectRow[] } | null>(null)
   const [addingExtraFor, setAddingExtraFor] = useState<number | null>(null)
-  const [extraForm, setExtraForm] = useState({ subject_name: '', teacher_id: '' })
+  const [extraForm, setExtraForm] = useState({ subject_name: '', teacher_id: '', periods_per_week: '4' })
   const [addingExtra, setAddingExtra] = useState(false)
+  const [editingSubject, setEditingSubject] = useState<{ classId: number; subjectId: number; name: string; teacherId: string; ppw: string } | null>(null)
   const [generatingTT, setGeneratingTT] = useState(false)
   const [ttMsg, setTtMsg] = useState('')
 
@@ -174,7 +175,7 @@ export default function CurriculumManagement({ schoolId }: Props) {
       const res = await fetch(`/api/classes/${classId}/subjects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject_name: extraForm.subject_name, teacher_id: extraForm.teacher_id || null }),
+        body: JSON.stringify({ subject_name: extraForm.subject_name, teacher_id: extraForm.teacher_id || null, periods_per_week: parseInt(extraForm.periods_per_week) || 4 }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
@@ -184,7 +185,7 @@ export default function CurriculumManagement({ schoolId }: Props) {
         ...prev,
         classes: prev.classes.map(c => c.id === classId ? { ...c, subjects: [...c.subjects, newSubject] } : c)
       } : prev)
-      setExtraForm({ subject_name: '', teacher_id: '' })
+      setExtraForm({ subject_name: '', teacher_id: '', periods_per_week: '4' })
       setAddingExtraFor(null)
 
       // No auto-regeneration — admin generates timetable intentionally from Timetable tab
@@ -201,6 +202,40 @@ export default function CurriculumManagement({ schoolId }: Props) {
         classes: prev.classes.map(c => c.id === classId ? { ...c, subjects: c.subjects.filter(s => s.id !== subjectId) } : c)
       } : prev)
     } catch { setError('Failed to remove subject') }
+  }
+
+  async function saveSubjectEdit() {
+    if (!editingSubject) return
+    try {
+      const res = await fetch(`/api/classes/${editingSubject.classId}/subjects`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject_id: editingSubject.subjectId,
+          subject_name: editingSubject.name,
+          teacher_id: editingSubject.teacherId || null,
+          periods_per_week: parseInt(editingSubject.ppw) || 4,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setExtraPanel(prev => prev ? {
+        ...prev,
+        classes: prev.classes.map(c => c.id === editingSubject.classId ? {
+          ...c,
+          subjects: c.subjects.map(s => s.id === editingSubject.subjectId ? {
+            ...s,
+            subject_name: data.subject_name,
+            teacher_id: data.teacher_id,
+            teacher_name: data.teacher_name,
+            periods_per_week: parseInt(editingSubject.ppw) || 4,
+          } : s)
+        } : c)
+      } : prev)
+      setEditingSubject(null)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to update subject')
+    }
   }
 
   const previewSubjects = selectedGrade && selectedCurriculum
@@ -434,7 +469,7 @@ export default function CurriculumManagement({ schoolId }: Props) {
                         <p className="font-semibold text-gray-800 text-sm">Section {cls.section}</p>
                         <div className="flex items-center gap-2">
                           <button
-                            onClick={() => { setAddingExtraFor(addingExtraFor === cls.id ? null : cls.id); setExtraForm({ subject_name: '', teacher_id: '' }) }}
+                            onClick={() => { setAddingExtraFor(addingExtraFor === cls.id ? null : cls.id); setExtraForm({ subject_name: '', teacher_id: '', periods_per_week: '4' }) }}
                             className="text-xs bg-violet-600 hover:bg-violet-700 text-white px-3 py-1 rounded-lg transition-colors">
                             + Add Subject
                           </button>
@@ -447,19 +482,62 @@ export default function CurriculumManagement({ schoolId }: Props) {
                           <span className="text-xs text-gray-400 italic">No subjects assigned</span>
                         ) : (
                           cls.subjects.map(s => (
-                            <div key={s.id} className="flex items-center gap-1.5 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1">
-                              <span className="text-xs font-medium text-violet-800">{s.subject_name}</span>
-                              {s.teacher_name && <span className="text-xs text-violet-500">· {s.teacher_name}</span>}
-                              <button onClick={() => removeExtraSubject(cls.id, s.id)} className="text-violet-300 hover:text-red-500 text-xs ml-0.5">×</button>
-                            </div>
+                            editingSubject?.subjectId === s.id ? (
+                              <div key={s.id} className="w-full bg-violet-50 border border-violet-300 rounded-lg p-3 flex flex-wrap gap-2 items-end">
+                                <div className="flex-1 min-w-32">
+                                  <label className="block text-xs text-gray-500 mb-1">Subject Name</label>
+                                  <input
+                                    value={editingSubject.name}
+                                    onChange={e => setEditingSubject(es => es ? { ...es, name: e.target.value } : es)}
+                                    className={inputCls + ' w-full'}
+                                  />
+                                </div>
+                                <div className="w-40">
+                                  <label className="block text-xs text-gray-500 mb-1">Teacher</label>
+                                  <select value={editingSubject.teacherId}
+                                    onChange={e => setEditingSubject(es => es ? { ...es, teacherId: e.target.value } : es)}
+                                    className={inputCls + ' w-full'}>
+                                    <option value="">— None —</option>
+                                    {teachers.map(t => (
+                                      <option key={t.id} value={t.id}>{t.name}{t.subject ? ` (${t.subject})` : ''}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div className="w-24">
+                                  <label className="block text-xs text-gray-500 mb-1">Periods/week</label>
+                                  <input type="number" min={1} max={12}
+                                    value={editingSubject.ppw}
+                                    onChange={e => setEditingSubject(es => es ? { ...es, ppw: e.target.value } : es)}
+                                    className={inputCls + ' w-full'} />
+                                </div>
+                                <button onClick={saveSubjectEdit}
+                                  className="bg-violet-600 hover:bg-violet-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap">
+                                  Save
+                                </button>
+                                <button onClick={() => setEditingSubject(null)}
+                                  className="border border-gray-200 text-gray-500 hover:bg-white px-3 py-2 rounded-lg text-sm transition-colors">
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div key={s.id} className="flex items-center gap-1.5 bg-violet-50 border border-violet-200 rounded-lg px-2.5 py-1">
+                                <span className="text-xs font-medium text-violet-800">{s.subject_name}</span>
+                                {s.teacher_name && <span className="text-xs text-violet-500">· {s.teacher_name}</span>}
+                                {s.periods_per_week && <span className="text-xs text-violet-400">· {s.periods_per_week}×/wk</span>}
+                                <button
+                                  onClick={() => setEditingSubject({ classId: cls.id, subjectId: s.id, name: s.subject_name, teacherId: s.teacher_id ? String(s.teacher_id) : '', ppw: String(s.periods_per_week ?? 4) })}
+                                  className="text-violet-300 hover:text-violet-600 text-xs ml-0.5" title="Edit">✎</button>
+                                <button onClick={() => removeExtraSubject(cls.id, s.id)} className="text-violet-300 hover:text-red-500 text-xs">×</button>
+                              </div>
+                            )
                           ))
                         )}
                       </div>
 
                       {/* Add subject inline form */}
                       {addingExtraFor === cls.id && (
-                        <div className="mt-3 bg-violet-50 border border-violet-200 rounded-lg p-3 flex gap-2 items-end">
-                          <div className="flex-1">
+                        <div className="mt-3 bg-violet-50 border border-violet-200 rounded-lg p-3 flex flex-wrap gap-2 items-end">
+                          <div className="flex-1 min-w-32">
                             <label className="block text-xs text-gray-500 mb-1">Subject Name *</label>
                             <input
                               value={extraForm.subject_name}
@@ -479,6 +557,13 @@ export default function CurriculumManagement({ schoolId }: Props) {
                                 <option key={t.id} value={t.id}>{t.name}{t.subject ? ` (${t.subject})` : ''}</option>
                               ))}
                             </select>
+                          </div>
+                          <div className="w-24">
+                            <label className="block text-xs text-gray-500 mb-1">Periods/week</label>
+                            <input type="number" min={1} max={12}
+                              value={extraForm.periods_per_week}
+                              onChange={e => setExtraForm(f => ({ ...f, periods_per_week: e.target.value }))}
+                              className={inputCls + ' w-full'} />
                           </div>
                           <button onClick={() => addExtraSubject(cls.id)} disabled={addingExtra || !extraForm.subject_name.trim()}
                             className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 whitespace-nowrap">

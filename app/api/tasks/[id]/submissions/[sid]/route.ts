@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { v2 as cloudinary } from 'cloudinary'
 import { awardPoints } from '@/lib/rewards'
-
-// AUTH DISABLED FOR TESTING — will be re-enabled when all features are complete
+import { getTeacherSession } from '@/lib/auth'
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -15,6 +14,8 @@ export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; sid: string }> }
 ) {
+  const session = await getTeacherSession()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: task_id, sid } = await params
   const body = await req.json()

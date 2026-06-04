@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireSchoolAdmin } from '@/lib/auth'
 
 // GET /api/fees/ledger?school_id=X&academic_year=2025-26&grade=8&status=overdue&student_id=Y
 export async function GET(req: NextRequest) {
+  if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const p = req.nextUrl.searchParams
   const school_id    = p.get('school_id')
   const academic_year = p.get('academic_year')
@@ -30,6 +32,14 @@ export async function GET(req: NextRequest) {
       )
     }
 
+    // Check whether the audit table exists (created by migration)
+    const { rows: [tableCheck] } = await pool.query(
+      `SELECT to_regclass('student_fee_ledger_edits') IS NOT NULL AS exists`
+    )
+    const hasEditsCol = tableCheck.exists
+      ? `EXISTS(SELECT 1 FROM student_fee_ledger_edits e WHERE e.ledger_id = l.id) AS has_edits`
+      : `FALSE AS has_edits`
+
     const { rows } = await pool.query(
       `SELECT
          l.*,
@@ -40,7 +50,8 @@ export async function GET(req: NextRequest) {
            0
          ) AS total_paid_confirmed,
          (l.amount_due - l.amount_paid) AS balance,
-         (CURRENT_DATE - l.due_date) AS days_overdue
+         (CURRENT_DATE - l.due_date) AS days_overdue,
+         ${hasEditsCol}
        FROM student_fee_ledger l
        JOIN students s ON s.id = l.student_id
        JOIN fee_categories fc ON fc.id = l.fee_category_id

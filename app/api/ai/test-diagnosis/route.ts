@@ -4,8 +4,10 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { generateTestDiagnosis } from '@/lib/gemini'
+import { getAnySession } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { grade, score, max_score, wrong_questions } = await req.json()
   if (!grade || score === undefined || !max_score)
     return NextResponse.json({ error: 'grade, score, max_score required' }, { status: 400 })

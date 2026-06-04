@@ -79,15 +79,13 @@ export async function GET(req: NextRequest) {
       [school_id, academic_year]
     )
 
-    // Payment mode breakdown
+    // Payment mode breakdown — filter to this academic year (Apr startYear → Mar endYear)
     const { rows: by_payment_mode } = await pool.query(
       `SELECT payment_mode, COUNT(*) AS count, SUM(amount) AS total
        FROM fee_payments
        WHERE school_id = $1 AND payment_status = 'completed'
-         AND EXTRACT(YEAR FROM paid_date) IN (
-           SELECT EXTRACT(YEAR FROM TO_DATE(SPLIT_PART($2, '-', 1), 'YYYY'))::int,
-                  EXTRACT(YEAR FROM TO_DATE(SPLIT_PART($2, '-', 1), 'YYYY'))::int + 1
-         )
+         AND paid_date >= (SPLIT_PART($2, '-', 1) || '-04-01')::date
+         AND paid_date <  ((SPLIT_PART($2, '-', 1)::int + 1)::text || '-04-01')::date
        GROUP BY payment_mode ORDER BY total DESC`,
       [school_id, academic_year]
     )

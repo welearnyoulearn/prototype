@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-
-// AUTH DISABLED FOR TESTING — will be re-enabled when all features are complete
+import { getTeacherSession } from '@/lib/auth'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await getTeacherSession()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: task_id } = await params
   const { school_id, teacher_id, student_ids, target_type = 'all' } = await req.json()

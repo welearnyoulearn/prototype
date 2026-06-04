@@ -1,18 +1,20 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import StudentSyllabus from '../student/components/StudentSyllabus'
 import { TRANSLATIONS, type Lang } from './translations'
 import ParentMarketplace from './components/ParentMarketplace'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+type Child = { id: number; name: string; grade: string; section: string; roll_number: string; school_id: number }
 type Student = {
   id: number; name: string; grade: string; section: string
   roll_number: string; school_id: number; class_id: number
   parent_name: string | null; parent_phone: string | null
 }
-type School = { id: number; name: string; city: string }
+type ParentInfo = { id: number; name: string; email: string; school_id: number; school_name: string; children: Child[] }
 
 type Summary = {
   upcoming_exams: Array<{
@@ -45,9 +47,15 @@ type FeeLedger = {
 type FeePayment = {
   id: number; receipt_number: string; amount: number; payment_mode: string
   payment_status: string; paid_date: string; category_name: string; period_label: string
-  transaction_ref: string | null
+  transaction_ref: string | null; rejection_reason: string | null; verified_at: string | null
+  notes: string | null
 }
-type FeeSummary = { total_due: number; total_paid: number; total_outstanding: number; overdue_count: number }
+type FeeWaiver = {
+  id: number; waiver_type: string; waiver_amount: number; reason: string
+  granted_by_name: string | null; created_at: string
+  category_name: string; period_label: string; amount_due: number
+}
+type FeeSummary = { total_due: number; total_paid: number; total_outstanding: number; total_waived: number; overdue_count: number }
 
 type Activity = {
   id: number; action_type: string; action_detail: string | null; created_at: string
@@ -105,15 +113,10 @@ function relTime(iso: string) {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 export default function ParentDashboard() {
-  const [step, setStep]       = useState<'school' | 'auth' | 'portal'>('school')
-  const [schools, setSchools] = useState<School[]>([])
-  const [schoolSearch, setSchoolSearch] = useState('')
-  const [loadingSchools, setLoadingSchools] = useState(false)
-  const [selectedSchool, setSelectedSchool] = useState<School | null>(null)
-  const [rollNumber, setRollNumber] = useState('')
-  const [parentPhone, setParentPhone] = useState('')
-  const [authError, setAuthError]   = useState('')
-  const [authLoading, setAuthLoading] = useState(false)
+  const router = useRouter()
+  const [loading, setLoading] = useState(true)
+  const [parentInfo, setParentInfo] = useState<ParentInfo | null>(null)
+  const [showChildPicker, setShowChildPicker] = useState(false)
   const [student, setStudent] = useState<Student | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
   const [activeNav, setActiveNav] = useState('overview')
@@ -131,15 +134,22 @@ export default function ParentDashboard() {
 
   const [feeLedger, setFeeLedger] = useState<FeeLedger[]>([])
   const [feePayments, setFeePayments] = useState<FeePayment[]>([])
+  const [feeWaivers, setFeeWaivers] = useState<FeeWaiver[]>([])
   const [feeSummary, setFeeSummary] = useState<FeeSummary | null>(null)
   const [feeLoading, setFeeLoading] = useState(false)
   const [feeAcYear, setFeeAcYear] = useState('')
   const [feeAcYears, setFeeAcYears] = useState<string[]>([])
   const [payingLedger, setPayingLedger] = useState<FeeLedger | null>(null)
+  const [selectedLedgerIds, setSelectedLedgerIds] = useState<Set<number>>(new Set())
   const [payAmount, setPayAmount] = useState('')
   const [payUPI, setPayUPI] = useState('')
   const [payLoading, setPayLoading] = useState(false)
-  const [paySuccess, setPaySuccess] = useState<{ receipt_number: string } | null>(null)
+  const [paySuccess, setPaySuccess] = useState<{ receipt_number: string; total_amount: number; entries_count: number } | null>(null)
+  const [payStep, setPayStep] = useState<'form' | 'method' | 'upi-id' | 'qr' | 'txn'>('form')
+  const [upiParentId, setUpiParentId] = useState('')
+  const [qrRevealed, setQrRevealed] = useState(false)
+  const [payTimerSecs, setPayTimerSecs] = useState(0)
+  const payTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const [activity, setActivity] = useState<Activity[]>([])
   const [actSummary, setActSummary] = useState<ActivitySummary | null>(null)
@@ -245,8 +255,9 @@ export default function ParentDashboard() {
       const d = await r.json()
       setFeeLedger(d.ledger || [])
       setFeePayments(d.payments || [])
+      setFeeWaivers(d.waivers || [])
       setFeeSummary(d.summary || null)
-    } catch { setFeeLedger([]); setFeePayments([]) }
+    } catch { setFeeLedger([]); setFeePayments([]); setFeeWaivers([]) }
     setFeeLoading(false)
   }, [])
 
@@ -273,47 +284,60 @@ export default function ParentDashboard() {
   }, [activeNav, student]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Auth ──────────────────────────────────────────────────────────────────────
-  async function searchSchools(q: string) {
-    setSchoolSearch(q)
-    if (q.length < 2) { setSchools([]); return }
-    setLoadingSchools(true)
+  async function selectChild(child: Child) {
+    // Resolve class_id from grade + section
+    let cid = 0
     try {
-      const res = await fetch(`/api/schools?search=${encodeURIComponent(q)}`)
-      const data = await res.json()
-      setSchools(Array.isArray(data) ? data.slice(0, 8) : [])
-    } catch { setSchools([]) }
-    setLoadingSchools(false)
+      const classRes = await fetch(`/api/classes?school_id=${child.school_id}`)
+      if (classRes.ok) {
+        const classes = await classRes.json()
+        const cls = (classes as { id: number; grade: string; section: string }[])
+          .find(c => c.grade === child.grade && c.section === child.section)
+        if (cls) cid = cls.id
+      }
+    } catch { /* non-critical */ }
+
+    const s: Student = { ...child, class_id: cid, parent_name: null, parent_phone: null }
+    setStudent(s)
+    setShowChildPicker(false)
+    setSummary(null); setFeeLedger([]); setFeePayments([]); setFeeWaivers([]); setFeeSummary(null)
+    setTimetable([]); setAttDays([]); setAttMonthly([]); setAttSummary(null)
+    setActivity([]); setActSummary(null); setWeeklyTests([]); setAiChatSessions([])
+    setActiveNav('overview'); setVisited(new Set(['overview']))
+
+    await loadSummary(s)
+    loadWeeklyTests(s)
+    Promise.all([
+      fetch(`/api/academic-year/current?school_id=${child.school_id}`).then(r => r.ok ? r.json() : null),
+      fetch(`/api/academic-years?school_id=${child.school_id}`).then(r => r.ok ? r.json() : []),
+    ]).then(([current, all]) => {
+      const allLabels: string[] = Array.isArray(all) ? all.map((y: { label: string }) => y.label) : []
+      const currentLabel: string = current?.label ?? allLabels[0] ?? '2025-26'
+      if (!allLabels.length) allLabels.push(currentLabel)
+      setFeeAcYears(allLabels)
+      setFeeAcYear(currentLabel)
+    }).catch(() => { setFeeAcYears(['2025-26']); setFeeAcYear('2025-26') })
   }
 
-  async function handleAuth() {
-    if (!selectedSchool || !rollNumber.trim() || !parentPhone.trim()) return
-    setAuthLoading(true); setAuthError('')
-    try {
-      const res = await fetch('/api/parent/lookup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: selectedSchool.id, roll_number: rollNumber.trim(), parent_phone: parentPhone.trim() }),
+  useEffect(() => {
+    fetch('/api/parent/auth/me')
+      .then(async r => {
+        if (r.status === 401) { router.push('/parent/login'); return }
+        const data = await r.json()
+        setParentInfo(data)
+        if (data.children.length === 1) {
+          await selectChild(data.children[0])
+        } else if (data.children.length > 1) {
+          setShowChildPicker(true)
+        }
       })
-      const data = await res.json()
-      if (!res.ok) { setAuthError(data.error || 'Not found'); setAuthLoading(false); return }
-      setStudent(data.student)
-      await loadSummary(data.student)
-      // Load weekly tests eagerly so overview card shows immediately
-      loadWeeklyTests(data.student)
-      // Load academic years for fee selector
-      Promise.all([
-        fetch(`/api/academic-year/current?school_id=${data.student.school_id}`).then(r => r.ok ? r.json() : null),
-        fetch(`/api/academic-years?school_id=${data.student.school_id}`).then(r => r.ok ? r.json() : []),
-      ]).then(([current, all]) => {
-        const allLabels: string[] = Array.isArray(all) ? all.map((y: { label: string }) => y.label) : []
-        const currentLabel: string = current?.label ?? allLabels[0] ?? '2025-26'
-        if (!allLabels.length) allLabels.push(currentLabel)
-        setFeeAcYears(allLabels)
-        setFeeAcYear(currentLabel)
-      }).catch(() => { setFeeAcYears(['2025-26']); setFeeAcYear('2025-26') })
-      setStep('portal')
-    } catch { setAuthError('Connection error. Please try again.') }
-    setAuthLoading(false)
+      .catch(() => router.push('/parent/login'))
+      .finally(() => setLoading(false))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleLogout() {
+    await fetch('/api/parent/auth/logout', { method: 'POST' }).catch(() => {})
+    router.push('/parent/login')
   }
 
   async function acknowledgeMarks(examId: number) {
@@ -331,119 +355,148 @@ export default function ParentDashboard() {
     setAckSaving(false)
   }
 
-  async function submitPayment() {
-    if (!student || !payingLedger) return
+  async function submitPayment(upiRef?: string) {
+    if (!student) return
     setPayLoading(true)
     try {
+      const isMulti = selectedLedgerIds.size > 0
+      const ref = upiRef !== undefined ? upiRef : payUPI
+      const body = isMulti
+        ? { school_id: student.school_id, student_id: student.id, ledger_ids: Array.from(selectedLedgerIds), total_amount: parseFloat(payAmount), transaction_ref: ref || null, upi_id: ref || null }
+        : { school_id: student.school_id, student_id: student.id, ledger_id: payingLedger?.id, amount: parseFloat(payAmount), upi_id: ref || null }
       const r = await fetch('/api/parent/fees', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          school_id: student.school_id, student_id: student.id,
-          ledger_id: payingLedger.id, amount: parseFloat(payAmount), upi_id: payUPI,
-        }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
       })
       const d = await r.json()
       if (r.ok) {
-        setPaySuccess({ receipt_number: d.receipt_number })
-        setPayingLedger(null); setPayAmount(''); setPayUPI('')
+        setPaySuccess({ receipt_number: d.receipt_number, total_amount: d.total_amount || parseFloat(payAmount), entries_count: d.entries_count || 1 })
+        setPayingLedger(null); setSelectedLedgerIds(new Set()); setPayAmount(''); setPayUPI('')
+        setPayStep('form'); setUpiParentId(''); setQrRevealed(false); stopPayTimer()
         loadFees(student, feeAcYear)
       }
     } catch { /* silent */ }
     setPayLoading(false)
   }
 
-  // ── School search ─────────────────────────────────────────────────────────────
-  if (step === 'school') return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50">
-      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4">
-        <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">{T.home}</Link>
-        <span className="text-gray-300">|</span>
-        <h1 className="text-lg font-semibold text-gray-800">{T.parentPortal}</h1>
-        <div className="ml-auto flex items-center gap-2">
-          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
-            {(['en', 'te'] as Lang[]).map(l => (
-              <button key={l} onClick={() => changeLang(l)}
-                className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${lang === l ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                {l === 'en' ? 'EN' : 'తె'}
-              </button>
-            ))}
-          </div>
-          <span className="bg-pink-100 text-pink-700 text-xs font-medium px-3 py-1 rounded-full">Parent</span>
-        </div>
-      </div>
-      <div className="max-w-md mx-auto px-6 py-16">
-        <div className="text-center mb-10">
-          <div className="w-16 h-16 bg-pink-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">{T.parentPortal}</h2>
-          <p className="text-gray-500 text-sm">{T.tagline}</p>
-        </div>
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-          <label className="block text-sm font-semibold text-gray-700 mb-2">{T.searchSchool}</label>
-          <input type="text" placeholder={T.typeSchool} value={schoolSearch}
-            onChange={e => searchSchools(e.target.value)}
-            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-pink-300" />
-          {loadingSchools && <p className="text-xs text-gray-400 mt-2">{T.searching}</p>}
-          {schools.length > 0 && (
-            <div className="mt-2 border border-gray-100 rounded-xl overflow-hidden divide-y divide-gray-50">
-              {schools.map(s => (
-                <button key={s.id} onClick={() => { setSelectedSchool(s); setSchoolSearch(s.name); setSchools([]); setStep('auth') }}
-                  className="w-full text-left px-4 py-3 hover:bg-pink-50 transition-colors">
-                  <p className="text-sm font-semibold text-gray-800">{s.name}</p>
-                  <p className="text-xs text-gray-400">{s.city}</p>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+  function startPayTimer() {
+    if (payTimerRef.current) clearInterval(payTimerRef.current)
+    setPayTimerSecs(300)
+    payTimerRef.current = setInterval(() => {
+      setPayTimerSecs(s => {
+        if (s <= 1) { clearInterval(payTimerRef.current!); payTimerRef.current = null; return 0 }
+        return s - 1
+      })
+    }, 1000)
+  }
+
+  function stopPayTimer() {
+    if (payTimerRef.current) { clearInterval(payTimerRef.current); payTimerRef.current = null }
+    setPayTimerSecs(0)
+  }
+
+  function fmtTimer(secs: number) {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0')
+    const s = (secs % 60).toString().padStart(2, '0')
+    return `${m}:${s}`
+  }
+
+  function cancelPayment() {
+    setPayingLedger(null); setSelectedLedgerIds(new Set())
+    setPayAmount(''); setPayUPI('')
+    setPayStep('form'); setUpiParentId(''); setQrRevealed(false); stopPayTimer()
+  }
+
+  async function handleIvePaid() {
+    stopPayTimer()
+    await submitPayment(upiParentId || undefined)
+  }
+
+  function printParentReceipt(pmt: FeePayment) {
+    const modeLabel: Record<string, string> = { cash: 'Cash', cheque: 'Cheque', dd: 'Demand Draft', upi: 'UPI', online: 'Online Transfer' }
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${pmt.receipt_number}</title>
+<style>
+  body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:680px;margin:0 auto}
+  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:20px}
+  .school{font-size:20px;font-weight:bold}
+  .rtitle{font-size:14px;font-weight:bold;margin-top:6px;letter-spacing:1px}
+  .rno{font-size:12px;color:#555;margin-top:4px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+  .lbl{font-size:11px;color:#888;margin-bottom:2px}
+  .val{font-size:13px;font-weight:500}
+  table{width:100%;border-collapse:collapse;margin:12px 0}
+  th{background:#f3f4f6;padding:8px 10px;text-align:left;font-size:12px;border:1px solid #ddd}
+  td{padding:8px 10px;font-size:13px;border:1px solid #ddd}
+  .tot td{font-weight:bold;background:#f9fafb}
+  .ftr{margin-top:24px;text-align:center;font-size:11px;color:#aaa;border-top:1px solid #eee;padding-top:10px}
+  @media print{body{padding:0}}
+</style></head><body>
+<div class="hdr">
+  <div class="school">Fee Receipt</div>
+  <div class="rtitle">PAYMENT CONFIRMATION</div>
+  <div class="rno">Receipt No: <strong>${pmt.receipt_number}</strong></div>
+</div>
+<table>
+  <thead><tr><th>Fee Category</th><th>Period</th><th>Amount Paid</th></tr></thead>
+  <tbody>
+    <tr><td>${pmt.category_name}</td><td>${pmt.period_label}</td><td>₹${Number(pmt.amount).toLocaleString('en-IN')}</td></tr>
+  </tbody>
+  <tfoot><tr class="tot"><td colspan="2" style="text-align:right">Total Paid:</td><td>₹${Number(pmt.amount).toLocaleString('en-IN')}</td></tr></tfoot>
+</table>
+<div class="grid2">
+  <div><div class="lbl">Payment Mode</div><div class="val">${modeLabel[pmt.payment_mode] || pmt.payment_mode}</div></div>
+  <div><div class="lbl">Payment Date</div><div class="val">${pmt.paid_date}</div></div>
+  ${pmt.transaction_ref ? `<div><div class="lbl">Transaction Ref</div><div class="val">${pmt.transaction_ref}</div></div>` : ''}
+</div>
+<div class="ftr">Generated on ${new Date().toLocaleString('en-IN')} · Computer-generated receipt · No signature required.</div>
+</body></html>`
+    const win = window.open('', '_blank', 'width=720,height=580')
+    if (win) { win.document.write(html); win.document.close(); win.print() }
+  }
+
+  // ── Loading / child picker screens ───────────────────────────────────────────
+  if (loading) return (
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50 flex items-center justify-center">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-10 h-10 border-4 border-pink-400 border-t-transparent rounded-full animate-spin" />
+        <p className="text-gray-400 text-sm">Loading your dashboard...</p>
       </div>
     </div>
   )
 
-  // ── Auth ──────────────────────────────────────────────────────────────────────
-  if (step === 'auth') return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50">
-      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4">
-        <button onClick={() => setStep('school')} className="text-gray-400 hover:text-gray-600 text-sm">{T.back}</button>
-        <span className="text-gray-300">|</span>
-        <h1 className="text-lg font-semibold text-gray-800">{selectedSchool?.name}</h1>
-        <div className="ml-auto flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
-          {(['en', 'te'] as Lang[]).map(l => (
-            <button key={l} onClick={() => changeLang(l)}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${lang === l ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-              {l === 'en' ? 'EN' : 'తె'}
+  if (showChildPicker && parentInfo) return (
+    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-6">
+          <div className="w-14 h-14 bg-pink-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
+            <svg className="w-7 h-7 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-gray-900">Select a Child</h2>
+          <p className="text-sm text-gray-500 mt-1">Welcome back, {parentInfo.name}</p>
+        </div>
+        <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100 shadow-sm overflow-hidden">
+          {parentInfo.children.map(child => (
+            <button key={child.id} onClick={() => selectChild(child)}
+              className="w-full flex items-center gap-4 px-5 py-4 hover:bg-pink-50 transition-colors text-left">
+              <div className="w-10 h-10 bg-pink-100 rounded-full flex items-center justify-center flex-shrink-0">
+                <span className="text-pink-600 font-bold text-sm">{child.name.charAt(0)}</span>
+              </div>
+              <div className="min-w-0">
+                <p className="font-semibold text-gray-900 text-sm">{child.name}</p>
+                <p className="text-xs text-gray-400">Grade {child.grade}-{child.section} · Roll {child.roll_number}</p>
+              </div>
+              <svg className="w-4 h-4 text-gray-300 ml-auto flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
             </button>
           ))}
         </div>
-      </div>
-      <div className="max-w-md mx-auto px-6 py-16">
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
-          <h2 className="text-lg font-bold text-gray-900 mb-1">{T.verifyChild}</h2>
-          <p className="text-sm text-gray-500 mb-6">{T.verifySubtitle}</p>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">{T.rollNumber}</label>
-              <input type="text" placeholder={T.rollPlaceholder} value={rollNumber}
-                onChange={e => setRollNumber(e.target.value)}
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-pink-300" />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-1">{T.phoneNumber}</label>
-              <input type="tel" placeholder={T.phonePlaceholder} value={parentPhone}
-                onChange={e => setParentPhone(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAuth()}
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-pink-300" />
-            </div>
-            {authError && <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">{authError}</div>}
-            <button onClick={handleAuth} disabled={authLoading || !rollNumber.trim() || !parentPhone.trim()}
-              className="w-full bg-pink-600 text-white rounded-xl py-3 font-semibold text-sm disabled:opacity-50 hover:bg-pink-700 transition-colors">
-              {authLoading ? T.verifying : T.accessDashboard}
-            </button>
-          </div>
-        </div>
+        <button onClick={handleLogout}
+          className="w-full mt-4 text-sm text-gray-400 hover:text-red-500 py-2 transition-colors">
+          Sign out
+        </button>
       </div>
     </div>
   )
@@ -467,7 +520,7 @@ export default function ParentDashboard() {
           <span className="text-gray-300 hidden sm:inline">|</span>
           <div>
             <p className="text-sm font-bold text-gray-900">{student.name}</p>
-            <p className="text-xs text-gray-400">{T.grade} {student.grade}-{student.section} · {selectedSchool?.name}</p>
+            <p className="text-xs text-gray-400">{T.grade} {student.grade}-{student.section} · {parentInfo?.school_name}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -491,9 +544,15 @@ export default function ParentDashboard() {
               </button>
             ))}
           </div>
-          <button onClick={() => { setStep('auth'); setStudent(null); setSummary(null) }}
-            className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-3 py-1.5 rounded-lg">
-            {T.switchChild}
+          {(parentInfo?.children?.length ?? 0) > 1 && (
+            <button onClick={() => setShowChildPicker(true)}
+              className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-3 py-1.5 rounded-lg">
+              {T.switchChild}
+            </button>
+          )}
+          <button onClick={handleLogout}
+            className="text-xs text-gray-400 hover:text-red-500 border border-gray-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition-colors">
+            Logout
           </button>
         </div>
       </div>
@@ -924,7 +983,7 @@ export default function ParentDashboard() {
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold text-gray-800">{T.feeDetails}</h2>
               <div className="flex gap-2">
-                <select value={feeAcYear} onChange={e => { setFeeAcYear(e.target.value); loadFees(student, e.target.value) }}
+                <select value={feeAcYear} onChange={e => { setFeeAcYear(e.target.value); loadFees(student, e.target.value); setSelectedLedgerIds(new Set()); setPayingLedger(null) }}
                   className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
                   {feeAcYears.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
@@ -932,14 +991,36 @@ export default function ParentDashboard() {
               </div>
             </div>
 
-            {/* Pay success */}
+            {/* Pay success — Receipt */}
             {paySuccess && (
-              <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-bold text-green-800">{T.paymentSuccess}</p>
-                  <p className="text-xs text-green-600 mt-0.5">{T.receipt} <span className="font-mono font-bold">{paySuccess.receipt_number}</span> · {T.adminVerify}</p>
+              <div className="bg-white border-2 border-green-200 rounded-2xl overflow-hidden shadow-sm">
+                <div className="bg-green-500 px-5 py-4 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                    <p className="text-white font-bold">{T.paymentSuccess}</p>
+                  </div>
+                  <button onClick={() => setPaySuccess(null)} className="text-green-200 hover:text-white text-xl font-bold leading-none">×</button>
                 </div>
-                <button onClick={() => setPaySuccess(null)} className="text-green-400 hover:text-green-600 text-lg font-bold">×</button>
+                <div className="px-5 py-4">
+                  <p className="text-xs text-gray-500 mb-1">Receipt Number</p>
+                  <p className="text-xl font-black font-mono text-gray-800 tracking-wide">{paySuccess.receipt_number}</p>
+                  <div className="mt-3 pt-3 border-t border-dashed border-gray-200 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-gray-400">Amount Paid</p>
+                      <p className="text-base font-bold text-gray-700">{fmt(paySuccess.total_amount)}</p>
+                    </div>
+                    {paySuccess.entries_count > 1 && (
+                      <div className="text-right">
+                        <p className="text-xs text-gray-400">Entries</p>
+                        <p className="text-base font-bold text-gray-700">{paySuccess.entries_count}</p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-3 bg-amber-50 rounded-xl px-4 py-2.5 flex items-start gap-2">
+                    <svg className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <p className="text-xs text-amber-700">{T.adminVerify} Share receipt number <span className="font-bold font-mono">{paySuccess.receipt_number}</span> with school admin if needed.</p>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -951,7 +1032,7 @@ export default function ParentDashboard() {
               <>
                 {/* Summary */}
                 {feeSummary && (
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className={`grid gap-3 ${feeSummary.total_waived > 0 ? 'grid-cols-4' : 'grid-cols-3'}`}>
                     <div className="bg-white border border-gray-100 rounded-xl p-4 text-center">
                       <p className="text-xs text-gray-400">{T.totalDue}</p>
                       <p className="text-xl font-black text-gray-800 mt-1">{fmt(feeSummary.total_due)}</p>
@@ -960,6 +1041,12 @@ export default function ParentDashboard() {
                       <p className="text-xs text-green-600">{T.paid}</p>
                       <p className="text-xl font-black text-green-700 mt-1">{fmt(feeSummary.total_paid)}</p>
                     </div>
+                    {feeSummary.total_waived > 0 && (
+                      <div className="bg-purple-50 border border-purple-100 rounded-xl p-4 text-center">
+                        <p className="text-xs text-purple-600">Waived</p>
+                        <p className="text-xl font-black text-purple-700 mt-1">{fmt(feeSummary.total_waived)}</p>
+                      </div>
+                    )}
                     <div className={`${feeSummary.total_outstanding > 0 ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'} border rounded-xl p-4 text-center`}>
                       <p className={`text-xs ${feeSummary.total_outstanding > 0 ? 'text-red-500' : 'text-gray-400'}`}>{T.outstanding}</p>
                       <p className={`text-xl font-black mt-1 ${feeSummary.total_outstanding > 0 ? 'text-red-600' : 'text-gray-400'}`}>{fmt(feeSummary.total_outstanding)}</p>
@@ -967,69 +1054,265 @@ export default function ParentDashboard() {
                   </div>
                 )}
 
-                {/* Payment form */}
-                {payingLedger && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
-                    <p className="text-sm font-bold text-blue-900 mb-1">{T.payOnline} — {payingLedger.category_name} · {payingLedger.period_label}</p>
-                    <p className="text-xs text-blue-600 mb-4">{T.balance} {fmt(payingLedger.balance)} · {T.paymentVerifyHint}</p>
-                    <div className="space-y-3">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-xs font-medium text-gray-600">{T.amount}</label>
-                          <input type="number" value={payAmount} onChange={e => setPayAmount(e.target.value)}
-                            placeholder={String(payingLedger.balance)}
-                            className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                        </div>
-                        <div>
-                          <label className="text-xs font-medium text-gray-600">{T.upiRef}</label>
-                          <input type="text" value={payUPI} onChange={e => setPayUPI(e.target.value)}
-                            placeholder="yourname@upi"
-                            className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                        </div>
+                {/* Multi-select pay bar */}
+                {selectedLedgerIds.size > 0 && !payingLedger && (() => {
+                  const selectedEntries = feeLedger.filter(e => selectedLedgerIds.has(e.id))
+                  const totalSelected = selectedEntries.reduce((s, e) => s + Number(e.balance), 0)
+                  return (
+                    <div className="bg-blue-600 rounded-xl p-4 text-white">
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-sm font-semibold">{selectedLedgerIds.size} {selectedLedgerIds.size === 1 ? 'entry' : 'entries'} selected · Total {fmt(totalSelected)}</p>
+                        <button onClick={() => setSelectedLedgerIds(new Set())} className="text-blue-200 hover:text-white text-xs">Clear</button>
                       </div>
                       <div className="flex gap-2">
-                        <button onClick={submitPayment} disabled={payLoading || !payAmount}
-                          className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-50">
-                          {payLoading ? T.submitting : T.submitPayment(payAmount ? fmt(payAmount) : '₹0')}
+                        <button
+                          onClick={() => { setPayAmount(String(totalSelected)); setPayingLedger({ id: -1 } as FeeLedger) }}
+                          className="flex-1 bg-white text-blue-700 font-semibold py-2 rounded-lg text-sm hover:bg-blue-50"
+                        >
+                          Pay {fmt(totalSelected)}
                         </button>
-                        <button onClick={() => { setPayingLedger(null); setPayAmount(''); setPayUPI('') }}
-                          className="px-4 border border-gray-200 text-gray-500 rounded-lg text-sm">{T.cancel}</button>
                       </div>
+                    </div>
+                  )
+                })()}
+
+                {/* Payment form (multi or single) */}
+                {payingLedger && (
+                  <div className="bg-white border border-blue-200 rounded-2xl overflow-hidden shadow-sm">
+                    {/* Payment header */}
+                    <div className="bg-blue-600 px-5 py-4">
+                      {selectedLedgerIds.size > 0 ? (
+                        <div>
+                          <p className="text-white font-bold text-sm">{selectedLedgerIds.size} fee entries</p>
+                          <div className="mt-1.5 space-y-0.5">
+                            {feeLedger.filter(e => selectedLedgerIds.has(e.id)).map(e => (
+                              <div key={e.id} className="flex justify-between text-xs text-blue-100">
+                                <span>{e.category_name} · {e.period_label}</span>
+                                <span>{fmt(e.balance)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <p className="text-white font-bold text-sm">{payingLedger.category_name} · {payingLedger.period_label}</p>
+                          <p className="text-blue-100 text-xs mt-0.5">Balance due: {fmt(payingLedger.balance)}</p>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-5">
+                      {/* Step 1: Enter amount */}
+                      {payStep === 'form' && (
+                        <div className="space-y-4">
+                          <div>
+                            <label className="text-xs font-semibold text-gray-600 block mb-1">Payment Amount (₹)</label>
+                            <input type="number" value={payAmount} onChange={e => setPayAmount(e.target.value)}
+                              placeholder="Enter amount"
+                              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                            <p className="text-xs text-gray-400 mt-1">Enter less for partial payment</p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => { setPayStep('qr'); setQrRevealed(false) }}
+                              disabled={!payAmount || Number(payAmount) <= 0}
+                              className="flex-1 bg-blue-600 text-white py-3 rounded-xl text-sm font-bold disabled:opacity-40 hover:bg-blue-700">
+                              Continue — Pay {payAmount ? fmt(payAmount) : '₹0'}
+                            </button>
+                            <button onClick={cancelPayment}
+                              className="px-4 border border-gray-200 text-gray-500 rounded-xl text-sm hover:bg-gray-50">
+                              {T.cancel}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Step 2 (method) and Step 3a (upi-id) — disabled, kept for future use */}
+                      {false && payStep === 'method' && null}
+                      {false && payStep === 'upi-id' && null}
+
+                      {/* Step 2: QR Code — scan and pay */}
+                      {payStep === 'qr' && (
+                        <div className="space-y-4">
+                          <p className="text-sm font-bold text-gray-700 text-center">Scan QR &amp; Pay {fmt(payAmount)}</p>
+
+                          <div className="flex flex-col items-center py-2">
+                            <div
+                              className="relative cursor-pointer select-none"
+                              onClick={() => { if (!qrRevealed) setQrRevealed(true) }}>
+                              <img
+                                src={`/api/fees/upi-qr?amount=${encodeURIComponent(payAmount)}&school_id=${student.school_id}`}
+                                alt="UPI QR Code"
+                                width={220}
+                                height={220}
+                                className={`rounded-2xl border-2 border-gray-200 transition-all duration-500 ${!qrRevealed ? 'blur-xl scale-95' : 'blur-0 scale-100'}`}
+                              />
+                              {!qrRevealed && (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl">
+                                  <div className="w-14 h-14 bg-white rounded-2xl shadow-lg flex items-center justify-center border border-gray-200">
+                                    <svg className="w-7 h-7 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                                    </svg>
+                                  </div>
+                                  <p className="text-xs font-bold text-gray-700 mt-2.5 bg-white/90 px-3 py-1.5 rounded-full shadow-sm">Tap to reveal QR code</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {qrRevealed ? (
+                            <div className="space-y-3">
+                              <div className="bg-purple-50 border border-purple-100 rounded-xl p-3 text-center">
+                                <p className="text-xs font-semibold text-purple-800">Scan with GPay, PhonePe, Paytm or any UPI app</p>
+                                <p className="text-xs text-purple-500 mt-0.5">Amount: {fmt(payAmount)} · School Fee Payment</p>
+                              </div>
+                              <button
+                                onClick={() => setPayStep('txn')}
+                                className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl text-sm font-bold">
+                                ✓ Payment Done — Enter Transaction ID
+                              </button>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-gray-400 text-center">Tap the QR above to reveal</p>
+                          )}
+
+                          <button onClick={() => { setPayStep('form'); setQrRevealed(false) }} className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                            Back
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Step 3: Paste UPI Transaction ID */}
+                      {payStep === 'txn' && (
+                        <div className="space-y-4">
+                          <div className="text-center">
+                            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-2">
+                              <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                            </div>
+                            <p className="text-sm font-bold text-gray-800">Payment Done! Enter Transaction ID</p>
+                            <p className="text-xs text-gray-400 mt-1">Copy the UPI transaction ID from your GPay / PhonePe / Paytm receipt and paste it below</p>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-semibold text-gray-600 block mb-1">UPI Transaction ID</label>
+                            <input
+                              type="text"
+                              placeholder="e.g. 4278563901234567 or T2506161234..."
+                              value={payUPI}
+                              onChange={e => setPayUPI(e.target.value)}
+                              className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-400"
+                            />
+                            <p className="text-xs text-gray-400 mt-1">Found in your UPI app under payment history / receipt</p>
+                          </div>
+
+                          <div className="bg-gray-50 rounded-xl p-3 text-xs text-gray-500 space-y-1">
+                            <p><span className="font-semibold text-gray-700">Amount:</span> {fmt(payAmount)}</p>
+                            <p><span className="font-semibold text-gray-700">Purpose:</span> School Fee Payment</p>
+                          </div>
+
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => submitPayment(payUPI || undefined)}
+                              disabled={payLoading || !payUPI.trim()}
+                              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-sm font-bold disabled:opacity-40">
+                              {payLoading ? 'Submitting…' : 'Submit for Verification'}
+                            </button>
+                            <button onClick={() => setPayStep('qr')} className="px-4 border border-gray-200 text-gray-500 rounded-xl text-sm hover:bg-gray-50">
+                              Back
+                            </button>
+                          </div>
+
+                          <p className="text-xs text-gray-400 text-center">School admin will verify your transaction ID and confirm the payment</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
 
-                {/* Ledger */}
+                {/* Ledger with checkboxes */}
                 {feeLedger.length === 0 ? (
                   <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
                     <p className="text-gray-400 text-sm">{T.noFeeEntries(feeAcYear)}</p>
                   </div>
                 ) : (
                   <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                    <div className="px-4 py-3 border-b border-gray-100">
+                    <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{T.feeLedger} — {feeAcYear}</p>
+                      {feeLedger.some(e => ['pending','partial','overdue'].includes(e.status)) && !payingLedger && (
+                        <button
+                          onClick={() => {
+                            const pendingIds = feeLedger.filter(e => ['pending','partial','overdue'].includes(e.status)).map(e => e.id)
+                            const totalBal = feeLedger.filter(e => ['pending','partial','overdue'].includes(e.status)).reduce((s, e) => s + Number(e.balance), 0)
+                            setSelectedLedgerIds(new Set(pendingIds))
+                            setPayAmount(String(totalBal))
+                            setPayingLedger({ id: -1 } as FeeLedger)
+                          }}
+                          className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 font-medium"
+                        >
+                          Pay All Pending
+                        </button>
+                      )}
                     </div>
                     <div className="divide-y divide-gray-50">
-                      {feeLedger.map(entry => (
-                        <div key={entry.id} className="px-4 py-3 flex items-center justify-between hover:bg-gray-50">
-                          <div>
-                            <p className="text-sm font-medium text-gray-800">{entry.category_name}</p>
-                            <p className="text-xs text-gray-400">{entry.period_label} · {T.dueDate} {entry.due_date}</p>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <div className="text-right">
-                              <p className="text-sm font-bold text-gray-800">{fmt(entry.amount_due)}</p>
-                              {Number(entry.balance) > 0 && <p className="text-xs text-red-500">{T.balance} {fmt(entry.balance)}</p>}
-                            </div>
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${STATUS_COLOR[entry.status] || 'bg-gray-100 text-gray-600'}`}>
-                              {entry.status}
-                            </span>
-                            {['pending', 'partial', 'overdue'].includes(entry.status) && !payingLedger && (
-                              <button onClick={() => { setPayingLedger(entry); setPayAmount(String(entry.balance)) }}
-                                className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 font-medium">
-                                {T.pay}
-                              </button>
+                      {feeLedger.map(entry => {
+                        const isPending = ['pending','partial','overdue'].includes(entry.status)
+                        const isSelected = selectedLedgerIds.has(entry.id)
+                        return (
+                          <div key={entry.id} className={`px-4 py-3 flex items-center gap-3 hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
+                            {isPending && !payingLedger && (
+                              <input type="checkbox" checked={isSelected}
+                                onChange={e => {
+                                  const next = new Set(selectedLedgerIds)
+                                  if (e.target.checked) next.add(entry.id)
+                                  else next.delete(entry.id)
+                                  setSelectedLedgerIds(next)
+                                }}
+                                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0" />
                             )}
+                            {(!isPending || payingLedger) && <div className="w-4 flex-shrink-0" />}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-800">{entry.category_name}</p>
+                              <p className="text-xs text-gray-400">{entry.period_label} · {T.dueDate} {entry.due_date}</p>
+                            </div>
+                            <div className="flex items-center gap-3 flex-shrink-0">
+                              <div className="text-right">
+                                <p className="text-sm font-bold text-gray-800">{fmt(entry.amount_due)}</p>
+                                {Number(entry.balance) > 0 && <p className="text-xs text-red-500">{T.balance} {fmt(entry.balance)}</p>}
+                              </div>
+                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${STATUS_COLOR[entry.status] || 'bg-gray-100 text-gray-600'}`}>
+                                {entry.status}
+                              </span>
+                              {isPending && !payingLedger && selectedLedgerIds.size === 0 && (
+                                <button onClick={() => { setPayingLedger(entry); setPayAmount(String(entry.balance)); setSelectedLedgerIds(new Set()) }}
+                                  className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 font-medium">
+                                  {T.pay}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Waivers / concessions */}
+                {feeWaivers.length > 0 && (
+                  <div className="bg-purple-50 rounded-xl border border-purple-100 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-purple-100">
+                      <p className="text-xs font-semibold text-purple-700 uppercase tracking-wide">Fee Concessions / Waivers</p>
+                    </div>
+                    <div className="divide-y divide-purple-50">
+                      {feeWaivers.map(w => (
+                        <div key={w.id} className="px-4 py-3 flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-gray-800">{w.category_name} · {w.period_label}</p>
+                            <p className="text-xs text-gray-400">{w.reason}{w.granted_by_name ? ` · Approved by ${w.granted_by_name}` : ''}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-purple-700">−{fmt(w.waiver_amount)}</p>
+                            <p className="text-[10px] text-purple-400 capitalize">{w.waiver_type.replace('_', ' ')} waiver</p>
                           </div>
                         </div>
                       ))}
@@ -1045,18 +1328,36 @@ export default function ParentDashboard() {
                     </div>
                     <div className="divide-y divide-gray-50">
                       {feePayments.map(pmt => (
-                        <div key={pmt.id} className="px-4 py-3 flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-medium text-gray-800">{pmt.category_name} · {pmt.period_label}</p>
-                            <p className="text-xs text-gray-400">{pmt.paid_date} · {pmt.payment_mode.toUpperCase()}{pmt.transaction_ref ? ` · ${pmt.transaction_ref}` : ''}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-sm font-bold text-green-700">{fmt(pmt.amount)}</p>
-                            <div className="flex items-center gap-1.5 justify-end mt-0.5">
-                              <span className="text-[10px] font-mono text-gray-400">{pmt.receipt_number}</span>
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${STATUS_COLOR[pmt.payment_status] || 'bg-gray-100 text-gray-600'}`}>
-                                {pmt.payment_status === 'pending_verification' ? T.pendingVerify : T.confirmed}
-                              </span>
+                        <div key={pmt.id} className={`px-4 py-3 ${pmt.payment_status === 'rejected' ? 'bg-red-50' : ''}`}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-800">{pmt.category_name} · {pmt.period_label}</p>
+                              <p className="text-xs text-gray-400">{pmt.paid_date} · {pmt.payment_mode.toUpperCase()}{pmt.transaction_ref ? ` · ${pmt.transaction_ref}` : ''}</p>
+                              {pmt.payment_status === 'rejected' && pmt.rejection_reason && (
+                                <p className="text-xs text-red-600 mt-1 font-medium">Rejected: {pmt.rejection_reason}</p>
+                              )}
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <p className="text-sm font-bold text-green-700">{fmt(pmt.amount)}</p>
+                              <div className="flex items-center gap-1.5 justify-end mt-0.5">
+                                <span className="text-[10px] font-mono text-gray-400">{pmt.receipt_number}</span>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                  pmt.payment_status === 'completed'           ? 'bg-green-100 text-green-700' :
+                                  pmt.payment_status === 'rejected'            ? 'bg-red-100 text-red-600' :
+                                  'bg-yellow-100 text-yellow-700'
+                                }`}>
+                                  {pmt.payment_status === 'pending_verification' ? T.pendingVerify :
+                                   pmt.payment_status === 'rejected' ? 'Rejected' : T.confirmed}
+                                </span>
+                              </div>
+                              {pmt.payment_status === 'completed' && (
+                                <button
+                                  onClick={() => printParentReceipt(pmt)}
+                                  className="mt-1 text-[10px] text-blue-600 hover:text-blue-800 underline"
+                                >
+                                  Download Receipt
+                                </button>
+                              )}
                             </div>
                           </div>
                         </div>

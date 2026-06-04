@@ -111,11 +111,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 }
 
-// PATCH /api/classes/[id]/subjects — assign teacher to a specific subject
+// PATCH /api/classes/[id]/subjects — edit subject name, teacher, or periods_per_week
+// Body: { subject_id, subject_name?, teacher_id?, periods_per_week? }
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   try {
-    const { subject_id, teacher_id } = await req.json()
+    const { subject_id, teacher_id, periods_per_week, subject_name } = await req.json()
     if (!subject_id) return NextResponse.json({ error: 'subject_id required' }, { status: 400 })
 
     const { rows: [sub] } = await pool.query(
@@ -125,36 +126,68 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     )
     if (!sub) return NextResponse.json({ error: 'Subject not found' }, { status: 404 })
 
-    const tid = teacher_id ? Number(teacher_id) : null
-    await pool.query('UPDATE class_subjects SET teacher_id = $1 WHERE id = $2', [tid, subject_id])
+    const updates: string[] = []
+    const values: (string | number | null)[] = []
 
-    // Propagate to timetable slots (conflict-safe)
-    if (tid) {
+    const newName = subject_name?.trim() || null
+    if (newName && newName !== sub.subject_name) {
+      updates.push(`subject_name = $${values.length + 1}`); values.push(newName)
+    }
+    if (teacher_id !== undefined) {
+      const tid = teacher_id ? Number(teacher_id) : null
+      updates.push(`teacher_id = $${values.length + 1}`); values.push(tid)
+    }
+    if (periods_per_week !== undefined) {
+      const ppw = Math.min(12, Math.max(1, parseInt(periods_per_week) || 4))
+      updates.push(`periods_per_week = $${values.length + 1}`); values.push(ppw)
+    }
+
+    if (updates.length > 0) {
+      values.push(subject_id)
+      await pool.query(`UPDATE class_subjects SET ${updates.join(', ')} WHERE id = $${values.length}`, values)
+    }
+
+    const effectiveName = newName || sub.subject_name
+
+    // If name changed, update timetable slots
+    if (newName && newName !== sub.subject_name) {
       await pool.query(
-        `UPDATE class_timetable ct SET teacher_id = $1
-         WHERE ct.class_id = $2 AND ct.subject_name = $3 AND ct.is_break = FALSE
-           AND ct.teacher_id IS DISTINCT FROM $1
-           AND NOT EXISTS (
-             SELECT 1 FROM class_timetable o
-             WHERE o.school_id = ct.school_id AND o.class_id != ct.class_id
-               AND o.day_of_week = ct.day_of_week AND o.period_number = ct.period_number
-               AND o.teacher_id = $1 AND o.is_break = FALSE
-           )`,
-        [tid, id, sub.subject_name]
+        `UPDATE class_timetable SET subject_name = $1 WHERE class_id = $2 AND subject_name = $3`,
+        [newName, id, sub.subject_name]
       )
+    }
+
+    // If teacher changed, propagate to timetable (conflict-safe)
+    if (teacher_id !== undefined) {
+      const tid = teacher_id ? Number(teacher_id) : null
+      if (tid) {
+        await pool.query(
+          `UPDATE class_timetable ct SET teacher_id = $1
+           WHERE ct.class_id = $2 AND ct.subject_name = $3 AND ct.is_break = FALSE
+             AND ct.teacher_id IS DISTINCT FROM $1
+             AND NOT EXISTS (
+               SELECT 1 FROM class_timetable o
+               WHERE o.school_id = ct.school_id AND o.class_id != ct.class_id
+                 AND o.day_of_week = ct.day_of_week AND o.period_number = ct.period_number
+                 AND o.teacher_id = $1 AND o.is_break = FALSE
+             )`,
+          [tid, id, effectiveName]
+        )
+      }
     }
 
     invalidateCache(`subjects:class:${id}`)
     invalidateCache(`timetable:class:${id}`)
     invalidateCache(`health:${sub.school_id}`)
 
+    const tid = teacher_id !== undefined ? (teacher_id ? Number(teacher_id) : null) : null
     const teacherName = tid
       ? (await pool.query('SELECT name FROM teachers WHERE id = $1', [tid])).rows[0]?.name ?? null
       : null
-    return NextResponse.json({ subject_id, teacher_id: tid, teacher_name: teacherName })
+    return NextResponse.json({ subject_id, teacher_id: tid, teacher_name: teacherName, subject_name: effectiveName })
   } catch (error) {
     console.error(error)
-    return NextResponse.json({ error: 'Failed to assign teacher' }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to update subject' }, { status: 500 })
   }
 }
 

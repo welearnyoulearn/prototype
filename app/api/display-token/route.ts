@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import crypto from 'crypto'
+import { requireSchoolAdmin } from '@/lib/auth'
 
 // GET /api/display-token?school_id=X — list tokens for this school
 export async function GET(req: NextRequest) {
+  if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const school_id = req.nextUrl.searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
   const { rows } = await pool.query(
@@ -15,6 +17,7 @@ export async function GET(req: NextRequest) {
 
 // POST /api/display-token — generate a new token
 export async function POST(req: NextRequest) {
+  if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const { school_id, label } = await req.json()
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
@@ -29,6 +32,7 @@ export async function POST(req: NextRequest) {
 
 // DELETE /api/display-token?id=X
 export async function DELETE(req: NextRequest) {
+  if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const id = req.nextUrl.searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
   await pool.query('DELETE FROM display_tokens WHERE id = $1', [id])

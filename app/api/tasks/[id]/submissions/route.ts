@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { awardPoints } from '@/lib/rewards'
-
-// AUTH DISABLED FOR TESTING — will be re-enabled when all features are complete
+import { getAnySession } from '@/lib/auth'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await getAnySession()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: task_id } = await params
   const school_id  = req.nextUrl.searchParams.get('school_id')
@@ -43,6 +44,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await getAnySession()
+  if (!session || session.role !== 'student') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: task_id } = await params
   const body = await req.json()

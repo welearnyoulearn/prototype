@@ -6,14 +6,14 @@ import { parseCSV } from '@/lib/parseCSV'
 type Props = { schoolId: number; onRefresh?: () => void }
 
 type StudentRow = {
-  name: string; email: string; grade: string; section: string
+  last_name: string; first_name: string; email: string; grade: string; section: string
   parent_name: string; parent_phone: string; parent_email: string; phone: string
 }
 
-const EMPTY_ROW: StudentRow = { name: '', email: '', grade: '', section: '', parent_name: '', parent_phone: '', parent_email: '', phone: '' }
-const CSV_HEADER = 'name,email,grade,section,parent_name,parent_phone,parent_email,phone'
-const CSV_EXAMPLE = `Arjun Mehta,arjun@student.com,10,A,Suresh Mehta,9876543210,suresh@parent.com,
-Priya Patel,priya@student.com,10,A,Ramesh Patel,9876543211,ramesh@parent.com,`
+const EMPTY_ROW: StudentRow = { last_name: '', first_name: '', email: '', grade: '', section: '', parent_name: '', parent_phone: '', parent_email: '', phone: '' }
+const CSV_HEADER = 'last_name,first_name,email,grade,section,parent_name,parent_phone,parent_email,phone'
+const CSV_EXAMPLE = `Mehta,Arjun,arjun@student.com,10,A,Suresh Mehta,9876543210,suresh@parent.com,
+Patel,Priya,priya@student.com,10,A,Ramesh Patel,9876543211,ramesh@parent.com,`
 
 // Staff CSV markers — if uploaded to student form by mistake
 const STAFF_CSV_MARKERS = ['department', 'qualification', 'staff_type', 'subject', 'employee_id', 'teaches_grades']
@@ -68,7 +68,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     if (allRows.length === 0) return
 
     const firstRowLower = allRows[0].map(c => c.toLowerCase().trim())
-    const hasHeader = firstRowLower.some(c => ['name', 'email', 'grade', 'student'].includes(c))
+    const hasHeader = firstRowLower.some(c => ['last_name', 'first_name', 'name', 'email', 'grade', 'student'].includes(c))
 
     // Conflict detection: check if this looks like a staff CSV
     if (hasHeader) {
@@ -81,14 +81,15 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
 
     const dataRows = hasHeader ? allRows.slice(1) : allRows
     const parsed: StudentRow[] = dataRows.map(cols => ({
-      name: cols[0] ?? '',
-      email: cols[1] ?? '',
-      grade: cols[2] ?? filterGrade,
-      section: cols[3] ?? filterSection,
-      parent_name: cols[4] ?? '',
-      parent_phone: cols[5] ?? '',
-      parent_email: cols[6] ?? '',
-      phone: cols[7] ?? '',
+      last_name: cols[0] ?? '',
+      first_name: cols[1] ?? '',
+      email: cols[2] ?? '',
+      grade: cols[3] ?? filterGrade,
+      section: cols[4] ?? filterSection,
+      parent_name: cols[5] ?? '',
+      parent_phone: cols[6] ?? '',
+      parent_email: cols[7] ?? '',
+      phone: cols[8] ?? '',
     }))
     if (parsed.length > 0) { setRows(parsed); setMode('manual') }
   }
@@ -108,23 +109,34 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
   }
 
   async function handleSubmit() {
-    const valid = rows.filter(r => r.name.trim())
-    if (valid.length === 0) { setError('At least one student with a name is required'); return }
+    const valid = rows.filter(r => r.last_name.trim() || r.first_name.trim())
+    if (valid.length === 0) { setError('At least one student name is required'); return }
 
     // Validate required fields
     const missing: string[] = []
     valid.forEach((r, i) => {
-      if (!r.grade.trim()) missing.push(`Row ${i + 1}: Grade is required`)
-      if (!r.section.trim()) missing.push(`Row ${i + 1}: Section is required`)
+      if (!r.last_name.trim())    missing.push(`Row ${i + 1}: Last Name is required`)
+      if (!r.first_name.trim())   missing.push(`Row ${i + 1}: First Name is required`)
+      if (!r.email.trim())        missing.push(`Row ${i + 1}: Student Email is required — login credentials will be sent here`)
+      if (r.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email.trim())) missing.push(`Row ${i + 1}: Invalid email`)
+      if (!r.grade.trim())        missing.push(`Row ${i + 1}: Grade is required`)
+      if (!r.section.trim())      missing.push(`Row ${i + 1}: Section is required`)
+      if (!r.parent_name.trim())  missing.push(`Row ${i + 1}: Parent Name is required`)
+      if (!r.parent_phone.trim()) missing.push(`Row ${i + 1}: Parent Phone is required`)
     })
     if (missing.length > 0) { setError(missing.join(' · ')); return }
+
+    // Combine last_name + first_name → full name sent to API
+    const students = valid.map(({ last_name, first_name, ...rest }) => ({
+      ...rest, name: `${last_name} ${first_name}`.trim(),
+    }))
 
     setSubmitting(true); setError(''); setResult(null); setCsvWarn('')
     try {
       const res = await fetch('/api/students/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, students: valid }),
+        body: JSON.stringify({ school_id: schoolId, students }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
@@ -264,12 +276,13 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-8">#</th>
-                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[130px]">Name *</th>
+                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Last Name <span className="text-red-400">*</span></th>
+                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">First Name <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[140px]">Student Email</th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Grade <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Section <span className="text-red-400">*</span></th>
-                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[120px]">Parent Name</th>
-                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[100px]">Parent Phone</th>
+                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[120px]">Parent Name <span className="text-red-400">*</span></th>
+                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Parent Phone <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[150px] bg-orange-50">Parent Email</th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[100px]">Student Phone</th>
                     <th className="px-3 py-2.5 w-8"></th>
@@ -279,8 +292,9 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                   {rows.map((row, i) => (
                     <tr key={i} className="hover:bg-gray-50">
                       <td className="px-3 py-2 text-gray-400">{i + 1}</td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="Full name" value={row.name} onChange={e => updateRow(i, 'name', e.target.value)} /></td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="Email" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input className={inputCls} placeholder="Last name" value={row.last_name} onChange={e => updateRow(i, 'last_name', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input className={inputCls} placeholder="First name" value={row.first_name} onChange={e => updateRow(i, 'first_name', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input className={`${inputCls} ${!row.email.trim() ? 'border-amber-300' : ''}`} placeholder="Email *" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="10" value={row.grade} onChange={e => updateRow(i, 'grade', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="A" value={row.section} onChange={e => updateRow(i, 'section', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="Parent name" value={row.parent_name} onChange={e => updateRow(i, 'parent_name', e.target.value)} /></td>
@@ -301,8 +315,8 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
             <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
               <button onClick={addRow} className="text-sm text-green-600 hover:text-green-800 font-medium">+ Add Row</button>
               <div className="flex items-center gap-3">
-                <span className="text-xs text-gray-400">{rows.filter(r => r.name.trim()).length} of {rows.length} rows ready</span>
-                <button onClick={handleSubmit} disabled={submitting || rows.every(r => !r.name.trim())}
+                <span className="text-xs text-gray-400">{rows.filter(r => r.last_name.trim() || r.first_name.trim()).length} of {rows.length} rows ready</span>
+                <button onClick={handleSubmit} disabled={submitting || rows.every(r => !r.last_name.trim() && !r.first_name.trim())}
                   className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
                   {submitting ? 'Enrolling...' : 'Enroll Students'}
                 </button>

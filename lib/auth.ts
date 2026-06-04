@@ -3,12 +3,19 @@ import bcrypt from 'bcryptjs'
 import { cookies } from 'next/headers'
 import { NextRequest } from 'next/server'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'wlyl-super-secret-key-change-in-production'
-const COOKIE_NAME = 'wlyl-auth'
-const TEACHER_COOKIE_NAME = 'wlyl-teacher'
+if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET env var must be set in production')
+}
+const JWT_SECRET = process.env.JWT_SECRET || 'wlyl-dev-only-secret-not-for-production'
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
 
-// ─── Admin/platform JWT payload ───────────────────────────────────────────────
+// ─── Cookie names ─────────────────────────────────────────────────────────────
+export const COOKIE_ADMIN   = 'wlyl-auth'
+export const COOKIE_TEACHER = 'wlyl-teacher'
+export const COOKIE_STUDENT = 'wlyl-student'
+export const COOKIE_PARENT  = 'wlyl-parent'
+
+// ─── JWT Payload types ────────────────────────────────────────────────────────
 export type JWTPayload = {
   userId: number
   role: 'platform_admin' | 'school_admin'
@@ -18,12 +25,33 @@ export type JWTPayload = {
   profileCompleted: boolean
 }
 
-// ─── Teacher JWT payload ───────────────────────────────────────────────────────
 export type TeacherJWTPayload = {
   teacherId: number
   schoolId: number
   role: 'teacher'
   passwordChanged: boolean
+  name: string
+  email: string
+}
+
+export type StudentJWTPayload = {
+  studentId: number
+  schoolId: number
+  role: 'student'
+  passwordChanged: boolean
+  name: string
+  grade: string
+  section: string
+  rollNumber: string
+}
+
+export type ParentJWTPayload = {
+  parentId: number
+  schoolId: number
+  role: 'parent'
+  passwordChanged: boolean
+  name: string
+  email: string
 }
 
 // ─── Password helpers ─────────────────────────────────────────────────────────
@@ -42,101 +70,13 @@ export function generateTempPassword(length = 10): string {
   return out
 }
 
-// ─── JWT helpers ──────────────────────────────────────────────────────────────
-export function signToken(payload: JWTPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' })
+export function generateResetToken(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+  let out = ''
+  for (let i = 0; i < 48; i++) out += chars[Math.floor(Math.random() * chars.length)]
+  return out
 }
 
-export function verifyToken(token: string): JWTPayload | null {
-  try {
-    // Strip JWT standard claims (iat, exp, nbf) so they don't conflict
-    // when the payload is spread into a new signToken call
-    const decoded = jwt.verify(token, JWT_SECRET) as JWTPayload & { iat?: number; exp?: number; nbf?: number }
-    const { iat: _iat, exp: _exp, nbf: _nbf, ...payload } = decoded
-    return payload as JWTPayload
-  } catch {
-    return null
-  }
-}
-
-// ─── Cookie helpers (server components / route handlers) ──────────────────────
-export async function setAuthCookie(payload: JWTPayload): Promise<void> {
-  const token = signToken(payload)
-  const cookieStore = await cookies()
-  cookieStore.set(COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: COOKIE_MAX_AGE,
-    path: '/',
-  })
-}
-
-export async function clearAuthCookie(): Promise<void> {
-  const cookieStore = await cookies()
-  cookieStore.delete(COOKIE_NAME)
-}
-
-export async function getSession(): Promise<JWTPayload | null> {
-  const cookieStore = await cookies()
-  const token = cookieStore.get(COOKIE_NAME)?.value
-  if (!token) return null
-  return verifyToken(token)
-}
-
-// ─── Teacher cookie helpers ────────────────────────────────────────────────────
-export function signTeacherToken(payload: TeacherJWTPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' })
-}
-
-export function verifyTeacherToken(token: string): TeacherJWTPayload | null {
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET) as TeacherJWTPayload & { iat?: number; exp?: number }
-    const { iat: _iat, exp: _exp, ...payload } = decoded
-    return payload as TeacherJWTPayload
-  } catch {
-    return null
-  }
-}
-
-export async function setTeacherAuthCookie(payload: TeacherJWTPayload): Promise<void> {
-  const token = signTeacherToken(payload)
-  const cookieStore = await cookies()
-  cookieStore.set(TEACHER_COOKIE_NAME, token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: COOKIE_MAX_AGE,
-    path: '/',
-  })
-}
-
-export async function clearTeacherAuthCookie(): Promise<void> {
-  const cookieStore = await cookies()
-  cookieStore.delete(TEACHER_COOKIE_NAME)
-}
-
-export async function getTeacherSession(): Promise<TeacherJWTPayload | null> {
-  const cookieStore = await cookies()
-  const token = cookieStore.get(TEACHER_COOKIE_NAME)?.value
-  if (!token) return null
-  return verifyTeacherToken(token)
-}
-
-export function getTeacherSessionFromRequest(req: NextRequest): TeacherJWTPayload | null {
-  const token = req.cookies.get(TEACHER_COOKIE_NAME)?.value
-  if (!token) return null
-  return verifyTeacherToken(token)
-}
-
-// ─── Middleware token extraction (Edge runtime) ───────────────────────────────
-export function getSessionFromRequest(req: NextRequest): JWTPayload | null {
-  const token = req.cookies.get(COOKIE_NAME)?.value
-  if (!token) return null
-  return verifyToken(token)
-}
-
-// ─── School code generator ────────────────────────────────────────────────────
 export function generateSchoolCode(schoolName: string, schoolId: number): string {
   const slug = schoolName
     .toLowerCase()
@@ -147,25 +87,134 @@ export function generateSchoolCode(schoolName: string, schoolId: number): string
   return `wlyl-schl-${slug}-${schoolId}`
 }
 
-// ─── Platform Admin API guard ─────────────────────────────────────────────────
-// Use in API route handlers to reject non-platform-admin requests.
+// ─── Generic JWT helpers ──────────────────────────────────────────────────────
+function sign<T extends object>(payload: T): string {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' })
+}
+
+function verify<T extends object>(token: string): T | null {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as T & { iat?: number; exp?: number }
+    const { iat: _i, exp: _e, ...payload } = decoded as T & { iat?: number; exp?: number }
+    return payload as T
+  } catch {
+    return null
+  }
+}
+
+async function setCookie(name: string, value: string) {
+  const cookieStore = await cookies()
+  cookieStore.set(name, value, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: COOKIE_MAX_AGE,
+    path: '/',
+  })
+}
+
+async function clearCookie(name: string) {
+  const cookieStore = await cookies()
+  cookieStore.delete(name)
+}
+
+// ─── Admin / Platform JWT ─────────────────────────────────────────────────────
+export function signToken(payload: JWTPayload): string         { return sign(payload) }
+export function verifyToken(token: string): JWTPayload | null  { return verify<JWTPayload>(token) }
+export async function setAuthCookie(payload: JWTPayload)       { await setCookie(COOKIE_ADMIN, signToken(payload)) }
+export async function clearAuthCookie()                        { await clearCookie(COOKIE_ADMIN) }
+
+export async function getSession(): Promise<JWTPayload | null> {
+  const cookieStore = await cookies()
+  const token = cookieStore.get(COOKIE_ADMIN)?.value
+  if (!token) return null
+  return verifyToken(token)
+}
+
+export function getSessionFromRequest(req: NextRequest): JWTPayload | null {
+  const token = req.cookies.get(COOKIE_ADMIN)?.value
+  if (!token) return null
+  return verifyToken(token)
+}
+
 export async function requirePlatformAdmin(): Promise<JWTPayload | null> {
   const session = await getSession()
   if (!session || session.role !== 'platform_admin') return null
   return session
 }
 
-// ─── School Admin API guard ───────────────────────────────────────────────────
 export async function requireSchoolAdmin(): Promise<JWTPayload | null> {
   const session = await getSession()
   if (!session || session.role !== 'school_admin') return null
   return session
 }
 
-// ─── Reset token generator ────────────────────────────────────────────────────
-export function generateResetToken(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
-  let out = ''
-  for (let i = 0; i < 48; i++) out += chars[Math.floor(Math.random() * chars.length)]
-  return out
+// ─── Teacher JWT ──────────────────────────────────────────────────────────────
+export function signTeacherToken(payload: TeacherJWTPayload): string              { return sign(payload) }
+export function verifyTeacherToken(token: string): TeacherJWTPayload | null       { return verify<TeacherJWTPayload>(token) }
+export async function setTeacherAuthCookie(payload: TeacherJWTPayload)            { await setCookie(COOKIE_TEACHER, signTeacherToken(payload)) }
+export async function clearTeacherAuthCookie()                                    { await clearCookie(COOKIE_TEACHER) }
+
+export async function getTeacherSession(): Promise<TeacherJWTPayload | null> {
+  const cookieStore = await cookies()
+  const token = cookieStore.get(COOKIE_TEACHER)?.value
+  if (!token) return null
+  return verifyTeacherToken(token)
+}
+
+export function getTeacherSessionFromRequest(req: NextRequest): TeacherJWTPayload | null {
+  const token = req.cookies.get(COOKIE_TEACHER)?.value
+  if (!token) return null
+  return verifyTeacherToken(token)
+}
+
+// ─── Student JWT ──────────────────────────────────────────────────────────────
+export function signStudentToken(payload: StudentJWTPayload): string              { return sign(payload) }
+export function verifyStudentToken(token: string): StudentJWTPayload | null       { return verify<StudentJWTPayload>(token) }
+export async function setStudentAuthCookie(payload: StudentJWTPayload)            { await setCookie(COOKIE_STUDENT, signStudentToken(payload)) }
+export async function clearStudentAuthCookie()                                    { await clearCookie(COOKIE_STUDENT) }
+
+export async function getStudentSession(): Promise<StudentJWTPayload | null> {
+  const cookieStore = await cookies()
+  const token = cookieStore.get(COOKIE_STUDENT)?.value
+  if (!token) return null
+  return verifyStudentToken(token)
+}
+
+export function getStudentSessionFromRequest(req: NextRequest): StudentJWTPayload | null {
+  const token = req.cookies.get(COOKIE_STUDENT)?.value
+  if (!token) return null
+  return verifyStudentToken(token)
+}
+
+// ─── Parent JWT ───────────────────────────────────────────────────────────────
+export function signParentToken(payload: ParentJWTPayload): string                { return sign(payload) }
+export function verifyParentToken(token: string): ParentJWTPayload | null         { return verify<ParentJWTPayload>(token) }
+export async function setParentAuthCookie(payload: ParentJWTPayload)              { await setCookie(COOKIE_PARENT, signParentToken(payload)) }
+export async function clearParentAuthCookie()                                     { await clearCookie(COOKIE_PARENT) }
+
+export async function getParentSession(): Promise<ParentJWTPayload | null> {
+  const cookieStore = await cookies()
+  const token = cookieStore.get(COOKIE_PARENT)?.value
+  if (!token) return null
+  return verifyParentToken(token)
+}
+
+export function getParentSessionFromRequest(req: NextRequest): ParentJWTPayload | null {
+  const token = req.cookies.get(COOKIE_PARENT)?.value
+  if (!token) return null
+  return verifyParentToken(token)
+}
+
+// ─── Any authenticated session ────────────────────────────────────────────────
+// Returns the schoolId and role for whichever session cookie is present.
+// Used on routes accessible by teachers, students, and school admins alike.
+export async function getAnySession(): Promise<{ schoolId: number; role: string } | null> {
+  const teacher = await getTeacherSession()
+  if (teacher) return { schoolId: teacher.schoolId, role: 'teacher' }
+  const student = await getStudentSession()
+  if (student) return { schoolId: student.schoolId, role: 'student' }
+  const admin = await getSession()
+  if (admin && admin.schoolId) return { schoolId: admin.schoolId, role: admin.role }
+  return null
 }

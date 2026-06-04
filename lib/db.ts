@@ -50,6 +50,28 @@ export async function initDB() {
   // sentinel was set. These run on every cold start (fast: IF NOT EXISTS guard).
   await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS board VARCHAR(20)`)
 
+  // ── Parent authentication ──────────────────────────────────────────────────
+  await pool.query(`ALTER TABLE parents ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)`)
+  await pool.query(`ALTER TABLE parents ADD COLUMN IF NOT EXISTS password_changed BOOLEAN DEFAULT FALSE`)
+  await pool.query(`ALTER TABLE parents ADD COLUMN IF NOT EXISTS school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE`)
+  // Deduplicate parents by email before creating unique index (keep lowest id)
+  await pool.query(`
+    DELETE FROM parents
+    WHERE id NOT IN (
+      SELECT MIN(id) FROM parents WHERE email IS NOT NULL GROUP BY email
+    ) AND email IS NOT NULL
+  `)
+  // Allow one parent account per email (across schools via parent_email on students)
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS parents_email_unique ON parents(email) WHERE email IS NOT NULL`)
+
+  // ── Extend password_reset_tokens to support all roles (not just users) ─────
+  await pool.query(`ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'admin'`)
+  await pool.query(`ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS reference_id INTEGER`)
+
+  // ── Multi-role school staff + platform admin team ─────────────────────────
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(255)`)
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active'`)
+
   // ── Two-tier rewards: points_type splits academic vs marketplace ──────────────
   await pool.query(`ALTER TABLE student_points ADD COLUMN IF NOT EXISTS points_type VARCHAR(20) DEFAULT 'academic'`)
 
@@ -113,6 +135,54 @@ export async function initDB() {
   await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS reading_passage JSONB`)
   await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS writing_prompt JSONB`)
   await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS speaking_sentences JSONB`)
+
+  // ── Fee management extended schema ───────────────────────────────────────────
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_structure_locks (
+      id            SERIAL PRIMARY KEY,
+      school_id     INTEGER NOT NULL,
+      academic_year TEXT    NOT NULL,
+      locked_by     TEXT    NOT NULL,
+      locked_at     TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, academic_year)
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_structure_amendments (
+      id               SERIAL PRIMARY KEY,
+      school_id        INTEGER NOT NULL,
+      fee_structure_id INTEGER REFERENCES fee_structures(id) ON DELETE SET NULL,
+      fee_category_id  INTEGER REFERENCES fee_categories(id) ON DELETE CASCADE,
+      grade            TEXT    NOT NULL,
+      academic_year    TEXT    NOT NULL,
+      old_amount       NUMERIC(10,2) NOT NULL,
+      new_amount       NUMERIC(10,2) NOT NULL,
+      effective_from   DATE    NOT NULL DEFAULT CURRENT_DATE,
+      reason           TEXT    NOT NULL,
+      changed_by       TEXT    NOT NULL,
+      created_at       TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS student_fee_ledger_edits (
+      id            SERIAL PRIMARY KEY,
+      ledger_id     INTEGER NOT NULL REFERENCES student_fee_ledger(id) ON DELETE CASCADE,
+      school_id     INTEGER NOT NULL,
+      student_id    INTEGER NOT NULL,
+      old_amount    NUMERIC(10,2) NOT NULL,
+      new_amount    NUMERIC(10,2) NOT NULL,
+      reason        TEXT    NOT NULL,
+      changed_by    TEXT    NOT NULL,
+      changed_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS verified_by      TEXT`)
+  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS verified_at      TIMESTAMPTZ`)
+  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS rejection_reason TEXT`)
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_student_fee_ledger_entry
+    ON student_fee_ledger (student_id, fee_category_id, academic_year, period_label)
+  `)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS student_hub_completions (
       id SERIAL PRIMARY KEY,

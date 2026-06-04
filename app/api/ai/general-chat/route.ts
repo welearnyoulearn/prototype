@@ -5,11 +5,13 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getTextbookContext } from '@/lib/textbook-search'
+import { getAnySession } from '@/lib/auth'
 
 const GROQ_URL   = 'https://api.groq.com/openai/v1/chat/completions'
 const GROQ_MODEL = 'llama-3.3-70b-versatile'
 
 export async function POST(req: NextRequest) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const { messages, mode, grade, name, syllabusContext, school_id, subject } = await req.json()
 
   if (!Array.isArray(messages) || messages.length === 0)

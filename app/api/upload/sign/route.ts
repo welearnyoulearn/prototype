@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { v2 as cloudinary } from 'cloudinary'
 import { ensureDB } from '@/lib/db'
-
-// AUTH DISABLED FOR TESTING — will be re-enabled when all features are complete
+import { getAnySession } from '@/lib/auth'
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -11,7 +10,8 @@ cloudinary.config({
 })
 
 export async function POST(req: NextRequest) {
-
+  const session = await getAnySession()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   if (!process.env.CLOUDINARY_API_SECRET) {
     return NextResponse.json({ error: 'Cloudinary not configured' }, { status: 500 })

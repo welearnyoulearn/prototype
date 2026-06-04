@@ -31,7 +31,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params
   try {
     const body = await req.json()
-    const { name, type, city, country, status, phone, email, address, logo_url, grading_scheme, board, restore } = body
+    const { name, type, city, country, status, phone, email, address, logo_url, grading_scheme, board, upi_id, restore } = body
 
     // Restore a soft-deleted school
     if (restore) {
@@ -40,6 +40,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       )
       return NextResponse.json(r.rows[0])
     }
+
+    await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS upi_id TEXT`)
 
     const result = await pool.query(
       `UPDATE schools SET
@@ -53,13 +55,15 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         address        = COALESCE($8,  address),
         logo_url       = COALESCE($9,  logo_url),
         grading_scheme = COALESCE($10, grading_scheme),
-        board          = COALESCE($11, board)
+        board          = COALESCE($11, board),
+        upi_id         = COALESCE($13, upi_id)
        WHERE id = $12 RETURNING *`,
       [name, type, city, country, status, phone, email, address,
        logo_url,
        grading_scheme !== undefined ? JSON.stringify(grading_scheme) : null,
        board ?? null,
-       id]
+       id,
+       upi_id ?? null]
     )
     if (result.rowCount === 0) return NextResponse.json({ error: 'School not found' }, { status: 404 })
     return NextResponse.json(result.rows[0])

@@ -263,37 +263,6 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
           </select>
         </div>
 
-        {/* Section-wise chips */}
-        <div className="flex gap-2 mb-4 flex-wrap">
-          {Array.from(new Set(
-            displayStudents
-              .filter(s => s.grade && s.section)
-              .map(s => `${s.grade}-${(s.section ?? '').toUpperCase()}`)
-          ))
-            .sort((a, b) => {
-              const [ga, sa] = a.split('-'); const [gb, sb] = b.split('-')
-              const n = (parseInt(ga) || 0) - (parseInt(gb) || 0)
-              return n !== 0 ? n : sa.localeCompare(sb)
-            })
-            .map(key => {
-              const [g, sec] = key.split('-')
-              const count = displayStudents.filter(s => s.grade === g && (s.section ?? '').toUpperCase() === sec).length
-              const active = gradeFilter === g && sectionFilter.toUpperCase() === sec
-              return (
-                <button key={key}
-                  onClick={() => {
-                    if (active) { setGradeFilter('all'); setSectionFilter('all') }
-                    else { setGradeFilter(g); setSectionFilter(sec) }
-                  }}
-                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                    active ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-200 hover:border-green-300'
-                  }`}>
-                  Gr.{g}-{sec} · {count}
-                </button>
-              )
-            })}
-        </div>
-
         {filtered.length === 0 ? (
           <div className="bg-white rounded-xl border border-gray-200 py-12 text-center">
             <p className="text-gray-400">No students found</p>
@@ -377,8 +346,8 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
       {/* Right: Detail panel */}
       {selected && (
         <div className="w-72 flex-shrink-0">
-          <div className="bg-white rounded-xl border border-gray-200 sticky top-6">
-            <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+          <div className="bg-white rounded-xl border border-gray-200 sticky top-6 flex flex-col max-h-[calc(100vh-6rem)] overflow-hidden">
+            <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
               <div className="flex gap-1">
                 {(['info', 'performance'] as const).map(t => (
                   <button key={t} onClick={() => {
@@ -393,6 +362,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
               <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
             </div>
 
+            <div className="overflow-y-auto flex-1">
             {detailTab === 'performance' ? (
               <div className="px-5 py-5">
                 {/* Avatar header */}
@@ -558,6 +528,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
               )}
             </div>
             </>) /* end info tab */}
+            </div> {/* end scroll wrapper */}
 
           </div>
         </div>

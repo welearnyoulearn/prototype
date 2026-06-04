@@ -4,8 +4,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { analyzeDoubtPatterns } from '@/lib/gemini'
+import { getAnySession } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const p          = req.nextUrl.searchParams
   const school_id  = p.get('school_id')
   const teacher_id = p.get('teacher_id')

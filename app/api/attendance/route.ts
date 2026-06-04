@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import nodemailer from 'nodemailer'
+import { getAnySession } from '@/lib/auth'
 
 // GET /api/attendance
 //   ?school_id=X&date=YYYY-MM-DD&view=school                           → school-wide: all classes attendance status for that day
@@ -9,6 +10,8 @@ import nodemailer from 'nodemailer'
 //   ?class_id=X&school_id=X&previous=true&session=morning|afternoon    → last recorded date for that session
 //   ?class_id=X&school_id=X&date=YYYY-MM-DD&summary=true               → per-session summary (who marked, counts)
 export async function GET(req: NextRequest) {
+  const authSession = await getAnySession()
+  if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = req.nextUrl
   const class_id  = searchParams.get('class_id')
@@ -199,6 +202,8 @@ export async function GET(req: NextRequest) {
 // POST /api/attendance
 // Body: { school_id, class_id, teacher_id, date, session: 'morning'|'afternoon', records: [{ student_id, status }] }
 export async function POST(req: NextRequest) {
+  const auth = await getAnySession()
+  if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
     const { school_id, class_id, teacher_id, date, session, records } = await req.json()

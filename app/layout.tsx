@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "VLearnUlearn – School Management Platform",
+  title: "We Learn You Learn – School Management Platform",
   description: "Multi-tenant school management and learning platform",
 };
 

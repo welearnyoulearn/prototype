@@ -11,7 +11,10 @@ export async function POST(req: NextRequest) {
 
     const { email, password, secret } = await req.json()
 
-    if (secret !== (process.env.SETUP_SECRET || 'wlyl-setup-2024')) {
+    if (!process.env.SETUP_SECRET) {
+      return NextResponse.json({ error: 'Setup endpoint is disabled — SETUP_SECRET not configured' }, { status: 503 })
+    }
+    if (secret !== process.env.SETUP_SECRET) {
       return NextResponse.json({ error: 'Invalid setup secret' }, { status: 403 })
     }
 

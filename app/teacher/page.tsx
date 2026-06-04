@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import Link from 'next/link'
+import { useEffect, useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import SmartSnapshot from './components/SmartSnapshot'
 import ClassView from './components/ClassView'
 import FullTimetable from './components/FullTimetable'
@@ -18,8 +18,6 @@ import NotificationBell from '../components/NotificationBell'
 import TestCalendar from '../components/TestCalendar'
 import FloatingAIChat from '../components/FloatingAIChat'
 
-type School = { id: number; name: string; city: string; country: string; status: string }
-type TeacherBasic = { id: number; name: string; employee_id: string; subject: string; department: string }
 type Teacher = {
   id: number
   name: string
@@ -36,17 +34,13 @@ type Teacher = {
   class_teacher_section: string | null
   status: string
   school_id: number
+  school_name: string
+  school_city: string
 }
 
 type HODAssignment = {
   is_hod: boolean
-  // Multiple assignments: teacher can be HOD for Physics Gr9A+9B AND Physics Gr10A+10B
-  assignments: {
-    id: number
-    department: string
-    teacher_id: number
-    class_ids: number[]
-  }[]
+  assignments: { id: number; department: string; teacher_id: number; class_ids: number[] }[]
 }
 
 type NavSection = {
@@ -90,30 +84,27 @@ const NAV_SECTIONS: NavSection[] = [
   },
 ]
 
-
-const LS_KEY = 'wlyl_teacher_session'
-
 export default function TeacherPortal() {
-  const [schools, setSchools] = useState<School[]>([])
-  const [selectedSchoolId, setSelectedSchoolId] = useState('')
-  const [teachers, setTeachers] = useState<TeacherBasic[]>([])
-  const [selectedTeacherId, setSelectedTeacherId] = useState('')
-  const [teacher, setTeacher] = useState<Teacher | null>(null)
+  const router = useRouter()
+  const [teacher, setTeacher]     = useState<Teacher | null>(null)
+  const [hodData, setHodData]     = useState<HODAssignment | null>(null)
+  const [loading, setLoading]     = useState(true)
   const [activeNav, setActiveNav] = useState('snapshot')
   const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set(['snapshot']))
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  function navigateTo(key: string) { setActiveNav(key); setVisitedNav(prev => new Set([...prev, key])); setSidebarOpen(false) }
   const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null } | null>(null)
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
   const [classViewOpenExamId, setClassViewOpenExamId] = useState<number | undefined>(undefined)
-  const [loading, setLoading] = useState(true)
-  const [profileLoading, setProfileLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [hodData, setHodData] = useState<HODAssignment | null>(null)
+
+  function navigateTo(key: string) {
+    setActiveNav(key)
+    setVisitedNav(prev => new Set([...prev, key]))
+    setSidebarOpen(false)
+  }
 
   function handleNavigate(key: string, payload?: { examId?: number; classId?: number; tab?: string }) {
-    if (key === 'class-view' && payload?.classId) {
-      fetch(`/api/classes/${payload.classId}?school_id=${selectedSchoolId}`)
+    if (key === 'class-view' && payload?.classId && teacher) {
+      fetch(`/api/classes/${payload.classId}?school_id=${teacher.school_id}`)
         .then(r => r.json())
         .then(data => {
           if (data?.id) {
@@ -122,8 +113,7 @@ export default function TeacherPortal() {
             setClassViewOpenExamId(payload.examId)
             navigateTo('class-view')
           }
-        })
-        .catch(() => {})
+        }).catch(() => {})
     } else {
       setClassViewInitialTab(undefined)
       setClassViewOpenExamId(undefined)
@@ -131,127 +121,61 @@ export default function TeacherPortal() {
     }
   }
 
-  // Load schools, then auto-restore saved session from localStorage
+  const handleLogout = useCallback(async () => {
+    await fetch('/api/teacher/auth/logout', { method: 'POST' })
+    router.push('/teacher/login')
+  }, [router])
+
+  // Fetch teacher identity from session cookie
   useEffect(() => {
-    fetch('/api/schools')
-      .then(r => r.json())
-      .then((data: School[]) => {
-        const active = data.filter(s => s.status === 'active')
-        setSchools(active)
-        // Try to restore previous session
-        try {
-          const saved = localStorage.getItem(LS_KEY)
-          if (saved) {
-            const { schoolId, teacherId } = JSON.parse(saved)
-            if (active.find(s => s.id === parseInt(schoolId))) {
-              setSelectedSchoolId(String(schoolId))
-              setSelectedTeacherId(String(teacherId))
-            }
-          }
-        } catch { /* ignore */ }
+    fetch('/api/teacher/auth/me')
+      .then(async r => {
+        if (r.status === 401) { router.push('/teacher/login'); return null }
+        return r.json()
       })
-      .catch(() => setError('Cannot connect to database'))
+      .then(data => {
+        if (!data) return
+        setTeacher(data)
+        // Fetch HOD status
+        return fetch(`/api/hod?school_id=${data.school_id}&teacher_id=${data.id}`)
+          .then(r => r.json())
+          .then(hod => setHodData(hod))
+          .catch(() => setHodData({ is_hod: false, assignments: [] }))
+      })
+      .catch(() => router.push('/teacher/login'))
       .finally(() => setLoading(false))
-  }, [])
-
-  useEffect(() => {
-    if (!selectedSchoolId) { setTeachers([]); setSelectedTeacherId(''); return }
-    fetch(`/api/teachers?school_id=${selectedSchoolId}&staff_type=teaching`)
-      .then(r => r.json())
-      .then(data => { setTeachers(Array.isArray(data) ? data : []) })
-  }, [selectedSchoolId])
-
-  useEffect(() => {
-    if (!selectedTeacherId) { setTeacher(null); setHodData(null); return }
-    setProfileLoading(true)
-    setHodData(null)
-    Promise.all([
-      fetch(`/api/teachers/${selectedTeacherId}`).then(r => r.json()),
-      fetch(`/api/hod?school_id=${selectedSchoolId}&teacher_id=${selectedTeacherId}`).then(r => r.json()).catch(() => ({ is_hod: false })),
-    ]).then(([teacherData, hodResult]) => {
-      setTeacher(teacherData)
-      setHodData(hodResult)
-      try { localStorage.setItem(LS_KEY, JSON.stringify({ schoolId: selectedSchoolId, teacherId: selectedTeacherId })) } catch { /* ignore */ }
-    }).finally(() => setProfileLoading(false))
-  }, [selectedTeacherId, selectedSchoolId])
-
-  const selectedSchool = schools.find(s => s.id === parseInt(selectedSchoolId))
+  }, [router])
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-gray-400">Loading...</p>
+        <div className="text-center">
+          <div className="w-10 h-10 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-gray-400 text-sm">Loading your portal...</p>
+        </div>
       </div>
     )
   }
 
-  if (!teacher) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4">
-          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Home</Link>
-          <span className="text-gray-300">|</span>
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-blue-900 rounded-lg flex items-center justify-center">
-              <span className="text-white text-xs font-bold">W</span>
-            </div>
-            <span className="font-bold text-gray-900">WLYL</span>
-          </div>
-          <span className="bg-green-100 text-green-700 text-xs font-medium px-3 py-1 rounded-full ml-auto">Teacher Portal</span>
-        </div>
-        <div className="max-w-md mx-auto px-6 py-16">
-          {error && (
-            <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>
-          )}
-          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center mb-6">
-            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-            </div>
-            <h1 className="text-xl font-bold text-gray-900 mb-1">Teacher Portal</h1>
-            <p className="text-sm text-gray-500">Select your school and name to continue</p>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">School</label>
-              <select value={selectedSchoolId} onChange={e => setSelectedSchoolId(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
-                <option value="">— Select school —</option>
-                {schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Your Name</label>
-              <select value={selectedTeacherId} onChange={e => setSelectedTeacherId(e.target.value)}
-                disabled={!selectedSchoolId || teachers.length === 0}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:opacity-50">
-                <option value="">— Select teacher —</option>
-                {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            </div>
-            {profileLoading && <p className="text-center text-sm text-gray-400">Loading profile...</p>}
-          </div>
-        </div>
-      </div>
-    )
-  }
+  if (!teacher) return null
+
+  const hour = new Date().getHours()
+  const greeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening'
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-100">
+      {/* Top bar */}
       <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between flex-shrink-0 z-30">
         <div className="flex items-center gap-2 sm:gap-3">
           <button onClick={() => setSidebarOpen(o => !o)} className="lg:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
-          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm hidden sm:inline">← Home</Link>
-          <span className="text-gray-200 hidden sm:inline">|</span>
           <nav className="hidden sm:flex items-center gap-1 text-sm text-gray-400">
-            <span>Home</span>
+            <span>Teacher Portal</span>
             <span>/</span>
             {activeNav === 'class-view' && selectedClass ? (
               <>
-                <button onClick={() => navigateTo('snapshot')} className="hover:text-blue-600 transition-colors">Smart Snapshot</button>
+                <button onClick={() => navigateTo('snapshot')} className="hover:text-emerald-600 transition-colors">Smart Snapshot</button>
                 <span>/</span>
                 <span className="text-gray-700 font-medium">Class {selectedClass.grade}{selectedClass.section}</span>
               </>
@@ -263,36 +187,35 @@ export default function TeacherPortal() {
           </nav>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
-          <p className="hidden sm:block text-sm font-medium text-gray-800">
-            Good {new Date().getHours() < 12 ? 'Morning' : new Date().getHours() < 17 ? 'Afternoon' : 'Evening'}, {teacher.name}
-          </p>
+          <p className="hidden sm:block text-sm font-medium text-gray-800">{greeting}, {teacher.name}</p>
           <NotificationBell teacherId={teacher.id} onNavigate={handleNavigate} />
-          <button onClick={() => { setTeacher(null); setSelectedTeacherId('') }}
-            className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-2 py-1 rounded">
-            Switch
+          <button
+            onClick={handleLogout}
+            className="text-xs text-gray-400 hover:text-red-600 border border-gray-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+            Logout
           </button>
         </div>
       </div>
 
       <div className="flex flex-1 min-h-0 relative">
         {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+
         <aside className={`fixed inset-y-0 left-0 z-40 lg:relative lg:inset-y-auto lg:left-auto w-52 bg-slate-900 flex-shrink-0 flex flex-col transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
           <div className="px-4 py-4 border-b border-slate-700">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center flex-shrink-0">
+              <div className="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center flex-shrink-0">
                 <span className="text-white text-sm font-bold">W</span>
               </div>
               <span className="text-white font-bold text-base">WLYL</span>
             </div>
-            {selectedSchool && (
-              <p className="text-slate-400 text-xs mt-2 leading-tight">{selectedSchool.name}</p>
-            )}
+            <p className="text-slate-400 text-xs mt-2 leading-tight">{teacher.school_name}</p>
           </div>
 
           <nav className="flex-1 py-3 overflow-y-auto">
             {NAV_SECTIONS.map(section => {
               const visibleItems = section.items.filter(item => {
-                // Syllabus Mgmt only visible to HOD teachers
                 if (item.key === 'syllabus') return hodData?.is_hod === true
                 return true
               })
@@ -301,20 +224,16 @@ export default function TeacherPortal() {
                 <div key={section.label} className="mb-2">
                   <p className="px-4 py-1.5 text-[10px] font-semibold text-slate-500 uppercase tracking-widest">{section.label}</p>
                   {visibleItems.map(item => (
-                    <button key={item.key} onClick={() => {
-                      if (item.comingSoon) return
-                      navigateTo(item.key)
-                    }}
+                    <button key={item.key}
+                      onClick={() => { if (!item.comingSoon) navigateTo(item.key) }}
                       className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors text-left ${
                         item.comingSoon ? 'text-slate-600 cursor-not-allowed'
-                          : activeNav === item.key ? 'bg-blue-600 text-white'
+                          : activeNav === item.key ? 'bg-emerald-600 text-white'
                           : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                       }`}>
                       {item.icon}
                       <span>{item.label}</span>
-                      {item.key === 'syllabus' && (
-                        <span className="ml-auto text-[9px] bg-emerald-500 text-white px-1.5 py-0.5 rounded font-medium">HOD</span>
-                      )}
+                      {item.key === 'syllabus' && <span className="ml-auto text-[9px] bg-emerald-500 text-white px-1.5 py-0.5 rounded font-medium">HOD</span>}
                       {item.comingSoon && <span className="ml-auto text-[9px] text-slate-600 font-medium">Soon</span>}
                     </button>
                   ))}
@@ -324,7 +243,7 @@ export default function TeacherPortal() {
           </nav>
 
           <div className="px-4 py-4 border-t border-slate-700 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+            <div className="w-9 h-9 rounded-full bg-emerald-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
               {teacher.name?.charAt(0)?.toUpperCase() ?? '?'}
             </div>
             <div className="min-w-0">
@@ -338,43 +257,31 @@ export default function TeacherPortal() {
           </div>
         </aside>
 
-        {/* Floating AI Assistant */}
-        <FloatingAIChat
-          mode="teacher"
-          teacherId={teacher.id}
-          teacherName={teacher.name}
-          teacherSubject={teacher.subject}
-        />
+        <FloatingAIChat mode="teacher" teacherId={teacher.id} teacherName={teacher.name} teacherSubject={teacher.subject} />
 
         <main className="flex-1 overflow-y-auto p-3 sm:p-6">
-          {visitedNav.has('snapshot') && <div hidden={activeNav !== 'snapshot'}><SmartSnapshot teacher={teacher} schoolId={parseInt(selectedSchoolId)} onNavigate={navigateTo} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} /></div>}
-          {/* class-view remounts on class change via key */}
-          {visitedNav.has('class-view') && selectedClass && <div hidden={activeNav !== 'class-view'}><ClassView key={selectedClass.id} classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section} schoolId={parseInt(selectedSchoolId)} teacherName={teacher.name} teacherId={teacher.id} isClassTeacher={teacher.class_teacher_grade === selectedClass.grade && teacher.class_teacher_section === selectedClass.section} teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} onBack={() => navigateTo('snapshot')} initialTab={classViewInitialTab} openExamId={classViewOpenExamId} /></div>}
-          {visitedNav.has('timetable')     && <div hidden={activeNav !== 'timetable'}><FullTimetable teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} /></div>}
-          {visitedNav.has('attendance')    && <div hidden={activeNav !== 'attendance'}><Attendance teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} /></div>}
-          {visitedNav.has('leave')         && <div hidden={activeNav !== 'leave'}><TeacherLeave teacherId={teacher.id} schoolId={parseInt(selectedSchoolId)} /></div>}
-          {visitedNav.has('profile')       && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher} /></div>}
-          {visitedNav.has('tasks')         && <div hidden={activeNav !== 'tasks'}><TasksPage teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={parseInt(selectedSchoolId)} /></div>}
-          {visitedNav.has('my-classes')    && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={parseInt(selectedSchoolId)} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} /></div>}
-          {visitedNav.has('my-students')   && <div hidden={activeNav !== 'my-students'}><MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={parseInt(selectedSchoolId)} /></div>}
-          {visitedNav.has('doubts')        && <div hidden={activeNav !== 'doubts'}><DoubtsCenter teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject }} schoolId={parseInt(selectedSchoolId)} /></div>}
-          {visitedNav.has('syllabus')      && hodData?.is_hod && hodData.assignments?.length > 0 && (
+          {visitedNav.has('snapshot')       && <div hidden={activeNav !== 'snapshot'}><SmartSnapshot teacher={teacher} schoolId={teacher.school_id} onNavigate={navigateTo} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} /></div>}
+          {visitedNav.has('class-view') && selectedClass && <div hidden={activeNav !== 'class-view'}><ClassView key={selectedClass.id} classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section} schoolId={teacher.school_id} teacherName={teacher.name} teacherId={teacher.id} isClassTeacher={teacher.class_teacher_grade === selectedClass.grade && teacher.class_teacher_section === selectedClass.section} teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} onBack={() => navigateTo('snapshot')} initialTab={classViewInitialTab} openExamId={classViewOpenExamId} /></div>}
+          {visitedNav.has('timetable')      && <div hidden={activeNav !== 'timetable'}><FullTimetable teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
+          {visitedNav.has('attendance')     && <div hidden={activeNav !== 'attendance'}><Attendance teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
+          {visitedNav.has('leave')          && <div hidden={activeNav !== 'leave'}><TeacherLeave teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
+          {visitedNav.has('profile')        && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher as (t: unknown) => void} /></div>}
+          {visitedNav.has('tasks')          && <div hidden={activeNav !== 'tasks'}><TasksPage teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
+          {visitedNav.has('my-classes')     && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} /></div>}
+          {visitedNav.has('my-students')    && <div hidden={activeNav !== 'my-students'}><MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
+          {visitedNav.has('doubts')         && <div hidden={activeNav !== 'doubts'}><DoubtsCenter teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject }} schoolId={teacher.school_id} /></div>}
+          {visitedNav.has('syllabus') && hodData?.is_hod && hodData.assignments?.length > 0 && (
             <div hidden={activeNav !== 'syllabus'}>
-              <HODSyllabus
-                teacher={{ id: teacher.id, name: teacher.name, school_id: parseInt(selectedSchoolId) }}
-                hodAssignments={hodData.assignments}
-              />
+              <HODSyllabus teacher={{ id: teacher.id, name: teacher.name, school_id: teacher.school_id }} hodAssignments={hodData.assignments} />
             </div>
           )}
-          {visitedNav.has('test-calendar') && <div hidden={activeNav !== 'test-calendar'}><TestCalendar mode="teacher" schoolId={parseInt(selectedSchoolId)} teacherId={teacher.id} /></div>}
-          {visitedNav.has('lesson-planner') && <div hidden={activeNav !== 'lesson-planner'}><LessonPlanner teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject }} schoolId={parseInt(selectedSchoolId)} /></div>}
+          {visitedNav.has('test-calendar')  && <div hidden={activeNav !== 'test-calendar'}><TestCalendar mode="teacher" schoolId={teacher.school_id} teacherId={teacher.id} /></div>}
+          {visitedNav.has('lesson-planner') && <div hidden={activeNav !== 'lesson-planner'}><LessonPlanner teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject }} schoolId={teacher.school_id} /></div>}
           {['performance', 'messages'].includes(activeNav) && (
             <div className="flex items-center justify-center h-full min-h-[400px]">
               <div className="text-center">
                 <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
+                  <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 </div>
                 <h3 className="text-lg font-semibold text-gray-700 mb-2">Coming Soon</h3>
                 <p className="text-gray-400 text-sm">This feature is under development</p>

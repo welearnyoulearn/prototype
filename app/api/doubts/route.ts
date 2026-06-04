@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { generateDoubtAnswer } from '@/lib/gemini'
 import { getTextbookContext } from '@/lib/textbook-search'
-
-// AUTH DISABLED FOR TESTING — will be re-enabled when all features are complete
+import { getAnySession } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
+  const session = await getAnySession()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { searchParams } = req.nextUrl
   const school_id  = searchParams.get('school_id')
@@ -67,6 +68,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const session = await getAnySession()
+  if (!session || session.role !== 'student') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
   const { school_id, class_id, student_id, subject, question, task_id } = body

@@ -5,8 +5,10 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { generateSchoolInsights } from '@/lib/gemini'
+import { getAnySession } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
+  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const body = await req.json()
 
   if (!process.env.GROQ_API_KEY)

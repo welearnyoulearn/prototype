@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
       )
 
       // Issue token with passwordChanged=false to trigger forced change
-      await setTeacherAuthCookie({ teacherId: teacher.id, schoolId: school.id, role: 'teacher', passwordChanged: false })
+      await setTeacherAuthCookie({ teacherId: teacher.id, schoolId: school.id, role: 'teacher', passwordChanged: false, name: teacher.name, email: teacher.email ?? '' })
       return NextResponse.json({ success: true, passwordChanged: false })
     }
 
@@ -61,6 +61,8 @@ export async function POST(req: NextRequest) {
       schoolId: school.id,
       role: 'teacher',
       passwordChanged: teacher.password_changed ?? false,
+      name: teacher.name,
+      email: teacher.email ?? '',
     })
 
     return NextResponse.json({
