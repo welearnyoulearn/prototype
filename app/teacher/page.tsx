@@ -8,15 +8,9 @@ import FullTimetable from './components/FullTimetable'
 import TeacherLeave from './components/TeacherLeave'
 import TeacherProfile from './components/TeacherProfile'
 import Attendance from './components/Attendance'
-import TasksPage from './components/TasksPage'
 import MyStudents from './components/MyStudents'
 import MyClasses from './components/MyClasses'
-import DoubtsCenter from './components/DoubtsCenter'
-import HODSyllabus from './components/HODSyllabus'
-import LessonPlanner from './components/LessonPlanner'
 import NotificationBell from '../components/NotificationBell'
-import TestCalendar from '../components/TestCalendar'
-import FloatingAIChat from '../components/FloatingAIChat'
 
 type Teacher = {
   id: number
@@ -38,10 +32,6 @@ type Teacher = {
   school_city: string
 }
 
-type HODAssignment = {
-  is_hod: boolean
-  assignments: { id: number; department: string; teacher_id: number; class_ids: number[] }[]
-}
 
 type NavSection = {
   label: string
@@ -65,17 +55,6 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    label: 'HOMEWORK & LEARNING',
-    items: [
-      { key: 'tasks', label: 'Homework', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l-3 3-1.5-1.5" /></svg> },
-      { key: 'doubts', label: 'Doubt Center', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> },
-      { key: 'syllabus', label: 'Syllabus Mgmt', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg> },
-      { key: 'test-calendar', label: 'Test Calendar', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> },
-      { key: 'lesson-planner', label: 'Lesson Planner', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg> },
-      { key: 'performance', label: 'Performance', comingSoon: true, icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg> },
-    ],
-  },
-  {
     label: 'MY ACCOUNT',
     items: [
       { key: 'profile', label: 'My Profile', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg> },
@@ -87,7 +66,6 @@ const NAV_SECTIONS: NavSection[] = [
 export default function TeacherPortal() {
   const router = useRouter()
   const [teacher, setTeacher]     = useState<Teacher | null>(null)
-  const [hodData, setHodData]     = useState<HODAssignment | null>(null)
   const [loading, setLoading]     = useState(true)
   const [activeNav, setActiveNav] = useState('snapshot')
   const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set(['snapshot']))
@@ -136,11 +114,6 @@ export default function TeacherPortal() {
       .then(data => {
         if (!data) return
         setTeacher(data)
-        // Fetch HOD status
-        return fetch(`/api/hod?school_id=${data.school_id}&teacher_id=${data.id}`)
-          .then(r => r.json())
-          .then(hod => setHodData(hod))
-          .catch(() => setHodData({ is_hod: false, assignments: [] }))
       })
       .catch(() => router.push('/teacher/login'))
       .finally(() => setLoading(false))
@@ -215,15 +188,11 @@ export default function TeacherPortal() {
 
           <nav className="flex-1 py-3 overflow-y-auto">
             {NAV_SECTIONS.map(section => {
-              const visibleItems = section.items.filter(item => {
-                if (item.key === 'syllabus') return hodData?.is_hod === true
-                return true
-              })
-              if (visibleItems.length === 0) return null
+              if (section.items.length === 0) return null
               return (
                 <div key={section.label} className="mb-2">
                   <p className="px-4 py-1.5 text-[10px] font-semibold text-slate-500 uppercase tracking-widest">{section.label}</p>
-                  {visibleItems.map(item => (
+                  {section.items.map(item => (
                     <button key={item.key}
                       onClick={() => { if (!item.comingSoon) navigateTo(item.key) }}
                       className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors text-left ${
@@ -233,7 +202,6 @@ export default function TeacherPortal() {
                       }`}>
                       {item.icon}
                       <span>{item.label}</span>
-                      {item.key === 'syllabus' && <span className="ml-auto text-[9px] bg-emerald-500 text-white px-1.5 py-0.5 rounded font-medium">HOD</span>}
                       {item.comingSoon && <span className="ml-auto text-[9px] text-slate-600 font-medium">Soon</span>}
                     </button>
                   ))}
@@ -257,8 +225,6 @@ export default function TeacherPortal() {
           </div>
         </aside>
 
-        <FloatingAIChat mode="teacher" teacherId={teacher.id} teacherName={teacher.name} teacherSubject={teacher.subject} />
-
         <main className="flex-1 overflow-y-auto p-3 sm:p-6">
           {visitedNav.has('snapshot')       && <div hidden={activeNav !== 'snapshot'}><SmartSnapshot teacher={teacher} schoolId={teacher.school_id} onNavigate={navigateTo} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} /></div>}
           {visitedNav.has('class-view') && selectedClass && <div hidden={activeNav !== 'class-view'}><ClassView key={selectedClass.id} classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section} schoolId={teacher.school_id} teacherName={teacher.name} teacherId={teacher.id} isClassTeacher={teacher.class_teacher_grade === selectedClass.grade && teacher.class_teacher_section === selectedClass.section} teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} onBack={() => navigateTo('snapshot')} initialTab={classViewInitialTab} openExamId={classViewOpenExamId} /></div>}
@@ -266,28 +232,8 @@ export default function TeacherPortal() {
           {visitedNav.has('attendance')     && <div hidden={activeNav !== 'attendance'}><Attendance teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('leave')          && <div hidden={activeNav !== 'leave'}><TeacherLeave teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('profile')        && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher as (t: unknown) => void} /></div>}
-          {visitedNav.has('tasks')          && <div hidden={activeNav !== 'tasks'}><TasksPage teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('my-classes')     && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} /></div>}
           {visitedNav.has('my-students')    && <div hidden={activeNav !== 'my-students'}><MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
-          {visitedNav.has('doubts')         && <div hidden={activeNav !== 'doubts'}><DoubtsCenter teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject }} schoolId={teacher.school_id} /></div>}
-          {visitedNav.has('syllabus') && hodData?.is_hod && hodData.assignments?.length > 0 && (
-            <div hidden={activeNav !== 'syllabus'}>
-              <HODSyllabus teacher={{ id: teacher.id, name: teacher.name, school_id: teacher.school_id }} hodAssignments={hodData.assignments} />
-            </div>
-          )}
-          {visitedNav.has('test-calendar')  && <div hidden={activeNav !== 'test-calendar'}><TestCalendar mode="teacher" schoolId={teacher.school_id} teacherId={teacher.id} /></div>}
-          {visitedNav.has('lesson-planner') && <div hidden={activeNav !== 'lesson-planner'}><LessonPlanner teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject }} schoolId={teacher.school_id} /></div>}
-          {['performance', 'messages'].includes(activeNav) && (
-            <div className="flex items-center justify-center h-full min-h-[400px]">
-              <div className="text-center">
-                <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                </div>
-                <h3 className="text-lg font-semibold text-gray-700 mb-2">Coming Soon</h3>
-                <p className="text-gray-400 text-sm">This feature is under development</p>
-              </div>
-            </div>
-          )}
         </main>
       </div>
     </div>

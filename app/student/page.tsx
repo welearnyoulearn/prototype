@@ -3,19 +3,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import StudentDashboard from './components/StudentDashboard'
-import StudentTasks from './components/StudentTasks'
-import StudentDoubts from './components/StudentDoubts'
-import StudentNewspaper from './components/StudentNewspaper'
-import StudentRewards from './components/StudentRewards'
-import StudentSyllabus from './components/StudentSyllabus'
 import StudentProfile from './components/StudentProfile'
 import StudentMarks from './components/StudentMarks'
 import StudentTimetable from './components/StudentTimetable'
-import WeeklyTest from './components/WeeklyTest'
-import StudentHub from './components/StudentHub'
 import NotificationBell from '../components/NotificationBell'
-import TestCalendar from '../components/TestCalendar'
-import FloatingAIChat from '../components/FloatingAIChat'
 
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
@@ -35,26 +26,9 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    label: 'LEARNING',
-    items: [
-      { key: 'tasks',     label: 'Homework',       icon: '📝' },
-      { key: 'syllabus',  label: 'Syllabus',        icon: '📚' },
-      { key: 'doubts',    label: 'Ask a Doubt',     icon: '💬' },
-      { key: 'newspaper', label: 'Daily Knowledge', icon: '🗞️' },
-    ],
-  },
-  {
     label: 'ACADEMIC',
     items: [
-      { key: 'my-marks',    label: 'My Marks',         icon: '📊' },
-      { key: 'weekly-test', label: 'Weekly Test',      icon: '⚡' },
-      { key: 'rewards',     label: 'Rewards & Badges', icon: '🏆' },
-    ],
-  },
-  {
-    label: 'STUDENT HUB',
-    items: [
-      { key: 'hub', label: 'Daily Hub', icon: '🎯' },
+      { key: 'my-marks', label: 'My Marks', icon: '📊' },
     ],
   },
   {
@@ -68,11 +42,10 @@ const NAV_SECTIONS: NavSection[] = [
 const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
 
 const BOTTOM_NAV = [
-  { key: 'dashboard',   label: 'Home',    emoji: '🏠' },
-  { key: 'tasks',       label: 'Tasks',   emoji: '📝' },
-  { key: 'weekly-test', label: 'Quiz',    emoji: '⚡' },
-  { key: 'doubts',      label: 'Doubts',  emoji: '💬' },
-  { key: 'rewards',     label: 'Rewards', emoji: '🏆' },
+  { key: 'dashboard', label: 'Home',     emoji: '🏠' },
+  { key: 'timetable', label: 'Schedule', emoji: '🗓️' },
+  { key: 'my-marks',  label: 'Marks',    emoji: '📊' },
+  { key: 'profile',   label: 'Profile',  emoji: '👤' },
 ]
 
 export default function StudentPortal() {
@@ -264,39 +237,12 @@ export default function StudentPortal() {
           </div>
         </aside>
 
-        {/* Floating AI Tutor */}
-        <FloatingAIChat
-          mode="student"
-          studentId={student.id}
-          studentName={student.name}
-          grade={student.grade}
-          schoolId={student.school_id}
-          classId={classId}
-        />
-
         {/* ── Main Content ──────────────────────────────────────────── */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 pb-24 lg:pb-6 scroll-smooth">
           <div className="max-w-3xl mx-auto">
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} /></div>}
-            {visitedNav.has('tasks')       && <div hidden={activeNav !== 'tasks'}><StudentTasks student={student} classId={classId} schoolId={student.school_id} /></div>}
-            {visitedNav.has('doubts')      && <div hidden={activeNav !== 'doubts'}><StudentDoubts student={student} classId={classId} schoolId={student.school_id} /></div>}
-            {visitedNav.has('newspaper')   && <div hidden={activeNav !== 'newspaper'}><StudentNewspaper studentId={student.id} schoolId={student.school_id} /></div>}
-            {visitedNav.has('rewards')     && <div hidden={activeNav !== 'rewards'}><StudentRewards studentId={student.id} schoolId={student.school_id} classId={classId} grade={student.grade} /></div>}
-            {visitedNav.has('syllabus')    && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={student.school_id} classId={classId} /></div>}
             {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={student.school_id} classId={classId} /></div>}
-            {visitedNav.has('weekly-test') && (
-              <div hidden={activeNav !== 'weekly-test'}>
-                <div className="space-y-6">
-                  <WeeklyTest student={student} classId={classId} schoolId={student.school_id} />
-                  <div className="border-t border-gray-100 pt-6">
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Exam Calendar</p>
-                    <TestCalendar mode="student" schoolId={student.school_id} classId={classId} studentId={student.id} />
-                  </div>
-                </div>
-              </div>
-            )}
             {visitedNav.has('timetable')   && <div hidden={activeNav !== 'timetable'}><StudentTimetable classId={classId} schoolId={student.school_id} grade={student.grade} section={student.section} /></div>}
-            {visitedNav.has('hub')         && <div hidden={activeNav !== 'hub'}><StudentHub studentId={student.id} schoolId={student.school_id} grade={student.grade} /></div>}
             {visitedNav.has('profile')     && <div hidden={activeNav !== 'profile'}><StudentProfile student={student} /></div>}
           </div>
         </main>

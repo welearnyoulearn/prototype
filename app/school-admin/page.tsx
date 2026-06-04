@@ -9,7 +9,6 @@ import { useRouter } from 'next/navigation'
 
 // Always-loaded (small, needed immediately)
 import Overview from './components/Overview'
-import CommandBar from './components/CommandBar'
 
 // Lazy-loaded — only downloaded when first opened
 function ModuleSkeleton() {
@@ -30,25 +29,14 @@ const EmergencyCover        = dynamic(() => import('./components/EmergencyCover'
 const StaffOnboarding       = dynamic(() => import('./components/StaffOnboarding'),        { loading: () => <ModuleSkeleton /> })
 const StudentOnboarding     = dynamic(() => import('./components/StudentOnboarding'),      { loading: () => <ModuleSkeleton /> })
 const ClassManagement       = dynamic(() => import('./components/ClassManagement'),        { loading: () => <ModuleSkeleton /> })
-const StudentTeacherAnalysis= dynamic(() => import('./components/StudentTeacherAnalysis'), { loading: () => <ModuleSkeleton /> })
 const TimetableManagement   = dynamic(() => import('./components/TimetableManagement'),    { loading: () => <ModuleSkeleton /> })
 const ExamSchedule          = dynamic(() => import('./components/ExamSchedule'),           { loading: () => <ModuleSkeleton /> })
 const TeachersManagement    = dynamic(() => import('./components/TeachersManagement'),     { loading: () => <ModuleSkeleton /> })
 const StudentsManagement    = dynamic(() => import('./components/StudentsManagement'),     { loading: () => <ModuleSkeleton /> })
-const ClassAnalytics        = dynamic(() => import('./components/ClassAnalytics'),         { loading: () => <ModuleSkeleton /> })
-const AcademicAnalytics     = dynamic(() => import('./components/AcademicAnalytics'),      { loading: () => <ModuleSkeleton /> })
 const AnnouncementBoard     = dynamic(() => import('./components/AnnouncementBoard'),      { loading: () => <ModuleSkeleton /> })
-const AcademicCalendar      = dynamic(() => import('./components/AcademicCalendar'),       { loading: () => <ModuleSkeleton /> })
-const StudentLeaderboard    = dynamic(() => import('./components/StudentLeaderboard'),     { loading: () => <ModuleSkeleton /> })
 const ExportCenter          = dynamic(() => import('./components/ExportCenter'),           { loading: () => <ModuleSkeleton /> })
 const SchoolSettings        = dynamic(() => import('./components/SchoolSettings'),         { loading: () => <ModuleSkeleton /> })
-const DailyBriefing         = dynamic(() => import('./components/DailyBriefing'),          { loading: () => <ModuleSkeleton /> })
-const NotificationCenter    = dynamic(() => import('./components/NotificationCenter'),     { loading: () => <ModuleSkeleton /> })
-const ParentEngagement      = dynamic(() => import('./components/ParentEngagement'),       { loading: () => <ModuleSkeleton /> })
-const YearRollover          = dynamic(() => import('./components/YearRollover'),           { loading: () => <ModuleSkeleton /> })
 const FeeManagement         = dynamic(() => import('./components/FeeManagement'),          { loading: () => <ModuleSkeleton /> })
-const YearReview            = dynamic(() => import('./components/YearReview'),             { loading: () => <ModuleSkeleton /> })
-const MarketplaceOrders     = dynamic(() => import('./components/MarketplaceOrders'),      { loading: () => <ModuleSkeleton /> })
 
 type School = {
   id: number
@@ -70,13 +58,12 @@ type NavItem = {
 
 // Section grouping for sidebar — Management first, then Scheduling
 const NAV_SECTIONS = [
-  { label: 'OVERVIEW',    keys: ['overview', 'briefing'] },
-  { label: 'PEOPLE',      keys: ['staff', 'students', 'class-management'] },
-  { label: 'MANAGEMENT',  keys: ['fee-management', 'parent-engagement', 'year-rollover', 'marketplace-orders'] },
-  { label: 'SCHEDULING',  keys: ['timetable', 'attendance', 'leave-requests', 'emergency-cover', 'exam-schedule'] },
-  { label: 'ANALYTICS',   keys: ['class-analytics', 'academic-analytics', 'analysis', 'year-review'] },
-  { label: 'COMMUNICATION', keys: ['announcements', 'notifications', 'leaderboard'] },
-  { label: 'TOOLS',       keys: ['calendar', 'export', 'settings'] },
+  { label: 'OVERVIEW',      keys: ['overview'] },
+  { label: 'PEOPLE',        keys: ['staff', 'students', 'class-management'] },
+  { label: 'MANAGEMENT',    keys: ['fee-management'] },
+  { label: 'SCHEDULING',    keys: ['timetable', 'attendance', 'leave-requests', 'emergency-cover', 'exam-schedule'] },
+  { label: 'COMMUNICATION', keys: ['announcements'] },
+  { label: 'TOOLS',         keys: ['export', 'settings'] },
 ]
 
 const NAV_ITEMS: NavItem[] = [
@@ -142,16 +129,6 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
-    key: 'analysis',
-    label: 'Analysis',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-      </svg>
-    ),
-  },
-  {
     key: 'timetable',
     label: 'Timetable',
     tier: ['basic', 'standard', 'premium'],
@@ -182,52 +159,12 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
-    key: 'class-analytics',
-    label: 'Class Analytics',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-      </svg>
-    ),
-  },
-  {
-    key: 'academic-analytics',
-    label: 'Academic Analytics',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-      </svg>
-    ),
-  },
-  {
     key: 'announcements',
     label: 'Announcements',
     tier: ['basic', 'standard', 'premium'],
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
-      </svg>
-    ),
-  },
-  {
-    key: 'calendar',
-    label: 'Academic Calendar',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-      </svg>
-    ),
-  },
-  {
-    key: 'leaderboard',
-    label: 'Leaderboard',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
       </svg>
     ),
   },
@@ -252,72 +189,12 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
-    key: 'briefing',
-    label: 'Daily Briefing',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-      </svg>
-    ),
-  },
-  {
-    key: 'notifications',
-    label: 'Notifications',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-      </svg>
-    ),
-  },
-  {
-    key: 'parent-engagement',
-    label: 'Parent Engagement',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-      </svg>
-    ),
-  },
-  {
-    key: 'year-rollover',
-    label: 'Year Rollover',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
-      </svg>
-    ),
-  },
-  {
     key: 'fee-management',
     label: 'Fee Management',
     tier: ['basic', 'standard', 'premium'],
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
-      </svg>
-    ),
-  },
-  {
-    key: 'marketplace-orders',
-    label: 'Marketplace Orders',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
-      </svg>
-    ),
-  },
-  {
-    key: 'year-review',
-    label: 'Year-in-Review',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
       </svg>
     ),
   },
@@ -628,7 +505,6 @@ export default function SchoolAdmin() {
               </div>
             ) : (
               <FeaturesProvider value={enabledFeatures}>
-                <CommandBar schoolId={selectedSchool.id} onNavigate={navigateTo} />
                 {visited.has('overview')         && <div hidden={activeNav !== 'overview'}><Overview schoolId={selectedSchool.id} onNavigate={navigateTo} /></div>}
                 {visited.has('attendance')       && <div hidden={activeNav !== 'attendance'}><AttendanceDashboard schoolId={selectedSchool.id} /></div>}
                 {visited.has('leave-requests')   && <div hidden={activeNav !== 'leave-requests'}><LeaveRequests schoolId={selectedSchool.id} /></div>}
@@ -672,23 +548,12 @@ export default function SchoolAdmin() {
                 )}
 
                 {visited.has('class-management') && <div hidden={activeNav !== 'class-management'}><ClassManagement schoolId={selectedSchool.id} onNavigate={navigateTo} /></div>}
-                {visited.has('analysis')         && <div hidden={activeNav !== 'analysis'}><StudentTeacherAnalysis schoolId={selectedSchool.id} /></div>}
                 {visited.has('timetable')        && <div hidden={activeNav !== 'timetable'}><TimetableManagement schoolId={selectedSchool.id} /></div>}
                 {visited.has('exam-schedule')    && <div hidden={activeNav !== 'exam-schedule'}><ExamSchedule schoolId={selectedSchool.id} /></div>}
-                {visited.has('class-analytics')    && <div hidden={activeNav !== 'class-analytics'}><ClassAnalytics schoolId={selectedSchool.id} /></div>}
-                {visited.has('academic-analytics') && <div hidden={activeNav !== 'academic-analytics'}><AcademicAnalytics schoolId={selectedSchool.id} /></div>}
-                {visited.has('announcements')      && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} /></div>}
-                {visited.has('calendar')           && <div hidden={activeNav !== 'calendar'}><AcademicCalendar schoolId={selectedSchool.id} /></div>}
-                {visited.has('leaderboard')        && <div hidden={activeNav !== 'leaderboard'}><StudentLeaderboard schoolId={selectedSchool.id} /></div>}
-                {visited.has('export')             && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}
-                {visited.has('settings')           && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} /></div>}
-                {visited.has('briefing')           && <div hidden={activeNav !== 'briefing'}><DailyBriefing schoolId={selectedSchool.id} onNavigate={navigateTo} /></div>}
-                {visited.has('notifications')      && <div hidden={activeNav !== 'notifications'}><NotificationCenter schoolId={selectedSchool.id} /></div>}
-                {visited.has('parent-engagement')  && <div hidden={activeNav !== 'parent-engagement'}><ParentEngagement schoolId={selectedSchool.id} /></div>}
-                {visited.has('year-rollover')       && <div hidden={activeNav !== 'year-rollover'}><YearRollover schoolId={selectedSchool.id} /></div>}
-                {visited.has('fee-management')      && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} /></div>}
-                {visited.has('year-review')         && <div hidden={activeNav !== 'year-review'}><YearReview schoolId={selectedSchool.id} /></div>}
-                {visited.has('marketplace-orders')  && <div hidden={activeNav !== 'marketplace-orders'}><MarketplaceOrders schoolId={selectedSchool.id} /></div>}
+                {visited.has('announcements')    && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} /></div>}
+                {visited.has('export')           && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}
+                {visited.has('settings')         && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} /></div>}
+                {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} /></div>}
               </FeaturesProvider>
             )}
           </main>
