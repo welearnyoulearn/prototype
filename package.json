@@ -8,6 +8,10 @@
     "start": "next start",
     "lint": "eslint"
   },
+  "engines": {
+    "node": ">=18.17.0",
+    "npm": ">=9.0.0"
+  },
   "dependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",
@@ -40,6 +44,10 @@
     "typescript": "^5"
   },
   "optionalDependencies": {
-    "@tailwindcss/oxide-win32-x64-msvc": "^4.2.2"
+    "@tailwindcss/oxide-win32-x64-msvc": "^4.2.2",
+    "@tailwindcss/oxide-darwin-x64": "^4.2.2",
+    "@tailwindcss/oxide-darwin-arm64": "^4.2.2",
+    "@tailwindcss/oxide-linux-x64-gnu": "^4.2.2",
+    "@tailwindcss/oxide-linux-arm64-gnu": "^4.2.2"
   }
 }
