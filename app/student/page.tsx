@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import StudentDashboard from './components/StudentDashboard'
+import StudentTasks from './components/StudentTasks'
+import StudentDoubts from './components/StudentDoubts'
 import StudentProfile from './components/StudentProfile'
 import StudentMarks from './components/StudentMarks'
 import StudentTimetable from './components/StudentTimetable'
@@ -26,6 +28,13 @@ const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
+    label: 'LEARNING',
+    items: [
+      { key: 'tasks',  label: 'Homework',    icon: '📝' },
+      { key: 'doubts', label: 'Ask a Doubt', icon: '💬' },
+    ],
+  },
+  {
     label: 'ACADEMIC',
     items: [
       { key: 'my-marks', label: 'My Marks', icon: '📊' },
@@ -42,10 +51,11 @@ const NAV_SECTIONS: NavSection[] = [
 const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
 
 const BOTTOM_NAV = [
-  { key: 'dashboard', label: 'Home',     emoji: '🏠' },
-  { key: 'timetable', label: 'Schedule', emoji: '🗓️' },
-  { key: 'my-marks',  label: 'Marks',    emoji: '📊' },
-  { key: 'profile',   label: 'Profile',  emoji: '👤' },
+  { key: 'dashboard', label: 'Home',    emoji: '🏠' },
+  { key: 'tasks',     label: 'Tasks',   emoji: '📝' },
+  { key: 'doubts',    label: 'Doubts',  emoji: '💬' },
+  { key: 'my-marks',  label: 'Marks',   emoji: '📊' },
+  { key: 'profile',   label: 'Profile', emoji: '👤' },
 ]
 
 export default function StudentPortal() {
@@ -241,6 +251,8 @@ export default function StudentPortal() {
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 pb-24 lg:pb-6 scroll-smooth">
           <div className="max-w-3xl mx-auto">
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} /></div>}
+            {visitedNav.has('tasks')       && <div hidden={activeNav !== 'tasks'}><StudentTasks student={student} classId={classId} schoolId={student.school_id} /></div>}
+            {visitedNav.has('doubts')      && <div hidden={activeNav !== 'doubts'}><StudentDoubts student={student} classId={classId} schoolId={student.school_id} /></div>}
             {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={student.school_id} classId={classId} /></div>}
             {visitedNav.has('timetable')   && <div hidden={activeNav !== 'timetable'}><StudentTimetable classId={classId} schoolId={student.school_id} grade={student.grade} section={student.section} /></div>}
             {visitedNav.has('profile')     && <div hidden={activeNav !== 'profile'}><StudentProfile student={student} /></div>}

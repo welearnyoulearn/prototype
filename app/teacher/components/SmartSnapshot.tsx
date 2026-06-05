@@ -128,7 +128,7 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
   const [annExpanded, setAnnExpanded] = useState<number | null>(null)
 
   // Class health state — only fetched for class teachers
-  const [_classHealthLoading, _setClassHealthLoading] = useState(false)
+  const [classHealthLoading, setClassHealthLoading] = useState(false)
   const [classHealth, setClassHealth] = useState<{
     total_students: number
     attendance_rate: number | null
@@ -188,8 +188,15 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
       c => c.grade === teacher.class_teacher_grade && c.section === teacher.class_teacher_section
     )
     if (!ownClass) return
-    void ownClass // class health endpoint removed in wlylV1
-    void setClassHealth
+    setClassHealthLoading(true)
+    fetch(`/api/classes/${ownClass.id}/health?school_id=${schoolId}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data && !data.error) setClassHealth(data)
+        else console.warn('Class health API error:', data)
+      })
+      .catch(err => console.error('Class health fetch failed:', err))
+      .finally(() => setClassHealthLoading(false))
   }, [classes, schoolId, teacher.class_teacher_grade, teacher.class_teacher_section])
 
   const ownTodayPeriods = (today ? timetable.filter(p => p.day_of_week === today) : [])
@@ -588,6 +595,87 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
         </div>
       )}
 
+      {/* Class Health Summary — only for class teachers */}
+      {isClassTeacher && (classHealth || classHealthLoading) && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-base font-bold text-gray-900">
+              Class Health — {teacher.class_teacher_grade}-{teacher.class_teacher_section}
+            </h3>
+            <button onClick={() => onNavigate('doubts')} className="text-xs text-blue-500 hover:underline">view doubts →</button>
+          </div>
+
+          {classHealthLoading && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[1,2,3,4].map(i => (
+                <div key={i} className="bg-gray-100 rounded-xl p-4 animate-pulse h-20" />
+              ))}
+            </div>
+          )}
+
+          {/* Doubt pattern warning */}
+          {classHealth && classHealth.doubt_patterns.length > 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-3 flex items-start gap-2">
+              <svg className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <div>
+                <p className="text-xs font-semibold text-red-700">Doubt Pattern Alert</p>
+                <p className="text-xs text-red-500 mt-0.5">
+                  {classHealth.doubt_patterns.map(p => `${p.subject} (${p.count})`).join(', ')} — students struggling in last 7 days
+                </p>
+              </div>
+            </div>
+          )}
+
+          {classHealth && <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              {
+                label: 'Attendance',
+                value: classHealth.attendance_rate !== null ? `${classHealth.attendance_rate}%` : '—',
+                sub: 'This month',
+                color: classHealth.attendance_rate !== null
+                  ? classHealth.attendance_rate >= 75 ? 'text-green-600' : 'text-red-500'
+                  : 'text-gray-400',
+                bg: classHealth.attendance_rate !== null
+                  ? classHealth.attendance_rate >= 75 ? 'bg-green-50' : 'bg-red-50'
+                  : 'bg-gray-50',
+              },
+              {
+                label: 'Task Completion',
+                value: classHealth.task_completion_rate !== null ? `${classHealth.task_completion_rate}%` : '—',
+                sub: `${classHealth.total_students} students`,
+                color: classHealth.task_completion_rate !== null
+                  ? classHealth.task_completion_rate >= 60 ? 'text-blue-600' : 'text-amber-500'
+                  : 'text-gray-400',
+                bg: classHealth.task_completion_rate !== null
+                  ? classHealth.task_completion_rate >= 60 ? 'bg-blue-50' : 'bg-amber-50'
+                  : 'bg-gray-50',
+              },
+              {
+                label: 'Avg Score',
+                value: classHealth.avg_score !== null ? `${classHealth.avg_score}` : '—',
+                sub: 'Reviewed tasks',
+                color: 'text-purple-600',
+                bg: 'bg-purple-50',
+              },
+              {
+                label: 'Open Doubts',
+                value: classHealth.doubts.open + classHealth.doubts.in_progress,
+                sub: `${classHealth.doubts.resolved} resolved`,
+                color: (classHealth.doubts.open + classHealth.doubts.in_progress) > 5 ? 'text-orange-600' : 'text-gray-700',
+                bg: (classHealth.doubts.open + classHealth.doubts.in_progress) > 5 ? 'bg-orange-50' : 'bg-gray-50',
+              },
+            ].map(item => (
+              <div key={item.label} className={`${item.bg} rounded-xl p-4`}>
+                <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide mb-1">{item.label}</p>
+                <p className={`text-2xl font-bold ${item.color}`}>{item.value}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">{item.sub}</p>
+              </div>
+            ))}
+          </div>}
+        </div>
+      )}
 
       {/* My Classes */}
       <div>
