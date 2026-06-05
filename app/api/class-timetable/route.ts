@@ -5,101 +5,106 @@ import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
 import { getAnySession } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
-  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  await ensureDB()
-
-  const { searchParams } = new URL(req.url)
-  const school_id           = searchParams.get('school_id')
-  const class_id            = searchParams.get('class_id')
-  const teacher_id          = searchParams.get('teacher_id')
-  const date                = searchParams.get('date')
-  const day_of_week_filter   = searchParams.get('day_of_week')
-  const period_number_filter = searchParams.get('period_number')
-  // template_id: 'default' → IS NULL (school default), numeric → specific template, absent → no filter
-  const template_id_param   = searchParams.get('template_id')
-
-  if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
-
-  // Only serve from cache for full structural fetches (no slot-level or date filters)
-  if (!date && !day_of_week_filter && !period_number_filter) {
-    const cacheKey = class_id
-      ? `timetable:class:${class_id}:tmpl:${template_id_param ?? 'all'}`
-      : teacher_id
-        ? `timetable:teacher:${teacher_id}:school:${school_id}:tmpl:${template_id_param ?? 'all'}`
-        : `timetable:school:${school_id}:tmpl:${template_id_param ?? 'all'}`
-    const cached = getCache(cacheKey)
-    if (cached) return NextResponse.json(cached)
-  }
-
   try {
-    const vals: (string | number | null)[] = [school_id]
+    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    await ensureDB()
 
-    const selectExtra = date
-      ? `, sa.substitute_teacher_id, st.name AS substitute_teacher_name, sa.id AS substitute_assignment_id, st.subject AS substitute_teacher_subject, st.department AS substitute_teacher_department`
-      : ''
+    const { searchParams } = new URL(req.url)
+    const school_id           = searchParams.get('school_id')
+    const class_id            = searchParams.get('class_id')
+    const teacher_id          = searchParams.get('teacher_id')
+    const date                = searchParams.get('date')
+    const day_of_week_filter   = searchParams.get('day_of_week')
+    const period_number_filter = searchParams.get('period_number')
+    // template_id: 'default' → IS NULL (school default), numeric → specific template, absent → no filter
+    const template_id_param   = searchParams.get('template_id')
 
-    let fromClause = `FROM class_timetable ct LEFT JOIN teachers t ON ct.teacher_id = t.id LEFT JOIN classes c ON c.id = ct.class_id`
-    if (date) {
-      vals.push(date)
-      fromClause += `
-             LEFT JOIN substitute_assignments sa
-               ON sa.class_id = ct.class_id
-              AND sa.period_number = ct.period_number
-              AND sa.school_id = ct.school_id
-              AND sa.date = $2
-             LEFT JOIN teachers st ON st.id = sa.substitute_teacher_id`
-    }
+    if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 
-    let whereClause = ` WHERE ct.school_id = $1`
-    if (class_id)             { whereClause += ` AND ct.class_id = $${vals.length + 1}`;      vals.push(class_id) }
-    if (teacher_id)           { whereClause += ` AND ct.teacher_id = $${vals.length + 1}`;    vals.push(teacher_id) }
-    if (day_of_week_filter)   { whereClause += ` AND ct.day_of_week = $${vals.length + 1}`;   vals.push(day_of_week_filter) }
-    if (period_number_filter) { whereClause += ` AND ct.period_number = $${vals.length + 1}`; vals.push(period_number_filter) }
-
-    // Template scoping — each template is independent; NULL = school default
-    if (template_id_param === 'default') {
-      whereClause += ` AND ct.template_id IS NULL`
-    } else if (template_id_param !== null) {
-      whereClause += ` AND ct.template_id = $${vals.length + 1}`
-      vals.push(parseInt(template_id_param))
-    }
-    // else: no template filter → return all (used by health, teacher schedules, etc.)
-
-    // has_conflict: teacher double-booked within the SAME template only
-    const conflictCheck = `
-      CASE
-        WHEN ct.teacher_id IS NOT NULL AND ct.is_break = FALSE AND EXISTS (
-          SELECT 1 FROM class_timetable cx
-          WHERE cx.school_id     = ct.school_id
-            AND cx.teacher_id    = ct.teacher_id
-            AND cx.day_of_week   = ct.day_of_week
-            AND cx.period_number = ct.period_number
-            AND cx.class_id     != ct.class_id
-            AND cx.is_break      = FALSE
-            AND cx.template_id IS NOT DISTINCT FROM ct.template_id
-        ) THEN TRUE ELSE FALSE
-      END AS has_conflict`
-
-    const q = `SELECT ct.*, t.name AS teacher_name, t.employee_id, c.grade, c.section, ${conflictCheck}${selectExtra}
-             ${fromClause}${whereClause}
-             ORDER BY CASE ct.day_of_week WHEN 'Monday' THEN 1 WHEN 'Tuesday' THEN 2 WHEN 'Wednesday' THEN 3 WHEN 'Thursday' THEN 4 WHEN 'Friday' THEN 5 ELSE 6 END, ct.period_number`
-
-    const result = await pool.query(q, vals)
-
-    // Cache only if no slot-level or date filters
+    // Only serve from cache for full structural fetches (no slot-level or date filters)
     if (!date && !day_of_week_filter && !period_number_filter) {
       const cacheKey = class_id
         ? `timetable:class:${class_id}:tmpl:${template_id_param ?? 'all'}`
         : teacher_id
           ? `timetable:teacher:${teacher_id}:school:${school_id}:tmpl:${template_id_param ?? 'all'}`
           : `timetable:school:${school_id}:tmpl:${template_id_param ?? 'all'}`
-      setCache(cacheKey, result.rows, 30_000)
+      const cached = getCache(cacheKey)
+      if (cached) return NextResponse.json(cached)
     }
 
-    return NextResponse.json(result.rows)
-  } catch (error) {
-    console.error(error)
-    return NextResponse.json({ error: 'Failed to fetch class timetable' }, { status: 500 })
+    try {
+      const vals: (string | number | null)[] = [school_id]
+
+      const selectExtra = date
+        ? `, sa.substitute_teacher_id, st.name AS substitute_teacher_name, sa.id AS substitute_assignment_id, st.subject AS substitute_teacher_subject, st.department AS substitute_teacher_department`
+        : ''
+
+      let fromClause = `FROM class_timetable ct LEFT JOIN teachers t ON ct.teacher_id = t.id LEFT JOIN classes c ON c.id = ct.class_id`
+      if (date) {
+        vals.push(date)
+        fromClause += `
+               LEFT JOIN substitute_assignments sa
+                 ON sa.class_id = ct.class_id
+                AND sa.period_number = ct.period_number
+                AND sa.school_id = ct.school_id
+                AND sa.date = $2
+               LEFT JOIN teachers st ON st.id = sa.substitute_teacher_id`
+      }
+
+      let whereClause = ` WHERE ct.school_id = $1`
+      if (class_id)             { whereClause += ` AND ct.class_id = $${vals.length + 1}`;      vals.push(class_id) }
+      if (teacher_id)           { whereClause += ` AND ct.teacher_id = $${vals.length + 1}`;    vals.push(teacher_id) }
+      if (day_of_week_filter)   { whereClause += ` AND ct.day_of_week = $${vals.length + 1}`;   vals.push(day_of_week_filter) }
+      if (period_number_filter) { whereClause += ` AND ct.period_number = $${vals.length + 1}`; vals.push(period_number_filter) }
+
+      // Template scoping — each template is independent; NULL = school default
+      if (template_id_param === 'default') {
+        whereClause += ` AND ct.template_id IS NULL`
+      } else if (template_id_param !== null) {
+        whereClause += ` AND ct.template_id = $${vals.length + 1}`
+        vals.push(parseInt(template_id_param))
+      }
+      // else: no template filter → return all (used by health, teacher schedules, etc.)
+
+      // has_conflict: teacher double-booked within the SAME template only
+      const conflictCheck = `
+        CASE
+          WHEN ct.teacher_id IS NOT NULL AND ct.is_break = FALSE AND EXISTS (
+            SELECT 1 FROM class_timetable cx
+            WHERE cx.school_id     = ct.school_id
+              AND cx.teacher_id    = ct.teacher_id
+              AND cx.day_of_week   = ct.day_of_week
+              AND cx.period_number = ct.period_number
+              AND cx.class_id     != ct.class_id
+              AND cx.is_break      = FALSE
+              AND cx.template_id IS NOT DISTINCT FROM ct.template_id
+          ) THEN TRUE ELSE FALSE
+        END AS has_conflict`
+
+      const q = `SELECT ct.*, t.name AS teacher_name, t.employee_id, c.grade, c.section, ${conflictCheck}${selectExtra}
+               ${fromClause}${whereClause}
+               ORDER BY CASE ct.day_of_week WHEN 'Monday' THEN 1 WHEN 'Tuesday' THEN 2 WHEN 'Wednesday' THEN 3 WHEN 'Thursday' THEN 4 WHEN 'Friday' THEN 5 ELSE 6 END, ct.period_number`
+
+      const result = await pool.query(q, vals)
+
+      // Cache only if no slot-level or date filters
+      if (!date && !day_of_week_filter && !period_number_filter) {
+        const cacheKey = class_id
+          ? `timetable:class:${class_id}:tmpl:${template_id_param ?? 'all'}`
+          : teacher_id
+            ? `timetable:teacher:${teacher_id}:school:${school_id}:tmpl:${template_id_param ?? 'all'}`
+            : `timetable:school:${school_id}:tmpl:${template_id_param ?? 'all'}`
+        setCache(cacheKey, result.rows, 30_000)
+      }
+
+      return NextResponse.json(result.rows)
+    } catch (error) {
+      console.error(error)
+      return NextResponse.json({ error: 'Failed to fetch class timetable' }, { status: 500 })
+    }
+} catch (err: unknown) {
+    console.error('[API]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 
@@ -231,50 +236,55 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  const { searchParams } = new URL(req.url)
-  const school_id         = searchParams.get('school_id')
-  const class_id          = searchParams.get('class_id')
-  const template_id_param = searchParams.get('template_id')
-
-  if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
-
-  // Build template fragment
-  const isDefault = template_id_param === 'default' || template_id_param === null
-  const tmplWhere = isDefault
-    ? `AND template_id IS NULL`
-    : `AND template_id = ${parseInt(template_id_param!)}`
-
   try {
-    if (class_id) {
-      await pool.query(
-        `DELETE FROM class_timetable WHERE class_id=$1 AND school_id=$2 ${tmplWhere}`,
-        [class_id, school_id]
-      )
-      // Clear timetable_generated_at only when deleting the school-default timetable
-      if (isDefault) {
+    const { searchParams } = new URL(req.url)
+    const school_id         = searchParams.get('school_id')
+    const class_id          = searchParams.get('class_id')
+    const template_id_param = searchParams.get('template_id')
+
+    if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+
+    // Build template fragment
+    const isDefault = template_id_param === 'default' || template_id_param === null
+    const tmplWhere = isDefault
+      ? `AND template_id IS NULL`
+      : `AND template_id = ${parseInt(template_id_param!)}`
+
+    try {
+      if (class_id) {
         await pool.query(
-          'UPDATE classes SET timetable_generated_at=NULL, timetable_circulated_at=NULL WHERE id=$1 AND school_id=$2',
+          `DELETE FROM class_timetable WHERE class_id=$1 AND school_id=$2 ${tmplWhere}`,
           [class_id, school_id]
         )
-      }
-      invalidateCache(`timetable:class:${class_id}`)
-    } else {
-      await pool.query(
-        `DELETE FROM class_timetable WHERE school_id=$1 ${tmplWhere}`,
-        [school_id]
-      )
-      if (isDefault) {
+        // Clear timetable_generated_at only when deleting the school-default timetable
+        if (isDefault) {
+          await pool.query(
+            'UPDATE classes SET timetable_generated_at=NULL, timetable_circulated_at=NULL WHERE id=$1 AND school_id=$2',
+            [class_id, school_id]
+          )
+        }
+        invalidateCache(`timetable:class:${class_id}`)
+      } else {
         await pool.query(
-          'UPDATE classes SET timetable_generated_at=NULL, timetable_circulated_at=NULL WHERE school_id=$1',
+          `DELETE FROM class_timetable WHERE school_id=$1 ${tmplWhere}`,
           [school_id]
         )
+        if (isDefault) {
+          await pool.query(
+            'UPDATE classes SET timetable_generated_at=NULL, timetable_circulated_at=NULL WHERE school_id=$1',
+            [school_id]
+          )
+        }
       }
+      invalidateCache(`timetable:school:${school_id}`)
+      invalidateCache(`health:${school_id}`)
+      return NextResponse.json({ success: true })
+    } catch (error) {
+      console.error(error)
+      return NextResponse.json({ error: 'Failed to delete timetable' }, { status: 500 })
     }
-    invalidateCache(`timetable:school:${school_id}`)
-    invalidateCache(`health:${school_id}`)
-    return NextResponse.json({ success: true })
-  } catch (error) {
-    console.error(error)
-    return NextResponse.json({ error: 'Failed to delete timetable' }, { status: 500 })
+} catch (err: unknown) {
+    console.error('[API]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

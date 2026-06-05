@@ -2,39 +2,44 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 
 export async function GET(req: NextRequest) {
-
-  const school_id = req.nextUrl.searchParams.get('school_id')
-  const teacher_id = req.nextUrl.searchParams.get('teacher_id')
-  const status = req.nextUrl.searchParams.get('status')
-  // active_date=YYYY-MM-DD → only return leaves where that date falls within [start_date, end_date]
-  const active_date = req.nextUrl.searchParams.get('active_date')
-
   try {
-    const conditions: string[] = []
-    const values: (string | number)[] = []
 
-    if (school_id) { values.push(school_id); conditions.push(`lr.school_id = $${values.length}`) }
-    if (teacher_id) { values.push(teacher_id); conditions.push(`lr.teacher_id = $${values.length}`) }
-    if (status) { values.push(status); conditions.push(`lr.status = $${values.length}`) }
-    if (active_date) {
-      values.push(active_date)
-      conditions.push(`$${values.length}::date BETWEEN lr.start_date AND lr.end_date`)
+    const school_id = req.nextUrl.searchParams.get('school_id')
+    const teacher_id = req.nextUrl.searchParams.get('teacher_id')
+    const status = req.nextUrl.searchParams.get('status')
+    // active_date=YYYY-MM-DD → only return leaves where that date falls within [start_date, end_date]
+    const active_date = req.nextUrl.searchParams.get('active_date')
+
+    try {
+      const conditions: string[] = []
+      const values: (string | number)[] = []
+
+      if (school_id) { values.push(school_id); conditions.push(`lr.school_id = $${values.length}`) }
+      if (teacher_id) { values.push(teacher_id); conditions.push(`lr.teacher_id = $${values.length}`) }
+      if (status) { values.push(status); conditions.push(`lr.status = $${values.length}`) }
+      if (active_date) {
+        values.push(active_date)
+        conditions.push(`$${values.length}::date BETWEEN lr.start_date AND lr.end_date`)
+      }
+
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+      const result = await pool.query(
+        `SELECT lr.*, t.name AS teacher_name, t.employee_id, t.department
+         FROM leave_requests lr
+         JOIN teachers t ON lr.teacher_id = t.id
+         ${where}
+         ORDER BY lr.created_at DESC`,
+        values
+      )
+      return NextResponse.json(result.rows)
+    } catch (error) {
+      console.error(error)
+      return NextResponse.json({ error: 'Failed to fetch leave requests' }, { status: 500 })
     }
-
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-
-    const result = await pool.query(
-      `SELECT lr.*, t.name AS teacher_name, t.employee_id, t.department
-       FROM leave_requests lr
-       JOIN teachers t ON lr.teacher_id = t.id
-       ${where}
-       ORDER BY lr.created_at DESC`,
-      values
-    )
-    return NextResponse.json(result.rows)
-  } catch (error) {
-    console.error(error)
-    return NextResponse.json({ error: 'Failed to fetch leave requests' }, { status: 500 })
+} catch (err: unknown) {
+    console.error('[API]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 

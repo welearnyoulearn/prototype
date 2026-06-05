@@ -59,169 +59,179 @@ async function ensureSchema(client: { query: (sql: string, params?: unknown[]) =
 // Returns: { students, categories, amounts }
 // amounts is a flat array of { student_id, fee_category_id, amount }
 export async function GET(req: NextRequest) {
-  const p = req.nextUrl.searchParams
-  const school_id     = p.get('school_id')
-  const grade         = p.get('grade')
-  const academic_year = p.get('academic_year')
-
-  if (!school_id || !grade || !academic_year) {
-    return NextResponse.json({ error: 'school_id, grade, academic_year required' }, { status: 400 })
-  }
   try {
-    await ensureSchema(pool)
+    const p = req.nextUrl.searchParams
+    const school_id     = p.get('school_id')
+    const grade         = p.get('grade')
+    const academic_year = p.get('academic_year')
 
-    const [studentsRes, categoriesRes, amountsRes] = await Promise.all([
-      pool.query(
-        `SELECT id, name, roll_number, section FROM students
-         WHERE school_id = $1 AND grade = $2 AND status = 'active'
-         ORDER BY section, (NULLIF(regexp_replace(roll_number,'[^0-9]','','g'),''))::int NULLS LAST, name`,
-        [school_id, grade]
-      ),
-      pool.query(
-        `SELECT id, name, frequency FROM fee_categories
-         WHERE school_id = $1 AND is_active = TRUE AND category_type = 'variable'
-         ORDER BY name`,
-        [school_id]
-      ),
-      pool.query(
-        `SELECT sfca.student_id, sfca.fee_category_id, sfca.amount
-         FROM student_fee_category_assignments sfca
-         JOIN students s ON s.id = sfca.student_id
-         WHERE sfca.school_id = $1 AND s.grade = $2 AND sfca.academic_year = $3`,
-        [school_id, grade, academic_year]
-      ),
-    ])
+    if (!school_id || !grade || !academic_year) {
+      return NextResponse.json({ error: 'school_id, grade, academic_year required' }, { status: 400 })
+    }
+    try {
+      await ensureSchema(pool)
 
-    return NextResponse.json({
-      students:   studentsRes.rows,
-      categories: categoriesRes.rows,
-      amounts:    amountsRes.rows,
-    })
-  } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
+      const [studentsRes, categoriesRes, amountsRes] = await Promise.all([
+        pool.query(
+          `SELECT id, name, roll_number, section FROM students
+           WHERE school_id = $1 AND grade = $2 AND status = 'active'
+           ORDER BY section, (NULLIF(regexp_replace(roll_number,'[^0-9]','','g'),''))::int NULLS LAST, name`,
+          [school_id, grade]
+        ),
+        pool.query(
+          `SELECT id, name, frequency FROM fee_categories
+           WHERE school_id = $1 AND is_active = TRUE AND category_type = 'variable'
+           ORDER BY name`,
+          [school_id]
+        ),
+        pool.query(
+          `SELECT sfca.student_id, sfca.fee_category_id, sfca.amount
+           FROM student_fee_category_assignments sfca
+           JOIN students s ON s.id = sfca.student_id
+           WHERE sfca.school_id = $1 AND s.grade = $2 AND sfca.academic_year = $3`,
+          [school_id, grade, academic_year]
+        ),
+      ])
+
+      return NextResponse.json({
+        students:   studentsRes.rows,
+        categories: categoriesRes.rows,
+        amounts:    amountsRes.rows,
+      })
+    } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
+} catch (err: unknown) {
+    console.error('[API]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }
 
 // POST /api/fees/category-assignments
 // Body: { school_id, academic_year, assignments: [{ student_id, fee_category_id, amount }] }
 // Replaces all assignments for the given students+categories and syncs ledger
 export async function POST(req: NextRequest) {
-  const client = await pool.connect()
   try {
-    const { school_id, academic_year, assignments, changed_by = 'Admin' } = await req.json()
-    if (!school_id || !academic_year || !Array.isArray(assignments)) {
-      return NextResponse.json({ error: 'school_id, academic_year, assignments required' }, { status: 400 })
-    }
+    const client = await pool.connect()
+    try {
+      const { school_id, academic_year, assignments, changed_by = 'Admin' } = await req.json()
+      if (!school_id || !academic_year || !Array.isArray(assignments)) {
+        return NextResponse.json({ error: 'school_id, academic_year, assignments required' }, { status: 400 })
+      }
 
-    await ensureSchema(client)
+      await ensureSchema(client)
 
-    // Separate into non-zero (save) and zero (remove)
-    const toSave   = assignments.filter((a: {amount: string}) => parseFloat(a.amount) > 0)
-    const toRemove = assignments.filter((a: {amount: string}) => !(parseFloat(a.amount) > 0))
+      // Separate into non-zero (save) and zero (remove)
+      const toSave   = assignments.filter((a: {amount: string}) => parseFloat(a.amount) > 0)
+      const toRemove = assignments.filter((a: {amount: string}) => !(parseFloat(a.amount) > 0))
 
-    const studentIds  = [...new Set(assignments.map((a: {student_id: number}) => Number(a.student_id)))]
-    const categoryIds = [...new Set(assignments.map((a: {fee_category_id: number}) => Number(a.fee_category_id)))]
+      const studentIds  = [...new Set(assignments.map((a: {student_id: number}) => Number(a.student_id)))]
+      const categoryIds = [...new Set(assignments.map((a: {fee_category_id: number}) => Number(a.fee_category_id)))]
 
-    if (studentIds.length === 0) return NextResponse.json({ upserted: 0, ledgerUpdated: 0 })
+      if (studentIds.length === 0) return NextResponse.json({ upserted: 0, ledgerUpdated: 0 })
 
-    await client.query('BEGIN')
+      await client.query('BEGIN')
 
-    // Snapshot existing amounts BEFORE wiping (for audit trail)
-    const { rows: existing } = await client.query(
-      `SELECT student_id, fee_category_id, amount
-       FROM student_fee_category_assignments
-       WHERE school_id = $1 AND academic_year = $2
-         AND student_id = ANY($3) AND fee_category_id = ANY($4)`,
-      [school_id, academic_year, studentIds, categoryIds]
-    )
-    const existingMap: Record<string, number> = {}
-    existing.forEach((r: {student_id: number; fee_category_id: number; amount: number}) => {
-      existingMap[`${r.student_id}:${r.fee_category_id}`] = parseFloat(String(r.amount))
-    })
-
-    // Wipe existing assignments for this cohort then re-insert
-    await client.query(
-      `DELETE FROM student_fee_category_assignments
-       WHERE school_id = $1 AND academic_year = $2
-         AND student_id  = ANY($3) AND fee_category_id = ANY($4)`,
-      [school_id, academic_year, studentIds, categoryIds]
-    )
-
-    let upserted = 0
-    for (const { student_id, fee_category_id, amount } of toSave) {
-      await client.query(
-        `INSERT INTO student_fee_category_assignments
-           (school_id, fee_category_id, student_id, academic_year, amount)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [school_id, fee_category_id, student_id, academic_year, parseFloat(amount)]
+      // Snapshot existing amounts BEFORE wiping (for audit trail)
+      const { rows: existing } = await client.query(
+        `SELECT student_id, fee_category_id, amount
+         FROM student_fee_category_assignments
+         WHERE school_id = $1 AND academic_year = $2
+           AND student_id = ANY($3) AND fee_category_id = ANY($4)`,
+        [school_id, academic_year, studentIds, categoryIds]
       )
-      upserted++
+      const existingMap: Record<string, number> = {}
+      existing.forEach((r: {student_id: number; fee_category_id: number; amount: number}) => {
+        existingMap[`${r.student_id}:${r.fee_category_id}`] = parseFloat(String(r.amount))
+      })
 
-      // Log history if amount actually changed (or is new)
-      const key = `${student_id}:${fee_category_id}`
-      const oldAmt = existingMap[key] ?? null
-      const newAmt = parseFloat(amount)
-      if (oldAmt === null || oldAmt !== newAmt) {
+      // Wipe existing assignments for this cohort then re-insert
+      await client.query(
+        `DELETE FROM student_fee_category_assignments
+         WHERE school_id = $1 AND academic_year = $2
+           AND student_id  = ANY($3) AND fee_category_id = ANY($4)`,
+        [school_id, academic_year, studentIds, categoryIds]
+      )
+
+      let upserted = 0
+      for (const { student_id, fee_category_id, amount } of toSave) {
         await client.query(
-          `INSERT INTO student_fee_assignment_history
-             (school_id, student_id, fee_category_id, academic_year, old_amount, new_amount, change_type, changed_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [school_id, student_id, fee_category_id, academic_year,
-           oldAmt, newAmt,
-           oldAmt === null ? 'added' : 'updated',
-           changed_by]
+          `INSERT INTO student_fee_category_assignments
+             (school_id, fee_category_id, student_id, academic_year, amount)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [school_id, fee_category_id, student_id, academic_year, parseFloat(amount)]
+        )
+        upserted++
+
+        // Log history if amount actually changed (or is new)
+        const key = `${student_id}:${fee_category_id}`
+        const oldAmt = existingMap[key] ?? null
+        const newAmt = parseFloat(amount)
+        if (oldAmt === null || oldAmt !== newAmt) {
+          await client.query(
+            `INSERT INTO student_fee_assignment_history
+               (school_id, student_id, fee_category_id, academic_year, old_amount, new_amount, change_type, changed_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [school_id, student_id, fee_category_id, academic_year,
+             oldAmt, newAmt,
+             oldAmt === null ? 'added' : 'updated',
+             changed_by]
+          )
+        }
+      }
+
+      // Sync existing ledger entries for saved amounts
+      let ledgerUpdated = 0
+      for (const { student_id, fee_category_id, amount } of toSave) {
+        const amt = parseFloat(amount)
+        const { rowCount } = await client.query(
+          `UPDATE student_fee_ledger
+           SET amount_due = $1,
+               status = CASE
+                 WHEN amount_paid >= $1                     THEN 'paid'
+                 WHEN amount_paid > 0 AND amount_paid < $1 THEN 'partial'
+                 WHEN $1 > 0 AND due_date < CURRENT_DATE   THEN 'overdue'
+                 ELSE 'pending'
+               END
+           WHERE school_id = $2 AND student_id = $3 AND fee_category_id = $4
+             AND academic_year = $5 AND amount_due != $1`,
+          [amt, school_id, student_id, fee_category_id, academic_year]
+        )
+        ledgerUpdated += rowCount ?? 0
+      }
+
+      // Log removals in history
+      for (const { student_id, fee_category_id } of toRemove) {
+        const key = `${student_id}:${fee_category_id}`
+        const oldAmt = existingMap[key]
+        if (oldAmt !== undefined && oldAmt > 0) {
+          await client.query(
+            `INSERT INTO student_fee_assignment_history
+               (school_id, student_id, fee_category_id, academic_year, old_amount, new_amount, change_type, changed_by)
+             VALUES ($1, $2, $3, $4, $5, 0, 'removed', $6)`,
+            [school_id, student_id, fee_category_id, academic_year, oldAmt, changed_by]
+          )
+        }
+      }
+
+      // For removed entries (zero = not applicable): delete unpaid pending/overdue ledger rows
+      for (const { student_id, fee_category_id } of toRemove) {
+        await client.query(
+          `DELETE FROM student_fee_ledger
+           WHERE school_id = $1 AND student_id = $2 AND fee_category_id = $3
+             AND academic_year = $4 AND amount_paid = 0
+             AND status IN ('pending', 'overdue')`,
+          [school_id, student_id, fee_category_id, academic_year]
         )
       }
-    }
 
-    // Sync existing ledger entries for saved amounts
-    let ledgerUpdated = 0
-    for (const { student_id, fee_category_id, amount } of toSave) {
-      const amt = parseFloat(amount)
-      const { rowCount } = await client.query(
-        `UPDATE student_fee_ledger
-         SET amount_due = $1,
-             status = CASE
-               WHEN amount_paid >= $1                     THEN 'paid'
-               WHEN amount_paid > 0 AND amount_paid < $1 THEN 'partial'
-               WHEN $1 > 0 AND due_date < CURRENT_DATE   THEN 'overdue'
-               ELSE 'pending'
-             END
-         WHERE school_id = $2 AND student_id = $3 AND fee_category_id = $4
-           AND academic_year = $5 AND amount_due != $1`,
-        [amt, school_id, student_id, fee_category_id, academic_year]
-      )
-      ledgerUpdated += rowCount ?? 0
-    }
-
-    // Log removals in history
-    for (const { student_id, fee_category_id } of toRemove) {
-      const key = `${student_id}:${fee_category_id}`
-      const oldAmt = existingMap[key]
-      if (oldAmt !== undefined && oldAmt > 0) {
-        await client.query(
-          `INSERT INTO student_fee_assignment_history
-             (school_id, student_id, fee_category_id, academic_year, old_amount, new_amount, change_type, changed_by)
-           VALUES ($1, $2, $3, $4, $5, 0, 'removed', $6)`,
-          [school_id, student_id, fee_category_id, academic_year, oldAmt, changed_by]
-        )
-      }
-    }
-
-    // For removed entries (zero = not applicable): delete unpaid pending/overdue ledger rows
-    for (const { student_id, fee_category_id } of toRemove) {
-      await client.query(
-        `DELETE FROM student_fee_ledger
-         WHERE school_id = $1 AND student_id = $2 AND fee_category_id = $3
-           AND academic_year = $4 AND amount_paid = 0
-           AND status IN ('pending', 'overdue')`,
-        [school_id, student_id, fee_category_id, academic_year]
-      )
-    }
-
-    await client.query('COMMIT')
-    return NextResponse.json({ upserted, ledgerUpdated })
-  } catch (e) {
-    await client.query('ROLLBACK')
-    console.error(e)
-    return NextResponse.json({ error: 'Failed to save assignments' }, { status: 500 })
-  } finally { client.release() }
+      await client.query('COMMIT')
+      return NextResponse.json({ upserted, ledgerUpdated })
+    } catch (e) {
+      await client.query('ROLLBACK')
+      console.error(e)
+      return NextResponse.json({ error: 'Failed to save assignments' }, { status: 500 })
+    } finally { client.release() }
+} catch (err: unknown) {
+    console.error('[API]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }

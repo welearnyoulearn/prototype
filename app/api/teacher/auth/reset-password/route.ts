@@ -29,11 +29,16 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const token = req.nextUrl.searchParams.get('token')
-  if (!token) return NextResponse.json({ valid: false })
-  const result = await pool.query(
-    `SELECT id FROM password_reset_tokens WHERE token = $1 AND role = 'teacher' AND used = FALSE AND expires_at > NOW()`,
-    [token]
-  )
-  return NextResponse.json({ valid: result.rows.length > 0 })
+  try {
+    const token = req.nextUrl.searchParams.get('token')
+    if (!token) return NextResponse.json({ valid: false })
+    const result = await pool.query(
+      `SELECT id FROM password_reset_tokens WHERE token = $1 AND role = 'teacher' AND used = FALSE AND expires_at > NOW()`,
+      [token]
+    )
+    return NextResponse.json({ valid: result.rows.length > 0 })
+} catch (err: unknown) {
+    console.error('[API]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }

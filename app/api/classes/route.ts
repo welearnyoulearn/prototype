@@ -5,36 +5,41 @@ import { matchTeacher } from '@/lib/matchTeacher'
 import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
 
 export async function GET(req: NextRequest) {
-  const school_id = req.nextUrl.searchParams.get('school_id')
-  if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
-  const removed = req.nextUrl.searchParams.get('removed') === 'true'
-
-  if (!removed) {
-    const cached = getCache(`classes:${school_id}`)
-    if (cached) return NextResponse.json(cached)
-  }
-
   try {
-    const studentStatus = removed ? 'inactive' : 'active'
-    const deletedFilter = removed ? 'IS NOT NULL' : 'IS NULL'
-    const orderBy = removed
-      ? `c.deleted_at DESC, (NULLIF(regexp_replace(c.grade,'[^0-9]','','g'),''))::int NULLS LAST, c.section`
-      : `(NULLIF(regexp_replace(c.grade,'[^0-9]','','g'),''))::int NULLS LAST, c.section`
+    const school_id = req.nextUrl.searchParams.get('school_id')
+    if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    const removed = req.nextUrl.searchParams.get('removed') === 'true'
 
-    const result = await pool.query(
-      `SELECT c.*, t.name AS class_teacher_name,
-              (SELECT COUNT(*) FROM students s WHERE s.grade = c.grade AND s.section = c.section AND s.school_id = c.school_id AND s.status = $2) AS student_count
-       FROM classes c
-       LEFT JOIN teachers t ON c.class_teacher_id = t.id
-       WHERE c.school_id = $1 AND c.deleted_at ${deletedFilter}
-       ORDER BY ${orderBy}`,
-      [school_id, studentStatus]
-    )
-    if (!removed) setCache(`classes:${school_id}`, result.rows, 60_000)
-    return NextResponse.json(result.rows)
-  } catch (error) {
-    console.error(error)
-    return NextResponse.json({ error: 'Failed to fetch classes' }, { status: 500 })
+    if (!removed) {
+      const cached = getCache(`classes:${school_id}`)
+      if (cached) return NextResponse.json(cached)
+    }
+
+    try {
+      const studentStatus = removed ? 'inactive' : 'active'
+      const deletedFilter = removed ? 'IS NOT NULL' : 'IS NULL'
+      const orderBy = removed
+        ? `c.deleted_at DESC, (NULLIF(regexp_replace(c.grade,'[^0-9]','','g'),''))::int NULLS LAST, c.section`
+        : `(NULLIF(regexp_replace(c.grade,'[^0-9]','','g'),''))::int NULLS LAST, c.section`
+
+      const result = await pool.query(
+        `SELECT c.*, t.name AS class_teacher_name,
+                (SELECT COUNT(*) FROM students s WHERE s.grade = c.grade AND s.section = c.section AND s.school_id = c.school_id AND s.status = $2) AS student_count
+         FROM classes c
+         LEFT JOIN teachers t ON c.class_teacher_id = t.id
+         WHERE c.school_id = $1 AND c.deleted_at ${deletedFilter}
+         ORDER BY ${orderBy}`,
+        [school_id, studentStatus]
+      )
+      if (!removed) setCache(`classes:${school_id}`, result.rows, 60_000)
+      return NextResponse.json(result.rows)
+    } catch (error) {
+      console.error(error)
+      return NextResponse.json({ error: 'Failed to fetch classes' }, { status: 500 })
+    }
+} catch (err: unknown) {
+    console.error('[API]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 

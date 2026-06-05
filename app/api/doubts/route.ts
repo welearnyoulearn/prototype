@@ -5,66 +5,71 @@ import { getTextbookContext } from '@/lib/textbook-search'
 import { getAnySession } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
-  const session = await getAnySession()
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  try {
+    const session = await getAnySession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { searchParams } = req.nextUrl
-  const school_id  = searchParams.get('school_id')
-  const class_id   = searchParams.get('class_id')
-  const student_id = searchParams.get('student_id')
-  const teacher_id = searchParams.get('teacher_id')
-  const status     = searchParams.get('status')
-  const subject    = searchParams.get('subject')
-  const is_faq     = searchParams.get('is_faq')
+    const { searchParams } = req.nextUrl
+    const school_id  = searchParams.get('school_id')
+    const class_id   = searchParams.get('class_id')
+    const student_id = searchParams.get('student_id')
+    const teacher_id = searchParams.get('teacher_id')
+    const status     = searchParams.get('status')
+    const subject    = searchParams.get('subject')
+    const is_faq     = searchParams.get('is_faq')
 
-  if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 
-  // Build WHERE clauses
-  const conditions: string[] = ['d.school_id = $1']
-  const values: (string | number)[] = [school_id]
+    // Build WHERE clauses
+    const conditions: string[] = ['d.school_id = $1']
+    const values: (string | number)[] = [school_id]
 
-  if (class_id) { values.push(class_id); conditions.push(`d.class_id = $${values.length}`) }
-  if (student_id) { values.push(student_id); conditions.push(`d.student_id = $${values.length}`) }
-  if (status) { values.push(status); conditions.push(`d.status = $${values.length}`) }
-  if (subject) { values.push(subject); conditions.push(`d.subject = $${values.length}`) }
-  if (is_faq === 'true') { conditions.push(`d.is_class_faq = TRUE`) }
+    if (class_id) { values.push(class_id); conditions.push(`d.class_id = $${values.length}`) }
+    if (student_id) { values.push(student_id); conditions.push(`d.student_id = $${values.length}`) }
+    if (status) { values.push(status); conditions.push(`d.status = $${values.length}`) }
+    if (subject) { values.push(subject); conditions.push(`d.subject = $${values.length}`) }
+    if (is_faq === 'true') { conditions.push(`d.is_class_faq = TRUE`) }
 
-  // If teacher_id provided: return doubts from all classes this teacher is associated with
-  let teacherClassJoin = ''
-  if (teacher_id && !class_id) {
-    teacherClassJoin = `
-      AND d.class_id IN (
-        SELECT DISTINCT ct.class_id FROM class_timetable ct WHERE ct.teacher_id = $${values.length + 1}
-        UNION
-        SELECT c.id FROM classes c WHERE c.class_teacher_id = $${values.length + 1}
-      )
-    `
-    values.push(teacher_id)
+    // If teacher_id provided: return doubts from all classes this teacher is associated with
+    let teacherClassJoin = ''
+    if (teacher_id && !class_id) {
+      teacherClassJoin = `
+        AND d.class_id IN (
+          SELECT DISTINCT ct.class_id FROM class_timetable ct WHERE ct.teacher_id = $${values.length + 1}
+          UNION
+          SELECT c.id FROM classes c WHERE c.class_teacher_id = $${values.length + 1}
+        )
+      `
+      values.push(teacher_id)
+    }
+
+    const { rows } = await pool.query(`
+      SELECT
+        d.id, d.school_id, d.class_id, d.student_id, d.subject, d.question,
+        d.task_id, d.ai_answer, d.teacher_answer,
+        d.answered_by, d.answered_at, d.status, d.created_at,
+        d.last_message_at, d.message_count, d.resolved_at, d.closed_by_teacher,
+        d.is_class_faq, d.faq_set_by,
+        s.name AS student_name, s.roll_number,
+        c.grade, c.section,
+        t.name AS answered_by_name,
+        tk.title AS task_title
+      FROM doubts d
+      JOIN students s ON s.id = d.student_id
+      JOIN classes c ON c.id = d.class_id
+      LEFT JOIN teachers t ON t.id = d.answered_by
+      LEFT JOIN tasks tk ON tk.id = d.task_id
+      WHERE ${conditions.join(' AND ')} ${teacherClassJoin}
+      ORDER BY
+        CASE WHEN d.status = 'resolved' THEN 2 WHEN d.status = 'in_progress' THEN 1 ELSE 0 END,
+        COALESCE(d.last_message_at, d.created_at) DESC
+    `, values)
+
+    return NextResponse.json(rows)
+} catch (err: unknown) {
+    console.error('[API]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
-
-  const { rows } = await pool.query(`
-    SELECT
-      d.id, d.school_id, d.class_id, d.student_id, d.subject, d.question,
-      d.task_id, d.ai_answer, d.teacher_answer,
-      d.answered_by, d.answered_at, d.status, d.created_at,
-      d.last_message_at, d.message_count, d.resolved_at, d.closed_by_teacher,
-      d.is_class_faq, d.faq_set_by,
-      s.name AS student_name, s.roll_number,
-      c.grade, c.section,
-      t.name AS answered_by_name,
-      tk.title AS task_title
-    FROM doubts d
-    JOIN students s ON s.id = d.student_id
-    JOIN classes c ON c.id = d.class_id
-    LEFT JOIN teachers t ON t.id = d.answered_by
-    LEFT JOIN tasks tk ON tk.id = d.task_id
-    WHERE ${conditions.join(' AND ')} ${teacherClassJoin}
-    ORDER BY
-      CASE WHEN d.status = 'resolved' THEN 2 WHEN d.status = 'in_progress' THEN 1 ELSE 0 END,
-      COALESCE(d.last_message_at, d.created_at) DESC
-  `, values)
-
-  return NextResponse.json(rows)
 }
 
 export async function POST(req: NextRequest) {

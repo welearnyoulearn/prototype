@@ -30,12 +30,12 @@ function LoginForm() {
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Invalid credentials'); return }
 
-      if (data.firstLogin) {
+      if (data.role === 'platform_admin') {
+        router.push('/platform-admin')
+      } else if (data.firstLogin) {
         router.push('/change-password?first=1')
       } else if (!data.profileCompleted) {
         router.push('/profile-setup')
-      } else if (data.role === 'platform_admin') {
-        router.push('/platform-admin')
       } else {
         router.push('/school-admin')
       }
@@ -46,10 +46,10 @@ function LoginForm() {
     }
   }
 
-  const title    = isPlatform ? 'Platform Admin' : 'School Admin'
-  const subtitle = isPlatform ? 'Sign in with your admin email' : 'Sign in with your School ID'
-  const idLabel  = isPlatform ? 'Email Address' : 'School ID'
-  const idPlaceholder = isPlatform ? 'admin@youremail.com' : 'wlyl-schl-yourschool-1'
+  const title    = isPlatform ? 'Platform Admin' : 'School Portal'
+  const subtitle = isPlatform ? 'Sign in with your admin email' : 'Sign in with your School ID or email'
+  const idLabel  = isPlatform ? 'Email Address' : 'School ID or Email'
+  const idPlaceholder = isPlatform ? 'admin@youremail.com' : 'School ID or your email address'
 
   return (
     <AuthShell theme={theme} title={title} subtitle={subtitle}>
@@ -59,7 +59,7 @@ function LoginForm() {
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1.5">{idLabel}</label>
           <input
-            type={isPlatform ? 'email' : 'text'}
+            type="text"
             value={identifier}
             onChange={e => setIdentifier(e.target.value)}
             placeholder={idPlaceholder}
@@ -67,7 +67,7 @@ function LoginForm() {
             autoComplete={isPlatform ? 'email' : 'username'}
             className={`w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 ${theme.ring} transition`}
           />
-          {!isPlatform && <p className="text-xs text-gray-400 mt-1">Your School ID was sent in the onboarding email</p>}
+          {!isPlatform && <p className="text-xs text-gray-400 mt-1">School admins use School ID · Principal/VP use their email address</p>}
         </div>
 
         <PasswordField

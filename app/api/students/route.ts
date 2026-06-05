@@ -5,32 +5,37 @@ import { hashPassword, generateTempPassword, getAnySession, requireSchoolAdmin }
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail } from '@/lib/email'
 
 export async function GET(req: NextRequest) {
-  const session = await getAnySession()
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
   try {
-    const { searchParams } = new URL(req.url)
-    const school_id = searchParams.get('school_id')
-    const grade = searchParams.get('grade')
-    const section = searchParams.get('section')
+    const session = await getAnySession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const conditions: string[] = []
-    const values: (string | number)[] = []
+    try {
+      const { searchParams } = new URL(req.url)
+      const school_id = searchParams.get('school_id')
+      const grade = searchParams.get('grade')
+      const section = searchParams.get('section')
 
-    if (school_id) { values.push(school_id); conditions.push(`school_id = $${values.length}`) }
-    if (grade) { values.push(grade); conditions.push(`grade = $${values.length}`) }
-    if (section) { values.push(section); conditions.push(`section = $${values.length}`) }
+      const conditions: string[] = []
+      const values: (string | number)[] = []
 
-    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+      if (school_id) { values.push(school_id); conditions.push(`school_id = $${values.length}`) }
+      if (grade) { values.push(grade); conditions.push(`grade = $${values.length}`) }
+      if (section) { values.push(section); conditions.push(`section = $${values.length}`) }
 
-    const result = await pool.query(
-      `SELECT * FROM students ${where} ORDER BY (NULLIF(regexp_replace(grade,'[^0-9]','','g'),''))::int NULLS LAST, section, name`,
-      values
-    )
-    return NextResponse.json(result.rows)
-  } catch (error) {
-    console.error(error)
-    return NextResponse.json({ error: 'Failed to fetch students' }, { status: 500 })
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+      const result = await pool.query(
+        `SELECT * FROM students ${where} ORDER BY (NULLIF(regexp_replace(grade,'[^0-9]','','g'),''))::int NULLS LAST, section, name`,
+        values
+      )
+      return NextResponse.json(result.rows)
+    } catch (error) {
+      console.error(error)
+      return NextResponse.json({ error: 'Failed to fetch students' }, { status: 500 })
+    }
+} catch (err: unknown) {
+    console.error('[API]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 

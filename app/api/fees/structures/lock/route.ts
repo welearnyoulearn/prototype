@@ -37,19 +37,24 @@ export async function POST(req: NextRequest) {
 
 // GET /api/fees/structures/lock?school_id=X&academic_year=Y
 export async function GET(req: NextRequest) {
-  const p = req.nextUrl.searchParams
-  const school_id    = p.get('school_id')
-  const academic_year = p.get('academic_year')
-  if (!school_id || !academic_year) {
-    return NextResponse.json({ error: 'school_id and academic_year required' }, { status: 400 })
-  }
   try {
-    const { rows: [tbl] } = await pool.query(`SELECT to_regclass('fee_structure_locks') IS NOT NULL AS exists`)
-    if (!tbl.exists) return NextResponse.json(null)
-    const { rows: [lock] } = await pool.query(
-      `SELECT * FROM fee_structure_locks WHERE school_id = $1 AND academic_year = $2`,
-      [school_id, academic_year]
-    )
-    return NextResponse.json(lock || null)
-  } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
+    const p = req.nextUrl.searchParams
+    const school_id    = p.get('school_id')
+    const academic_year = p.get('academic_year')
+    if (!school_id || !academic_year) {
+      return NextResponse.json({ error: 'school_id and academic_year required' }, { status: 400 })
+    }
+    try {
+      const { rows: [tbl] } = await pool.query(`SELECT to_regclass('fee_structure_locks') IS NOT NULL AS exists`)
+      if (!tbl.exists) return NextResponse.json(null)
+      const { rows: [lock] } = await pool.query(
+        `SELECT * FROM fee_structure_locks WHERE school_id = $1 AND academic_year = $2`,
+        [school_id, academic_year]
+      )
+      return NextResponse.json(lock || null)
+    } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
+} catch (err: unknown) {
+    console.error('[API]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }

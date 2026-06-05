@@ -3,41 +3,46 @@ import pool from '@/lib/db'
 import { getAnySession } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
-  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  const { searchParams } = new URL(req.url)
-  const teacher_id = searchParams.get('teacher_id')
-  const recipient_school_id = searchParams.get('recipient_school_id')
-  const student_id = searchParams.get('student_id')
-  const unread_only = searchParams.get('unread_only')
-
-  if (!teacher_id && !recipient_school_id && !student_id) {
-    return NextResponse.json({ error: 'teacher_id, recipient_school_id, or student_id required' }, { status: 400 })
-  }
   try {
-    let q = `SELECT n.*, t.name AS sender_name
-             FROM notifications n
-             LEFT JOIN teachers t ON n.sender_teacher_id = t.id
-             WHERE `
-    const vals: (string | number)[] = []
+    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const { searchParams } = new URL(req.url)
+    const teacher_id = searchParams.get('teacher_id')
+    const recipient_school_id = searchParams.get('recipient_school_id')
+    const student_id = searchParams.get('student_id')
+    const unread_only = searchParams.get('unread_only')
 
-    if (teacher_id) {
-      vals.push(teacher_id)
-      q += `n.recipient_teacher_id = $${vals.length}`
-    } else if (student_id) {
-      vals.push(student_id)
-      q += `n.recipient_student_id = $${vals.length}`
-    } else {
-      vals.push(recipient_school_id!)
-      q += `n.recipient_school_id = $${vals.length}`
+    if (!teacher_id && !recipient_school_id && !student_id) {
+      return NextResponse.json({ error: 'teacher_id, recipient_school_id, or student_id required' }, { status: 400 })
     }
+    try {
+      let q = `SELECT n.*, t.name AS sender_name
+               FROM notifications n
+               LEFT JOIN teachers t ON n.sender_teacher_id = t.id
+               WHERE `
+      const vals: (string | number)[] = []
 
-    if (unread_only === 'true') q += ` AND n.is_read = FALSE`
-    q += ' ORDER BY n.created_at DESC LIMIT 50'
-    const result = await pool.query(q, vals)
-    return NextResponse.json(result.rows)
-  } catch (error) {
-    console.error(error)
-    return NextResponse.json({ error: 'Failed to fetch notifications' }, { status: 500 })
+      if (teacher_id) {
+        vals.push(teacher_id)
+        q += `n.recipient_teacher_id = $${vals.length}`
+      } else if (student_id) {
+        vals.push(student_id)
+        q += `n.recipient_student_id = $${vals.length}`
+      } else {
+        vals.push(recipient_school_id!)
+        q += `n.recipient_school_id = $${vals.length}`
+      }
+
+      if (unread_only === 'true') q += ` AND n.is_read = FALSE`
+      q += ' ORDER BY n.created_at DESC LIMIT 50'
+      const result = await pool.query(q, vals)
+      return NextResponse.json(result.rows)
+    } catch (error) {
+      console.error(error)
+      return NextResponse.json({ error: 'Failed to fetch notifications' }, { status: 500 })
+    }
+} catch (err: unknown) {
+    console.error('[API]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 
