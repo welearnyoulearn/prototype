@@ -65,17 +65,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
   const [feeOutstanding, setFeeOutstanding]   = useState(0)
   const [loading, setLoading]                 = useState(true)
   const [currentYear, setCurrentYear]         = useState<string | null>(null)
-  const [aiInsights, setAiInsights]           = useState<string | null>(null)
-  const [aiLoading, setAiLoading]             = useState(false)
-  const [aiError, setAiError]                 = useState('')
-  const [healthReport, setHealthReport]       = useState<string | null>(null)
-  const [healthLoading, setHealthLoading]     = useState(false)
-  const [parentMsgStudentId, setParentMsgStudentId] = useState('')
-  const [parentMsgConcern, setParentMsgConcern]     = useState('')
-  const [parentMsg, setParentMsg]             = useState('')
-  const [parentMsgLoading, setParentMsgLoading]     = useState(false)
-  const [parentMsgError, setParentMsgError]         = useState('')
-  const [showParentTool, setShowParentTool]         = useState(false)
 
   const load = useCallback(async (year?: string) => {
     setLoading(true)
@@ -134,65 +123,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schoolId])
 
-  async function loadAiInsights() {
-    setAiLoading(true)
-    setAiError('')
-    try {
-      const res = await fetch('/api/ai/school-insights', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          date: new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' }),
-          teachers: stats.teachers,
-          students: stats.students,
-          classes: stats.classes,
-          pendingLeaves: stats.pendingLeaves,
-          attendancePct: attPct ?? undefined,
-          uncoveredPeriods: uncovered.length || undefined,
-          upcomingExams: upcomingExams.length || undefined,
-        }),
-      })
-      const data = await res.json()
-      if (data.error) { setAiError(data.error); return }
-      setAiInsights(data.insights)
-    } catch {
-      setAiError('Failed to load AI insights.')
-    } finally {
-      setAiLoading(false)
-    }
-  }
-
-  async function loadHealthReport() {
-    setHealthLoading(true)
-    try {
-      const res = await fetch('/api/ai/school-health-report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId }),
-      })
-      const data = await res.json()
-      setHealthReport(data.report || 'Could not generate report.')
-    } catch { setHealthReport('Could not generate report.') }
-    setHealthLoading(false)
-  }
-
-  async function generateParentMsg() {
-    if (!parentMsgStudentId.trim()) { setParentMsgError('Enter a student ID'); return }
-    setParentMsgLoading(true)
-    setParentMsgError('')
-    setParentMsg('')
-    try {
-      const res = await fetch('/api/ai/parent-message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, student_id: parseInt(parentMsgStudentId), concern: parentMsgConcern }),
-      })
-      const data = await res.json()
-      if (!res.ok) { setParentMsgError(data.error || 'Failed'); return }
-      setParentMsg(data.message)
-    } catch { setParentMsgError('Connection error') }
-    setParentMsgLoading(false)
-  }
 
   const todayLabel   = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short' })
   const attMarked    = attendance.filter(a => a.morning_marked).length

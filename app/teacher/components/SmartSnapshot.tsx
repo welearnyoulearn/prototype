@@ -181,23 +181,7 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
     }).finally(() => setLoading(false))
   }, [teacher.id, schoolId])
 
-  // Fetch class health for class teacher's own class (non-blocking, waits for classes to load)
-  useEffect(() => {
-    if (!teacher.class_teacher_grade || !teacher.class_teacher_section || classes.length === 0) return
-    const ownClass = classes.find(
-      c => c.grade === teacher.class_teacher_grade && c.section === teacher.class_teacher_section
-    )
-    if (!ownClass) return
-    setClassHealthLoading(true)
-    fetch(`/api/classes/${ownClass.id}/health?school_id=${schoolId}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data && !data.error) setClassHealth(data)
-        else console.warn('Class health API error:', data)
-      })
-      .catch(err => console.error('Class health fetch failed:', err))
-      .finally(() => setClassHealthLoading(false))
-  }, [classes, schoolId, teacher.class_teacher_grade, teacher.class_teacher_section])
+  // Class health endpoint not available in wlylV1 — section stays hidden
 
   const ownTodayPeriods = (today ? timetable.filter(p => p.day_of_week === today) : [])
     .sort((a, b) => a.period_number - b.period_number)

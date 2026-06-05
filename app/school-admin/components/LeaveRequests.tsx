@@ -105,8 +105,6 @@ function SubstituteModal({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [viewMode, setViewMode] = useState<'list' | 'timetable'>('list')
-  const [aiSuggestion, setAiSuggestion] = useState('')
-  const [aiSuggLoading, setAiSuggLoading] = useState(false)
 
   // Load teacher's timetable periods (all classes they teach)
   useEffect(() => {
@@ -171,19 +169,6 @@ function SubstituteModal({
     } catch { /* ignore */ }
   }
 
-  async function loadAiSuggestion() {
-    setAiSuggLoading(true)
-    try {
-      const res = await fetch('/api/ai/leave-coverage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, leave_request_id: leave.id }),
-      })
-      const data = await res.json()
-      setAiSuggestion(data.suggestion || 'Could not generate suggestion.')
-    } catch { setAiSuggestion('Could not generate suggestion.') }
-    setAiSuggLoading(false)
-  }
 
   function setSubTeacher(date: string, period: number, teacherId: number | null) {
     setSubs(prev => prev.map(r =>

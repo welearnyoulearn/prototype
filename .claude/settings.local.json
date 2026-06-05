@@ -113,7 +113,9 @@
       "Bash(git -C \"D:/wlyl/prototype\" branch --show-current)",
       "Bash(awk 'NR>=631 && NR<=710 {print NR\": \"$0}' app/school-admin/components/TimetableManagement.tsx)",
       "Bash(python3 -c ' *)",
-      "Bash(python3)"
+      "Bash(python3)",
+      "Bash(Get-ChildItem -Recurse app/api -Filter \"route.ts\")",
+      "Bash(Sort-Object)"
     ],
     "additionalDirectories": [
       "d:\\wlyl\\prototype\\app\\api\\fees\\ledger",

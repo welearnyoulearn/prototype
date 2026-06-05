@@ -157,73 +157,12 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
     } catch { setError('Failed to delete class') }
   }
 
-  async function autoSync() {
-    try {
-      const res = await fetch('/api/classes/sync', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId }),
-      })
-      const data = await res.json()
-      if (res.ok && (data.created > 0 || data.removed > 0)) await loadData()
-    } catch { /* silent */ }
-  }
+  async function autoSync() { /* sync not available in wlylV1 */ }
+  async function loadAllTemplates() { setAllTemplates([]); setLoadingTemplates(false) }
+  async function saveDefaultSet(e: React.FormEvent) { e.preventDefault(); alert('Subject templates not available in this version.') }
+  async function deleteDefaultSet(_id: number) { alert('Subject templates not available in this version.') }
 
-  async function loadAllTemplates() {
-    setLoadingTemplates(true)
-    try {
-      const data = await fetch(`/api/schools/subject-templates?school_id=${schoolId}`).then(r => r.json())
-      setAllTemplates(Array.isArray(data) ? data : [])
-    } finally { setLoadingTemplates(false) }
-  }
-
-  async function saveDefaultSet(e: React.FormEvent) {
-    e.preventDefault()
-    const validSubjects = newSetSubjects.filter(s => s.name.trim())
-    if (!newSetName.trim() || validSubjects.length === 0) return
-    setSavingSet(true); setSetMsg(null)
-    try {
-      const res = await fetch('/api/schools/subject-templates', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          school_id: schoolId, name: newSetName.trim(),
-          from_grade: parseInt(newSetFrom), to_grade: parseInt(newSetTo),
-          subjects: validSubjects.map(s => ({ name: s.name.trim(), periods_per_week: 4 })),
-        }),
-      })
-      if (!res.ok) throw new Error((await res.json()).error)
-      setSetMsg('✓ Default set saved')
-      setNewSetName(''); setNewSetFrom('1'); setNewSetTo('5'); setNewSetSubjects([{ name: '' }])
-      await loadAllTemplates()
-    } catch (err: unknown) {
-      setSetMsg(err instanceof Error ? err.message : 'Failed to save')
-    } finally { setSavingSet(false) }
-  }
-
-  async function deleteDefaultSet(id: number) {
-    if (!confirm('Delete this default subject set?')) return
-    await fetch(`/api/schools/subject-templates?id=${id}`, { method: 'DELETE' })
-    setAllTemplates(prev => prev.filter(t => t.id !== id))
-  }
-
-  async function syncFromStudents() {
-    setSyncing(true); setSyncMsg(null)
-    try {
-      const res = await fetch('/api/classes/sync', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      const parts: string[] = []
-      if (data.created > 0) parts.push(`+${data.created} added (${data.created_classes.join(', ')})`)
-      if (data.removed > 0) parts.push(`−${data.removed} removed (${data.removed_classes.join(', ')})`)
-      setSyncMsg(parts.length > 0 ? `✓ ${parts.join(' · ')}` : '✓ Already in sync')
-      if (data.created > 0 || data.removed > 0) await loadData()
-      setTimeout(() => setSyncMsg(null), 5000)
-    } catch (err: unknown) {
-      setSyncMsg(err instanceof Error ? err.message : 'Sync failed')
-    } finally { setSyncing(false) }
-  }
+  async function syncFromStudents() { setSyncing(false) }
 
   // Group by grade
   const byGrade: Record<string, ClassRow[]> = {}
@@ -711,12 +650,7 @@ function ClassDetail({
   useEffect(() => {
     if (tab === 'timetable') loadTimetable()
     if (tab === 'students') loadStudents()
-    if (tab === 'subjects' && templates.length === 0) {
-      fetch(`/api/schools/subject-templates?school_id=${schoolId}`)
-        .then(r => r.json())
-        .then(data => setTemplates(Array.isArray(data) ? data : []))
-        .catch(() => {})
-    }
+    if (tab === 'subjects' && templates.length === 0) setTemplates([])
   }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadStudents() {

@@ -3,9 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Tasks from './Tasks'
 import ClassDoubts from './ClassDoubts'
-import ClassPerformance from './ClassPerformance'
 import ExamMarks from './ExamMarks'
-import WeeklyTestResults from './WeeklyTestResults'
 import { SCHEDULE } from '@/lib/schedule'
 
 type Subject = {
@@ -115,9 +113,8 @@ type Props = {
   openExamId?: number
 }
 
-const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Performance', 'Attendance', 'Timetable', 'Marks & Results', 'Weekly Tests', 'Homework', 'Doubts', 'Syllabus']
-const SUBJECT_TEACHER_TABS = ['My Overview', 'Marks & Results', 'Homework', 'Doubts', 'Timetable', 'Syllabus']
-const TABS = CLASS_TEACHER_TABS // kept for reference
+const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Attendance', 'Timetable', 'Marks & Results', 'Homework', 'Doubts']
+const SUBJECT_TEACHER_TABS = ['My Overview', 'Marks & Results', 'Homework', 'Doubts', 'Timetable']
 
 // API returns: { id, exam_name, exam_type, exam_date, status, subject_name, subject_status, max_marks, ... }
 type MyExamRow = {
@@ -1234,15 +1231,6 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         </div>
       )}
 
-      {/* ── PERFORMANCE TAB ─────────────────────────────────────────────────── */}
-      {activeTab === 'Performance' && (
-        <ClassPerformance
-          classId={classId}
-          schoolId={schoolId}
-          grade={grade}
-          section={section}
-        />
-      )}
 
       {/* ── ATTENDANCE TAB ──────────────────────────────────────────────────── */}
       {activeTab === 'Attendance' && (
@@ -1660,17 +1648,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         </div>
       )}
 
-      {/* ── WEEKLY TESTS TAB ────────────────────────────────────────────────── */}
-      {activeTab === 'Weekly Tests' && (
-        <WeeklyTestResults
-          classId={classId}
-          schoolId={schoolId}
-          grade={grade}
-          section={section}
-        />
-      )}
-
-      {/* ── OTHER TABS ──────────────────────────────────────────────────────── */}
+      {/* ── MARKS & RESULTS TAB ─────────────────────────────────────────────── */}
       {activeTab === 'Marks & Results' && teacher && (
         <ExamMarks
           classId={classId}
@@ -1688,17 +1666,6 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         </div>
       )}
 
-      {/* ── SYLLABUS TAB ────────────────────────────────────────────────────── */}
-      {activeTab === 'Syllabus' && (
-        <SyllabusTracking
-          classId={classId}
-          schoolId={schoolId}
-          grade={grade}
-          teacher={teacher}
-          isClassTeacher={isClassTeacher}
-          onGoToHomework={() => setActiveTab('Homework')}
-        />
-      )}
     </div>
   )
 }

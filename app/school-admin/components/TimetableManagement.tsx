@@ -293,12 +293,11 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
       fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()),
       fetch(`/api/teachers?school_id=${schoolId}&staff_type=teaching`).then(r => r.json()),
       fetch(`/api/class-timetable?school_id=${schoolId}`).then(r => r.json()),
-      fetch(`/api/schedule-templates?school_id=${schoolId}`).then(r => r.json()),
-    ]).then(([cls, tch, allSlots, tmpls]) => {
+    ]).then(([cls, tch, allSlots]) => {
       setClasses(Array.isArray(cls) ? cls : [])
       setTeachers(Array.isArray(tch) ? tch : [])
       setAllSchoolSlots(Array.isArray(allSlots) ? allSlots : [])
-      setSavedTemplates(Array.isArray(tmpls) ? tmpls : [])
+      setSavedTemplates([])
     }).finally(() => setLoading(false))
     loadHealth()
     loadConflicts()  // eagerly load school-wide conflicts for the top banner
@@ -1894,42 +1893,10 @@ function TemplateTab({
   const [showSaveAs, setShowSaveAs]       = useState(false)
   const [deletingId, setDeletingId]       = useState<number | null>(null)
 
-  useEffect(() => {
-    fetch(`/api/schedule-templates?school_id=${schoolId}`)
-      .then(r => r.json())
-      .then(d => setTemplates(Array.isArray(d) ? d : []))
-      .catch(() => {})
-      .finally(() => setTemplatesLoading(false))
-  }, [schoolId])
+  useEffect(() => { setTemplates([]); setTemplatesLoading(false) }, [schoolId])
 
-  async function saveAsTemplate() {
-    if (!saveAsName.trim()) return
-    setSavingTemplate(true)
-    try {
-      const res = await fetch('/api/schedule-templates', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, name: saveAsName.trim(), settings: form }),
-      })
-      const data = await res.json()
-      if (res.ok) {
-        setTemplates(prev => {
-          const filtered = prev.filter(t => t.id !== data.id)
-          return [...filtered, data].sort((a, b) => a.created_at.localeCompare(b.created_at))
-        })
-        setSaveAsName(''); setShowSaveAs(false)
-        setSaveMsg({ text: `Template "${data.name}" saved`, ok: true })
-        setTimeout(() => setSaveMsg(null), 3000)
-      }
-    } finally { setSavingTemplate(false) }
-  }
-
-  async function deleteTemplate(id: number) {
-    setDeletingId(id)
-    try {
-      await fetch(`/api/schedule-templates?id=${id}&school_id=${schoolId}`, { method: 'DELETE' })
-      setTemplates(prev => prev.filter(t => t.id !== id))
-    } finally { setDeletingId(null) }
-  }
+  async function saveAsTemplate() { alert('Schedule templates not available in this version.') }
+  async function deleteTemplate(_id: number) { alert('Schedule templates not available in this version.') }
 
   function loadTemplate(t: SavedTemplate) {
     setForm(t.settings)

@@ -113,64 +113,10 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   useEffect(() => { if (tab === 'subjects') loadTemplates() }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (tab === 'staff') loadStaff() }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function loadTemplates() {
-    setTmplLoading(true)
-    try {
-      const r = await fetch(`/api/schools/subject-templates?school_id=${schoolId}`)
-      const data = await r.json()
-      setTemplates(Array.isArray(data) ? data : [])
-    } finally { setTmplLoading(false) }
-  }
-
-  async function createTemplate() {
-    if (!newTmpl.name.trim()) return
-    try {
-      const r = await fetch('/api/schools/subject-templates', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          school_id: schoolId,
-          name: newTmpl.name.trim(),
-          from_grade: parseInt(newTmpl.from_grade),
-          to_grade: parseInt(newTmpl.to_grade),
-          subjects: [],
-        }),
-      })
-      const data = await r.json()
-      if (!r.ok) throw new Error(data.error)
-      setTemplates(prev => [...prev, data])
-      setEditingTmpl(data)
-      setNewTmpl({ name: '', from_grade: '1', to_grade: '5' })
-      setShowAddTmpl(false)
-    } catch (e: unknown) {
-      setTmplMsg({ text: e instanceof Error ? e.message : 'Failed to create', ok: false })
-    }
-  }
-
-  async function saveTemplate(tmpl: SubjectTemplate) {
-    try {
-      const r = await fetch(`/api/schools/subject-templates?id=${tmpl.id}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subjects: tmpl.subjects }),
-      })
-      if (!r.ok) throw new Error()
-      setTemplates(prev => prev.map(t => t.id === tmpl.id ? tmpl : t))
-      setTmplMsg({ text: '✓ Template saved', ok: true })
-      setTimeout(() => setTmplMsg(null), 3000)
-    } catch {
-      setTmplMsg({ text: 'Failed to save', ok: false })
-    }
-  }
-
-  async function deleteTemplate(id: number) {
-    if (!confirm('Delete this template?')) return
-    try {
-      await fetch(`/api/schools/subject-templates?id=${id}`, { method: 'DELETE' })
-      setTemplates(prev => prev.filter(t => t.id !== id))
-      if (editingTmpl?.id === id) setEditingTmpl(null)
-    } catch {
-      setTmplMsg({ text: 'Failed to delete', ok: false })
-    }
-  }
+  async function loadTemplates() { setTemplates([]); setTmplLoading(false) }
+  async function createTemplate() { alert('Subject templates not available in this version.') }
+  async function saveTemplate(_tmpl: SubjectTemplate) { alert('Subject templates not available in this version.') }
+  async function deleteTemplate(_id: number) { alert('Subject templates not available in this version.') }
 
   function addSubjectToTemplate(tmpl: SubjectTemplate) {
     const name = newSubjectName.trim()

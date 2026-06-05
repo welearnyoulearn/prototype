@@ -58,7 +58,7 @@ function AudiencePills({ raw }: { raw: string }) {
 }
 
 export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
-  const [tab, setTab]             = useState<'list' | 'create' | 'tvmode'>('list')
+  const [tab, setTab]             = useState<'list' | 'create'>('list')
   const [items, setItems]         = useState<Announcement[]>([])
   const [loading, setLoading]     = useState(true)
   const [deleting, setDeleting]   = useState<number | null>(null)
@@ -68,17 +68,6 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
   const [expanded, setExpanded]   = useState<number | null>(null)
   const [filterAudience, setFilterAudience] = useState<string>('all')
 
-  // AI Draft state
-  const [showAIDraft, setShowAIDraft] = useState(false)
-  const [aiTopic, setAiTopic] = useState('')
-  const [aiDrafting, setAiDrafting] = useState(false)
-  const [aiDraftError, setAiDraftError] = useState('')
-
-  // TV Mode state
-  const [tokens, setTokens]       = useState<Array<{ id: number; token: string; label: string; last_used_at: string | null }>>([])
-  const [tokensLoading, setTokensLoading] = useState(false)
-  const [tokenLabel, setTokenLabel] = useState('Main Display')
-  const [generatingToken, setGeneratingToken] = useState(false)
 
   // Form state — target_audience as array
   const [form, setForm] = useState({
@@ -112,28 +101,6 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
     })
   }
 
-  async function draftWithAI() {
-    if (!aiTopic.trim()) { setAiDraftError('Enter a topic first'); return }
-    setAiDrafting(true)
-    setAiDraftError('')
-    try {
-      const audience = form.target_audience.includes('all') ? 'everyone' : form.target_audience.join(', ')
-      const res = await fetch('/api/ai/draft-announcement', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: form.announcement_type, topic: aiTopic.trim(), audience }),
-      })
-      const data = await res.json()
-      if (data.error) { setAiDraftError(data.error); return }
-      setForm(f => ({ ...f, title: data.title ?? f.title, content: data.content ?? f.content }))
-      setShowAIDraft(false)
-      setAiTopic('')
-    } catch {
-      setAiDraftError('Failed to generate. Try again.')
-    } finally {
-      setAiDrafting(false)
-    }
-  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
@@ -215,18 +182,6 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
             New Announcement
-          </button>
-          <button onClick={async () => {
-            setTab('tvmode')
-            setTokensLoading(true)
-            const r = await fetch(`/api/display-token?school_id=${schoolId}`)
-            setTokens(await r.json())
-            setTokensLoading(false)
-          }}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-1.5 ${tab === 'tvmode'
-              ? 'bg-purple-600 text-white shadow-sm shadow-purple-200'
-              : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-            📺 TV Mode
           </button>
         </div>
       </div>
@@ -530,102 +485,6 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
         </form>
       )}
 
-      {/* ── TV Mode ── */}
-      {tab === 'tvmode' && (
-        <div className="space-y-5">
-          <div className="bg-gradient-to-br from-purple-600 to-purple-700 rounded-2xl p-6 text-white">
-            <div className="flex items-start gap-4">
-              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-2xl flex-shrink-0">📺</div>
-              <div className="flex-1">
-                <h3 className="font-bold text-lg">TV / Kiosk Mode</h3>
-                <p className="text-purple-200 text-sm mt-1">
-                  Generate a public display URL for your school&apos;s TV or notice board. Shows live attendance, exams, announcements, and leaderboard — auto-rotating every 10 seconds.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex gap-2 mt-5">
-              <input
-                type="text"
-                placeholder="Label this display (e.g. Main Lobby, Staff Room)"
-                value={tokenLabel}
-                onChange={e => setTokenLabel(e.target.value)}
-                className="flex-1 bg-white/20 backdrop-blur border border-white/30 text-white placeholder-purple-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-white/50"
-              />
-              <button
-                disabled={generatingToken}
-                onClick={async () => {
-                  setGeneratingToken(true)
-                  const r = await fetch('/api/display-token', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ school_id: schoolId, label: tokenLabel }),
-                  })
-                  const t = await r.json()
-                  setTokens(prev => [t, ...prev])
-                  setTokenLabel('Main Display')
-                  setGeneratingToken(false)
-                }}
-                className="bg-white text-purple-700 px-5 py-2.5 rounded-xl text-sm font-bold hover:bg-purple-50 disabled:opacity-50 transition-all flex-shrink-0"
-              >
-                {generatingToken ? 'Generating…' : '+ Generate URL'}
-              </button>
-            </div>
-          </div>
-
-          {tokensLoading ? (
-            <div className="text-center py-10 text-gray-400 text-sm">Loading display tokens…</div>
-          ) : tokens.length === 0 ? (
-            <div className="text-center py-12 bg-white border border-dashed border-gray-200 rounded-2xl text-gray-400 text-sm">
-              No display tokens yet. Generate one above to get started.
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {tokens.map(t => {
-                const url = `${typeof window !== 'undefined' ? window.location.origin : ''}/display?token=${t.token}`
-                return (
-                  <div key={t.id} className="bg-white border border-gray-200 rounded-2xl p-5">
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <p className="text-sm font-bold text-gray-800">{t.label}</p>
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          {t.last_used_at
-                            ? `Last used: ${new Date(t.last_used_at).toLocaleString('en-IN')}`
-                            : 'Not yet opened'}
-                        </p>
-                      </div>
-                      <div className="flex gap-2">
-                        <a href={url} target="_blank" rel="noreferrer"
-                          className="text-xs bg-purple-600 text-white px-3 py-2 rounded-lg hover:bg-purple-700 font-semibold transition-colors flex items-center gap-1">
-                          Open ↗
-                        </a>
-                        <button
-                          onClick={async () => { await navigator.clipboard.writeText(url) }}
-                          className="text-xs border border-gray-200 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-50 font-medium transition-colors"
-                        >
-                          Copy URL
-                        </button>
-                        <button
-                          onClick={async () => {
-                            await fetch(`/api/display-token?id=${t.id}`, { method: 'DELETE' })
-                            setTokens(prev => prev.filter(x => x.id !== t.id))
-                          }}
-                          className="text-xs border border-red-200 text-red-500 px-3 py-2 rounded-lg hover:bg-red-50 font-medium transition-colors"
-                        >
-                          Revoke
-                        </button>
-                      </div>
-                    </div>
-                    <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-2.5 text-xs font-mono text-gray-500 break-all">
-                      {url}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   )
 }

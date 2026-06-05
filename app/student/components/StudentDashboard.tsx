@@ -25,10 +25,6 @@ type AnnouncementItem = {
 type Props = {
   student: Student; classId: number; schoolId: number; onNavigate?: (key: string) => void
 }
-type WeeklyTestStatus = {
-  status: 'not_generated' | 'available' | 'submitted'
-  week_start: string; score?: number | null; max_score?: number | null
-}
 
 /* ── Helpers ────────────────────────────────────────────────── */
 function getGreeting() {
@@ -136,12 +132,6 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
   const [engagementScore, setEngagementScore] = useState<number | null>(null)
   const [announcements,   setAnnouncements]   = useState<AnnouncementItem[]>([])
   const [annExpanded,     setAnnExpanded]     = useState<number | null>(null)
-  const [weeklyTest,      setWeeklyTest]      = useState<WeeklyTestStatus | null>(null)
-
-  useEffect(() => {
-    fetch(`/api/weekly-test?student_id=${student.id}&school_id=${schoolId}&class_id=${classId}&check_only=true`)
-      .then(r => r.json()).then(d => setWeeklyTest(d)).catch(() => {})
-  }, [student.id, schoolId, classId])
 
   useEffect(() => {
     Promise.all([
@@ -176,23 +166,7 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
             ? (subs.filter(s => s.submitted_at).length / published.length) * 100 : 0
           const now2 = new Date()
           const monthStart = `${now2.getFullYear()}-${String(now2.getMonth() + 1).padStart(2, '0')}-01`
-          fetch(`/api/weekly-test/history?student_id=${student.id}&school_id=${schoolId}&limit=5`)
-            .then(r => r.json())
-            .then(d => {
-              const recent = (d.tests || []).filter(
-                (t: { week_start: string; status: string; score: number | null; max_score: number | null }) =>
-                  t.week_start >= monthStart && t.status === 'submitted' && t.score !== null && t.max_score
-              )
-              const testPct = recent.length > 0
-                ? recent.reduce((a: number, t: { score: number; max_score: number }) =>
-                    a + (t.score / t.max_score * 100), 0) / recent.length : 0
-              setEngagementScore(Math.round(
-                recent.length > 0
-                  ? attPct * 0.4 + taskPct * 0.4 + testPct * 0.2
-                  : attPct * 0.5 + taskPct * 0.5
-              ))
-            })
-            .catch(() => setEngagementScore(Math.round(attPct * 0.5 + taskPct * 0.5)))
+          setEngagementScore(Math.round(attPct * 0.5 + taskPct * 0.5))
         }).catch(() => {})
     }).finally(() => setLoading(false))
   }, [student.id, classId, schoolId])
@@ -279,52 +253,6 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
         <StatCard emoji="⭐" val={reviewed}      label="Graded"  color="text-purple-500" delay={180} onClick={() => onNavigate?.('tasks')} />
       </div>
 
-      {/* ── Weekly Test Banner (shimmer when available) ───────────── */}
-      {weeklyTest && weeklyTest.status !== 'not_generated' && (
-        weeklyTest.status === 'available' ? (
-          <button
-            onClick={() => onNavigate?.('weekly-test')}
-            className="w-full text-left bg-white border-2 border-violet-200 rounded-2xl p-4 flex items-center justify-between gap-3
-                       card-lift shimmer anim-slide-up anim-glow-orange"
-            style={{ animationDelay: '0.25s', '--tw-shadow-color': 'rgba(139,92,246,0.15)' } as React.CSSProperties}
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-violet-100 flex items-center justify-center text-2xl flex-shrink-0 emoji-wobble">
-                ⚡
-              </div>
-              <div>
-                <p className="text-xs font-black text-violet-500 uppercase tracking-wide">This Week</p>
-                <p className="text-sm font-black text-gray-900 mt-0.5">AI Weekly Test is ready!</p>
-                <p className="text-xs text-gray-400">Based on your recent class topics</p>
-              </div>
-            </div>
-            <span className="text-sm font-black text-violet-500 flex-shrink-0 group-hover:translate-x-1 transition-transform">
-              Start →
-            </span>
-          </button>
-        ) : weeklyTest.status === 'submitted' && weeklyTest.score != null && weeklyTest.max_score ? (
-          (() => {
-            const pct   = Math.round((weeklyTest.score as number) / (weeklyTest.max_score as number) * 100)
-            const color = pct >= 80 ? 'text-green-600' : pct >= 50 ? 'text-amber-600' : 'text-red-500'
-            return (
-              <button
-                onClick={() => onNavigate?.('weekly-test')}
-                className="w-full text-left bg-white border border-gray-200 rounded-2xl p-4 flex items-center justify-between gap-3 card-lift anim-slide-up"
-                style={{ animationDelay: '0.25s' }}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-xl bg-gray-100 flex items-center justify-center text-2xl flex-shrink-0">⚡</div>
-                  <div>
-                    <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">This Week&apos;s Test</p>
-                    <p className="text-sm font-bold text-gray-700 mt-0.5">Tap to review your answers</p>
-                  </div>
-                </div>
-                <p className={`text-3xl font-black ${color} flex-shrink-0 anim-num-pop`}>{pct}%</p>
-              </button>
-            )
-          })()
-        ) : null
-      )}
 
       {/* ── Overdue Alert (pulse glow) ────────────────────────────── */}
       {overdue.length > 0 && (
@@ -449,7 +377,7 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
         {[
           { label: 'Ask a Doubt', emoji: '💬', key: 'doubts'   },
           { label: 'My Marks',   emoji: '📊', key: 'my-marks' },
-          { label: 'Daily Hub',  emoji: '🎯', key: 'hub'      },
+          { label: 'Timetable',  emoji: '🗓️', key: 'timetable' },
         ].map((item, i) => (
           <button
             key={item.key}
