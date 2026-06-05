@@ -44,7 +44,7 @@ export default function TeacherLoginPage() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1.5">Email Address</label>
+          <label className="block text-sm font-medium text-white/70 mb-1.5">Email Address</label>
           <input
             type="email"
             value={email}
@@ -52,7 +52,7 @@ export default function TeacherLoginPage() {
             placeholder="your.email@school.edu"
             required
             autoComplete="email"
-            className={`w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 ${theme.ring} transition`}
+            className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent transition backdrop-blur-sm`}
           />
         </div>
 
@@ -66,7 +66,7 @@ export default function TeacherLoginPage() {
         />
 
         <div className="flex justify-end">
-          <Link href="/teacher/forgot-password" className="text-sm text-emerald-600 hover:text-emerald-800 font-medium transition">
+          <Link href="/teacher/forgot-password" className="text-sm text-white/40 hover:text-white/70 font-medium transition">
             Forgot password?
           </Link>
         </div>
@@ -74,7 +74,7 @@ export default function TeacherLoginPage() {
         <button
           type="submit"
           disabled={loading}
-          className={`w-full ${theme.accent} ${theme.accentHover} text-white font-semibold py-3 rounded-xl text-sm transition disabled:opacity-60 shadow-sm flex items-center justify-center gap-2`}
+          className={`w-full bg-gradient-to-r ${theme.btnGradient} text-white font-semibold py-3 rounded-xl text-sm transition-all disabled:opacity-50 shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2`}
         >
           {loading ? (
             <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Signing in...</>
@@ -82,9 +82,9 @@ export default function TeacherLoginPage() {
         </button>
       </form>
 
-      <div className="mt-5 pt-5 border-t border-gray-100 flex items-center justify-between text-sm">
-        <span className="text-gray-400">Not a teacher?</span>
-        <Link href="/" className="text-gray-500 hover:text-gray-700 font-medium transition">← Back to portal selection</Link>
+      <div className="mt-5 pt-5 border-t border-white/8 flex items-center justify-between text-sm">
+        <span className="text-white/30">Not a teacher??</span>
+        <Link href="/" className="text-white/30 hover:text-white/50 font-medium transition">← Back to portal selection</Link>
       </div>
     </AuthShell>
   )
