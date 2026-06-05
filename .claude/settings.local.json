@@ -105,7 +105,8 @@
       "Bash(ping -n 2 db.hiiusazavhjxawctnomj.supabase.co)",
       "Bash(node scripts/migrate-to-mumbai.js \"postgresql://postgres.hiiusazavhjxawctnomj:Kowsik111%23%23%23@aws-1-ap-south-1.pooler.supabase.com:5432/postgres\")",
       "Bash(npx tsx *)",
-      "Bash(DATABASE_URL=\"postgresql://postgres.hiiusazavhjxawctnomj:Kowsik111%23%23%23@aws-1-ap-south-1.pooler.supabase.com:5432/postgres\" npx tsx scripts/bootstrap-mumbai.ts)"
+      "Bash(DATABASE_URL=\"postgresql://postgres.hiiusazavhjxawctnomj:Kowsik111%23%23%23@aws-1-ap-south-1.pooler.supabase.com:5432/postgres\" npx tsx scripts/bootstrap-mumbai.ts)",
+      "Bash(git cherry-pick *)"
     ],
     "additionalDirectories": [
       "d:\\wlyl\\prototype\\app\\api\\fees\\ledger",
