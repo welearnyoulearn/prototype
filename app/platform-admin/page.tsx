@@ -18,12 +18,13 @@ type School = {
   created_at: string
   deleted_at?: string
   tier?: string
-  teacher_count?: number
-  student_count?: number
+  teacher_count?: number | string
+  student_count?: number | string
+  admin_last_login?: string
 }
 
 type PlatformStats = {
-  schools:       { total: number; active: number; inactive: number }
+  schools:       { total: number; active: number; inactive: number; deleted: number }
   teachers:      { total: number }
   students:      { total: number }
   subscriptions: { basic: number; standard: number; premium: number; none: number }
@@ -36,24 +37,23 @@ type FormData = {
 }
 
 const TIER_BADGE: Record<string, string> = {
-  basic:    'bg-green-100 text-green-700',
-  standard: 'bg-blue-100 text-blue-700',
-  premium:  'bg-purple-100 text-purple-700',
-  none:     'bg-gray-100 text-gray-500',
+  basic:    'bg-green-100 text-green-700 border-green-200',
+  standard: 'bg-blue-100 text-blue-700 border-blue-200',
+  premium:  'bg-purple-100 text-purple-700 border-purple-200',
+  none:     'bg-gray-100 text-gray-500 border-gray-200',
 }
 
-const TIER_LABEL: Record<string, string> = {
-  basic: 'Basic', standard: 'Standard', premium: 'Premium', none: 'No Plan',
-}
+const TIER_ORDER: Record<string, number> = { none: 0, basic: 1, standard: 2, premium: 3 }
 
-type Tab = 'active' | 'inactive' | 'deleted'
+type Tab     = 'active' | 'inactive' | 'deleted'
+type SortCol = 'name' | 'plan' | 'staff' | 'joined' | 'last_active'
 
 function timeAgo(dateStr: string) {
   const diff = Date.now() - new Date(dateStr).getTime()
   const days = Math.floor(diff / 86400000)
   if (days === 0) return 'Today'
   if (days === 1) return 'Yesterday'
-  if (days < 7) return `${days}d ago`
+  if (days < 7)  return `${days}d ago`
   if (days < 30) return `${Math.floor(days / 7)}w ago`
   if (days < 365) return `${Math.floor(days / 30)}mo ago`
   return `${Math.floor(days / 365)}y ago`
@@ -76,16 +76,92 @@ export default function PlatformAdmin() {
   const [filterTier, setFilterTier]       = useState<string>('all')
   const [highlightId, setHighlightId]     = useState<number | null>(null)
   const [createdSchool, setCreatedSchool] = useState<{ id: number; name: string; code: string; pass: string } | null>(null)
+  const [copiedCode, setCopiedCode]       = useState<number | null>(null)
+  const [changingPlanFor, setChangingPlanFor] = useState<number | null>(null)
+  const [sort, setSort] = useState<{ col: SortCol; dir: 'asc' | 'desc' }>({ col: 'joined', dir: 'desc' })
 
   // Admin team modal
-  const [showAdminModal, setShowAdminModal]         = useState(false)
-  const [adminList, setAdminList]                   = useState<{ id: number; full_name: string; email: string; status: string; created_at: string }[]>([])
-  const [adminForm, setAdminForm]                   = useState({ full_name: '', email: '' })
-  const [adminSubmitting, setAdminSubmitting]       = useState(false)
-  const [adminError, setAdminError]                 = useState('')
+  const [showAdminModal, setShowAdminModal]   = useState(false)
+  const [adminList, setAdminList]             = useState<{ id: number; full_name: string; email: string; status: string; created_at: string }[]>([])
+  const [adminForm, setAdminForm]             = useState({ full_name: '', email: '' })
+  const [adminSubmitting, setAdminSubmitting] = useState(false)
+  const [adminError, setAdminError]           = useState('')
+  const [resetResult, setResetResult]         = useState<{ name: string; email: string; password: string; emailSent: boolean } | null>(null)
+  const [resettingId, setResettingId]         = useState<number | null>(null)
+
+  const [form, setForm] = useState<FormData>({
+    name: '', type: 'Private', city: '', country: '', phone: '', email: '', address: '',
+  })
+
+  const scopeForTab: Record<Tab, string> = { active: 'active', inactive: 'inactive', deleted: 'deleted' }
+
+  const fetchSchools = useCallback(async (t: Tab = tab) => {
+    setLoading(true)
+    try {
+      const res  = await fetch(`/api/schools?scope=${scopeForTab[t]}`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setSchools(data)
+    } catch { setError('Failed to load schools') }
+    finally   { setLoading(false) }
+  }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function fetchStats() {
+    try {
+      const res = await fetch('/api/platform/stats')
+      if (res.ok) setStats(await res.json())
+    } catch { /* non-critical */ }
+  }
+
+  useEffect(() => {
+    Promise.all([fetchSchools(tab), fetchStats()])
+      .catch(() => setError('Cannot connect to database.'))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!highlightId) return
+    const timer = setTimeout(() => {
+      document.getElementById(`school-row-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 150)
+    const clear = setTimeout(() => setHighlightId(null), 3500)
+    return () => { clearTimeout(timer); clearTimeout(clear) }
+  }, [highlightId])
+
+  function switchTab(t: Tab) {
+    setTab(t); setSearch(''); setFilterTier('all'); fetchSchools(t)
+  }
+
+  function toggleSort(col: SortCol) {
+    setSort(prev =>
+      prev.col === col
+        ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { col, dir: col === 'joined' || col === 'last_active' ? 'desc' : 'asc' }
+    )
+  }
+
+  function copyCode(schoolId: number, code: string) {
+    navigator.clipboard.writeText(code).catch(() => {})
+    setCopiedCode(schoolId)
+    setTimeout(() => setCopiedCode(null), 2000)
+  }
+
+  async function handlePlanChange(schoolId: number, newTier: string) {
+    setChangingPlanFor(schoolId)
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/subscription`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier: newTier }),
+      })
+      if (!res.ok) throw new Error()
+      setSchools(prev => prev.map(s => s.id === schoolId ? { ...s, tier: newTier } : s))
+      fetchStats()
+    } catch { setError('Failed to update plan') }
+    finally   { setChangingPlanFor(null) }
+  }
 
   async function openAdminModal() {
-    setShowAdminModal(true); setAdminError('')
+    setShowAdminModal(true); setAdminError(''); setResetResult(null)
     const res = await fetch('/api/platform/admins')
     if (res.ok) setAdminList(await res.json())
   }
@@ -94,7 +170,7 @@ export default function PlatformAdmin() {
     e.preventDefault()
     if (!adminForm.full_name.trim() || !adminForm.email.trim()) { setAdminError('Name and email required'); return }
     setAdminSubmitting(true); setAdminError('')
-    const res = await fetch('/api/platform/admins', {
+    const res  = await fetch('/api/platform/admins', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(adminForm),
     })
@@ -105,57 +181,23 @@ export default function PlatformAdmin() {
     setAdminSubmitting(false)
   }
 
-  const [form, setForm] = useState<FormData>({
-    name: '', type: 'Private', city: '', country: '', phone: '', email: '', address: '',
-  })
-
-  const scopeForTab: Record<Tab, string> = {
-    active: 'active', inactive: 'inactive', deleted: 'deleted',
-  }
-
-  const fetchSchools = useCallback(async (t: Tab = tab) => {
-    setLoading(true)
+  async function handleResetAdmin(adminId: number) {
+    if (!confirm('Reset credentials for this admin? A new password will be generated and emailed to them.')) return
+    setResettingId(adminId); setResetResult(null)
     try {
-      const res = await fetch(`/api/schools?scope=${scopeForTab[t]}`)
+      const res  = await fetch(`/api/platform/admins/${adminId}/reset`, { method: 'POST' })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      setSchools(data)
-    } catch { setError('Failed to load schools') }
-    finally { setLoading(false) }
-  }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    Promise.all([fetchSchools(tab), fetchStats()])
-      .catch(() => setError('Cannot connect to database.'))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Scroll to & highlight newly added school after credentials modal closes
-  useEffect(() => {
-    if (!highlightId) return
-    const timer = setTimeout(() => {
-      const el = document.getElementById(`school-row-${highlightId}`)
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }, 150)
-    const clear = setTimeout(() => setHighlightId(null), 3500)
-    return () => { clearTimeout(timer); clearTimeout(clear) }
-  }, [highlightId])
-
-  function switchTab(t: Tab) {
-    setTab(t); setSearch(''); setFilterTier('all'); fetchSchools(t)
-  }
-
-  async function fetchStats() {
-    try {
-      const res = await fetch('/api/platform/stats')
-      if (res.ok) setStats(await res.json())
-    } catch { /* non-critical */ }
+      if (!res.ok) { setAdminError(data.error || 'Reset failed'); return }
+      setResetResult({ name: data.name, email: data.email, password: data.tempPassword, emailSent: data.emailSent })
+    } catch { setAdminError('Reset failed') }
+    finally   { setResettingId(null) }
   }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     setSubmitting(true); setError('')
     try {
-      const res = await fetch('/api/schools', {
+      const res  = await fetch('/api/schools', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
@@ -181,9 +223,8 @@ export default function PlatformAdmin() {
   async function toggleStatus(school: School) {
     const newStatus = school.status === 'active' ? 'inactive' : 'active'
     try {
-      const res = await fetch(`/api/schools/${school.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+      const res  = await fetch(`/api/schools/${school.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
       })
       const data = await res.json()
@@ -207,8 +248,7 @@ export default function PlatformAdmin() {
     if (!confirm(`Restore "${name}"? It will become active again.`)) return
     try {
       const res = await fetch(`/api/schools/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ restore: true }),
       })
       if (!res.ok) throw new Error()
@@ -222,34 +262,71 @@ export default function PlatformAdmin() {
     router.push('/login')
   }
 
+  // Filter + sort
   const filtered = schools.filter(s => {
+    const q = search.toLowerCase()
     const matchSearch = !search || (
-      s.name.toLowerCase().includes(search.toLowerCase()) ||
-      (s.city || '').toLowerCase().includes(search.toLowerCase()) ||
-      (s.school_code || '').toLowerCase().includes(search.toLowerCase())
+      s.name.toLowerCase().includes(q) ||
+      (s.city || '').toLowerCase().includes(q) ||
+      (s.school_code || '').toLowerCase().includes(q)
     )
     const matchTier = filterTier === 'all' || (s.tier || 'none') === filterTier
     return matchSearch && matchTier
   })
 
-  // Derived analytics
-  const noPlanCount = stats?.subscriptions.none ?? 0
-  const paidCount   = stats ? (stats.subscriptions.basic + stats.subscriptions.standard + stats.subscriptions.premium) : 0
+  const sorted = [...filtered].sort((a, b) => {
+    const dir = sort.dir === 'asc' ? 1 : -1
+    switch (sort.col) {
+      case 'name':   return dir * a.name.localeCompare(b.name)
+      case 'plan':   return dir * ((TIER_ORDER[a.tier || 'none'] || 0) - (TIER_ORDER[b.tier || 'none'] || 0))
+      case 'staff':  return dir * (
+        (Number(a.teacher_count || 0) + Number(a.student_count || 0)) -
+        (Number(b.teacher_count || 0) + Number(b.student_count || 0))
+      )
+      case 'joined': return dir * (new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+      case 'last_active': {
+        const la = a.admin_last_login ? new Date(a.admin_last_login).getTime() : 0
+        const lb = b.admin_last_login ? new Date(b.admin_last_login).getTime() : 0
+        return dir * (la - lb)
+      }
+      default: return 0
+    }
+  })
+
+  // Derived stats
+  const noPlanCount    = stats?.subscriptions.none ?? 0
+  const paidCount      = stats ? stats.subscriptions.basic + stats.subscriptions.standard + stats.subscriptions.premium : 0
+  const conversionPct  = stats?.schools.active ? Math.round((paidCount / stats.schools.active) * 100) : 0
 
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-purple-300'
-
   const tabCls = (t: Tab) =>
     `px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-      tab === t
-        ? 'bg-white text-gray-900 shadow-sm border border-gray-200'
-        : 'text-gray-500 hover:text-gray-700'
+      tab === t ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'
     }`
+
+  function thSort(col: SortCol, label: string) {
+    const active = sort.col === col
+    return (
+      <th
+        key={col}
+        onClick={() => toggleSort(col)}
+        className="text-left px-5 py-3 font-medium text-gray-500 cursor-pointer select-none hover:text-gray-800 transition-colors whitespace-nowrap"
+      >
+        <span className="inline-flex items-center gap-1">
+          {label}
+          <span className={`text-[10px] ${active ? 'text-purple-500' : 'text-gray-300'}`}>
+            {active ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'}
+          </span>
+        </span>
+      </th>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
 
       {/* ── Top bar ── */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-20">
+      <div className="bg-white border-b border-gray-200 px-6 py-3.5 flex items-center justify-between sticky top-0 z-20 shadow-sm">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-purple-600 rounded-lg flex items-center justify-center">
@@ -277,9 +354,7 @@ export default function PlatformAdmin() {
             onClick={() => { fetchSchools(tab); fetchStats() }}
             className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors"
             title="Refresh data"
-          >
-            ↻ Refresh
-          </button>
+          >↻ Refresh</button>
           <span className="bg-purple-100 text-purple-700 text-xs font-medium px-3 py-1 rounded-full">Platform Admin</span>
           <button onClick={handleLogout}
             className="text-sm text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition-colors">
@@ -297,7 +372,7 @@ export default function PlatformAdmin() {
           </div>
         )}
 
-        {/* ── Platform-wide stats ── */}
+        {/* ── Stats cards ── */}
         {stats && (
           <>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
@@ -314,20 +389,33 @@ export default function PlatformAdmin() {
                   </div>
                 </div>
                 <p className="text-3xl font-black text-gray-900">{stats.schools.active}</p>
-                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                <div className="mt-1.5 space-y-1">
                   {stats.growth.this_month > 0 ? (
-                    <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-medium">
-                      +{stats.growth.this_month} this month
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-medium">
+                        +{stats.growth.this_month} this month
+                      </span>
+                      {stats.growth.last_month > 0 && (
+                        <span className="text-xs text-gray-400">vs {stats.growth.last_month} last mo</span>
+                      )}
+                    </div>
                   ) : (
-                    <span className="text-xs text-gray-400">no new schools this month</span>
+                    <p className="text-xs text-gray-400">
+                      {stats.growth.last_month > 0
+                        ? `${stats.growth.last_month} joined last month`
+                        : 'no new schools this month'}
+                    </p>
                   )}
-                  {stats.schools.inactive > 0 &&
-                    <span className="text-xs text-orange-500">{stats.schools.inactive} inactive</span>}
+                  <div className="flex items-center gap-2">
+                    {stats.schools.inactive > 0 &&
+                      <span className="text-xs text-orange-500 font-medium">{stats.schools.inactive} inactive</span>}
+                    {stats.schools.deleted > 0 &&
+                      <span className="text-xs text-gray-400">{stats.schools.deleted} deleted</span>}
+                  </div>
                 </div>
               </div>
 
-              {/* Paying schools */}
+              {/* On Paid Plan */}
               <div className="bg-white rounded-xl border border-gray-200 p-5">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">On Paid Plan</p>
@@ -339,15 +427,19 @@ export default function PlatformAdmin() {
                   </div>
                 </div>
                 <p className="text-3xl font-black text-gray-900">{paidCount}</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {paidCount} of {stats.schools.active} active
+                  <span className="ml-1 font-semibold text-gray-600">({conversionPct}%)</span>
+                </p>
                 <div className="mt-2 flex gap-0.5 h-1.5 rounded-full overflow-hidden bg-gray-100">
                   {stats.subscriptions.premium > 0 && (
-                    <div className="bg-purple-500" style={{ width: `${(stats.subscriptions.premium / Math.max(stats.schools.active, 1)) * 100}%` }} />
+                    <div className="bg-purple-500 transition-all" style={{ width: `${(stats.subscriptions.premium / Math.max(stats.schools.active, 1)) * 100}%` }} />
                   )}
                   {stats.subscriptions.standard > 0 && (
-                    <div className="bg-blue-400" style={{ width: `${(stats.subscriptions.standard / Math.max(stats.schools.active, 1)) * 100}%` }} />
+                    <div className="bg-blue-400 transition-all" style={{ width: `${(stats.subscriptions.standard / Math.max(stats.schools.active, 1)) * 100}%` }} />
                   )}
                   {stats.subscriptions.basic > 0 && (
-                    <div className="bg-green-400" style={{ width: `${(stats.subscriptions.basic / Math.max(stats.schools.active, 1)) * 100}%` }} />
+                    <div className="bg-green-400 transition-all" style={{ width: `${(stats.subscriptions.basic / Math.max(stats.schools.active, 1)) * 100}%` }} />
                   )}
                 </div>
                 <div className="flex gap-2 mt-1.5 flex-wrap">
@@ -360,7 +452,7 @@ export default function PlatformAdmin() {
                 </div>
               </div>
 
-              {/* Platform reach */}
+              {/* Platform Reach */}
               <div className="bg-white rounded-xl border border-gray-200 p-5">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Platform Reach</p>
@@ -381,7 +473,7 @@ export default function PlatformAdmin() {
                 </p>
               </div>
 
-              {/* No-plan pipeline */}
+              {/* No Plan Yet */}
               <div className={`rounded-xl border p-5 ${noPlanCount > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200'}`}>
                 <div className="flex items-center justify-between mb-3">
                   <p className={`text-xs font-medium uppercase tracking-wide ${noPlanCount > 0 ? 'text-amber-600' : 'text-gray-500'}`}>
@@ -389,8 +481,7 @@ export default function PlatformAdmin() {
                   </p>
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${noPlanCount > 0 ? 'bg-amber-100' : 'bg-gray-100'}`}>
                     <svg className={`w-4 h-4 ${noPlanCount > 0 ? 'text-amber-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </div>
                 </div>
@@ -400,7 +491,7 @@ export default function PlatformAdmin() {
                 </p>
                 {noPlanCount > 0 && (
                   <button
-                    onClick={() => { setFilterTier('none'); setTab('active'); fetchSchools('active') }}
+                    onClick={() => { setFilterTier('none'); switchTab('active') }}
                     className="mt-2 text-xs text-amber-700 font-semibold underline hover:no-underline"
                   >
                     View & assign plans →
@@ -409,7 +500,7 @@ export default function PlatformAdmin() {
               </div>
             </div>
 
-            {/* ── Needs-attention banner ── */}
+            {/* Inactive schools banner */}
             {stats.schools.inactive > 0 && (
               <div className="mb-6 bg-orange-50 border border-orange-200 rounded-xl px-5 py-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -418,7 +509,7 @@ export default function PlatformAdmin() {
                       d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                   </svg>
                   <p className="text-sm text-orange-800">
-                    <span className="font-semibold">{stats.schools.inactive} school{stats.schools.inactive !== 1 ? 's' : ''}</span> are inactive
+                    <span className="font-semibold">{stats.schools.inactive} school{stats.schools.inactive !== 1 ? 's' : ''}</span> {stats.schools.inactive === 1 ? 'is' : 'are'} inactive
                   </p>
                 </div>
                 <button onClick={() => switchTab('inactive')}
@@ -434,7 +525,11 @@ export default function PlatformAdmin() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-xl font-bold text-gray-900">Schools</h2>
-            <p className="text-gray-400 text-sm">{filtered.length} of {schools.length} shown</p>
+            <p className="text-gray-400 text-sm">
+              {filtered.length !== schools.length
+                ? `${filtered.length} of ${schools.length} shown`
+                : `${schools.length} school${schools.length !== 1 ? 's' : ''}`}
+            </p>
           </div>
           <button
             onClick={() => setShowModal(true)}
@@ -450,16 +545,21 @@ export default function PlatformAdmin() {
         {/* ── Tabs ── */}
         <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl mb-4 w-fit">
           <button onClick={() => switchTab('active')} className={tabCls('active')}>
-            Active Schools
+            Active
             {stats && <span className="ml-1.5 text-gray-400 font-normal">({stats.schools.active})</span>}
           </button>
           <button onClick={() => switchTab('inactive')} className={tabCls('inactive')}>
             Inactive
-            {stats?.schools.inactive ? (
-              <span className="ml-1.5 text-orange-400 font-normal">({stats.schools.inactive})</span>
-            ) : null}
+            <span className={`ml-1.5 font-normal ${stats && stats.schools.inactive > 0 ? 'text-orange-400' : 'text-gray-400'}`}>
+              ({stats?.schools.inactive ?? 0})
+            </span>
           </button>
-          <button onClick={() => switchTab('deleted')} className={tabCls('deleted')}>Deleted</button>
+          <button onClick={() => switchTab('deleted')} className={tabCls('deleted')}>
+            Deleted
+            {stats && stats.schools.deleted > 0 && (
+              <span className="ml-1.5 text-gray-400 font-normal">({stats.schools.deleted})</span>
+            )}
+          </button>
         </div>
 
         {/* ── Filters ── */}
@@ -467,8 +567,7 @@ export default function PlatformAdmin() {
           <div className="relative flex-1">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
               fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <input
               type="text"
@@ -489,6 +588,14 @@ export default function PlatformAdmin() {
               <option value="premium">Premium</option>
             </select>
           )}
+          {(search || filterTier !== 'all') && (
+            <button
+              onClick={() => { setSearch(''); setFilterTier('all') }}
+              className="text-sm text-gray-400 hover:text-gray-700 border border-gray-200 px-3 py-2 rounded-lg bg-white transition-colors"
+            >
+              Clear
+            </button>
+          )}
         </div>
 
         {tab === 'deleted' && (
@@ -504,7 +611,7 @@ export default function PlatformAdmin() {
               <div className="w-6 h-6 border-2 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
               <p className="text-gray-400 text-sm">Loading schools…</p>
             </div>
-          ) : filtered.length === 0 ? (
+          ) : sorted.length === 0 ? (
             <div className="py-16 text-center">
               <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -523,17 +630,15 @@ export default function PlatformAdmin() {
                 <p className="text-gray-400 text-sm mt-1">Click &quot;Add School&quot; to register the first school</p>
               )}
               {(search || filterTier !== 'all') && (
-                <button
-                  onClick={() => { setSearch(''); setFilterTier('all') }}
-                  className="mt-3 text-sm text-purple-600 hover:text-purple-800 underline"
-                >
+                <button onClick={() => { setSearch(''); setFilterTier('all') }}
+                  className="mt-3 text-sm text-purple-600 hover:text-purple-800 underline">
                   Clear filters
                 </button>
               )}
             </div>
 
           ) : tab === 'deleted' ? (
-            /* ── Deleted schools table ── */
+            /* ── Deleted table ── */
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr>
@@ -545,7 +650,7 @@ export default function PlatformAdmin() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {filtered.map(school => (
+                {sorted.map(school => (
                   <tr key={school.id} className="hover:bg-red-50/30 transition-colors opacity-75">
                     <td className="px-5 py-3.5">
                       <span className="font-medium text-gray-600 line-through">{school.name}</span>
@@ -581,108 +686,173 @@ export default function PlatformAdmin() {
             </table>
 
           ) : (
-            /* ── Active / Inactive schools table ── */
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="text-left px-5 py-3 font-medium text-gray-500">School</th>
-                  <th className="text-left px-5 py-3 font-medium text-gray-500">School ID</th>
-                  <th className="text-left px-5 py-3 font-medium text-gray-500">Plan</th>
-                  <th className="text-left px-5 py-3 font-medium text-gray-500">Staff / Students</th>
-                  <th className="text-left px-5 py-3 font-medium text-gray-500">Location</th>
-                  <th className="text-left px-5 py-3 font-medium text-gray-500">Joined</th>
-                  <th className="text-left px-5 py-3 font-medium text-gray-500">Status</th>
-                  <th className="text-left px-5 py-3 font-medium text-gray-500">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {filtered.map(school => {
-                  const isNew        = isNewThisWeek(school.created_at)
-                  const isHighlighted = school.id === highlightId
-                  return (
-                    <tr
-                      id={`school-row-${school.id}`}
-                      key={school.id}
-                      className={`transition-all duration-700 ${
-                        isHighlighted
-                          ? 'bg-green-50 outline outline-2 outline-green-300'
-                          : 'hover:bg-gray-50'
-                      }`}
-                    >
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-2">
-                          <Link href={`/platform-admin/schools/${school.id}`}
-                            className="font-medium text-purple-700 hover:text-purple-900 hover:underline">
-                            {school.name}
-                          </Link>
-                          {isNew && (
-                            <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-semibold">NEW</span>
-                          )}
-                        </div>
-                        <div className="text-gray-400 text-xs mt-0.5">{school.type}</div>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        {school.school_code ? (
-                          <code className="text-xs bg-purple-50 text-purple-700 border border-purple-200 px-2 py-1 rounded font-mono">
-                            {school.school_code}
-                          </code>
-                        ) : <span className="text-gray-300 text-xs">—</span>}
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span className={`text-xs font-medium px-2.5 py-1 rounded-full capitalize ${TIER_BADGE[school.tier || 'none']}`}>
-                          {TIER_LABEL[school.tier || 'none'] ?? school.tier}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5 text-gray-600 text-xs">
-                        <div><span className="font-medium text-gray-800">{school.teacher_count ?? '—'}</span> teachers</div>
-                        <div><span className="font-medium text-gray-800">{school.student_count ?? '—'}</span> students</div>
-                      </td>
-                      <td className="px-5 py-3.5 text-gray-600 text-sm">
-                        {[school.city, school.country].filter(Boolean).join(', ') || '—'}
-                      </td>
-                      <td className="px-5 py-3.5 text-gray-400 text-xs whitespace-nowrap">
-                        {school.created_at ? timeAgo(school.created_at) : '—'}
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          school.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                        }`}>
-                          {school.status}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-2">
-                          <Link href={`/platform-admin/schools/${school.id}`}
-                            className="text-xs px-2.5 py-1 rounded border border-purple-200 hover:bg-purple-50 text-purple-600 transition-colors">
-                            Manage
-                          </Link>
-                          <button onClick={() => toggleStatus(school)}
-                            className={`text-xs px-2.5 py-1 rounded border transition-colors ${
-                              school.status === 'active'
-                                ? 'border-gray-200 hover:bg-gray-50 text-gray-600'
-                                : 'border-green-200 hover:bg-green-50 text-green-600 font-medium'
-                            }`}>
-                            {school.status === 'active' ? 'Deactivate' : 'Activate'}
-                          </button>
-                          <button onClick={() => handleDelete(school.id, school.name)}
-                            className="text-xs px-2.5 py-1 rounded border border-red-200 hover:bg-red-50 text-red-500 transition-colors">
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+            /* ── Active / Inactive table ── */
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[900px]">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    {thSort('name',        'School')}
+                    <th className="text-left px-5 py-3 font-medium text-gray-500 whitespace-nowrap">School ID</th>
+                    {thSort('plan',        'Plan')}
+                    {thSort('staff',       'Staff / Students')}
+                    <th className="text-left px-5 py-3 font-medium text-gray-500">Location</th>
+                    {thSort('last_active', 'Last Active')}
+                    {thSort('joined',      'Joined')}
+                    <th className="text-left px-5 py-3 font-medium text-gray-500">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {sorted.map(school => {
+                    const tcnt        = Number(school.teacher_count || 0)
+                    const scnt        = Number(school.student_count || 0)
+                    const needsSetup  = tcnt === 0 || scnt === 0
+                    const isNew       = isNewThisWeek(school.created_at)
+                    const isHighlight = school.id === highlightId
+                    const isChanging  = changingPlanFor === school.id
+
+                    return (
+                      <tr
+                        id={`school-row-${school.id}`}
+                        key={school.id}
+                        className={`transition-all duration-700 ${
+                          isHighlight ? 'bg-green-50 outline outline-2 outline-green-300' : 'hover:bg-gray-50/80'
+                        }`}
+                      >
+                        {/* School name + badges */}
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <Link href={`/platform-admin/schools/${school.id}`}
+                              className="font-semibold text-purple-700 hover:text-purple-900 hover:underline">
+                              {school.name}
+                            </Link>
+                            {isNew && (
+                              <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold leading-tight">NEW</span>
+                            )}
+                            {needsSetup && (
+                              <span
+                                title={[tcnt === 0 ? 'No teachers' : '', scnt === 0 ? 'No students' : ''].filter(Boolean).join(', ') + ' — setup incomplete'}
+                                className="text-amber-400 text-sm cursor-help"
+                              >⚠</span>
+                            )}
+                          </div>
+                          <div className="text-gray-400 text-xs mt-0.5">{school.type}</div>
+                        </td>
+
+                        {/* School ID + copy button */}
+                        <td className="px-5 py-3.5">
+                          {school.school_code ? (
+                            <div className="flex items-center gap-1.5">
+                              <code className="text-xs bg-purple-50 text-purple-700 border border-purple-200 px-2 py-1 rounded font-mono">
+                                {school.school_code}
+                              </code>
+                              <button
+                                onClick={() => copyCode(school.id, school.school_code!)}
+                                title="Copy school code"
+                                className="text-gray-300 hover:text-purple-500 transition-colors flex-shrink-0"
+                              >
+                                {copiedCode === school.id
+                                  ? <span className="text-[10px] text-green-600 font-bold">✓</span>
+                                  : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                    </svg>
+                                }
+                              </button>
+                            </div>
+                          ) : <span className="text-gray-300 text-xs">—</span>}
+                        </td>
+
+                        {/* Plan — inline dropdown */}
+                        <td className="px-5 py-3.5">
+                          <div className="relative inline-flex items-center">
+                            <select
+                              value={school.tier || 'none'}
+                              onChange={e => handlePlanChange(school.id, e.target.value)}
+                              disabled={isChanging}
+                              className={`text-xs font-medium pl-2.5 pr-6 py-1 rounded-full border cursor-pointer appearance-none
+                                focus:outline-none focus:ring-2 focus:ring-purple-300 transition-all
+                                disabled:opacity-60 disabled:cursor-not-allowed
+                                ${TIER_BADGE[school.tier || 'none']}`}
+                            >
+                              <option value="none">No Plan</option>
+                              <option value="basic">Basic</option>
+                              <option value="standard">Standard</option>
+                              <option value="premium">Premium</option>
+                            </select>
+                            <span className="absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none">
+                              {isChanging
+                                ? <span className="block w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin opacity-50" />
+                                : <svg className="w-2.5 h-2.5 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+                                  </svg>
+                              }
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Staff / Students + health */}
+                        <td className="px-5 py-3.5">
+                          <div className={`text-xs ${tcnt === 0 ? 'text-amber-600' : 'text-gray-500'}`}>
+                            <span className={`font-semibold ${tcnt === 0 ? 'text-amber-600' : 'text-gray-800'}`}>{tcnt}</span> teachers
+                          </div>
+                          <div className={`text-xs ${scnt === 0 ? 'text-amber-600' : 'text-gray-500'}`}>
+                            <span className={`font-semibold ${scnt === 0 ? 'text-amber-600' : 'text-gray-800'}`}>{scnt}</span> students
+                          </div>
+                        </td>
+
+                        {/* Location */}
+                        <td className="px-5 py-3.5 text-gray-500 text-sm">
+                          {[school.city, school.country].filter(Boolean).join(', ') || <span className="text-gray-300">—</span>}
+                        </td>
+
+                        {/* Last Active */}
+                        <td className="px-5 py-3.5 text-xs whitespace-nowrap">
+                          {school.admin_last_login
+                            ? <span className="text-gray-600">{timeAgo(school.admin_last_login)}</span>
+                            : <span className="text-gray-300 italic">Never</span>
+                          }
+                        </td>
+
+                        {/* Joined */}
+                        <td className="px-5 py-3.5 text-gray-400 text-xs whitespace-nowrap">
+                          {school.created_at ? timeAgo(school.created_at) : '—'}
+                        </td>
+
+                        {/* Actions */}
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-1.5">
+                            <Link href={`/platform-admin/schools/${school.id}`}
+                              className="text-xs px-2.5 py-1 rounded border border-purple-200 hover:bg-purple-50 text-purple-600 transition-colors whitespace-nowrap">
+                              Manage
+                            </Link>
+                            <button onClick={() => toggleStatus(school)}
+                              className={`text-xs px-2.5 py-1 rounded border transition-colors whitespace-nowrap ${
+                                school.status === 'active'
+                                  ? 'border-gray-200 hover:bg-gray-50 text-gray-500'
+                                  : 'border-green-200 hover:bg-green-50 text-green-600 font-medium'
+                              }`}>
+                              {school.status === 'active' ? 'Deactivate' : 'Activate'}
+                            </button>
+                            <button onClick={() => handleDelete(school.id, school.name)}
+                              className="text-xs px-2.5 py-1 rounded border border-red-200 hover:bg-red-50 text-red-500 transition-colors">
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
 
-        {/* Footer summary */}
-        {!loading && filtered.length > 0 && (
+        {!loading && sorted.length > 0 && (
           <p className="mt-3 text-center text-xs text-gray-400">
-            {filtered.length} school{filtered.length !== 1 ? 's' : ''}
+            {sorted.length} school{sorted.length !== 1 ? 's' : ''}
             {(search || filterTier !== 'all') && ` — filtered from ${schools.length} total`}
+            {' · '}sorted by {sort.col.replace('_', ' ')} {sort.dir === 'asc' ? '↑' : '↓'}
           </p>
         )}
       </div>
@@ -694,17 +864,15 @@ export default function PlatformAdmin() {
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
               <div>
                 <h3 className="font-semibold text-gray-900">Add New School</h3>
-                <p className="text-xs text-gray-400 mt-0.5">School admin credentials will be generated automatically</p>
+                <p className="text-xs text-gray-400 mt-0.5">Admin credentials will be generated and emailed automatically</p>
               </div>
-              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
             </div>
             <form onSubmit={handleCreate} className="px-6 py-5 space-y-4">
               {error && <p className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  School Name <span className="text-red-500">*</span>
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">School Name <span className="text-red-500">*</span></label>
                 <input type="text" required value={form.name}
                   onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                   placeholder="e.g. Greenwood High School" className={inputCls} />
@@ -727,56 +895,13 @@ export default function PlatformAdmin() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Country <span className="text-red-500">*</span></label>
-                <select required value={form.country}
-                  onChange={e => setForm(f => ({ ...f, country: e.target.value }))}
-                  className={inputCls}>
+                <select required value={form.country} onChange={e => setForm(f => ({ ...f, country: e.target.value }))} className={inputCls}>
                   <option value="">— Select country —</option>
                   <option value="India">India</option>
                   <option disabled>──────────</option>
-                  <option value="Afghanistan">Afghanistan</option>
-                  <option value="Australia">Australia</option>
-                  <option value="Bangladesh">Bangladesh</option>
-                  <option value="Bhutan">Bhutan</option>
-                  <option value="Brazil">Brazil</option>
-                  <option value="Canada">Canada</option>
-                  <option value="China">China</option>
-                  <option value="Egypt">Egypt</option>
-                  <option value="Ethiopia">Ethiopia</option>
-                  <option value="France">France</option>
-                  <option value="Germany">Germany</option>
-                  <option value="Ghana">Ghana</option>
-                  <option value="Indonesia">Indonesia</option>
-                  <option value="Iran">Iran</option>
-                  <option value="Iraq">Iraq</option>
-                  <option value="Japan">Japan</option>
-                  <option value="Jordan">Jordan</option>
-                  <option value="Kenya">Kenya</option>
-                  <option value="Malaysia">Malaysia</option>
-                  <option value="Maldives">Maldives</option>
-                  <option value="Mexico">Mexico</option>
-                  <option value="Morocco">Morocco</option>
-                  <option value="Myanmar">Myanmar</option>
-                  <option value="Nepal">Nepal</option>
-                  <option value="Nigeria">Nigeria</option>
-                  <option value="Pakistan">Pakistan</option>
-                  <option value="Philippines">Philippines</option>
-                  <option value="Qatar">Qatar</option>
-                  <option value="Russia">Russia</option>
-                  <option value="Saudi Arabia">Saudi Arabia</option>
-                  <option value="Singapore">Singapore</option>
-                  <option value="South Africa">South Africa</option>
-                  <option value="South Korea">South Korea</option>
-                  <option value="Sri Lanka">Sri Lanka</option>
-                  <option value="Tanzania">Tanzania</option>
-                  <option value="Thailand">Thailand</option>
-                  <option value="Turkey">Turkey</option>
-                  <option value="Uganda">Uganda</option>
-                  <option value="Ukraine">Ukraine</option>
-                  <option value="United Arab Emirates">United Arab Emirates</option>
-                  <option value="United Kingdom">United Kingdom</option>
-                  <option value="United States">United States</option>
-                  <option value="Vietnam">Vietnam</option>
-                  <option value="Zimbabwe">Zimbabwe</option>
+                  {['Afghanistan','Australia','Bangladesh','Bhutan','Brazil','Canada','China','Egypt','Ethiopia','France','Germany','Ghana','Indonesia','Iran','Iraq','Japan','Jordan','Kenya','Malaysia','Maldives','Mexico','Morocco','Myanmar','Nepal','Nigeria','Pakistan','Philippines','Qatar','Russia','Saudi Arabia','Singapore','South Africa','South Korea','Sri Lanka','Tanzania','Thailand','Turkey','Uganda','Ukraine','United Arab Emirates','United Kingdom','United States','Vietnam','Zimbabwe'].map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
                 </select>
               </div>
 
@@ -820,7 +945,7 @@ export default function PlatformAdmin() {
         </div>
       )}
 
-      {/* ── School Created Credentials Modal ── */}
+      {/* ── School Created — Credentials Modal ── */}
       {createdSchool && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
@@ -839,14 +964,26 @@ export default function PlatformAdmin() {
             </div>
             <div className="px-6 py-5">
               <p className="text-sm text-gray-600 mb-4">
-                School admin credentials have been generated. Copy and share them with the school.
+                Copy these credentials and share with the school admin. They&apos;ll be prompted to set a new password on first login.
               </p>
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
                 <div>
                   <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">School ID (Login)</p>
-                  <code className="text-sm font-mono text-amber-900 bg-white border border-amber-200 rounded px-3 py-2 block">
-                    {createdSchool.code}
-                  </code>
+                  <div className="flex items-center gap-2">
+                    <code className="text-sm font-mono text-amber-900 bg-white border border-amber-200 rounded px-3 py-2 flex-1">
+                      {createdSchool.code}
+                    </code>
+                    <button onClick={() => copyCode(-1, createdSchool.code)}
+                      className="text-amber-600 hover:text-amber-800 border border-amber-200 rounded px-2 py-2 hover:bg-amber-100 transition-colors">
+                      {copiedCode === -1
+                        ? <span className="text-xs font-bold">✓</span>
+                        : <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                      }
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">Temporary Password</p>
@@ -855,9 +992,6 @@ export default function PlatformAdmin() {
                   </code>
                 </div>
               </div>
-              <p className="text-xs text-gray-400 mt-3 bg-gray-50 rounded-lg px-3 py-2">
-                The school admin will be asked to change this password on first login.
-              </p>
               <button
                 onClick={handleCredentialsDismiss}
                 className="w-full mt-4 bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-xl text-sm font-medium transition-colors"
@@ -869,7 +1003,7 @@ export default function PlatformAdmin() {
         </div>
       )}
 
-      {/* ── Admin Team Modal ───────────────────────────────────────────────── */}
+      {/* ── Admin Team Modal ── */}
       {showAdminModal && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
@@ -880,9 +1014,27 @@ export default function PlatformAdmin() {
               </div>
               <button onClick={() => setShowAdminModal(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
             </div>
-
-            {/* Existing admins list */}
             <div className="flex-1 overflow-y-auto px-6 py-4">
+              {/* Reset result banner */}
+              {resetResult && (
+                <div className={`mb-4 rounded-xl border p-4 ${resetResult.emailSent ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+                  <p className={`text-xs font-bold uppercase tracking-wide mb-2 ${resetResult.emailSent ? 'text-green-700' : 'text-amber-700'}`}>
+                    {resetResult.emailSent ? '✓ Credentials reset & emailed' : '⚠ Credentials reset — email failed, copy manually'}
+                  </p>
+                  <p className="text-xs text-gray-600 mb-1"><span className="font-medium">Name:</span> {resetResult.name}</p>
+                  <p className="text-xs text-gray-600 mb-2"><span className="font-medium">Email:</span> {resetResult.email}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-gray-600"><span className="font-medium">New Password:</span></p>
+                    <code className="text-sm font-mono font-bold bg-white border border-amber-200 px-2 py-0.5 rounded text-amber-800">{resetResult.password}</code>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(resetResult.password).catch(() => {}) }}
+                      className="text-xs text-amber-700 underline hover:no-underline"
+                    >copy</button>
+                  </div>
+                  <button onClick={() => setResetResult(null)} className="mt-2 text-xs text-gray-400 hover:text-gray-600">dismiss ✕</button>
+                </div>
+              )}
+
               {adminList.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-4">No admins yet</p>
               ) : (
@@ -899,30 +1051,32 @@ export default function PlatformAdmin() {
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${a.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
                         {a.status}
                       </span>
+                      <button
+                        onClick={() => handleResetAdmin(a.id)}
+                        disabled={resettingId === a.id}
+                        className="text-xs text-gray-400 hover:text-purple-600 hover:bg-purple-50 border border-gray-200 hover:border-purple-200 px-2 py-1 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+                        title="Reset & resend credentials"
+                      >
+                        {resettingId === a.id ? '…' : '↺ Reset'}
+                      </button>
                     </div>
                   ))}
                 </div>
               )}
-
-              {/* Add admin form */}
               <div className="border-t border-gray-100 pt-4">
                 <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Invite New Admin</p>
                 {adminError && (
                   <div className="mb-3 bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg text-sm">{adminError}</div>
                 )}
                 <form onSubmit={handleAddAdmin} className="space-y-3">
-                  <input
-                    type="text" placeholder="Full name" value={adminForm.full_name}
+                  <input type="text" placeholder="Full name" value={adminForm.full_name}
                     onChange={e => setAdminForm(f => ({ ...f, full_name: e.target.value }))}
                     className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
-                    required
-                  />
-                  <input
-                    type="email" placeholder="Email address" value={adminForm.email}
+                    required />
+                  <input type="email" placeholder="Email address" value={adminForm.email}
                     onChange={e => setAdminForm(f => ({ ...f, email: e.target.value }))}
                     className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
-                    required
-                  />
+                    required />
                   <button type="submit" disabled={adminSubmitting}
                     className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">
                     {adminSubmitting ? 'Sending invite…' : 'Send Invite Email'}
