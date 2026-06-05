@@ -3,8 +3,7 @@ import pool from '@/lib/db'
 
 export async function GET() {
   try {
-    const [schools, teachers, students, subs, growth] = await Promise.all([
-      // Only count non-deleted schools
+    const [schools, teachers, students, subs, growth, deleted] = await Promise.all([
       pool.query(`
         SELECT
           COUNT(*) FILTER (WHERE status = 'active')   AS active,
@@ -29,7 +28,6 @@ export async function GET() {
             SELECT id FROM schools WHERE status = 'active' AND deleted_at IS NULL
           )
       `),
-      // Only count subscriptions for non-deleted schools
       pool.query(`
         SELECT
           COUNT(*) FILTER (WHERE ss.tier = 'basic')    AS basic,
@@ -40,22 +38,32 @@ export async function GET() {
         INNER JOIN schools s ON s.id = ss.school_id
         WHERE s.deleted_at IS NULL AND s.status = 'active'
       `),
-      // New schools this month vs last month (non-deleted)
       pool.query(`
         SELECT
-          COUNT(*) FILTER (WHERE created_at >= date_trunc('month', now()))                                   AS this_month,
+          COUNT(*) FILTER (WHERE created_at >= date_trunc('month', now()))                              AS this_month,
           COUNT(*) FILTER (WHERE created_at >= date_trunc('month', now() - interval '1 month')
-                             AND created_at <  date_trunc('month', now()))                                   AS last_month
+                             AND created_at <  date_trunc('month', now()))                              AS last_month
         FROM schools
         WHERE deleted_at IS NULL
       `),
+      pool.query(`SELECT COUNT(*) AS count FROM schools WHERE deleted_at IS NOT NULL`),
     ])
 
     return NextResponse.json({
-      schools:       schools.rows[0],
-      teachers:      teachers.rows[0],
-      students:      students.rows[0],
-      subscriptions: subs.rows[0],
+      schools: {
+        total:    Number(schools.rows[0].total),
+        active:   Number(schools.rows[0].active),
+        inactive: Number(schools.rows[0].inactive),
+        deleted:  Number(deleted.rows[0].count),
+      },
+      teachers:      { total: Number(teachers.rows[0].total) },
+      students:      { total: Number(students.rows[0].total) },
+      subscriptions: {
+        basic:    Number(subs.rows[0].basic),
+        standard: Number(subs.rows[0].standard),
+        premium:  Number(subs.rows[0].premium),
+        none:     Number(subs.rows[0].none),
+      },
       growth: {
         this_month: Number(growth.rows[0].this_month),
         last_month: Number(growth.rows[0].last_month),

@@ -34,6 +34,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
     }
 
+    // Track last login (lazy column creation — idempotent)
+    pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ').catch(() => {})
+    pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]).catch(() => {})
+
     const payload: JWTPayload = {
       userId: user.id,
       role: user.role,

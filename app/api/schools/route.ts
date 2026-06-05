@@ -26,10 +26,12 @@ export async function GET(req: NextRequest) {
       SELECT
         s.*,
         sub.tier,
-        (SELECT COUNT(*) FROM teachers t WHERE t.school_id = s.id AND t.status = 'active') AS teacher_count,
-        (SELECT COUNT(*) FROM students st WHERE st.school_id = s.id AND st.status = 'active') AS student_count
+        (SELECT COUNT(*) FROM teachers t  WHERE t.school_id  = s.id AND t.status  = 'active') AS teacher_count,
+        (SELECT COUNT(*) FROM students st WHERE st.school_id = s.id AND st.status = 'active') AS student_count,
+        u.last_login_at AS admin_last_login
       FROM schools s
       LEFT JOIN school_subscriptions sub ON sub.school_id = s.id
+      LEFT JOIN users u ON u.school_id = s.id AND u.role = 'school_admin'
       WHERE ${whereClause}
       ORDER BY s.created_at DESC
     `)
