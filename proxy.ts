@@ -38,18 +38,42 @@ function isPublic(pathname: string): boolean {
 
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
+  const host = req.headers.get('host') ?? ''
+  const isAdminSubdomain = host.startsWith('admin.')
 
-  if (isPublic(pathname) || pathname === '/') return NextResponse.next()
-
-  // ── Platform Admin ─────────────────────────────────────────────────────────
-  if (pathname.startsWith('/platform-admin')) {
-    const token = req.cookies.get(COOKIE_ADMIN)?.value
-    const payload = token ? getTokenPayload(token) : null
-    if (!payload || payload.role !== 'platform_admin') {
+  // ── admin.welearnyoulearn.com — Platform Admin only ───────────────────────
+  if (isAdminSubdomain) {
+    // Allow static assets and API
+    if (pathname.startsWith('/_next/') || pathname.startsWith('/api/') || pathname.startsWith('/favicon')) {
+      return NextResponse.next()
+    }
+    // Root → redirect to platform login
+    if (pathname === '/') {
       return NextResponse.redirect(new URL('/login?role=platform', req.url))
     }
-    return NextResponse.next()
+    // Platform admin portal — check auth
+    if (pathname.startsWith('/platform-admin')) {
+      const token = req.cookies.get(COOKIE_ADMIN)?.value
+      const payload = token ? getTokenPayload(token) : null
+      if (!payload || payload.role !== 'platform_admin') {
+        return NextResponse.redirect(new URL('/login?role=platform', req.url))
+      }
+      return NextResponse.next()
+    }
+    // Allow login/forgot/reset pages on admin subdomain
+    if (pathname.startsWith('/login') || pathname.startsWith('/forgot-password') || pathname.startsWith('/reset-password')) {
+      return NextResponse.next()
+    }
+    // Block everything else on admin subdomain
+    return NextResponse.redirect(new URL('/login?role=platform', req.url))
   }
+
+  // ── Main domain — block platform admin access ─────────────────────────────
+  if (pathname.startsWith('/platform-admin')) {
+    return NextResponse.redirect(new URL('/', req.url))
+  }
+
+  if (isPublic(pathname) || pathname === '/') return NextResponse.next()
 
   // ── School Admin ──────────────────────────────────────────────────────────
   if (pathname.startsWith('/school-admin')) {
