@@ -87,6 +87,7 @@ export async function initDB() {
   // ── Multi-role school staff + platform admin team ─────────────────────────
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(255)`)
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active'`)
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`)
 
   // ── Two-tier rewards: points_type splits academic vs marketplace ──────────────
   await pool.query(`ALTER TABLE student_points ADD COLUMN IF NOT EXISTS points_type VARCHAR(20) DEFAULT 'academic'`)

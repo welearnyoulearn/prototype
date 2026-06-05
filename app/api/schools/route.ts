@@ -17,9 +17,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(result.rows)
     }
 
-    // Ensure last_login_at column exists before querying it
-    await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ').catch(() => {})
-
     let whereClause = 'deleted_at IS NULL AND status != \'deleted\''
     if (scope === 'deleted')  whereClause = 'deleted_at IS NOT NULL'
     else if (scope === 'inactive') whereClause = 'deleted_at IS NULL AND status = \'inactive\''
