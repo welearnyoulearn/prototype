@@ -84,9 +84,86 @@ export default function StudentPortal() {
   const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set(['dashboard']))
   const [sidebarOpen, setSidebarOpen] = useState(false)
   function navigateTo(key: string) { setActiveNav(key); setVisitedNav(prev => new Set([...prev, key])); setSidebarOpen(false) }
+  const [showSandbox, setShowSandbox] = useState(false)
   const [loading, setLoading] = useState(true)
   const [studentLoading, setStudentLoading] = useState(false)
   const [error, setError] = useState('')
+  const [sandboxSchoolName, setSandboxSchoolName] = useState('')
+  const [sandboxGrade, setSandboxGrade] = useState('')
+  const [sandboxSection, setSandboxSection] = useState('A')
+  const [sandboxStudentName, setSandboxStudentName] = useState('')
+  const [sandboxCreating, setSandboxCreating] = useState(false)
+  const [sandboxError, setSandboxError] = useState('')
+
+  async function handleSandboxCreate() {
+    if (!sandboxSchoolName.trim() || !sandboxGrade.trim() || !sandboxStudentName.trim()) {
+      setSandboxError('Please fill in School Name, Grade, and Student Name.')
+      return
+    }
+    setSandboxCreating(true)
+    setSandboxError('')
+    try {
+      // 1. Create school
+      const schoolRes = await fetch('/api/schools', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: sandboxSchoolName.trim(),
+          tier: 'premium',
+          city: 'Sandbox',
+          country: 'India'
+        })
+      })
+      const schoolData = await schoolRes.json()
+      if (!schoolRes.ok) throw new Error(schoolData.error || 'Failed to create school')
+
+      // Refresh schools list
+      const schoolsRes = await fetch('/api/schools')
+      const schoolsData = await schoolsRes.json()
+      const activeSchools = schoolsData.filter((s: School) => s.status === 'active')
+      setSchools(activeSchools)
+
+      // 2. Create student
+      const studentRes = await fetch('/api/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolData.id,
+          name: sandboxStudentName.trim(),
+          grade: sandboxGrade.trim(),
+          section: (sandboxSection || 'A').trim(),
+          roll_number: 'SB' + Math.floor(100 + Math.random() * 900)
+        })
+      })
+      const studentData = await studentRes.json()
+      if (!studentRes.ok) throw new Error(studentData.error || 'Failed to create student')
+
+      // 3. Fetch classes
+      const classRes = await fetch(`/api/classes?school_id=${schoolData.id}`)
+      const classData = await classRes.json()
+      setClasses(classData)
+      const matchedClass = classData.find((c: ClassOption) => c.grade === sandboxGrade.trim() && c.section === (sandboxSection || 'A').trim())
+
+      // 4. Log in
+      setSelectedSchoolId(String(schoolData.id))
+      if (matchedClass) {
+        setSelectedClassId(String(matchedClass.id))
+      }
+      setSelectedStudentId(String(studentData.id))
+      setStudent(studentData)
+
+      // Reset sandbox form
+      setSandboxSchoolName('')
+      setSandboxGrade('')
+      setSandboxSection('A')
+      setSandboxStudentName('')
+      setShowSandbox(false)
+    } catch (err: any) {
+      setSandboxError(err.message || 'An error occurred during sandbox creation.')
+    } finally {
+      setSandboxCreating(false)
+    }
+  }
 
   const LS_KEY = 'wlyl_student_session'
   const pendingRestore = useRef<{ schoolId: string; classId: string; studentId: string } | null>(null)
@@ -240,6 +317,107 @@ export default function StudentPortal() {
             </div>
             {studentLoading && <p className="text-center text-sm text-gray-400">Loading profile...</p>}
           </div>
+
+          {/* Developer Sandbox Helper */}
+          <div className="mt-6 bg-slate-900 rounded-xl border border-slate-800 text-white overflow-hidden shadow-xl transition-all">
+            <button
+              onClick={() => setShowSandbox(!showSandbox)}
+              className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-800 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-yellow-400 text-lg">🧪</span>
+                <span className="font-semibold text-sm tracking-wide text-slate-200 uppercase">Developer Sandbox Helper</span>
+              </div>
+              <svg
+                className={`w-5 h-5 text-slate-400 transition-transform duration-200 ${showSandbox ? 'rotate-180' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {showSandbox && (
+              <div className="px-6 pb-6 pt-2 border-t border-slate-800 space-y-4 text-left">
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Use this sandbox tool to quickly register a new school (Premium) and onboard a student. You will be logged in immediately.
+                </p>
+
+                {sandboxError && (
+                  <div className="bg-red-950/60 border border-red-800 text-red-300 px-3 py-2 rounded-lg text-xs">
+                    {sandboxError}
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-400 mb-1 uppercase tracking-wider">School Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Westside Academy"
+                      value={sandboxSchoolName}
+                      onChange={e => setSandboxSchoolName(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-yellow-400 transition"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-400 mb-1 uppercase tracking-wider">Grade</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 9"
+                        value={sandboxGrade}
+                        onChange={e => setSandboxGrade(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-yellow-400 transition"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-400 mb-1 uppercase tracking-wider">Section</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. A"
+                        value={sandboxSection}
+                        onChange={e => setSandboxSection(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-yellow-400 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-semibold text-slate-400 mb-1 uppercase tracking-wider">Student Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Elena Rostova"
+                      value={sandboxStudentName}
+                      onChange={e => setSandboxStudentName(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-yellow-400 transition"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={sandboxCreating}
+                  onClick={handleSandboxCreate}
+                  className="w-full bg-gradient-to-r from-yellow-500 to-amber-500 hover:from-yellow-600 hover:to-amber-600 text-slate-950 font-bold py-2.5 rounded-lg text-sm transition shadow-lg hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {sandboxCreating ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4 text-slate-950" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Creating Account...
+                    </>
+                  ) : (
+                    <span>✨ Auto-Create & Log In</span>
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     )
@@ -284,55 +462,76 @@ export default function StudentPortal() {
       <div className="flex flex-1 min-h-0 relative">
         {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
         {/* Sidebar */}
-        <aside className={`fixed inset-y-0 left-0 z-40 lg:relative lg:inset-y-auto lg:left-auto w-52 bg-slate-900 flex-shrink-0 flex flex-col transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-          <div className="px-4 py-4 border-b border-slate-700">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-yellow-500 rounded-lg flex items-center justify-center flex-shrink-0">
-                <span className="text-white text-sm font-bold">W</span>
+        <aside className={`fixed inset-y-0 left-0 z-40 lg:relative lg:inset-y-auto lg:left-auto w-56 bg-gradient-to-b from-slate-950 via-[#0e1320] to-slate-950 border-r border-slate-900/60 shadow-[4px_0_24px_-4px_rgba(0,0,0,0.4)] flex-shrink-0 flex flex-col transform transition-all duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+          <div className="px-5 py-5 border-b border-slate-900/60">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 bg-gradient-to-br from-yellow-400 to-amber-500 rounded-lg flex items-center justify-center flex-shrink-0 shadow-lg shadow-yellow-500/20">
+                <span className="text-slate-950 text-sm font-black tracking-wider">W</span>
               </div>
-              <span className="text-white font-bold text-base">WLYL</span>
+              <span className="text-white font-extrabold text-base tracking-wide">WLYL</span>
             </div>
-            {selectedSchool && (
-              <p className="text-slate-400 text-xs mt-2 leading-tight">{selectedSchool.name}</p>
-            )}
-            {selectedClass && (
-              <p className="text-slate-500 text-xs mt-0.5">Grade {selectedClass.grade}-{selectedClass.section}</p>
+            
+            {/* School & Class Glassmorphism Card */}
+            {(selectedSchool || selectedClass) && (
+              <div className="mt-4 p-3 rounded-xl bg-slate-900/40 border border-slate-800/80 backdrop-blur-sm shadow-inner">
+                {selectedSchool && (
+                  <p className="text-slate-200 text-xs font-semibold truncate leading-tight flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.6)]" />
+                    {selectedSchool.name}
+                  </p>
+                )}
+                {selectedClass && (
+                  <p className="text-slate-400 text-[11px] font-medium mt-1 pl-3">
+                    Grade {selectedClass.grade}-{selectedClass.section}
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
-          <nav className="flex-1 py-2 overflow-y-auto">
+          <nav className="flex-1 py-3 overflow-y-auto px-2 space-y-1">
             {NAV_SECTIONS.map(section => (
-              <div key={section.label} className="mb-1">
-                <p className="px-4 pt-3 pb-1 text-[10px] font-bold text-slate-500 uppercase tracking-widest">{section.label}</p>
-                {section.items.map(item => (
-                  <button key={item.key}
-                    onClick={() => { if (!item.comingSoon) navigateTo(item.key) }}
-                    className={`w-full flex items-center gap-3 px-4 py-2 text-sm transition-colors text-left ${
-                      item.comingSoon
-                        ? 'text-slate-600 cursor-not-allowed'
-                        : activeNav === item.key
-                          ? 'bg-yellow-500/20 text-yellow-400 border-r-[3px] border-yellow-400'
-                          : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                    }`}>
-                    {item.icon}
-                    <span className="flex-1">{item.label}</span>
-                    {item.comingSoon && (
-                      <span className="text-[9px] bg-slate-700 text-slate-500 px-1.5 py-0.5 rounded font-medium">SOON</span>
-                    )}
-                  </button>
-                ))}
+              <div key={section.label} className="mb-2">
+                <p className="px-3 pt-3 pb-1 text-[9px] font-bold text-slate-500/90 tracking-widest uppercase select-none">{section.label}</p>
+                {section.items.map(item => {
+                  const isActive = activeNav === item.key
+                  return (
+                    <button key={item.key}
+                      onClick={() => { if (!item.comingSoon) navigateTo(item.key) }}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 text-left group ${
+                        item.comingSoon
+                          ? 'text-slate-600 cursor-not-allowed'
+                          : isActive
+                            ? 'bg-gradient-to-r from-yellow-500/10 via-amber-500/5 to-transparent text-yellow-400 border-r-2 border-yellow-500 shadow-[inset_-6px_0_12px_-6px_rgba(234,179,8,0.2)] pl-4 scale-[1.01]'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60 hover:pl-4 hover:scale-[1.01]'
+                      }`}>
+                      <span className={`transition-colors duration-200 ${isActive ? 'text-yellow-400' : 'text-slate-500 group-hover:text-slate-300'}`}>
+                        {item.icon}
+                      </span>
+                      <span className="flex-1 truncate">{item.label}</span>
+                      {item.comingSoon && (
+                        <span className="text-[8px] bg-slate-900 border border-slate-800 text-slate-500 px-1.5 py-0.5 rounded font-bold tracking-wider">SOON</span>
+                      )}
+                    </button>
+                  )
+                })}
               </div>
             ))}
           </nav>
 
-          <div className="px-4 py-3 border-t border-slate-700">
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 bg-yellow-500/20 rounded-full flex items-center justify-center flex-shrink-0">
-                <span className="text-yellow-400 text-xs font-bold">{student.name.charAt(0)}</span>
+          {/* Profile block */}
+          <div className="px-5 py-4 border-t border-slate-900/60 bg-slate-950/40 backdrop-blur-md">
+            <div className="flex items-center gap-3">
+              <div className="relative flex-shrink-0">
+                <div className="w-8 h-8 bg-gradient-to-br from-yellow-500/10 to-amber-500/10 border border-yellow-500/30 rounded-full flex items-center justify-center shadow-md">
+                  <span className="text-yellow-400 text-xs font-black uppercase">{student.name.charAt(0)}</span>
+                </div>
+                {/* Active online status light */}
+                <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-slate-950 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
               </div>
-              <div className="min-w-0">
-                <p className="text-white text-xs font-medium truncate">{student.name}</p>
-                <p className="text-slate-500 text-[10px]">Roll {student.roll_number || '—'}</p>
+              <div className="min-w-0 flex-1">
+                <p className="text-slate-100 text-xs font-semibold truncate leading-tight">{student.name}</p>
+                <p className="text-slate-500 text-[10px] font-medium mt-0.5">Roll No: {student.roll_number || '—'}</p>
               </div>
             </div>
           </div>

@@ -232,6 +232,10 @@ export default function PlatformAdmin() {
           <h1 className="text-sm font-semibold text-gray-700">Platform Admin</h1>
         </div>
         <div className="flex items-center gap-2">
+          <Link href="/platform-admin/curriculum"
+            className="text-xs text-purple-600 hover:text-purple-800 hover:bg-purple-100 border border-purple-200 px-3 py-1.5 rounded-lg transition-colors font-semibold bg-purple-50">
+            📚 Master Syllabus
+          </Link>
           <Link href="/platform-admin/features"
             className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors font-medium">
             Feature Plans

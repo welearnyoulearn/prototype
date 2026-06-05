@@ -14,6 +14,7 @@ export const ALL_FEATURES = [
   { key: 'student-onboarding', label: 'Student Onboarding (legacy)',   category: 'Core' },
   // Academic
   { key: 'timetable',          label: 'Timetable',                category: 'Academic' },
+  { key: 'curriculum',         label: 'Syllabus Customizer',      category: 'Academic' },
   { key: 'exam-schedule',      label: 'Exam Schedule',            category: 'Academic' },
   { key: 'report-cards',       label: 'Report Cards',             category: 'Academic' },
   { key: 'analysis',           label: 'Student-Teacher Analysis', category: 'Academic' },

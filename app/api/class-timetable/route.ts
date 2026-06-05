@@ -102,102 +102,148 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  await ensureDB()
   try {
     const body = await req.json()
 
-    // Direct slot update by id (e.g. from add-subject flow)
-    if (body.id) {
-      const { id, subject_name, teacher_id, room, time_from, time_to } = body
-      const result = await pool.query(
-        `UPDATE class_timetable
-         SET subject_name=$1, teacher_id=$2,
-             room=COALESCE($3, room),
-             time_from=COALESCE($4, time_from),
-             time_to=COALESCE($5, time_to),
-             is_manual=TRUE, source='manual'
-         WHERE id=$6 RETURNING *`,
-        [subject_name || null, teacher_id || null, room, time_from, time_to, id]
-      )
-      return NextResponse.json(result.rows[0])
-    }
+    let classId = body.class_id
+    let schoolId = body.school_id
+    let dayOfWeek = body.day_of_week
+    let periodNumber = body.period_number
+    let templateId = body.template_id
+    let subjectName = body.subject_name
+    let teacherId = body.teacher_id
+    let room = body.room
+    let timeFrom = body.time_from
+    let timeTo = body.time_to
 
-    const { class_id, school_id, day_of_week, period_number, teacher_id, apply_to_subject, subject_name, template_id } = body
-    if (!class_id || !school_id) {
-      return NextResponse.json({ error: 'class_id, school_id required' }, { status: 400 })
-    }
-
-    // Build template WHERE fragment (safe: template_id is either null or a validated integer from the client)
-    const tmplWhere = template_id != null
-      ? `AND template_id = ${parseInt(String(template_id))}`
-      : `AND template_id IS NULL`
-
+    let existingSlot = null
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
-      const { rows: [cls] } = await client.query('SELECT grade, section FROM classes WHERE id=$1', [class_id])
 
-      if (apply_to_subject && subject_name) {
+      // 1. Look up existing slot by ID if provided, otherwise by coordinates
+      if (body.id) {
+        const { rows } = await client.query('SELECT * FROM class_timetable WHERE id = $1', [body.id])
+        if (rows.length > 0) {
+          existingSlot = rows[0]
+          classId = existingSlot.class_id
+          schoolId = existingSlot.school_id
+          dayOfWeek = existingSlot.day_of_week
+          periodNumber = existingSlot.period_number
+          templateId = existingSlot.template_id
+        }
+      } else if (classId && dayOfWeek && periodNumber !== undefined) {
+        const { rows } = await client.query(
+          `SELECT * FROM class_timetable 
+           WHERE class_id = $1 
+             AND day_of_week = $2 
+             AND period_number = $3 
+             AND (template_id = $4 OR (template_id IS NULL AND $4 IS NULL))`,
+          [classId, dayOfWeek, periodNumber, templateId]
+        )
+        if (rows.length > 0) {
+          existingSlot = rows[0]
+        }
+      }
+
+      // 2. Handle apply_to_subject (bulk update teacher for all periods of a subject)
+      if (body.apply_to_subject && subjectName && classId && schoolId) {
+        const tmplWhere = templateId != null
+          ? `AND template_id = ${parseInt(String(templateId))}`
+          : `AND template_id IS NULL`
         const { rows: updatedSlots } = await client.query(
           `UPDATE class_timetable
            SET teacher_id=$1, is_manual=TRUE, source='manual'
            WHERE class_id=$2 AND school_id=$3 AND subject_name=$4 ${tmplWhere}
            RETURNING *`,
-          [teacher_id || null, class_id, school_id, subject_name]
+          [teacherId || null, classId, schoolId, subjectName]
         )
-        await client.query('COMMIT')
 
-        const { rows: [clsInfo] } = await pool.query(
-          'SELECT grade, section, timetable_generated_at FROM classes WHERE id=$1', [class_id]
-        )
-        if (clsInfo?.timetable_generated_at) {
+        const { rows: [cls] } = await client.query('SELECT grade, section, timetable_generated_at FROM classes WHERE id=$1', [classId])
+        if (cls?.timetable_generated_at) {
           await notifyTimetableChange(pool, {
-            school_id: Number(school_id), class_id: Number(class_id),
-            grade: clsInfo.grade, section: clsInfo.section,
-            teacher_ids: teacher_id ? [Number(teacher_id)] : [],
+            school_id: Number(schoolId), class_id: Number(classId),
+            grade: cls.grade, section: cls.section,
+            teacher_ids: teacherId ? [Number(teacherId)] : [],
             title: 'Timetable Updated',
-            message: `${subject_name} teacher has been updated for Grade ${clsInfo.grade}-${clsInfo.section}.`,
+            message: `${subjectName} teacher has been updated for Grade ${cls.grade}-${cls.section}.`,
           })
         }
-        invalidateCache(`timetable:class:${class_id}`)
-        invalidateCache(`timetable:school:${school_id}`)
-        invalidateCache(`health:${school_id}`)
-        return NextResponse.json({ updated: updatedSlots.length, subject_name })
+
+        await client.query('COMMIT')
+        invalidateCache(`timetable:class:${classId}`)
+        invalidateCache(`timetable:school:${schoolId}`)
+        invalidateCache(`health:${schoolId}`)
+        return NextResponse.json({ updated: updatedSlots.length, subject_name: subjectName })
       }
 
-      if (!day_of_week || period_number == null) {
+      // 3. Single slot update or delete
+      if (!classId || !schoolId) {
         await client.query('ROLLBACK')
-        return NextResponse.json({ error: 'day_of_week and period_number required for single slot update' }, { status: 400 })
+        return NextResponse.json({ error: 'class_id, school_id required' }, { status: 400 })
       }
-
-      const result = await client.query(
-        `UPDATE class_timetable
-         SET teacher_id=$1, is_manual=TRUE, source='manual'
-         WHERE class_id=$2 AND school_id=$3 AND day_of_week=$4 AND period_number=$5 ${tmplWhere}
-         RETURNING *`,
-        [teacher_id || null, class_id, school_id, day_of_week, period_number]
-      )
-      if (result.rows.length === 0) {
+      if (!dayOfWeek || periodNumber == null) {
         await client.query('ROLLBACK')
-        return NextResponse.json({ error: 'Slot not found' }, { status: 404 })
+        return NextResponse.json({ error: 'day_of_week and period_number required' }, { status: 400 })
       }
-      await client.query('COMMIT')
-      invalidateCache(`timetable:class:${class_id}`)
-      invalidateCache(`timetable:school:${school_id}`)
-      invalidateCache(`health:${school_id}`)
 
-      const { rows: [clsPublished] } = await pool.query(
-        'SELECT timetable_generated_at FROM classes WHERE id=$1', [class_id]
-      )
-      if (clsPublished?.timetable_generated_at) {
+      const pNum = Math.round(Number(periodNumber))
+      let resultSlot = null
+
+      const { rows: [cls] } = await client.query('SELECT grade, section, timetable_generated_at FROM classes WHERE id=$1', [classId])
+
+      if (!subjectName || subjectName.trim().toLowerCase() === 'free' || subjectName.trim() === '—' || subjectName.trim() === '') {
+        // If subject is empty/free, delete slot from db
+        if (existingSlot) {
+          await client.query('DELETE FROM class_timetable WHERE id = $1', [existingSlot.id])
+        }
+        resultSlot = { id: 0, class_id: classId, school_id: schoolId, day_of_week: dayOfWeek, period_number: pNum, subject_name: null, teacher_id: null }
+      } else {
+        // Upsert
+        if (existingSlot) {
+          const res = await client.query(
+            `UPDATE class_timetable
+             SET subject_name = $1,
+                 teacher_id = $2,
+                 room = COALESCE($3, room),
+                 time_from = COALESCE($4, time_from),
+                 time_to = COALESCE($5, time_to),
+                 is_manual = TRUE,
+                 source = 'manual'
+             WHERE id = $6 RETURNING *`,
+            [subjectName.trim(), teacherId || null, room || null, timeFrom || null, timeTo || null, existingSlot.id]
+          )
+          resultSlot = res.rows[0]
+        } else {
+          const res = await client.query(
+            `INSERT INTO class_timetable (
+               class_id, school_id, day_of_week, period_number, template_id,
+               subject_name, teacher_id, room, time_from, time_to, is_manual, source
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE, 'manual')
+             RETURNING *`,
+            [classId, schoolId, dayOfWeek, pNum, templateId || null, subjectName.trim(), teacherId || null, room || null, timeFrom || null, timeTo || null]
+          )
+          resultSlot = res.rows[0]
+        }
+      }
+
+      if (cls?.timetable_generated_at) {
         await notifyTimetableChange(pool, {
-          school_id: Number(school_id), class_id: Number(class_id),
-          grade: cls?.grade, section: cls?.section,
-          teacher_ids: teacher_id ? [Number(teacher_id)] : [],
+          school_id: Number(schoolId), class_id: Number(classId),
+          grade: cls.grade, section: cls.section,
+          teacher_ids: teacherId ? [Number(teacherId)] : [],
           title: 'Timetable Updated',
-          message: `Your timetable has been updated for Grade ${cls?.grade}-${cls?.section} on ${day_of_week}.`,
+          message: `Your timetable has been updated for Grade ${cls.grade}-${cls.section} on ${dayOfWeek}.`,
         })
       }
-      return NextResponse.json(result.rows[0])
+
+      await client.query('COMMIT')
+      invalidateCache(`timetable:class:${classId}`)
+      invalidateCache(`timetable:school:${schoolId}`)
+      invalidateCache(`health:${schoolId}`)
+
+      return NextResponse.json(resultSlot)
     } catch (e) {
       await client.query('ROLLBACK')
       throw e

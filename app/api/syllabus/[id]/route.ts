@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 
 // PATCH /api/syllabus/[id] — update status, target dates, delay reasons, HOD remarks, topic details
-// Body: { school_id, status?, covered_by?, topic_name?, chapter_order?, topic_order?,
+// Body: { school_id, class_id?, status?, covered_by?, topic_name?, topic_order?,
 //         target_date?, delay_reason?, hod_remark?, hod_remark_by? }
 export async function PATCH(
   req: NextRequest,
@@ -12,79 +12,139 @@ export async function PATCH(
   const { id } = await params
   const body = await req.json()
   const {
-    school_id, status, covered_by,
-    topic_name, chapter_name, chapter_order, topic_order,
+    school_id, class_id, status, covered_by,
+    topic_name, topic_order,
     target_date, delay_reason, hod_remark, hod_remark_by,
   } = body
 
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 
   try {
-    const setClauses: string[] = []
-    const args: (string | number | null)[] = []
-
-    if (status !== undefined) {
-      args.push(status)
-      setClauses.push(`status = $${args.length}`)
-      if (status === 'covered') {
-        const today = new Date().toISOString().slice(0, 10)
-        args.push(today)
-        setClauses.push(`covered_date = $${args.length}`)
-        if (covered_by) {
-          args.push(covered_by)
-          setClauses.push(`covered_by = $${args.length}`)
-          setClauses.push(`last_teacher_id = $${args.length}`)
-        }
-      } else {
-        setClauses.push(`covered_date = NULL`)
-        setClauses.push(`covered_by = NULL`)
-      }
-    }
-
-    if (topic_name !== undefined)   { args.push(topic_name);   setClauses.push(`topic_name = $${args.length}`) }
-    if (chapter_name !== undefined) { args.push(chapter_name); setClauses.push(`chapter_name = $${args.length}`) }
-    if (chapter_order !== undefined){ args.push(chapter_order);setClauses.push(`chapter_order = $${args.length}`) }
-    if (topic_order !== undefined)  { args.push(topic_order);  setClauses.push(`topic_order = $${args.length}`) }
-
-    // HOD governance fields
-    if (target_date !== undefined) {
-      args.push(target_date || null)
-      setClauses.push(`target_date = $${args.length}`)
-    }
-    if (delay_reason !== undefined) {
-      args.push(delay_reason || null)
-      setClauses.push(`delay_reason = $${args.length}`)
-    }
-    if (hod_remark !== undefined) {
-      args.push(hod_remark || null)
-      setClauses.push(`hod_remark = $${args.length}`)
-      if (hod_remark_by) {
-        args.push(hod_remark_by)
-        setClauses.push(`hod_remark_by = $${args.length}`)
-      }
-      setClauses.push(`hod_remark_at = NOW()`)
-    }
-
-    if (!setClauses.length) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
-
-    args.push(id, school_id)
-    const { rows: [updated] } = await pool.query(
-      `UPDATE syllabus_topics SET ${setClauses.join(', ')}
-       WHERE id = $${args.length - 1} AND school_id = $${args.length}
-       RETURNING *`,
-      args
+    const isUpdatingProgress = (
+      status !== undefined ||
+      target_date !== undefined ||
+      delay_reason !== undefined ||
+      hod_remark !== undefined
     )
 
-    if (!updated) return NextResponse.json({ error: 'Topic not found' }, { status: 404 })
+    if (isUpdatingProgress && !class_id) {
+      return NextResponse.json({ error: 'class_id required to update topic progress status' }, { status: 400 })
+    }
 
-    return NextResponse.json(updated)
+    let progressResult = null
+
+    // 1. Handle section-specific progress updates in school_topic_progress
+    if (isUpdatingProgress) {
+      // Fetch existing progress first to merge values
+      const { rows: existingProgress } = await pool.query(
+        'SELECT * FROM school_topic_progress WHERE class_id = $1 AND school_topic_id = $2',
+        [class_id, id]
+      )
+      const current = existingProgress[0] || {}
+
+      // Calculate status and dates
+      let newStatus = status !== undefined ? status : (current.status || 'pending')
+      let newCoveredDate = current.covered_date
+      let newCoveredBy = current.covered_by
+
+      if (status !== undefined) {
+        if (status === 'covered') {
+          newCoveredDate = current.covered_date || new Date().toISOString().slice(0, 10)
+          newCoveredBy = covered_by !== undefined ? covered_by : (current.covered_by || null)
+        } else {
+          newCoveredDate = null
+          newCoveredBy = null
+        }
+      }
+
+      const newTargetDate = target_date !== undefined ? (target_date || null) : (current.target_date || null)
+      const newDelayReason = delay_reason !== undefined ? (delay_reason || null) : (current.delay_reason || null)
+      const newHodRemark = hod_remark !== undefined ? (hod_remark || null) : (current.hod_remark || null)
+      const newHodRemarkBy = hod_remark_by !== undefined ? (hod_remark_by || null) : (current.hod_remark_by || null)
+      const newHodRemarkAt = hod_remark !== undefined ? new Date() : (current.hod_remark_at || null)
+
+      // Upsert into school_topic_progress
+      const upsertRes = await pool.query(
+        `INSERT INTO school_topic_progress (
+          class_id, school_topic_id, status, covered_date, covered_by,
+          target_date, delay_reason, hod_remark, hod_remark_by, hod_remark_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         ON CONFLICT (class_id, school_topic_id) DO UPDATE SET
+           status = EXCLUDED.status,
+           covered_date = EXCLUDED.covered_date,
+           covered_by = EXCLUDED.covered_by,
+           target_date = EXCLUDED.target_date,
+           delay_reason = EXCLUDED.delay_reason,
+           hod_remark = EXCLUDED.hod_remark,
+           hod_remark_by = EXCLUDED.hod_remark_by,
+           hod_remark_at = EXCLUDED.hod_remark_at
+         RETURNING *`,
+        [
+          class_id, id, newStatus, newCoveredDate, newCoveredBy,
+          newTargetDate, newDelayReason, newHodRemark, newHodRemarkBy, newHodRemarkAt
+        ]
+      )
+      progressResult = upsertRes.rows[0]
+    }
+
+    // 2. Handle topic-specific properties in school_topics
+    let topicResult = null
+    const isUpdatingTopic = (topic_name !== undefined || topic_order !== undefined)
+
+    if (isUpdatingTopic) {
+      // Verify topic exists and is custom if they are trying to rename it
+      const { rows: [topicRow] } = await pool.query(
+        'SELECT * FROM school_topics WHERE id = $1',
+        [id]
+      )
+
+      if (!topicRow) {
+        return NextResponse.json({ error: 'Topic not found' }, { status: 404 })
+      }
+
+      if (topic_name !== undefined && !topicRow.is_custom) {
+        return NextResponse.json({ error: 'Cannot rename a board-mandated topic' }, { status: 403 })
+      }
+
+      const setClauses: string[] = []
+      const args: (string | number)[] = []
+
+      if (topic_name !== undefined) {
+        args.push(topic_name)
+        setClauses.push(`topic_name = $${args.length}`)
+      }
+      if (topic_order !== undefined) {
+        args.push(topic_order)
+        setClauses.push(`topic_order = $${args.length}`)
+      }
+
+      if (setClauses.length > 0) {
+        args.push(id)
+        const updateRes = await pool.query(
+          `UPDATE school_topics SET ${setClauses.join(', ')} WHERE id = $${args.length} RETURNING *`,
+          args
+        )
+        topicResult = updateRes.rows[0]
+      }
+    }
+
+    if (!isUpdatingProgress && !isUpdatingTopic) {
+      return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
+    }
+
+    return NextResponse.json({
+      success: true,
+      progress: progressResult,
+      topic: topicResult,
+    })
   } catch (err) {
     console.error('Syllabus PATCH error:', err)
     return NextResponse.json({ error: 'Failed to update topic' }, { status: 500 })
   }
 }
 
-// DELETE /api/syllabus/[id]?school_id=
+// DELETE /api/syllabus/[id]?school_id= — delete a custom topic
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -96,10 +156,27 @@ export async function DELETE(
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 
   try {
-    await pool.query(
-      'DELETE FROM syllabus_topics WHERE id = $1 AND school_id = $2',
-      [id, school_id]
+    // 1. Fetch topic
+    const { rows: [topicRow] } = await pool.query(
+      'SELECT * FROM school_topics WHERE id = $1',
+      [id]
     )
+
+    if (!topicRow) {
+      return NextResponse.json({ error: 'Topic not found' }, { status: 404 })
+    }
+
+    // Guardrail: Locked board topics cannot be deleted
+    if (!topicRow.is_custom) {
+      return NextResponse.json({ error: 'Cannot delete a board-mandated topic' }, { status: 403 })
+    }
+
+    // 2. Perform delete
+    await pool.query(
+      'DELETE FROM school_topics WHERE id = $1',
+      [id]
+    )
+
     return NextResponse.json({ success: true })
   } catch (err) {
     console.error('Syllabus DELETE error:', err)

@@ -171,14 +171,18 @@ export async function GET(req: NextRequest) {
         SELECT COUNT(DISTINCT class_id)::int AS count
         FROM (
           SELECT
-            st.class_id,
-            COUNT(*)                                                    AS total,
-            COUNT(*) FILTER (WHERE st.status = 'covered')              AS covered
-          FROM syllabus_topics st
-          WHERE st.school_id = $1
-          GROUP BY st.class_id
-          HAVING COUNT(*) > 0
-            AND (COUNT(*) FILTER (WHERE st.status = 'covered')::float / COUNT(*)) < 0.5
+            c.id AS class_id,
+            COUNT(st.id) AS total,
+            COUNT(st.id) FILTER (WHERE stp.status = 'covered') AS covered
+          FROM classes c
+          JOIN school_subjects ss ON ss.school_id = c.school_id AND ss.grade = c.grade
+          JOIN school_chapters sc ON sc.school_subject_id = ss.id
+          JOIN school_topics st ON st.school_chapter_id = sc.id
+          LEFT JOIN school_topic_progress stp ON stp.school_topic_id = st.id AND stp.class_id = c.id
+          WHERE c.school_id = $1
+          GROUP BY c.id
+          HAVING COUNT(st.id) > 0
+            AND (COUNT(st.id) FILTER (WHERE stp.status = 'covered')::float / COUNT(st.id)) < 0.5
         ) sub
       `, [sid])
       return rows[0]

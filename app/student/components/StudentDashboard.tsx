@@ -67,11 +67,31 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
   const [annExpanded, setAnnExpanded] = useState<number | null>(null)
   const [weeklyTest, setWeeklyTest] = useState<WeeklyTestStatus | null>(null)
 
+  // Classrooms grid states
+  const [classes, setClasses] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null; student_count: number }[]>([])
+  const [selectedLockedClass, setSelectedLockedClass] = useState<{ grade: string; section: string } | null>(null)
+
   useEffect(() => {
     // Check weekly test status without triggering AI generation
     fetch(`/api/weekly-test?student_id=${student.id}&school_id=${schoolId}&class_id=${classId}&check_only=true`)
       .then(r => r.json())
       .then(d => setWeeklyTest(d))
+      .catch(() => {})
+
+    // Fetch school classrooms
+    fetch(`/api/classes?school_id=${schoolId}`)
+      .then(r => r.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          const sorted = data.sort((a, b) => {
+            const ga = parseInt(a.grade) || 0
+            const gb = parseInt(b.grade) || 0
+            if (ga !== gb) return ga - gb
+            return a.section.localeCompare(b.section)
+          })
+          setClasses(sorted)
+        }
+      })
       .catch(() => {})
   }, [student.id, schoolId, classId])
 
@@ -249,6 +269,142 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
             <p className="text-xs text-gray-500 mt-0.5">{item.label}</p>
           </div>
         ))}
+      </div>
+
+      {/* School Classrooms Grid */}
+      <div className="bg-white rounded-2xl border border-slate-100 p-6 shadow-sm">
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🏫</span>
+            <div>
+              <h3 className="font-extrabold text-slate-800 text-sm tracking-tight">School Classrooms</h3>
+              <p className="text-[10px] text-slate-400 font-medium">Overview of active academy classes</p>
+            </div>
+          </div>
+          <span className="text-xs bg-slate-50 border border-slate-100 text-slate-500 font-bold px-3 py-1 rounded-full">{classes.length} Classes Registered</span>
+        </div>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+          {classes.map(cls => {
+            const isActive = cls.grade === student.grade && cls.section === student.section
+            if (isActive) {
+              return (
+                <div
+                  key={cls.id}
+                  className="relative overflow-hidden rounded-2xl border-2 border-emerald-500/80 bg-gradient-to-br from-emerald-50/50 via-teal-50/10 to-white shadow-xl shadow-emerald-500/5 hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 cursor-pointer p-5 flex flex-col justify-between min-h-[175px] group"
+                >
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-bl-full pointer-events-none transition-transform duration-300 group-hover:scale-110" />
+                  <div>
+                    <div className="flex justify-between items-start">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 shadow-sm">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        My Class
+                      </span>
+                      <div className="p-2 rounded-xl bg-emerald-500 text-white shadow-md shadow-emerald-500/20">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                        </svg>
+                      </div>
+                    </div>
+                    <h4 className="text-xl font-black text-slate-900 mt-3 tracking-tight">Grade {cls.grade}-{cls.section}</h4>
+                    <div className="mt-3 space-y-1.5 text-xs">
+                      <div className="flex items-center gap-1.5 text-slate-600 font-medium">
+                        <span className="text-slate-400 text-sm">👤</span>
+                        <span className="truncate">{cls.class_teacher_name || 'No Class Teacher'}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-slate-500">
+                        <span className="text-slate-400 text-sm">👥</span>
+                        <span>{cls.student_count || 0} enrolled students</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-[11px] text-center transition-colors shadow-md hover:shadow-lg flex items-center justify-center gap-1">
+                    <span>Enter Classroom</span>
+                    <svg className="w-3.5 h-3.5 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                  </div>
+                </div>
+              )
+            } else {
+              return (
+                <div
+                  key={cls.id}
+                  onClick={() => setSelectedLockedClass({ grade: cls.grade, section: cls.section })}
+                  className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-slate-50/40 hover:bg-white hover:border-slate-300 shadow-sm hover:shadow-md transition-all duration-300 cursor-pointer p-5 flex flex-col justify-between min-h-[175px] group"
+                >
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-slate-100 rounded-bl-full pointer-events-none transition-transform duration-300 group-hover:scale-105" />
+                  <div>
+                    <div className="flex justify-between items-start">
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500">
+                        <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                        Locked
+                      </span>
+                      <div className="p-2 rounded-xl bg-slate-100 text-slate-400 group-hover:text-amber-500 group-hover:bg-amber-50/80 transition-colors">
+                        <svg className="w-4 h-4 transition-transform group-hover:rotate-12 duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                        </svg>
+                      </div>
+                    </div>
+                    <h4 className="text-xl font-bold text-slate-800 mt-3 tracking-tight group-hover:text-slate-900 transition-colors">Grade {cls.grade}-{cls.section}</h4>
+                    <div className="mt-3 space-y-1.5 text-xs">
+                      <div className="flex items-center gap-1.5 text-slate-500">
+                        <span className="text-slate-400 text-sm">👤</span>
+                        <span className="truncate">{cls.class_teacher_name || 'No Class Teacher'}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-slate-400">
+                        <span className="text-slate-400 text-sm">👥</span>
+                        <span>{cls.student_count || 0} enrolled students</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 w-full py-2 bg-slate-100 text-slate-500 font-bold rounded-xl text-[11px] text-center transition-colors group-hover:bg-amber-50 group-hover:text-amber-700 border border-transparent group-hover:border-amber-200/50 flex items-center justify-center gap-1">
+                    <span>Restricted Access</span>
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                  </div>
+                </div>
+              )
+            }
+          })}
+        </div>
+
+        {/* Blocker Modal */}
+        {selectedLockedClass && (
+          <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-md transition-opacity" onClick={() => setSelectedLockedClass(null)} />
+            <div className="relative bg-white rounded-[32px] max-w-md w-full p-8 shadow-2xl border border-slate-100 transform transition-all text-center animate-in fade-in zoom-in-95 duration-200 z-50">
+              <div className="w-20 h-20 bg-gradient-to-br from-amber-500/10 to-yellow-500/5 border border-amber-500/20 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-amber-500/5">
+                <svg className="w-10 h-10 text-amber-500 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+              </div>
+              <h3 className="text-2xl font-black text-slate-900 leading-tight">
+                Classroom Locked
+              </h3>
+              <p className="text-xs font-bold text-amber-600 mt-1.5 uppercase tracking-widest bg-amber-50 border border-amber-200/50 rounded-full px-4 py-1 inline-block">
+                Access Restricted to Grade {selectedLockedClass.grade}-{selectedLockedClass.section}
+              </p>
+              <div className="my-6 bg-slate-50/80 rounded-2xl p-5 border border-slate-100 text-left">
+                <p className="text-xs text-slate-600 leading-relaxed font-medium">
+                  As a student registered in <strong className="text-slate-800">Grade {student.grade}-{student.section}</strong>, you only have permission to view your active grade syllabus, assignments, and timetable.
+                </p>
+                <p className="text-xs text-slate-500 leading-relaxed mt-3 border-t border-slate-200/60 pt-3">
+                  If you believe this is an error, please contact your school administrator to update your class assignment.
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedLockedClass(null)}
+                className="w-full py-3.5 px-4 bg-gradient-to-r from-slate-900 to-slate-950 hover:from-black hover:to-black text-white font-extrabold rounded-xl shadow-lg hover:shadow-xl transition-all duration-150 hover:scale-[1.01] active:scale-[0.99]"
+              >
+                Close Window
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

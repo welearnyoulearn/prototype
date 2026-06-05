@@ -485,7 +485,7 @@ function SyllabusTracking({
       await fetch(`/api/syllabus/${topic.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, status: newStatus, covered_by: teacher.id }),
+        body: JSON.stringify({ school_id: schoolId, class_id: classId, status: newStatus, covered_by: teacher.id }),
       })
       // Reload to sync counts
       const subjectParam = `&subject=${encodeURIComponent(selectedSubject)}`
@@ -786,6 +786,63 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   const [classSubstitutes, setClassSubstitutes] = useState<ClassSubstitute[]>([])
   // Week offset for Timetable tab (0 = current/anchor week, 1 = next week, etc.)
   const [ttWeekOffset, setTtWeekOffset] = useState(0)
+
+  // Teacher portal slot editing
+  const [editSlot, setEditSlot] = useState<TimetableSlot | null>(null)
+  const [roomVal, setRoomVal] = useState<string>('')
+  const [savingSlot, setSavingSlot] = useState(false)
+
+  const handleCellClick = (slot: TimetableSlot) => {
+    if (!teacher) return
+    if (slot.subject_name && slot.subject_name !== teacher.subject) return
+    setEditSlot(slot)
+    setRoomVal(slot.room || '')
+  }
+
+  const saveTeacherSlot = async (isClear: boolean) => {
+    if (!editSlot || !teacher) return
+    setSavingSlot(true)
+    try {
+      const payload = {
+        id: editSlot.id,
+        class_id: classId,
+        school_id: schoolId,
+        day_of_week: editSlot.day_of_week,
+        period_number: editSlot.period_number,
+        subject_name: isClear ? null : teacher.subject,
+        teacher_id: isClear ? null : teacher.id,
+        room: isClear ? null : roomVal.trim(),
+        time_from: editSlot.time_from,
+        time_to: editSlot.time_to
+      }
+      
+      const res = await fetch('/api/class-timetable', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      
+      if (res.ok) {
+        // Re-fetch all class timetable slots
+        const data = await fetch(`/api/class-timetable?class_id=${classId}&school_id=${schoolId}`).then(r => r.json())
+        const allSlots: TimetableSlot[] = Array.isArray(data) ? data : []
+        setAllTimetableSlots(allSlots)
+        // Refresh today's slots too
+        const todayDay = getToday()
+        const daySlots = allSlots.filter(s => s.day_of_week === todayDay)
+          .sort((a, b) => a.period_number - b.period_number)
+        setTodaySlots(daySlots)
+        setEditSlot(null)
+      } else {
+        alert('Failed to save slot. Please try again.')
+      }
+    } catch (err) {
+      console.error(err)
+      alert('Error updating timetable slot.')
+    } finally {
+      setSavingSlot(false)
+    }
+  }
 
   // Attendance tab state
   const [attView, setAttView] = useState<'day' | 'monthly'>('day')
@@ -1585,36 +1642,88 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                             const isMe = hasSub && teacherId && sub.substitute_teacher_id === teacherId
 
                             if (!slot) {
+                              const canSchedule = !!teacher?.subject
                               return (
                                 <td key={day} className="px-2 py-2 border-r border-gray-100 last:border-r-0">
-                                  <div className={`rounded min-h-[42px] flex items-center justify-center ${isToday ? 'bg-orange-50/30' : 'bg-gray-50'} border border-gray-100`}>
-                                    <span className="text-gray-200 text-[10px] italic">Free</span>
-                                  </div>
+                                  {canSchedule ? (
+                                    <button
+                                      onClick={() => handleCellClick({
+                                        id: 0,
+                                        period_number: schedSlot.slot,
+                                        time_from: schedSlot.time_from,
+                                        time_to: schedSlot.time_to,
+                                        subject_name: null,
+                                        teacher_name: null,
+                                        room: null,
+                                        is_break: false,
+                                        break_label: null,
+                                        day_of_week: day,
+                                        substitute_teacher_id: null,
+                                        substitute_teacher_name: null
+                                      })}
+                                      className={`w-full rounded min-h-[42px] flex items-center justify-center ${isToday ? 'bg-orange-50/30 hover:bg-orange-50' : 'bg-gray-50 hover:bg-slate-100'} border border-dashed border-slate-200 hover:border-slate-400 transition-all text-slate-400 hover:text-slate-600 font-semibold cursor-pointer`}
+                                    >
+                                      <span className="text-[10px]">+ Schedule</span>
+                                    </button>
+                                  ) : (
+                                    <div className={`rounded min-h-[42px] flex items-center justify-center ${isToday ? 'bg-orange-50/30' : 'bg-gray-50'} border border-gray-100`}>
+                                      <span className="text-gray-200 text-[10px] italic">Free</span>
+                                    </div>
+                                  )}
                                 </td>
                               )
                             }
 
+                            const isMySubject = slot.subject_name === teacher?.subject
+
                             return (
                               <td key={day} className={`px-2 py-2 border-r border-gray-100 last:border-r-0 ${isToday ? 'bg-orange-50/20' : ''}`}>
-                                <div className={`rounded px-2 py-1.5 min-h-[42px] ${hasSub ? 'bg-amber-50 border border-amber-200' : 'bg-blue-50 border border-blue-100'}`}>
-                                  <div className="flex items-start justify-between gap-1">
-                                    <p className={`font-semibold text-[11px] leading-tight ${hasSub ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-                                      {slot.subject_name || '—'}
-                                    </p>
-                                    {hasSub && <span className="text-[9px] bg-amber-400 text-white px-1 py-0.5 rounded font-bold flex-shrink-0">SUB</span>}
-                                  </div>
-                                  {hasSub ? (
-                                    <>
-                                      <p className="text-gray-300 line-through text-[10px]">{slot.teacher_name || 'No teacher'}</p>
-                                      <p className={`text-[10px] font-semibold ${isMe ? 'text-amber-600' : 'text-blue-600'}`}>
-                                        {isMe ? '★ You (Sub)' : sub.substitute_teacher_name || 'Substitute'}
+                                {isMySubject ? (
+                                  <button
+                                    onClick={() => handleCellClick(slot)}
+                                    className={`w-full text-left rounded px-2 py-1.5 min-h-[42px] transition-all hover:shadow-sm border cursor-pointer ${
+                                      hasSub ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-blue-50 border-blue-100 hover:bg-blue-100'
+                                    }`}
+                                  >
+                                    <div className="flex items-start justify-between gap-1">
+                                      <p className={`font-semibold text-[11px] leading-tight ${hasSub ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                                        {slot.subject_name || '—'}
                                       </p>
-                                    </>
-                                  ) : (
-                                    <p className="text-gray-400 text-[10px] mt-0.5">{slot.teacher_name || 'No teacher'}</p>
-                                  )}
-                                  {slot.room && <p className="text-gray-300 text-[10px]">{slot.room}</p>}
-                                </div>
+                                      {hasSub && <span className="text-[9px] bg-amber-400 text-white px-1 py-0.5 rounded font-bold flex-shrink-0">SUB</span>}
+                                    </div>
+                                    {hasSub ? (
+                                      <>
+                                        <p className="text-gray-300 line-through text-[10px]">{slot.teacher_name || 'No teacher'}</p>
+                                        <p className={`text-[10px] font-semibold ${isMe ? 'text-amber-600' : 'text-blue-600'}`}>
+                                          {isMe ? '★ You (Sub)' : sub.substitute_teacher_name || 'Substitute'}
+                                        </p>
+                                      </>
+                                    ) : (
+                                      <p className="text-gray-400 text-[10px] mt-0.5">{slot.teacher_name || 'No teacher'} (edit)</p>
+                                    )}
+                                    {slot.room && <p className="text-gray-300 text-[10px]">{slot.room}</p>}
+                                  </button>
+                                ) : (
+                                  <div className={`rounded px-2 py-1.5 min-h-[42px] border ${hasSub ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-100'}`}>
+                                    <div className="flex items-start justify-between gap-1">
+                                      <p className={`font-semibold text-[11px] leading-tight ${hasSub ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                                        {slot.subject_name || '—'}
+                                      </p>
+                                      {hasSub && <span className="text-[9px] bg-amber-400 text-white px-1 py-0.5 rounded font-bold flex-shrink-0">SUB</span>}
+                                    </div>
+                                    {hasSub ? (
+                                      <>
+                                        <p className="text-gray-300 line-through text-[10px]">{slot.teacher_name || 'No teacher'}</p>
+                                        <p className={`text-[10px] font-semibold ${isMe ? 'text-amber-600' : 'text-blue-600'}`}>
+                                          {isMe ? '★ You (Sub)' : sub.substitute_teacher_name || 'Substitute'}
+                                        </p>
+                                      </>
+                                    ) : (
+                                      <p className="text-gray-400 text-[10px] mt-0.5">{slot.teacher_name || 'No teacher'}</p>
+                                    )}
+                                    {slot.room && <p className="text-gray-300 text-[10px]">{slot.room}</p>}
+                                  </div>
+                                )}
                               </td>
                             )
                           })}
@@ -1698,6 +1807,84 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           isClassTeacher={isClassTeacher}
           onGoToHomework={() => setActiveTab('Homework')}
         />
+      )}
+
+      {/* ── TEACHER EDIT TIMETABLE SLOT MODAL ── */}
+      {editSlot && teacher && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setEditSlot(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-900 text-base">
+                {editSlot.id === 0 ? 'Schedule Class' : 'Edit Timetable Slot'}
+              </h3>
+              <button onClick={() => setEditSlot(null)} className="text-gray-400 hover:text-gray-600 text-xl font-bold cursor-pointer">×</button>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5 mb-4">
+              <span className="text-[11px] bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-medium">{editSlot.day_of_week}</span>
+              <span className="text-[11px] bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-medium">Period {editSlot.period_number}</span>
+              <span className="text-[11px] bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-medium">{editSlot.time_from}–{editSlot.time_to}</span>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Subject</label>
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 font-semibold">
+                  {teacher.subject}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Teacher</label>
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 font-semibold">
+                  {teacher.name}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Room (optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Room 102, Science Lab..."
+                  value={roomVal}
+                  onChange={e => setRoomVal(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditSlot(null)}
+                  className="flex-1 py-2 border border-slate-200 text-slate-600 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={savingSlot}
+                  onClick={() => saveTeacherSlot(false)}
+                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {savingSlot ? 'Saving...' : editSlot.id === 0 ? 'Schedule' : 'Save'}
+                </button>
+              </div>
+
+              {editSlot.id !== 0 && (
+                <div className="pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    disabled={savingSlot}
+                    onClick={() => saveTeacherSlot(true)}
+                    className="w-full py-2 border border-dashed border-red-300 text-red-600 hover:bg-red-50 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    🗑 Clear Slot (Make Free)
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -36,6 +36,7 @@ type Teacher = {
   class_teacher_section: string | null
   status: string
   school_id: number
+  passwordChanged?: boolean
 }
 
 type HODAssignment = {
@@ -96,7 +97,6 @@ const LS_KEY = 'wlyl_teacher_session'
 export default function TeacherPortal() {
   const [schools, setSchools] = useState<School[]>([])
   const [selectedSchoolId, setSelectedSchoolId] = useState('')
-  const [teachers, setTeachers] = useState<TeacherBasic[]>([])
   const [selectedTeacherId, setSelectedTeacherId] = useState('')
   const [teacher, setTeacher] = useState<Teacher | null>(null)
   const [activeNav, setActiveNav] = useState('snapshot')
@@ -107,9 +107,22 @@ export default function TeacherPortal() {
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
   const [classViewOpenExamId, setClassViewOpenExamId] = useState<number | undefined>(undefined)
   const [loading, setLoading] = useState(true)
-  const [profileLoading, setProfileLoading] = useState(false)
   const [error, setError] = useState('')
   const [hodData, setHodData] = useState<HODAssignment | null>(null)
+
+  // Credentials login states
+  const [schoolCode, setSchoolCode] = useState('')
+  const [employeeId, setEmployeeId] = useState('')
+  const [password, setPassword] = useState('')
+  const [loginLoading, setLoginLoading] = useState(false)
+
+  // First-time password change states
+  const [mustChangePassword, setMustChangePassword] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmNewPassword, setConfirmNewPassword] = useState('')
+  const [changePasswordLoading, setChangePasswordLoading] = useState(false)
+  const [changePasswordError, setChangePasswordError] = useState('')
 
   function handleNavigate(key: string, payload?: { examId?: number; classId?: number; tab?: string }) {
     if (key === 'class-view' && payload?.classId) {
@@ -131,106 +144,381 @@ export default function TeacherPortal() {
     }
   }
 
-  // Load schools, then auto-restore saved session from localStorage
+  // Load schools, then restore saved session from backend cookie
   useEffect(() => {
     fetch('/api/schools')
       .then(r => r.json())
       .then((data: School[]) => {
         const active = data.filter(s => s.status === 'active')
         setSchools(active)
-        // Try to restore previous session
-        try {
-          const saved = localStorage.getItem(LS_KEY)
-          if (saved) {
-            const { schoolId, teacherId } = JSON.parse(saved)
-            if (active.find(s => s.id === parseInt(schoolId))) {
-              setSelectedSchoolId(String(schoolId))
-              setSelectedTeacherId(String(teacherId))
-            }
-          }
-        } catch { /* ignore */ }
       })
       .catch(() => setError('Cannot connect to database'))
+
+    // Check teacher session via /api/teacher-auth/me
+    fetch('/api/teacher-auth/me')
+      .then(async r => {
+        if (r.ok) {
+          const teacherData = await r.json()
+          setTeacher(teacherData)
+          setSelectedSchoolId(String(teacherData.school_id))
+          setSelectedTeacherId(String(teacherData.id))
+          if (teacherData.passwordChanged === false) {
+            setMustChangePassword(true)
+          }
+          // Fetch HOD data
+          fetch(`/api/hod?school_id=${teacherData.school_id}&teacher_id=${teacherData.id}`)
+            .then(res => res.json())
+            .then(hodResult => setHodData(hodResult))
+            .catch(() => {})
+        }
+      })
+      .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => {
-    if (!selectedSchoolId) { setTeachers([]); setSelectedTeacherId(''); return }
-    fetch(`/api/teachers?school_id=${selectedSchoolId}&staff_type=teaching`)
-      .then(r => r.json())
-      .then(data => { setTeachers(Array.isArray(data) ? data : []) })
-  }, [selectedSchoolId])
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault()
+    if (!schoolCode.trim() || !employeeId.trim() || !password) {
+      setError('Please fill in all fields')
+      return
+    }
+    setLoginLoading(true)
+    setError('')
+    try {
+      const res = await fetch('/api/teacher-auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_code: schoolCode.trim(),
+          employee_id: employeeId.trim(),
+          password
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Login failed')
+      }
 
-  useEffect(() => {
-    if (!selectedTeacherId) { setTeacher(null); setHodData(null); return }
-    setProfileLoading(true)
-    setHodData(null)
-    Promise.all([
-      fetch(`/api/teachers/${selectedTeacherId}`).then(r => r.json()),
-      fetch(`/api/hod?school_id=${selectedSchoolId}&teacher_id=${selectedTeacherId}`).then(r => r.json()).catch(() => ({ is_hod: false })),
-    ]).then(([teacherData, hodResult]) => {
+      // Fetch teacher details via /api/teacher-auth/me
+      const meRes = await fetch('/api/teacher-auth/me')
+      if (!meRes.ok) {
+        throw new Error('Failed to retrieve teacher profile')
+      }
+      const teacherData = await meRes.json()
       setTeacher(teacherData)
-      setHodData(hodResult)
-      try { localStorage.setItem(LS_KEY, JSON.stringify({ schoolId: selectedSchoolId, teacherId: selectedTeacherId })) } catch { /* ignore */ }
-    }).finally(() => setProfileLoading(false))
-  }, [selectedTeacherId, selectedSchoolId])
+      setSelectedSchoolId(String(teacherData.school_id))
+      setSelectedTeacherId(String(teacherData.id))
+
+      if (data.passwordChanged === false) {
+        setMustChangePassword(true)
+      } else {
+        setMustChangePassword(false)
+      }
+
+      // Fetch HOD data
+      const hodRes = await fetch(`/api/hod?school_id=${teacherData.school_id}&teacher_id=${teacherData.id}`)
+      if (hodRes.ok) {
+        const hodResult = await hodRes.json()
+        setHodData(hodResult)
+      } else {
+        setHodData(null)
+      }
+
+      // Clear credentials
+      setSchoolCode('')
+      setEmployeeId('')
+      setPassword('')
+    } catch (err: any) {
+      setError(err.message || 'An error occurred during login')
+    } finally {
+      setLoginLoading(false)
+    }
+  }
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault()
+    if (!currentPassword || !newPassword || !confirmNewPassword) {
+      setChangePasswordError('Please fill in all fields')
+      return
+    }
+    if (newPassword !== confirmNewPassword) {
+      setChangePasswordError('New passwords do not match')
+      return
+    }
+    if (newPassword.length < 6) {
+      setChangePasswordError('New password must be at least 6 characters')
+      return
+    }
+    setChangePasswordLoading(true)
+    setChangePasswordError('')
+    try {
+      const res = await fetch('/api/teacher-auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          current_password: currentPassword,
+          new_password: newPassword
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to change password')
+      }
+
+      // Update states
+      setMustChangePassword(false)
+      if (teacher) {
+        setTeacher({ ...teacher, passwordChanged: true })
+      }
+      // Reset password fields
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmNewPassword('')
+    } catch (err: any) {
+      setChangePasswordError(err.message || 'An error occurred')
+    } finally {
+      setChangePasswordLoading(false)
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await fetch('/api/teacher-auth/logout', { method: 'POST' })
+    } catch { /* ignore */ }
+    setTeacher(null)
+    setSelectedTeacherId('')
+    setSelectedSchoolId('')
+    setMustChangePassword(false)
+    setHodData(null)
+    localStorage.removeItem(LS_KEY)
+  }
 
   const selectedSchool = schools.find(s => s.id === parseInt(selectedSchoolId))
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-gray-400">Loading...</p>
+        <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
 
   if (!teacher) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-4">
-          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm">← Home</Link>
-          <span className="text-gray-300">|</span>
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-blue-900 rounded-lg flex items-center justify-center">
-              <span className="text-white text-xs font-bold">W</span>
-            </div>
-            <span className="font-bold text-gray-900">WLYL</span>
-          </div>
-          <span className="bg-green-100 text-green-700 text-xs font-medium px-3 py-1 rounded-full ml-auto">Teacher Portal</span>
-        </div>
-        <div className="max-w-md mx-auto px-6 py-16">
-          {error && (
-            <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>
-          )}
-          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center mb-6">
-            <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-blue-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+        <div className="sm:mx-auto sm:w-full sm:max-w-md">
+          <div className="flex justify-center">
+            <div className="w-12 h-12 bg-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-600/20">
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l9-5-9-5-9 5 9 5z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" />
               </svg>
             </div>
-            <h1 className="text-xl font-bold text-gray-900 mb-1">Teacher Portal</h1>
-            <p className="text-sm text-gray-500">Select your school and name to continue</p>
           </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">School</label>
-              <select value={selectedSchoolId} onChange={e => setSelectedSchoolId(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
-                <option value="">— Select school —</option>
-                {schools.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
+          <h2 className="mt-6 text-center text-3xl font-extrabold text-slate-900 tracking-tight">
+            Teacher Portal
+          </h2>
+          <p className="mt-2 text-center text-sm text-slate-600">
+            Sign in to access your dashboard, schedules, and classes
+          </p>
+        </div>
+
+        <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+          <div className="bg-white py-8 px-4 shadow-xl shadow-slate-200/50 rounded-2xl border border-slate-100 sm:px-10">
+            {error && (
+              <div className="mb-6 bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-xl text-sm flex items-start gap-2.5">
+                <svg className="w-5 h-5 text-rose-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>{error}</span>
+              </div>
+            )}
+
+            <form className="space-y-6" onSubmit={handleLogin}>
+              <div>
+                <label htmlFor="school_code" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  School Code
+                </label>
+                <input
+                  id="school_code"
+                  type="text"
+                  required
+                  placeholder="e.g., wlyl-schl-st-jude-int-2"
+                  value={schoolCode}
+                  onChange={e => setSchoolCode(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-900 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition duration-150 ease-in-out"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="employee_id" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  Employee ID
+                </label>
+                <input
+                  id="employee_id"
+                  type="text"
+                  required
+                  placeholder="e.g., T_JUDE_001"
+                  value={employeeId}
+                  onChange={e => setEmployeeId(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-900 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition duration-150 ease-in-out"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="password" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  Password
+                </label>
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-900 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition duration-150 ease-in-out"
+                />
+              </div>
+
+              <div>
+                <button
+                  type="submit"
+                  disabled={loginLoading}
+                  className="w-full flex justify-center py-3 px-4 border border-transparent rounded-xl shadow-md text-sm font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 transition duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed hover:scale-[1.01] active:scale-[0.99]"
+                >
+                  {loginLoading ? 'Signing in...' : 'Sign In'}
+                </button>
+              </div>
+            </form>
+
+            <div className="mt-8 pt-6 border-t border-slate-100">
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100">
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <span className="text-emerald-500">💡</span> Demo Credentials
+                </h4>
+                <div className="space-y-1.5 text-xs text-slate-600">
+                  <div className="flex justify-between">
+                    <span className="font-medium">School Code:</span>
+                    <code className="bg-slate-200/60 px-1.5 py-0.5 rounded text-[11px] font-mono select-all">wlyl-schl-st-jude-int-2</code>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium">Employee ID:</span>
+                    <code className="bg-slate-200/60 px-1.5 py-0.5 rounded text-[11px] font-mono select-all">T_JUDE_001</code>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium">Default Password:</span>
+                    <code className="bg-slate-200/60 px-1.5 py-0.5 rounded text-[11px] font-mono select-all">T_JUDE_001</code>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Your Name</label>
-              <select value={selectedTeacherId} onChange={e => setSelectedTeacherId(e.target.value)}
-                disabled={!selectedSchoolId || teachers.length === 0}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:opacity-50">
-                <option value="">— Select teacher —</option>
-                {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
+          </div>
+
+          <div className="mt-6 text-center">
+            <Link href="/" className="text-sm font-semibold text-emerald-600 hover:text-emerald-700 flex items-center justify-center gap-1">
+              <span>←</span> Return to Homepage
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (mustChangePassword) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-blue-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+        <div className="sm:mx-auto sm:w-full sm:max-w-md">
+          <div className="flex justify-center">
+            <div className="w-12 h-12 bg-amber-500 rounded-xl flex items-center justify-center shadow-lg shadow-amber-500/20">
+              <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
             </div>
-            {profileLoading && <p className="text-center text-sm text-gray-400">Loading profile...</p>}
+          </div>
+          <h2 className="mt-6 text-center text-3xl font-extrabold text-slate-900 tracking-tight">
+            Security Update Required
+          </h2>
+          <p className="mt-2 text-center text-sm text-slate-600">
+            For your security, please update your first-time temporary password.
+          </p>
+        </div>
+
+        <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+          <div className="bg-white py-8 px-4 shadow-xl shadow-slate-200/50 rounded-2xl border border-slate-100 sm:px-10">
+            {changePasswordError && (
+              <div className="mb-6 bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-xl text-sm flex items-start gap-2.5">
+                <svg className="w-5 h-5 text-rose-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>{changePasswordError}</span>
+              </div>
+            )}
+
+            <form className="space-y-6" onSubmit={handleChangePassword}>
+              <div>
+                <label htmlFor="current_password" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  Current (Temporary) Password
+                </label>
+                <input
+                  id="current_password"
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  value={currentPassword}
+                  onChange={e => setCurrentPassword(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-900 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition duration-150 ease-in-out"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="new_password" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  New Secure Password
+                </label>
+                <input
+                  id="new_password"
+                  type="password"
+                  required
+                  placeholder="At least 6 characters"
+                  value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-900 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition duration-150 ease-in-out"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="confirm_new_password" className="block text-sm font-semibold text-slate-700 mb-1.5">
+                  Confirm New Password
+                </label>
+                <input
+                  id="confirm_new_password"
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  value={confirmNewPassword}
+                  onChange={e => setConfirmNewPassword(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-900 bg-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition duration-150 ease-in-out"
+                />
+              </div>
+
+              <div>
+                <button
+                  type="submit"
+                  disabled={changePasswordLoading}
+                  className="w-full flex justify-center py-3 px-4 border border-transparent rounded-xl shadow-md text-sm font-bold text-white bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 transition duration-150 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed hover:scale-[1.01] active:scale-[0.99]"
+                >
+                  {changePasswordLoading ? 'Updating...' : 'Update Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div className="mt-6 text-center">
+            <button
+              onClick={handleLogout}
+              className="text-sm font-semibold text-slate-500 hover:text-slate-700 transition"
+            >
+              Sign out and change later
+            </button>
           </div>
         </div>
       </div>
@@ -267,9 +555,12 @@ export default function TeacherPortal() {
             Good {new Date().getHours() < 12 ? 'Morning' : new Date().getHours() < 17 ? 'Afternoon' : 'Evening'}, {teacher.name}
           </p>
           <NotificationBell teacherId={teacher.id} onNavigate={handleNavigate} />
-          <button onClick={() => { setTeacher(null); setSelectedTeacherId('') }}
-            className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-2 py-1 rounded">
-            Switch
+          <button onClick={handleLogout}
+            className="text-xs text-rose-500 hover:text-rose-700 hover:bg-rose-50 font-semibold border border-rose-200 px-2.5 py-1.5 rounded-lg transition duration-150 flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            Sign Out
           </button>
         </div>
       </div>

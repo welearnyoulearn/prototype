@@ -2,66 +2,74 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 
 // GET /api/syllabus/analytics?school_id=
-// Returns school-wide syllabus coverage:
+// Returns school-wide syllabus coverage metrics using the new copy-on-subscribe hierarchical tables:
 //   by_class   — per class: total, covered, pct, subjects breakdown
 //   by_teacher — per teacher: total, covered, pct across all assigned classes
 //   by_subject — per subject: total, covered, pct across school
 export async function GET(req: NextRequest) {
-
   const { searchParams } = new URL(req.url)
   const school_id = searchParams.get('school_id')
 
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 
   try {
-    const [byClassRes, byTeacherRes, bySubjectRes] = await Promise.all([
+    await ensureDB()
 
-      // Per class × subject coverage
+    const [byClassRes, byTeacherRes, bySubjectRes] = await Promise.all([
+      // 1. Per class × subject coverage (joins ss, sc, st, and stp for that class)
       pool.query(`
         SELECT
-          c.id          AS class_id,
+          c.id AS class_id,
           c.grade,
           c.section,
-          st.subject,
-          COUNT(st.id)::int                                              AS total,
-          COUNT(st.id) FILTER (WHERE st.status = 'covered')::int        AS covered
+          ss.subject_name AS subject,
+          COUNT(st.id)::int AS total,
+          COUNT(st.id) FILTER (WHERE stp.status = 'covered')::int AS covered
         FROM classes c
-        JOIN syllabus_topics st ON st.class_id = c.id AND st.school_id = $1
+        JOIN school_subjects ss ON ss.school_id = c.school_id AND ss.grade = c.grade
+        JOIN school_chapters sc ON sc.school_subject_id = ss.id
+        JOIN school_topics st ON st.school_chapter_id = sc.id
+        LEFT JOIN school_topic_progress stp ON stp.school_topic_id = st.id AND stp.class_id = c.id
         WHERE c.school_id = $1
-        GROUP BY c.id, c.grade, c.section, st.subject
-        ORDER BY c.grade, c.section, st.subject
+        GROUP BY c.id, c.grade, c.section, ss.subject_name
+        ORDER BY c.grade, c.section, ss.subject_name
       `, [school_id]),
 
-      // Per teacher: aggregate across all timetabled classes/subjects
+      // 2. Per teacher: aggregate across all timetabled classes/subjects
       pool.query(`
         SELECT
-          te.id         AS teacher_id,
-          te.name       AS teacher_name,
-          st.subject,
-          COUNT(st.id)::int                                              AS total,
-          COUNT(st.id) FILTER (WHERE st.status = 'covered')::int        AS covered
+          te.id AS teacher_id,
+          te.name AS teacher_name,
+          ts.subject,
+          COUNT(st.id)::int AS total,
+          COUNT(st.id) FILTER (WHERE stp.status = 'covered')::int AS covered
         FROM teachers te
         JOIN timetable_slots ts
           ON ts.teacher_id = te.id AND ts.school_id = $1 AND ts.slot_type = 'subject'
-        JOIN syllabus_topics st
-          ON st.class_id = ts.class_id
-         AND st.subject  = ts.subject
-         AND st.school_id = $1
+        JOIN classes c ON c.id = ts.class_id
+        JOIN school_subjects ss ON ss.school_id = $1 AND ss.grade = c.grade AND ss.subject_name = ts.subject
+        JOIN school_chapters sc ON sc.school_subject_id = ss.id
+        JOIN school_topics st ON st.school_chapter_id = sc.id
+        LEFT JOIN school_topic_progress stp ON stp.school_topic_id = st.id AND stp.class_id = ts.class_id
         WHERE te.school_id = $1
-        GROUP BY te.id, te.name, st.subject
-        ORDER BY te.name, st.subject
+        GROUP BY te.id, te.name, ts.subject
+        ORDER BY te.name, ts.subject
       `, [school_id]),
 
-      // Per subject across school
+      // 3. Per subject across school (sum over all classes in the grade)
       pool.query(`
         SELECT
-          st.subject,
-          COUNT(st.id)::int                                              AS total,
-          COUNT(st.id) FILTER (WHERE st.status = 'covered')::int        AS covered
-        FROM syllabus_topics st
-        WHERE st.school_id = $1
-        GROUP BY st.subject
-        ORDER BY st.subject
+          ss.subject_name AS subject,
+          COUNT(st.id)::int AS total,
+          COUNT(st.id) FILTER (WHERE stp.status = 'covered')::int AS covered
+        FROM classes c
+        JOIN school_subjects ss ON ss.school_id = c.school_id AND ss.grade = c.grade
+        JOIN school_chapters sc ON sc.school_subject_id = ss.id
+        JOIN school_topics st ON st.school_chapter_id = sc.id
+        LEFT JOIN school_topic_progress stp ON stp.school_topic_id = st.id AND stp.class_id = c.id
+        WHERE c.school_id = $1
+        GROUP BY ss.subject_name
+        ORDER BY ss.subject_name
       `, [school_id]),
     ])
 

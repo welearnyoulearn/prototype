@@ -67,11 +67,17 @@ export async function GET(req: NextRequest) {
   // Topics covered this Mon–Sat window — the source for this week's test
   // (cron pre-generates on Sunday; this is a fallback for new students / missed cron)
   const { rows: topics } = await pool.query(
-    `SELECT subject, chapter_name AS chapter, topic_name AS topic
-     FROM syllabus_topics
-     WHERE class_id = $1 AND school_id = $2 AND status = 'covered'
-       AND covered_date BETWEEN $3 AND $4
-     ORDER BY covered_date DESC, topic_order`,
+    `SELECT ss.subject_name AS subject, sc.chapter_name AS chapter, st.topic_name AS topic
+     FROM school_subjects ss
+     JOIN school_chapters sc ON sc.school_subject_id = ss.id
+     JOIN school_topics st ON st.school_chapter_id = sc.id
+     JOIN school_topic_progress stp
+       ON stp.school_topic_id = st.id
+      AND stp.class_id = $1
+      AND stp.status = 'covered'
+      AND stp.covered_date BETWEEN $3 AND $4
+     WHERE ss.school_id = $2
+     ORDER BY stp.covered_date DESC, st.topic_order`,
     [class_id, school_id, week_start, week_saturday]
   )
 

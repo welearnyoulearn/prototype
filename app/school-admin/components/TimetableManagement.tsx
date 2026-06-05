@@ -29,7 +29,8 @@ type TimetableSlot = {
   subject_name?: string | null; subject?: string | null
   teacher_name?: string | null; teacher_id?: number | null
   room?: string | null; is_break?: boolean; break_label?: string | null
-  grade?: string; section?: string; class_id?: number
+  grade?: string; section?: string; class_id?: number; school_id?: number
+  is_manual?: boolean; source?: string
 }
 type UnavailSlot = { day_of_week: string; period_number: number }
 
@@ -157,6 +158,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
 
   // Assign/change teacher modal (click on period)
   const [editSlot, setEditSlot]     = useState<TimetableSlot | null>(null)
+  const [chosenSubjectName, setChosenSubjectName] = useState<string>('')
   const [selTeacherId, setSelTeacherId] = useState<number | null>(null)
   const [applyToAll, setApplyToAll] = useState(true)
   const [saving, setSaving]         = useState(false)
@@ -358,11 +360,13 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     if (!editSlot || !selected) {
       setBusyTeachers({}); setSubjectAssignment(null); setChangingSubjTeacher(false)
       setAddSubjMode(false); setNewSubjName(''); setAddSubjErr(null)
+      setChosenSubjectName('')
       return
     }
     setLoadingAvail(true); setConflictError(null); setAddSubjMode(false)
     setAddSubjErr(null); setChangingSubjTeacher(false); setNewPermTeacherId(null)
     setShowSwapHints(false)
+    setChosenSubjectName(editSlot.subject_name || '')
     setSelTeacherId(editSlot.teacher_id ?? null)
     setApplyToAll(true)
     const pNum = Math.round(Number(editSlot.period_number))
@@ -443,10 +447,21 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
         setAddSubjErr(e.error ?? 'Failed to add subject')
         return
       }
-      // 2. Set subject_name on this slot (uses PUT /api/class-timetable with id)
+      // 2. Set subject_name on this slot (uses PUT /api/class-timetable with id/coordinates)
+      const pNum = Math.round(Number(editSlot.period_number))
+      const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
       await fetch('/api/class-timetable', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: editSlot.id, subject_name: newSubjName.trim(), teacher_id: null }),
+        body: JSON.stringify({
+          id: editSlot.id,
+          class_id: selected.id,
+          school_id: schoolId,
+          day_of_week: editSlot.day_of_week,
+          period_number: pNum,
+          subject_name: newSubjName.trim(),
+          teacher_id: null,
+          template_id: tmplIdForBody
+        }),
       })
       // Reload timetable
       const tmplParam = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
@@ -494,15 +509,27 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     const teacherName = teachers.find(t => t.id === teacherId)?.name ?? null
     const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
     const tmplParam = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
-    if (applyAll && editSlot.subject_name) {
+    
+    const subjName = chosenSubjectName.trim() || editSlot.subject_name
+
+    if (applyAll && subjName) {
       await fetch('/api/class-timetable', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ class_id: selected.id, school_id: schoolId, teacher_id: teacherId, apply_to_subject: true, subject_name: editSlot.subject_name, template_id: tmplIdForBody }),
+        body: JSON.stringify({ class_id: selected.id, school_id: schoolId, teacher_id: teacherId, apply_to_subject: true, subject_name: subjName, template_id: tmplIdForBody }),
       })
     } else {
       await fetch('/api/class-timetable', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ class_id: selected.id, school_id: schoolId, day_of_week: editSlot.day_of_week, period_number: pNum, teacher_id: teacherId, template_id: tmplIdForBody }),
+        body: JSON.stringify({
+          id: editSlot.id,
+          class_id: selected.id,
+          school_id: schoolId,
+          day_of_week: editSlot.day_of_week,
+          period_number: pNum,
+          subject_name: subjName || null,
+          teacher_id: teacherId,
+          template_id: tmplIdForBody
+        }),
       })
     }
     // Re-fetch timetable to get fresh has_conflict flags after teacher change
@@ -1458,9 +1485,27 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                                   {isFreeTarget && <p className="text-emerald-500 text-[9px] mt-0.5 font-semibold">↔ Swap</p>}
                                 </button>
                               ) : (
-                                <div className="rounded-lg px-2 py-1.5 border border-dashed border-gray-200 bg-gray-50 min-h-[48px] flex items-center justify-center">
-                                  <span className="text-gray-200 text-[10px]">—</span>
-                                </div>
+                                <button
+                                  onClick={() => handleCellClick({
+                                    id: 0,
+                                    class_id: selected.id,
+                                    school_id: Number(schoolId),
+                                    day_of_week: day,
+                                    period_number: s.slot,
+                                    subject_name: '',
+                                    teacher_id: null,
+                                    teacher_name: null,
+                                    room: '',
+                                    time_from: s.time_from,
+                                    time_to: s.time_to,
+                                    is_break: false,
+                                    is_manual: true,
+                                    source: 'manual',
+                                  })}
+                                  className="w-full text-center rounded-lg px-2 py-1.5 border border-dashed border-slate-200 bg-slate-50 hover:bg-violet-50 hover:border-violet-300 min-h-[48px] flex items-center justify-center transition-all group cursor-pointer"
+                                >
+                                  <span className="text-slate-400 group-hover:text-violet-600 text-[10px] font-semibold transition-colors">+ Schedule</span>
+                                </button>
                               )}
                             </td>
                           )
@@ -1580,6 +1625,38 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                 </div>
               ) : (
                 <>
+                  {/* ── SUBJECT SELECTOR (for blank slots) ── */}
+                  {!editSlot.subject_name && !addSubjMode && (
+                    <div className="mb-4">
+                      <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Select Subject:</label>
+                      <div className="grid grid-cols-2 gap-2 max-h-44 overflow-y-auto pr-1">
+                        {classSubjects.map(cs => {
+                          const isSel = chosenSubjectName === cs.subject_name
+                          return (
+                            <button
+                              key={cs.id}
+                              type="button"
+                              onClick={() => {
+                                setChosenSubjectName(cs.subject_name)
+                                setSelTeacherId(cs.teacher_id)
+                              }}
+                              className={`px-3 py-2.5 rounded-xl border text-xs text-left transition-all cursor-pointer ${
+                                isSel
+                                  ? 'bg-violet-600 border-violet-600 text-white shadow-sm font-semibold scale-[1.01]'
+                                  : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 hover:border-slate-300'
+                              }`}
+                            >
+                              <div className="font-semibold truncate">{cs.subject_name}</div>
+                              <div className={`text-[10px] truncate ${isSel ? 'text-violet-200' : 'text-slate-400'}`}>
+                                {cs.teacher_name || 'No teacher'}
+                              </div>
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* ── SUBJECT ASSIGNMENT INFO (for slots with subject but no teacher) ── */}
                   {subj && !editSlot.teacher_id && !loadingAvail && (
                     <>
@@ -1598,7 +1675,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                             <div className="mt-2">
                               {!changingSubjTeacher ? (
                                 <button onClick={() => { setChangingSubjTeacher(true); setNewPermTeacherId(null) }}
-                                  className="text-[11px] text-blue-600 font-semibold hover:text-blue-800 underline underline-offset-2">
+                                  className="text-[11px] text-blue-600 font-semibold hover:text-blue-800 underline underline-offset-2 cursor-pointer">
                                   Change permanent {subj} teacher →
                                 </button>
                               ) : (
@@ -1610,9 +1687,9 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                                   </div>
                                   <div className="flex gap-2">
                                     <button onClick={() => setChangingSubjTeacher(false)}
-                                      className="flex-1 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs hover:bg-gray-50">Cancel</button>
+                                      className="flex-1 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-xs hover:bg-gray-50 cursor-pointer">Cancel</button>
                                     <button onClick={savePermTeacher} disabled={savingPermTeacher || newPermTeacherId === null}
-                                      className="flex-1 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 disabled:opacity-50">
+                                      className="flex-1 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
                                       {savingPermTeacher ? 'Saving...' : 'Save'}
                                     </button>
                                   </div>
@@ -1630,7 +1707,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                   )}
 
                   {/* ── TEACHER SELECTION LIST ── */}
-                  {!changingSubjTeacher && (
+                  {!changingSubjTeacher && (chosenSubjectName || editSlot.subject_name) ? (
                     <>
                       {/* Precompute class-teacher lists for the "no teacher" scenario */}
                       {(() => {
@@ -1659,7 +1736,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                             ) : (
                               <div className="max-h-52 overflow-y-auto divide-y divide-gray-50">
                                 <button onClick={() => setSelTeacherId(null)}
-                                  className={`w-full px-3 py-2 text-left text-sm transition-colors ${selTeacherId === null ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-50 italic'}`}>
+                                  className={`w-full px-3 py-2 text-left text-sm transition-colors cursor-pointer ${selTeacherId === null ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-50 italic'}`}>
                                   — No teacher —
                                 </button>
 
@@ -1677,7 +1754,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                                           const isSel = selTeacherId === t.id
                                           return (
                                             <button key={t.id} onClick={() => setSelTeacherId(t.id)}
-                                              className={`w-full flex items-center justify-between px-3 py-2 text-left text-sm transition-colors ${isSel ? 'bg-blue-600 text-white' : 'hover:bg-gray-50 text-gray-800'}`}>
+                                              className={`w-full flex items-center justify-between px-3 py-2 text-left text-sm transition-colors cursor-pointer ${isSel ? 'bg-blue-600 text-white' : 'hover:bg-gray-50 text-gray-800'}`}>
                                               <span>
                                                 <span className="font-medium">{t.name}</span>
                                                 {subjLabel && <span className={`ml-1.5 text-[11px] ${isSel ? 'text-blue-200' : 'text-gray-400'}`}>· {subjLabel}</span>}
@@ -1703,7 +1780,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                                           {suggestions.length > 0 && (
                                             <div className="border-b border-gray-100">
                                               <button onClick={() => setShowSwapHints(h => !h)}
-                                                className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-semibold text-blue-600 hover:bg-blue-50 transition-colors">
+                                                className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-semibold text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer">
                                                 <span>↔ Swap this slot to fix ({suggestions.length} option{suggestions.length !== 1 ? 's' : ''})</span>
                                                 <span className="text-gray-400">{showSwapHints ? '▲' : '▼'}</span>
                                               </button>
@@ -1718,7 +1795,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                                                       <button key={s.id}
                                                         disabled={swapping}
                                                         onClick={() => doSwapFromModal(editSlot, s)}
-                                                        className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-left text-[11px] transition-colors disabled:opacity-40">
+                                                        className="w-full flex items-center justify-between px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 hover:bg-blue-100 text-left text-[11px] transition-colors disabled:opacity-40 cursor-pointer">
                                                         <span>
                                                           <span className="font-semibold text-blue-800">{s.subject_name}</span>
                                                           <span className="text-blue-500 ml-1.5">{s.day_of_week} · {pLabel}</span>
@@ -1805,30 +1882,44 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
                       })()}
 
                       {conflictError && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">{conflictError}</div>}
-                      {subj && (
+                      {(chosenSubjectName || editSlot.subject_name) && (
                         <label className="flex items-start gap-2 mb-4 cursor-pointer select-none">
-                          <input type="checkbox" checked={applyToAll} onChange={e => setApplyToAll(e.target.checked)} className="mt-0.5 accent-blue-600" />
+                          <input type="checkbox" checked={applyToAll} onChange={e => setApplyToAll(e.target.checked)} className="mt-0.5 accent-blue-600 animate-fade-in" />
                           <span className="text-xs text-gray-600">
-                            <span className="font-semibold">Apply to all {subj} periods in this class</span>
-                            <span className="block text-gray-400 text-[10px] mt-0.5">Replaces teacher for every {subj} slot</span>
+                            <span className="font-semibold">Apply to all {chosenSubjectName || editSlot.subject_name} periods in this class</span>
+                            <span className="block text-gray-400 text-[10px] mt-0.5">Replaces teacher for every {chosenSubjectName || editSlot.subject_name} slot</span>
                           </span>
                         </label>
                       )}
                       <div className="flex gap-2 mb-3">
-                        <button onClick={() => setEditSlot(null)} className="flex-1 py-2 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
-                        <button disabled={saving} onClick={() => saveEditSlot(selTeacherId, applyToAll)}
-                          className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
-                          {saving ? 'Saving...' : editSlot.teacher_id ? 'Change' : 'Assign'}
+                        <button onClick={() => setEditSlot(null)} className="flex-1 py-2 border border-gray-200 text-gray-600 rounded-xl text-sm hover:bg-gray-50 cursor-pointer">Cancel</button>
+                        <button disabled={saving || (!chosenSubjectName && !editSlot.subject_name)} onClick={() => saveEditSlot(selTeacherId, applyToAll)}
+                          className="flex-1 py-2 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 cursor-pointer">
+                          {saving ? 'Saving...' : editSlot.subject_name ? 'Change' : 'Assign'}
                         </button>
                       </div>
                     </>
+                  ) : (
+                    <div className="rounded-xl p-4 border border-dashed border-slate-200 bg-slate-50 text-center text-xs text-slate-400 mb-4 font-medium">
+                      Please select a subject above to view available teachers.
+                    </div>
+                  )}
+
+                  {/* ── CLEAR SLOT OPTION (for existing slots) ── */}
+                  {!changingSubjTeacher && editSlot.id !== 0 && (
+                    <div className="pt-3 border-t border-gray-100 mt-2">
+                      <button onClick={() => { setChosenSubjectName(''); saveEditSlot(null, false) }}
+                        className="w-full py-2 border border-dashed border-red-300 text-red-600 rounded-xl text-xs font-semibold hover:bg-red-50 transition-colors cursor-pointer">
+                        🗑 Clear Slot (Make Free)
+                      </button>
+                    </div>
                   )}
 
                   {/* ── ADD NEW SUBJECT OPTION ── */}
                   {!changingSubjTeacher && (
-                    <div className="pt-3 border-t border-gray-100">
+                    <div className="pt-3 border-t border-gray-100 mt-2">
                       <button onClick={() => { setAddSubjMode(true); setNewSubjName(''); setNewSubjPPW(4); setAddSubjErr(null) }}
-                        className="w-full py-2 border border-dashed border-violet-300 text-violet-600 rounded-xl text-xs font-medium hover:bg-violet-50 transition-colors">
+                        className="w-full py-2 border border-dashed border-violet-300 text-violet-600 rounded-xl text-xs font-medium hover:bg-violet-50 transition-colors cursor-pointer">
                         + Add New Subject to this slot
                       </button>
                     </div>

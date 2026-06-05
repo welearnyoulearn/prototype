@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const client = await pool.connect()
   try {
-    const { name, type, city, country, phone, email, address } = await req.json()
+    const { name, type, city, country, phone, email, address, tier } = await req.json()
 
     if (!name) return NextResponse.json({ error: 'School name is required' }, { status: 400 })
     if (phone && !/^\d{7,15}$/.test(phone.replace(/[\s\-\+\(\)]/g, ''))) {
@@ -77,8 +77,8 @@ export async function POST(req: NextRequest) {
     )
 
     await client.query(
-      `INSERT INTO school_subscriptions (school_id, tier) VALUES ($1, 'none') ON CONFLICT DO NOTHING`,
-      [school.id]
+      `INSERT INTO school_subscriptions (school_id, tier) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [school.id, tier || 'none']
     )
 
     // Auto-create current academic year based on today's date

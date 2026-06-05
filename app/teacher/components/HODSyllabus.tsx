@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
+import TopicContentViewer from '@/app/components/TopicContentViewer'
 
 type HODAssignmentItem = {
   id: number
@@ -32,6 +33,10 @@ type Topic = {
   hod_remark: string | null
   hod_remark_by_name: string | null
   hod_remark_at: string | null
+  content_text?: string
+  content_pdf_url?: string
+  questions?: any
+  resources?: any
 }
 
 type Chapter = {
@@ -60,6 +65,7 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
   const [expandedChapter, setExpandedChapter] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState<number | null>(null)
+  const [activeTopic, setActiveTopic] = useState<Topic | null>(null)
 
   // ── Add chapter (1b) ──────────────────────────────────────────────────────
   // "stagedChapter" exists only in local state until the first topic is added.
@@ -174,7 +180,7 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
       const res = await fetch(`/api/syllabus/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: teacher.school_id, ...payload }),
+        body: JSON.stringify({ school_id: teacher.school_id, class_id: selectedClassId, ...payload }),
       })
       if (!res.ok) throw new Error()
       await loadSyllabus()
@@ -786,6 +792,12 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
                                 <span className={`text-sm font-medium ${topic.status === 'covered' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
                                   {topic.topic_name}
                                 </span>
+                                <button
+                                  onClick={() => setActiveTopic(topic)}
+                                  className="text-[10px] text-indigo-600 hover:text-indigo-800 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100/70 px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1 ml-1.5"
+                                >
+                                  📖 View Material
+                                </button>
                                 {isBehind && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-semibold">Behind</span>}
                                 {topic.status === 'covered' && (
                                   <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">
@@ -928,6 +940,15 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
             )
           })}
         </div>
+      )}
+
+      {/* Premium Content Viewer Modal */}
+      {activeTopic && (
+        <TopicContentViewer
+          topic={activeTopic}
+          onClose={() => setActiveTopic(null)}
+          role="teacher"
+        />
       )}
     </div>
   )
