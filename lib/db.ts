@@ -7,16 +7,32 @@ import { Pool, types } from 'pg'
 types.setTypeParser(types.builtins.DATE, (val: string) => val)
 
 // Auto-detect local vs Supabase: skip SSL for localhost connections
-const isLocal = (process.env.DATABASE_URL ?? '').includes('localhost') ||
-                (process.env.DATABASE_URL ?? '').includes('127.0.0.1')
+const dbUrl = process.env.DATABASE_URL ?? ''
+const isLocal = dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1')
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  max: isLocal ? 10 : 3,            // local: more connections; Supabase pooler: keep low
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: isLocal ? 5000 : 10000,
-  ssl: isLocal ? false : { rejectUnauthorized: false },
-})
+// If individual params are set (avoids special-char URL encoding issues on Vercel),
+// use them directly. Otherwise fall back to the connection string URL.
+const poolConfig = (process.env.PGHOST)
+  ? {
+      host:     process.env.PGHOST,
+      port:     parseInt(process.env.PGPORT ?? '5432'),
+      database: process.env.PGDATABASE ?? 'postgres',
+      user:     process.env.PGUSER,
+      password: process.env.PGPASSWORD,
+      ssl: { rejectUnauthorized: false },
+      max: 3,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    }
+  : {
+      connectionString: dbUrl,
+      max: isLocal ? 10 : 3,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: isLocal ? 5000 : 10000,
+      ssl: isLocal ? false : { rejectUnauthorized: false },
+    }
+
+const pool = new Pool(poolConfig)
 
 export default pool
 
