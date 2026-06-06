@@ -9,6 +9,9 @@ export async function GET() {
     pgpassword: process.env.PGPASSWORD ? `set(${process.env.PGPASSWORD.length} chars)` : 'MISSING',
     pgdatabase: process.env.PGDATABASE ?? 'MISSING',
     jwt:        process.env.JWT_SECRET ? 'set' : 'MISSING',
+    email_user: process.env.EMAIL_USER ?? 'MISSING',
+    email_pass: process.env.EMAIL_PASS ? `set(${process.env.EMAIL_PASS.length} chars)` : 'MISSING',
+    email_host: process.env.EMAIL_HOST ?? 'MISSING',
   }
 
   try {
