@@ -17,9 +17,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(result.rows)
     }
 
-    let whereClause = 'deleted_at IS NULL AND status != \'deleted\''
-    if (scope === 'deleted')  whereClause = 'deleted_at IS NOT NULL'
-    else if (scope === 'inactive') whereClause = 'deleted_at IS NULL AND status = \'inactive\''
+    let whereClause = 's.deleted_at IS NULL AND s.status != \'deleted\''
+    if (scope === 'deleted')  whereClause = 's.deleted_at IS NOT NULL'
+    else if (scope === 'inactive') whereClause = 's.deleted_at IS NULL AND s.status = \'inactive\''
     else if (scope === 'all') whereClause = '1=1'
 
     const result = await pool.query(`
