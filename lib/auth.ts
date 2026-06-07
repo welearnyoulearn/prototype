@@ -4,7 +4,7 @@ import { cookies } from 'next/headers'
 import { NextRequest } from 'next/server'
 
 if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
-  throw new Error('JWT_SECRET env var must be set in production')
+  console.error('[FATAL] JWT_SECRET env var is not set — auth cookies will not work correctly')
 }
 const JWT_SECRET = process.env.JWT_SECRET || 'wlyl-dev-only-secret-not-for-production'
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days

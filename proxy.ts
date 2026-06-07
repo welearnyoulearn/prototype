@@ -68,8 +68,11 @@ export function proxy(req: NextRequest) {
     return NextResponse.redirect(new URL('/login?role=platform', req.url))
   }
 
-  // ── Main domain — block platform admin access ─────────────────────────────
-  if (pathname.startsWith('/platform-admin')) {
+  // ── Production main domain — block platform admin (use admin. subdomain) ──
+  // On testing/preview hosts (Netlify, localhost) allow full access so the
+  // whole app — including platform admin — can be exercised end to end.
+  const isProdMainDomain = host === 'welearnyoulearn.com' || host === 'www.welearnyoulearn.com'
+  if (isProdMainDomain && pathname.startsWith('/platform-admin')) {
     return NextResponse.redirect(new URL('/', req.url))
   }
 

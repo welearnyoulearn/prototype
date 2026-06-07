@@ -1,0 +1,12 @@
+# Netlify configuration for the WLYL admin (testing) deployment.
+# The official @netlify/plugin-nextjs runtime is auto-installed by Netlify
+# when it detects a Next.js app — it handles SSR, API routes, and the
+# serverless function output, so we do NOT set a `publish` directory.
+
+[build]
+  command = "npm run build"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # Allow the build to proceed even if optional native deps log warnings
+  NPM_FLAGS = "--no-audit --no-fund"
