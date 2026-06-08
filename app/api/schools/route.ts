@@ -97,9 +97,10 @@ export async function POST(req: NextRequest) {
     await client.query('COMMIT')
 
     if (email) {
-      const loginUrl = `${process.env.APP_URL || 'http://localhost:3000'}/login`
+      const loginUrl = `${process.env.APP_URL || 'https://welearnyoulearn.com'}/login`
       sendOnboardingEmail({ to: email, schoolName: school.name, schoolCode, tempPassword, loginUrl })
-        .catch(err => console.error('[email/onboarding]', err))
+        .then(() => console.log(`[email/onboarding] Sent to ${email}`))
+        .catch(err => console.error('[email/onboarding] Failed:', err?.message || err))
     } else {
       console.log(`\n[SCHOOL CREATED] ${school.name}\n  School Code: ${schoolCode}\n  Temp Password: ${tempPassword}\n`)
     }

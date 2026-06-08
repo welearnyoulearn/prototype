@@ -55,15 +55,18 @@ async function ensureSchema(client: { query: (sql: string, params?: unknown[]) =
   `)
 }
 
-// GET /api/fees/category-assignments?school_id=X&grade=Y&academic_year=Z
+// GET /api/fees/category-assignments?school_id=X&grade=Y&academic_year=Z&section=A
 // Returns: { students, categories, amounts }
 // amounts is a flat array of { student_id, fee_category_id, amount }
+// section optional: omit or 'all' = whole grade; otherwise filter to that section
 export async function GET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
     const school_id     = p.get('school_id')
     const grade         = p.get('grade')
     const academic_year = p.get('academic_year')
+    const section       = p.get('section')
+    const useSection    = section && section !== 'all'
 
     if (!school_id || !grade || !academic_year) {
       return NextResponse.json({ error: 'school_id, grade, academic_year required' }, { status: 400 })
@@ -75,8 +78,9 @@ export async function GET(req: NextRequest) {
         pool.query(
           `SELECT id, name, roll_number, section FROM students
            WHERE school_id = $1 AND grade = $2 AND status = 'active'
+           ${useSection ? 'AND section = $3' : ''}
            ORDER BY section, (NULLIF(regexp_replace(roll_number,'[^0-9]','','g'),''))::int NULLS LAST, name`,
-          [school_id, grade]
+          useSection ? [school_id, grade, section] : [school_id, grade]
         ),
         pool.query(
           `SELECT id, name, frequency FROM fee_categories
@@ -88,8 +92,9 @@ export async function GET(req: NextRequest) {
           `SELECT sfca.student_id, sfca.fee_category_id, sfca.amount
            FROM student_fee_category_assignments sfca
            JOIN students s ON s.id = sfca.student_id
-           WHERE sfca.school_id = $1 AND s.grade = $2 AND sfca.academic_year = $3`,
-          [school_id, grade, academic_year]
+           WHERE sfca.school_id = $1 AND s.grade = $2 AND sfca.academic_year = $3
+           ${useSection ? 'AND s.section = $4' : ''}`,
+          useSection ? [school_id, grade, academic_year, section] : [school_id, grade, academic_year]
         ),
       ])
 

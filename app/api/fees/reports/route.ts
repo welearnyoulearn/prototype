@@ -66,19 +66,30 @@ export async function GET(req: NextRequest) {
         [school_id, academic_year]
       )
 
-      // Grade-wise collection
+      // Class-wise collection (grade + section), enriched: defaulters + fully-paid counts
       const { rows: byGrade } = await pool.query(
-        `SELECT
-           s.grade,
-           COUNT(DISTINCT l.student_id)                              AS students,
-           COALESCE(SUM(l.amount_due), 0)                           AS total_due,
-           COALESCE(SUM(l.amount_paid), 0)                          AS total_collected,
-           COALESCE(SUM(GREATEST(l.amount_due - l.amount_paid, 0)), 0) AS outstanding
-         FROM student_fee_ledger l
-         JOIN students s ON s.id = l.student_id
-         WHERE l.school_id = $1 AND l.academic_year = $2
-         GROUP BY s.grade
-         ORDER BY s.grade::int NULLS LAST`,
+        `WITH per_student AS (
+           SELECT s.grade, COALESCE(s.section, '') AS section, l.student_id,
+                  SUM(l.amount_due)  AS s_due,
+                  SUM(l.amount_paid) AS s_paid,
+                  SUM(GREATEST(l.amount_due - l.amount_paid, 0)) AS s_out
+           FROM student_fee_ledger l
+           JOIN students s ON s.id = l.student_id
+           WHERE l.school_id = $1 AND l.academic_year = $2
+           GROUP BY s.grade, s.section, l.student_id
+         )
+         SELECT
+           grade,
+           section,
+           COUNT(*)                                       AS students,
+           COALESCE(SUM(s_due), 0)                        AS total_due,
+           COALESCE(SUM(s_paid), 0)                       AS total_collected,
+           COALESCE(SUM(s_out), 0)                        AS outstanding,
+           COUNT(*) FILTER (WHERE s_out <= 0)             AS fully_paid_students,
+           COUNT(*) FILTER (WHERE s_out > 0)              AS defaulter_students
+         FROM per_student
+         GROUP BY grade, section
+         ORDER BY grade::int NULLS LAST, section`,
         [school_id, academic_year]
       )
 

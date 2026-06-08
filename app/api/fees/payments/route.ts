@@ -72,6 +72,23 @@ export async function POST(req: NextRequest) {
       }
 
       const isMulti = Array.isArray(ledger_ids) && ledger_ids.length > 0
+
+      // Guard: block payments against a closed academic year
+      const guardIds = isMulti ? ledger_ids : (ledger_id ? [ledger_id] : [])
+      if (guardIds.length > 0) {
+        const { rows: [locked] } = await client.query(
+          `SELECT 1
+           FROM student_fee_ledger l
+           JOIN fee_year_close yc ON yc.school_id = l.school_id AND yc.academic_year = l.academic_year AND yc.is_reopened = FALSE
+           WHERE l.id = ANY($1) LIMIT 1`,
+          [guardIds]
+        ).catch(() => ({ rows: [] }))
+        if (locked) {
+          client.release()
+          return NextResponse.json({ error: 'This academic year is closed. Reopen it to record payments.' }, { status: 409 })
+        }
+      }
+
       if (!isMulti && (!ledger_id || !amount)) {
         return NextResponse.json({ error: 'Single mode: ledger_id and amount required' }, { status: 400 })
       }

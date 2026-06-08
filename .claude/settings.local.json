@@ -141,11 +141,33 @@
       "Bash(curl -s --max-time 10 \"https://prototype-sunny3005s-projects.vercel.app/api/health\")",
       "Bash(curl -s \"https://prototype-e2c99u7ab-sunny3005s-projects.vercel.app/api/health\")",
       "Bash(curl -s \"https://prototype-sunny3005s-projects.vercel.app/api/health\")",
-      "Bash(xargs grep -l \"AuthShell\\\\|forgot-password\\\\|reset-password\\\\|change-password\\\\|login\")"
+      "Bash(xargs grep -l \"AuthShell\\\\|forgot-password\\\\|reset-password\\\\|change-password\\\\|login\")",
+      "Bash(Get-Date -Format 'yyyyMMdd')",
+      "Bash(pg_dump \"postgresql://postgres.hiiusazavhjxawctnomj:Kowsik111%23%23%23@aws-1-ap-south-1.pooler.supabase.com:5432/postgres\" --no-password --schema=public -f \"backup_$\\(Get-Date -Format 'yyyyMMdd'\\).sql\")",
+      "Bash(node scripts/backup-db.js)",
+      "Bash(curl -s \"https://prototype-r9oz62j41-sunny3005s-projects.vercel.app/api/health\")",
+      "Bash(curl -s \"https://prototype-r9oz62j41-sunny3005s-projects.vercel.app/api/schools?scope=active\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d['env'], indent=2\\)\\)\")",
+      "Bash(curl -s \"https://prototype-o2rt8ggca-sunny3005s-projects.vercel.app/api/health\")",
+      "Bash(nslookup -type=mx welearnyoulearn.com)",
+      "Bash(nslookup -type=mx welearyoulearn.com)",
+      "Bash(xargs grep -l \"reset\\\\|password\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('scripts:', json.dumps\\(d.get\\('scripts',{}\\),indent=2\\)\\); print\\('next:', d['dependencies'].get\\('next'\\)\\)\")",
+      "Bash(git worktree *)",
+      "Bash(cd \"d:/wlyl/prototype-admin\" && ls netlify.toml 2>&1; echo \"=== check if @netlify/plugin-nextjs in package ===\"; grep -i \"netlify\" package.json 2>&1 || echo \"no netlify deps \\(fine - auto-installed\\)\")",
+      "Read(//d/wlyl/prototype-admin/**)",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('package.json'\\)\\); print\\('optionalDependencies:', json.dumps\\(d.get\\('optionalDependencies',{}\\), indent=2\\)\\)\")",
+      "Bash(echo \"=== exit: $? ===\")",
+      "Bash(git rm *)",
+      "Bash(npx eslint *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")",
+      "Bash(npm list *)"
     ],
     "additionalDirectories": [
       "d:\\wlyl\\prototype\\app\\api\\fees\\ledger",
-      "D:\\wlyl\\prototype\\.next\\dev"
+      "D:\\wlyl\\prototype\\.next\\dev",
+      "d:\\wlyl\\prototype-admin"
     ]
   }
 }

@@ -96,6 +96,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         return NextResponse.json({ error: 'Ledger entry not found' }, { status: 404 })
       }
 
+      // Block edits on a closed academic year
+      const { rows: [locked] } = await client.query(
+        `SELECT 1 FROM fee_year_close
+         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
+        [school_id, entry.academic_year]
+      ).catch(() => ({ rows: [] }))
+      if (locked) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to edit amounts.' }, { status: 409 })
+      }
+
       // Block edits on paid / waived entries
       if (entry.status === 'paid' || entry.status === 'waived') {
         await client.query('ROLLBACK')

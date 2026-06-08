@@ -1,27 +1,19 @@
-import nodemailer from 'nodemailer'
+import { Resend } from 'resend'
 
-const emailHost = process.env.EMAIL_HOST || 'smtp.zoho.in'
-const isGmail = emailHost.includes('gmail')
-
-const transporter = nodemailer.createTransport(
-  isGmail
-    ? { service: 'gmail', auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS } }
-    : {
-        host: emailHost,
-        port: parseInt(process.env.EMAIL_PORT || '587'),
-        secure: false,
-        auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-      }
-)
-
-const FROM = process.env.EMAIL_FROM || `"WLYL Team" <${process.env.EMAIL_USER}>`
+const FROM = process.env.EMAIL_FROM || 'WLYL Team <admin@welearnyoulearn.com>'
 
 export async function sendMail(to: string, subject: string, html: string) {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.warn('[email] EMAIL_USER / EMAIL_PASS not set — skipping email send')
+  const apiKey = process.env.RESEND_API_KEY
+  if (!apiKey) {
+    console.warn('[email] RESEND_API_KEY not set — skipping')
     return
   }
-  return transporter.sendMail({ from: FROM, to, subject, html })
+  const resend = new Resend(apiKey)
+  console.log(`[email] Sending to ${to} via Resend`)
+  const { data, error } = await resend.emails.send({ from: FROM, to, subject, html })
+  if (error) throw new Error(error.message)
+  console.log(`[email] Sent OK — id: ${data?.id}`)
+  return data
 }
 
 // ─── Shared base template ─────────────────────────────────────────────────────

@@ -30,6 +30,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
     const appUrl = process.env.APP_URL || 'http://localhost:3000'
     let emailSent = false
+    let emailError = ''
     try {
       await sendMail(
         user.email,
@@ -62,11 +63,12 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         </body></html>`
       )
       emailSent = true
-    } catch {
-      // Email failed — caller will show password in UI
+    } catch (err) {
+      emailError = err instanceof Error ? err.message : String(err)
+      console.error('[platform/admins/reset] Email failed:', emailError)
     }
 
-    return NextResponse.json({ tempPassword, emailSent, email: user.email, name: user.full_name })
+    return NextResponse.json({ tempPassword, emailSent, emailError, email: user.email, name: user.full_name })
   } catch (error) {
     console.error('[platform/admins/reset]', error)
     return NextResponse.json({ error: 'Failed to reset credentials' }, { status: 500 })

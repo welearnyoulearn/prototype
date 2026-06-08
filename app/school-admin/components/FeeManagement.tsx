@@ -49,6 +49,7 @@ type FeeStats = {
   monthly_trend: Array<{ month: string; collected: number }>
   top_defaulters: Array<{ student_id: number; student_name: string; grade: string; section: string; roll_number: string; outstanding: number; overdue_entries: number }>
   by_payment_mode: Array<{ payment_mode: string; count: number; total: number }>
+  by_class?: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
 }
 
 type PendingPayment = {
@@ -68,17 +69,12 @@ type ReportData = {
   balance: { total_billed: number; total_collected: number; total_outstanding: number; total_waived: number; paid_entries: number; partial_entries: number; unpaid_entries: number; waived_entries: number; total_students: number }
   monthly: Array<{ month: string; collected: number; payment_count: number; students_paid: number }>
   monthlyDue: Array<{ month: string; billed: number }>
-  byGrade: Array<{ grade: string; students: number; total_due: number; total_collected: number; outstanding: number }>
+  byGrade: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
   byCategory: Array<{ category_name: string; frequency: string; students: number; total_due: number; total_collected: number; total_waived: number; outstanding: number; paid_count: number; unpaid_count: number }>
   byMode: Array<{ payment_mode: string; count: number; total: number }>
   defaulters: Array<{ student_name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; outstanding: number; overdue_entries: number; unpaid_entries: number }>
 }
 
-type YearEndEntry = {
-  id: number; student_id: number; student_name: string; roll_number: string
-  grade: string; section: string; category_name: string; period_label: string
-  amount_due: number; amount_paid: number; balance: number; due_date: string; status: string
-}
 
 type PaymentRecord = {
   id: number; receipt_number: string; amount: number
@@ -100,6 +96,30 @@ type PaySuccess = {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const GRADES = ['1','2','3','4','5','6','7','8','9','10','11','12']
+
+const GRADE_GROUPS = [
+  { key: 'primary',   label: 'Primary',   sub: 'Grade 1–5',   grades: ['1','2','3','4','5'] },
+  { key: 'middle',    label: 'Middle',    sub: 'Grade 6–8',   grades: ['6','7','8'] },
+  { key: 'secondary', label: 'Secondary', sub: 'Grade 9–10',  grades: ['9','10'] },
+  { key: 'senior',    label: 'Senior',    sub: 'Grade 11–12',  grades: ['11','12'] },
+]
+
+const FREQ_LABEL: Record<string, string> = {
+  monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual', one_time: 'One Time',
+}
+const FREQ_HELP: Record<string, string> = {
+  monthly: '12 bills/year (Apr–Mar)', quarterly: '4 bills/year', annual: '1 bill/year, repeats', one_time: '1 bill ever, never repeats',
+}
+const FEE_ICONS: Record<string, string> = {
+  tuition: '📘', transport: '🚌', exam: '📝', admission: '🎓', hostel: '🏠',
+  book: '📚', uniform: '👕', sport: '⚽', activity: '⚽', annual: '📅',
+  library: '📖', lab: '🔬', fine: '⚠️', late: '⚠️', misc: '📋',
+}
+function feeIcon(name: string): string {
+  const n = name.toLowerCase()
+  for (const key of Object.keys(FEE_ICONS)) if (n.includes(key)) return FEE_ICONS[key]
+  return '💰'
+}
 
 const CATEGORY_SUGGESTIONS = [
   { name: 'Admission Fee',          frequency: 'one_time',   category_type: 'fixed'    },
@@ -137,7 +157,7 @@ function fmtDate(d: string) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function FeeManagement({ schoolId, adminName }: { schoolId: number; adminName?: string }) {
-  type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'pending' | 'reports' | 'yearend'
+  type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'pending' | 'students' | 'reports' | 'yearend'
   const [activeTab, setActiveTab] = useState<Tab>('overview')
 
   // Shared
@@ -147,6 +167,16 @@ export default function FeeManagement({ schoolId, adminName }: { schoolId: numbe
   // Overview
   const [stats, setStats]             = useState<FeeStats | null>(null)
   const [statsLoading, setStatsLoading] = useState(true)
+
+  type RecentPayment = {
+    id: number; student_name: string; grade: string; section: string
+    roll_number: string; category_name: string; period_label: string
+    amount: number; payment_mode: string; receipt_number: string; paid_date: string
+  }
+  const [recentPayments, setRecentPayments] = useState<RecentPayment[]>([])
+
+  type GradeStat = { grade: string; section?: string; students: number; total_due: number; total_collected: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }
+  const [gradeStats, setGradeStats] = useState<GradeStat[]>([])
 
   // Setup
   const [categories, setCategories]     = useState<FeeCategory[]>([])
@@ -166,6 +196,28 @@ export default function FeeManagement({ schoolId, adminName }: { schoolId: numbe
   const [amendForm, setAmendForm]       = useState({ new_amount: '', reason: '' })
   const [showAmendLog, setShowAmendLog] = useState(false)
 
+  // ── Fee Plan (new Tab 2) ──
+  // Sub-view: 'heads' = fee head cards (existing); 'variable' = combined all-variable-fees grid
+  const [planView, setPlanView] = useState<'heads' | 'variable'>('heads')
+  // Combined variable-fee grid (class scoped)
+  type VarGridStudent = { id: number; name: string; roll_number: string; section: string }
+  type VarGridCategory = { id: number; name: string; frequency: string }
+  const [vgGrade, setVgGrade]               = useState('')
+  const [vgSection, setVgSection]           = useState('all')
+  const [vgStudents, setVgStudents]         = useState<VarGridStudent[]>([])
+  const [vgCategories, setVgCategories]     = useState<VarGridCategory[]>([])
+  const [vgAmounts, setVgAmounts]           = useState<Record<string, string>>({})   // `${sid}:${cid}` -> amount
+  const [vgOriginal, setVgOriginal]         = useState<Record<string, string>>({})   // snapshot for change detection
+  const [vgLoading, setVgLoading]           = useState(false)
+  const [vgSaving, setVgSaving]             = useState(false)
+  const [vgMsg, setVgMsg]                   = useState('')
+  // Which fee head is being managed in the expanded panel (null = list view)
+  const [planManageCatId, setPlanManageCatId] = useState<number | null>(null)
+  // Add-fee wizard
+  const [showAddFee, setShowAddFee] = useState(false)
+  const [addFeeStep, setAddFeeStep] = useState(1)
+  // Grade-group amount inputs (for "same for all" fees) keyed by group name
+  const [groupAmounts, setGroupAmounts] = useState<Record<string, string>>({})
   // Applicability tab state
   const [applGrade, setApplGrade]               = useState('')
   const [applStudents, setApplStudents]         = useState<ApplStudent[]>([])
@@ -219,19 +271,95 @@ export default function FeeManagement({ schoolId, adminName }: { schoolId: numbe
   const [showRejectForm, setShowRejectForm]     = useState<number | null>(null)
   const [verifyMsg, setVerifyMsg]               = useState('')
 
+  // ── Collection (new Tab 3) ──
+  type CollectionView = 'counter' | 'online' | 'defaulters' | 'dayclose'
+  const [collectionView, setCollectionView]     = useState<CollectionView>('counter')
+  // Student whose dues panel is expanded (student_id), with all their open entries
+  const [openStudentId, setOpenStudentId]       = useState<number | null>(null)
+  // entries to collect in the inline form, keyed by ledger entry id (checked = include)
+  const [collectChecked, setCollectChecked]     = useState<Set<number>>(new Set())
+  const [showCollectForm, setShowCollectForm]   = useState(false)
+  // completed payments for the expanded student (for cancel/correct at the counter)
+  const [counterPayments, setCounterPayments]   = useState<PaymentRecord[]>([])
+  const [counterPmtLoading, setCounterPmtLoading] = useState(false)
+  const [showCounterHistory, setShowCounterHistory] = useState(false)
+  // Day close
+  type DayCloseData = {
+    date: string
+    by_mode: Record<string, { count: number; total: number }>
+    receipts: { first: string | null; last: string | null; count: number; total: number }
+    already_closed: boolean
+  }
+  const [dayCloseData, setDayCloseData]         = useState<DayCloseData | null>(null)
+  const [dayCloseDate, setDayCloseDate]         = useState(new Date().toISOString().slice(0, 10))
+  const [dayCloseLoading, setDayCloseLoading]   = useState(false)
+  const [actualCash, setActualCash]             = useState('')
+  const [dayCloseMsg, setDayCloseMsg]           = useState('')
+  const [dayCloseSubmitting, setDayCloseSubmitting] = useState(false)
+
+  // ── Student Passbook (Tab 4) ──
+  type PassbookTimeline = {
+    date: string; type: 'bill' | 'payment' | 'waiver' | 'amendment'
+    description: string; debit: number; credit: number; balance: number
+    by: string; reference: string | null
+  }
+  type PassbookData = {
+    student: { id: number; name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; parent_email: string | null }
+    summary: { total_billed: number; total_paid: number; total_waived: number; outstanding: number }
+    timeline: PassbookTimeline[]
+    ledger: LedgerEntry[]
+    payments: PaymentRecord[]
+    pending_payments: PaymentRecord[]
+    waivers: Array<{ id: number; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; fee_head_name: string; period_label: string }>
+  }
+  type PassbookSearchResult = { id: number; name: string; roll_number: string; grade: string; section: string }
+  const [pbSearch, setPbSearch]                 = useState('')
+  const [pbErr, setPbErr]                        = useState('')
+  const [pbData, setPbData]                     = useState<PassbookData | null>(null)
+  const [pbLoading, setPbLoading]               = useState(false)
+  const [pbSection, setPbSection]               = useState<'timeline' | 'bills' | 'payments' | 'waivers'>('bills')
+  // Full student directory for the Passbook tab (browse + filter)
+  const [pbAllStudents, setPbAllStudents]       = useState<PassbookSearchResult[]>([])
+  const [pbAllLoading, setPbAllLoading]         = useState(false)
+  const [pbGrade, setPbGrade]                   = useState('')
+  // Payment cancel / correct
+  const [cancelPmtId, setCancelPmtId]           = useState<number | null>(null)
+  const [cancelMode, setCancelMode]             = useState<'cancel' | 'correct'>('cancel')
+  const [cancelReason, setCancelReason]         = useState('')
+  const [correctAmount, setCorrectAmount]       = useState('')
+  const [cancelBusy, setCancelBusy]             = useState(false)
+  const [cancelMsg, setCancelMsg]               = useState('')
+
   // Reports tab
   const [reportData, setReportData]             = useState<ReportData | null>(null)
   const [reportLoading, setReportLoading]       = useState(false)
+  type AuditRow = { at: string; who: string; action: string; detail: string; amount: number | null }
+  const [auditLog, setAuditLog]                 = useState<AuditRow[]>([])
+  const [auditLoading, setAuditLoading]         = useState(false)
+  const [showAuditLog, setShowAuditLog]         = useState(false)
 
-  // Year-end tab
-  const [yearEndEntries, setYearEndEntries]     = useState<YearEndEntry[]>([])
+  // Year-end tab (new student-grouped flow)
+  type YearEndBill = { id: number; fee_category_id: number; category_name: string; period_label: string; amount_due: number; amount_paid: number; balance: number; due_date: string; status: string }
+  type YearEndStudent = { student_id: number; student_name: string; roll_number: string; grade: string; section: string; student_status: string; is_leaver: boolean; leaver_reason: string | null; total_unpaid: number; bills: YearEndBill[] }
+  type YearEndState = {
+    academic_year: string
+    summary: { total_billed: number; total_collected: number; total_waived: number; total_unpaid: number }
+    students: YearEndStudent[]
+    unpaid_count: number
+    target_year: string
+    target_year_exists: boolean
+    is_closed: boolean
+    close_record: { closed_by: string; closed_at: string; carried_total: number; writeoff_total: number; open_total: number } | null
+  }
+  const [yearEnd, setYearEnd]                   = useState<YearEndState | null>(null)
   const [yearEndLoading, setYearEndLoading]     = useState(false)
-  const [yearEndSelected, setYearEndSelected]   = useState<Set<number>>(new Set())
-  const [yearEndAction, setYearEndAction]       = useState<'carry_forward' | 'write_off'>('write_off')
-  const [yearEndToYear, setYearEndToYear]       = useState('')
-  const [yearEndReason, setYearEndReason]       = useState('')
-  const [yearEndProcessing, setYearEndProcessing] = useState(false)
-  const [yearEndMsg, setYearEndMsg]             = useState('')
+  // per-student decision: studentId -> 'carry' | 'writeoff' | 'open'
+  const [yeDecisions, setYeDecisions]           = useState<Record<number, 'carry' | 'writeoff' | 'open'>>({})
+  const [yeReasons, setYeReasons]               = useState<Record<number, string>>({})
+  const [yeFilter, setYeFilter]                 = useState<'all' | 'leavers' | 'continuing'>('all')
+  const [yeProcessing, setYeProcessing]         = useState(false)
+  const [yeMsg, setYeMsg]                        = useState('')
+  const [yeClosing, setYeClosing]               = useState(false)
 
   // Amendment impact preview
   const [amendImpact, setAmendImpact]           = useState<number | null>(null)
@@ -274,8 +402,29 @@ export default function FeeManagement({ schoolId, adminName }: { schoolId: numbe
     if (!academicYear) return
     setStatsLoading(true)
     try {
-      const r = await fetch(`/api/fees/stats?school_id=${schoolId}&academic_year=${academicYear}`)
-      if (r.ok) setStats(await r.json())
+      const [statsRes, pmtRes, reportRes] = await Promise.all([
+        fetch(`/api/fees/stats?school_id=${schoolId}&academic_year=${academicYear}`),
+        fetch(`/api/fees/payments?school_id=${schoolId}`),
+        fetch(`/api/fees/reports?school_id=${schoolId}&academic_year=${academicYear}`),
+      ])
+      if (statsRes.ok) {
+        const sd = await statsRes.json()
+        setStats(sd)
+        setGradeStats(Array.isArray(sd.by_class) ? sd.by_class : [])
+      }
+      if (pmtRes.ok) {
+        const all = await pmtRes.json() as Array<RecentPayment & { payment_status?: string }>
+        setRecentPayments(
+          all
+            .filter(p => p.payment_status === 'completed' || !p.payment_status)
+            .slice(0, 6)
+        )
+      }
+      // reports endpoint still fetched for backward-compat but class data now comes from stats
+      if (reportRes.ok) {
+        const d = await reportRes.json()
+        if (Array.isArray(d.byGrade) && d.byGrade.length > 0) setGradeStats(d.byGrade)
+      }
     } catch { /* silent */ }
     setStatsLoading(false)
   }, [schoolId, academicYear])
@@ -308,7 +457,7 @@ export default function FeeManagement({ schoolId, adminName }: { schoolId: numbe
 
   }, [schoolId, academicYear])
 
-  useEffect(() => { if (activeTab === 'setup' || activeTab === 'applicability') loadSetup() }, [activeTab, loadSetup])
+  useEffect(() => { if (activeTab === 'setup') loadSetup() }, [activeTab, loadSetup])
 
   const loadReports = useCallback(async () => {
     if (!academicYear) return
@@ -320,12 +469,29 @@ export default function FeeManagement({ schoolId, adminName }: { schoolId: numbe
 
   useEffect(() => { if (activeTab === 'reports' && academicYear) loadReports() }, [activeTab, loadReports, academicYear])
 
+  async function loadAuditLog() {
+    setShowAuditLog(true)
+    if (auditLog.length > 0) return
+    setAuditLoading(true)
+    const r = await fetch(`/api/fees/audit-log?school_id=${schoolId}&academic_year=${academicYear}`)
+    if (r.ok) setAuditLog(await r.json())
+    setAuditLoading(false)
+  }
+
   const loadYearEnd = useCallback(async () => {
     if (!academicYear) return
-    setYearEndLoading(true)
+    setYearEndLoading(true); setYeMsg('')
     const r = await fetch(`/api/fees/year-end?school_id=${schoolId}&academic_year=${academicYear}`)
-    if (r.ok) { const d = await r.json(); setYearEndEntries(d.entries || []) }
+    if (r.ok) {
+      const d: YearEndState = await r.json()
+      setYearEnd(d)
+      // default every student to 'open' (admin decides each — no auto default action)
+      const init: Record<number, 'carry' | 'writeoff' | 'open'> = {}
+      d.students.forEach(s => { init[s.student_id] = 'open' })
+      setYeDecisions(init)
+    }
     setYearEndLoading(false)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schoolId, academicYear])
 
   useEffect(() => { if (activeTab === 'yearend' && academicYear) loadYearEnd() }, [activeTab, loadYearEnd, academicYear])
@@ -609,6 +775,12 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   }
 
   async function generateLedger() {
+    // Mandate: all fixed fees must have amounts before generating bills
+    if (!fixedAmountsComplete()) {
+      const missing = fixedFeesMissingAmounts()
+      setStructureMsg(`⚠ Set amounts for all fixed fees first — missing: ${missing.join(', ')}`)
+      return
+    }
     setGeneratingLedger(true); setStructureMsg('')
     const r = await fetch('/api/fees/generate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -620,7 +792,83 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     loadStats()
   }
 
+  // ── Fee Plan helpers ──────────────────────────────────────────────────────────
+
+  // Create a fee head (from wizard) — does not navigate, refreshes list
+  async function createFeeHead() {
+    if (!newCategory.name.trim()) return
+    const r = await fetch('/api/fees/categories', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId, ...newCategory }),
+    })
+    if (r.ok) {
+      setNewCategory({ name: '', frequency: 'monthly', description: '', category_type: 'fixed' })
+      setShowAddFee(false); setAddFeeStep(1)
+      loadSetup()
+    }
+  }
+
+  // Apply a group amount to all grades in that group for the managed fee
+  function applyGroupAmount(catId: number, grades: string[], value: string) {
+    setEditAmounts(prev => {
+      const next = { ...prev }
+      grades.forEach(g => { next[`${catId}_${g}`] = value })
+      return next
+    })
+  }
+
+  // Save amounts for a single fee head (only that category's grades)
+  async function saveFeeAmounts(cat: FeeCategory) {
+    setSavingStructure(true); setStructureMsg('')
+    const structs = []
+    for (const grade of GRADES) {
+      const val = editAmounts[`${cat.id}_${grade}`]
+      if (val && parseFloat(val) > 0)
+        structs.push({ fee_category_id: cat.id, grade, amount: parseFloat(val), due_day: parseInt(dueDays[cat.id] || '10') || 10 })
+    }
+    const r = await fetch('/api/fees/structures', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, structures: structs, changed_by: adminName || 'Admin' }),
+    })
+    setStructureMsg(r.ok ? `✓ Amounts saved for ${cat.name}` : 'Failed to save')
+    setSavingStructure(false)
+    loadSetup()
+  }
+
+  // Whether a fee head has any amount configured
+  function feeHasAmounts(catId: number, type: string): boolean {
+    if (type === 'variable') {
+      return structures.some(s => s.fee_category_id === catId && Number(s.amount) > 0)
+    }
+    return GRADES.some(g => parseFloat(editAmounts[`${catId}_${g}`] || '0') > 0)
+  }
+
+  // Whether bills are generated for this fee head
+  function feeBillsGenerated(cat: FeeCategory): boolean {
+    return Number(cat.ledger_count) > 0
+  }
+
+  // Active FIXED fee heads only (variable fees are optional / per-student, so excluded from the gate)
+  function fixedFeeHeads(): FeeCategory[] {
+    return categories.filter(c => c.is_active && c.category_type !== 'variable')
+  }
+  // Generate Bills is allowed only when EVERY active fixed fee head has at least one amount set
+  function fixedAmountsComplete(): boolean {
+    const fixed = fixedFeeHeads()
+    if (fixed.length === 0) return false
+    return fixed.every(c => feeHasAmounts(c.id, c.category_type))
+  }
+  // List of fixed fee heads still missing amounts (for the gating message)
+  function fixedFeesMissingAmounts(): string[] {
+    return fixedFeeHeads().filter(c => !feeHasAmounts(c.id, c.category_type)).map(c => c.name)
+  }
+  // Any bills generated at all (gate for Lock)
+  function anyBillsGenerated(): boolean {
+    return categories.some(c => feeBillsGenerated(c))
+  }
+
   async function lockStructure() {
+    if (!anyBillsGenerated()) { setStructureMsg('⚠ Generate bills before locking the plan.'); return }
     setLockingStructure(true)
     const r = await fetch('/api/fees/structures/lock', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -700,6 +948,57 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     setApplSaving(false)
   }
 
+  // ── Combined "All Variable Fees" grid ──
+  async function loadVarGrid() {
+    if (!vgGrade || !academicYear) { setVgMsg('Pick a class first'); return }
+    setVgLoading(true); setVgMsg('')
+    try {
+      const params = new URLSearchParams({ school_id: String(schoolId), grade: vgGrade, academic_year: academicYear, section: vgSection })
+      const r = await fetch(`/api/fees/category-assignments?${params}`)
+      if (r.ok) {
+        const { students, categories, amounts } = await r.json()
+        setVgStudents(students)
+        setVgCategories(categories)
+        const init: Record<string, string> = {}
+        amounts.forEach((a: { student_id: number; fee_category_id: number; amount: number }) => {
+          init[`${a.student_id}:${a.fee_category_id}`] = String(a.amount)
+        })
+        setVgAmounts(init)
+        setVgOriginal({ ...init })   // snapshot to detect changed cells
+      } else {
+        const d = await r.json().catch(() => ({}))
+        setVgMsg(d.error || 'Failed to load')
+      }
+    } catch { setVgMsg('Network error') }
+    setVgLoading(false)
+  }
+
+  async function saveVarGrid() {
+    if (!vgGrade || !academicYear) return
+    setVgSaving(true); setVgMsg('')
+    // Write every cell (so blanks correctly remove unpaid entries); the API logs only real changes.
+    const assignments: { student_id: number; fee_category_id: number; amount: string }[] = []
+    vgStudents.forEach(s => {
+      vgCategories.forEach(c => {
+        const key = `${s.id}:${c.id}`
+        assignments.push({ student_id: s.id, fee_category_id: c.id, amount: vgAmounts[key] || '0' })
+      })
+    })
+    const r = await fetch('/api/fees/category-assignments', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, assignments, changed_by: adminName || 'Admin' }),
+    })
+    const d = await r.json()
+    if (r.ok) {
+      setVgMsg(`✓ Saved — ${d.upserted} assignments${d.ledgerUpdated > 0 ? `, ${d.ledgerUpdated} ledger entries updated` : ''}`)
+      setVgOriginal({ ...vgAmounts })   // reset change highlight baseline
+      loadStats()
+    } else {
+      setVgMsg(d.error || 'Failed to save')
+    }
+    setVgSaving(false)
+  }
+
   async function toggleCategoryType(cat: FeeCategory) {
     const newType = cat.category_type === 'fixed' ? 'variable' : 'fixed'
     await fetch(`/api/fees/categories?id=${cat.id}`, {
@@ -740,27 +1039,112 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     setCatChangelogLoading(false)
   }
 
-  async function runYearEnd() {
-    if (!yearEndSelected.size || !yearEndAction) return
-    setYearEndProcessing(true); setYearEndMsg('')
+  async function applyYearEndDecisions() {
+    if (!yearEnd) return
+    // Build decisions only for students who have a non-'open' decision (open = no-op leave as is)
+    const decisions = yearEnd.students
+      .map(s => ({ student_id: s.student_id, decision: yeDecisions[s.student_id] || 'open', reason: yeReasons[s.student_id] }))
+      .filter(d => d.decision === 'carry' || d.decision === 'writeoff')
+    if (decisions.length === 0) { setYeMsg('No carry-forward or write-off decisions selected.'); return }
+
+    // Guard on client too: leavers cannot carry
+    const badLeaver = yearEnd.students.find(s => s.is_leaver && yeDecisions[s.student_id] === 'carry')
+    if (badLeaver) { setYeMsg(`${badLeaver.student_name} is leaving — cannot carry forward. Choose Write Off or Leave Open.`); return }
+
+    if (decisions.some(d => d.decision === 'carry') && !yearEnd.target_year_exists) {
+      setYeMsg(`Academic year ${yearEnd.target_year} must be created before carrying forward.`); return
+    }
+
+    setYeProcessing(true); setYeMsg('')
     const r = await fetch('/api/fees/year-end', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        school_id: schoolId, from_year: academicYear,
-        to_year: yearEndAction === 'carry_forward' ? yearEndToYear : undefined,
-        action: yearEndAction, ledger_ids: Array.from(yearEndSelected),
-        reason: yearEndReason || undefined, done_by: adminName || 'Admin',
+        action: 'apply', school_id: schoolId, from_year: academicYear,
+        to_year: yearEnd.target_year, done_by: adminName || 'Admin', decisions,
       }),
     })
     const d = await r.json()
     if (r.ok) {
-      setYearEndMsg(`✓ ${d.processed} entries ${yearEndAction === 'write_off' ? 'written off' : 'carried forward'}`)
-      setYearEndSelected(new Set())
+      setYeMsg(`✓ Applied — ${d.carried.count} carried (${fmt(d.carried.total)}), ${d.writeoff.count} written off (${fmt(d.writeoff.total)})`)
       loadYearEnd()
     } else {
-      setYearEndMsg(d.error || 'Failed')
+      setYeMsg(d.error || 'Failed to apply')
     }
-    setYearEndProcessing(false)
+    setYeProcessing(false)
+  }
+
+  async function closeYear() {
+    setYeClosing(true); setYeMsg('')
+    const r = await fetch('/api/fees/year-end', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'close', school_id: schoolId, from_year: academicYear, done_by: adminName || 'Admin' }),
+    })
+    const d = await r.json()
+    setYeMsg(r.ok ? '✓ Financial year closed and locked' : (d.error || 'Failed to close'))
+    setYeClosing(false)
+    if (r.ok) loadYearEnd()
+  }
+
+  async function reopenYear() {
+    const reason = window.prompt('Reason for reopening this closed year? (logged permanently)')
+    if (!reason) return
+    setYeClosing(true); setYeMsg('')
+    const r = await fetch('/api/fees/year-end', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reopen', school_id: schoolId, from_year: academicYear, done_by: adminName || 'Admin', reason }),
+    })
+    const d = await r.json()
+    setYeMsg(r.ok ? '✓ Year reopened — edits allowed again' : (d.error || 'Failed'))
+    setYeClosing(false)
+    if (r.ok) loadYearEnd()
+  }
+
+  // Year-end view helpers
+  const visibleYeStudents = (yearEnd?.students || []).filter(s =>
+    yeFilter === 'all' ? true : yeFilter === 'leavers' ? s.is_leaver : !s.is_leaver
+  )
+  function startYearLabel(label: string) { return label.split('-')[0] }
+
+  function printYearEndStatement() {
+    if (!yearEnd) return
+    const s = yearEnd.summary
+    const carryN = Object.values(yeDecisions).filter(d => d === 'carry').length
+    const woN = Object.values(yeDecisions).filter(d => d === 'writeoff').length
+    const openN = Object.values(yeDecisions).filter(d => d === 'open').length
+    const rows = yearEnd.students.map(st => `<tr>
+      <td>${st.student_name}</td><td>Gr.${st.grade}${st.section}</td>
+      <td style="text-align:right">₹${Number(st.total_unpaid).toLocaleString('en-IN')}</td>
+      <td>${st.is_leaver ? st.leaver_reason : 'Continuing'}</td>
+      <td>${(yeDecisions[st.student_id] || 'open').replace('writeoff','Write Off').replace('carry','Carry Forward').replace('open','Leave Open')}</td>
+    </tr>`).join('')
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Year-End Statement ${academicYear}</title>
+<style>
+  body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:820px;margin:0 auto}
+  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:18px}
+  .title{font-size:20px;font-weight:bold}.sub{font-size:13px;color:#555;margin-top:4px}
+  .sumbox{display:flex;gap:12px;margin:18px 0}
+  .sumbox div{flex:1;border:1px solid #ddd;border-radius:8px;padding:10px;text-align:center}
+  .sumbox .l{font-size:11px;color:#888}.sumbox .v{font-size:15px;font-weight:bold;margin-top:2px}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  th{background:#f3f4f6;padding:8px;text-align:left;font-size:11px;border:1px solid #ddd}
+  td{padding:7px 8px;font-size:12px;border:1px solid #eee}
+  .ftr{margin-top:24px;text-align:center;font-size:11px;color:#aaa}
+  @media print{body{padding:0}}
+</style></head><body>
+<div class="hdr"><div class="title">Year-End Financial Statement</div><div class="sub">Academic Year ${academicYear}</div></div>
+<div class="sumbox">
+  <div><div class="l">Total Billed</div><div class="v">₹${Number(s.total_billed).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Collected</div><div class="v">₹${Number(s.total_collected).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Waived</div><div class="v">₹${Number(s.total_waived).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Unpaid</div><div class="v">₹${Number(s.total_unpaid).toLocaleString('en-IN')}</div></div>
+</div>
+<p style="font-size:12px;color:#555">Resolution plan: ${carryN} carry forward · ${woN} write off · ${openN} left open</p>
+<table><thead><tr><th>Student</th><th>Class</th><th style="text-align:right">Unpaid</th><th>Status</th><th>Decision</th></tr></thead>
+<tbody>${rows || '<tr><td colspan="5" style="text-align:center;color:#999">No unpaid dues</td></tr>'}</tbody></table>
+<div class="ftr">Generated ${new Date().toLocaleString('en-IN')} · ${adminName || 'Admin'} · Computer-generated statement.</div>
+</body></html>`
+    const win = window.open('', '_blank', 'width=900,height=680')
+    if (win) { win.document.write(html); win.document.close(); win.print() }
   }
 
   async function fetchAmendImpact(catId: number, grade: string) {
@@ -801,6 +1185,367 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     setVerifyingId(null)
   }
 
+  // ── Collection (Tab 3) helpers ────────────────────────────────────────────────
+
+  // Load the full ledger when the Collection tab opens (reuses loadLedger which fills `ledger`)
+  useEffect(() => {
+    if (activeTab === 'collect') {
+      loadLedger()
+      loadPending()
+    }
+  }, [activeTab, loadLedger, loadPending])
+
+  // Group ledger entries by student → one row per student with totals
+  type StudentRow = {
+    student_id: number; student_name: string; roll_number: string
+    grade: string; section: string
+    total_billed: number; total_paid: number; outstanding: number
+    open_entries: LedgerEntry[]   // pending/partial/overdue
+    all_entries: LedgerEntry[]
+    has_overdue: boolean; never_paid: boolean
+  }
+  const studentRows: StudentRow[] = (() => {
+    const map = new Map<number, StudentRow>()
+    for (const e of ledger) {
+      let row = map.get(e.student_id)
+      if (!row) {
+        row = {
+          student_id: e.student_id, student_name: e.student_name, roll_number: e.roll_number,
+          grade: e.grade, section: e.section,
+          total_billed: 0, total_paid: 0, outstanding: 0,
+          open_entries: [], all_entries: [], has_overdue: false, never_paid: true,
+        }
+        map.set(e.student_id, row)
+      }
+      row.total_billed += Number(e.amount_due)
+      row.total_paid += Number(e.amount_paid)
+      row.outstanding += Number(e.balance)
+      row.all_entries.push(e)
+      if (['pending', 'partial', 'overdue'].includes(e.status)) row.open_entries.push(e)
+      if (e.status === 'overdue') row.has_overdue = true
+      if (Number(e.amount_paid) > 0) row.never_paid = false
+    }
+    return Array.from(map.values())
+  })()
+
+  const collectionFiltered = studentRows.filter(r => {
+    if (ledgerGrade && r.grade !== ledgerGrade) return false
+    if (ledgerSearch) {
+      const q = ledgerSearch.toLowerCase()
+      if (!r.student_name.toLowerCase().includes(q) && !r.roll_number.toLowerCase().includes(q)) return false
+    }
+    if (ledgerStatus === 'overdue') return r.has_overdue
+    if (ledgerStatus === 'partial') return r.total_paid > 0 && r.outstanding > 0
+    if (ledgerStatus === 'never') return r.never_paid && r.outstanding > 0
+    if (ledgerStatus === 'clear') return r.outstanding === 0
+    return true
+  })
+
+  const openStudent = collectionFiltered.find(r => r.student_id === openStudentId)
+    || studentRows.find(r => r.student_id === openStudentId)
+
+  // Total of currently-checked entries in the collect form
+  const checkedTotal = openStudent
+    ? openStudent.open_entries.filter(e => collectChecked.has(e.id)).reduce((s, e) => s + Number(e.balance), 0)
+    : 0
+
+  function toggleStudent(id: number) {
+    if (openStudentId === id) { setOpenStudentId(null); setShowCollectForm(false); setShowCounterHistory(false); return }
+    setOpenStudentId(id); setShowCollectForm(false)
+    setShowPaymentsId(null); setShowHistoryId(null)
+    setShowCounterHistory(false); setCounterPayments([])
+    setCancelPmtId(null); setCancelMsg('')
+  }
+
+  async function loadCounterPayments(studentId: number) {
+    setShowCounterHistory(true); setCounterPmtLoading(true)
+    try {
+      const r = await fetch(`/api/fees/payments?school_id=${schoolId}&student_id=${studentId}`)
+      if (r.ok) setCounterPayments(await r.json())
+    } catch { /* silent */ }
+    setCounterPmtLoading(false)
+  }
+
+  function startCollect(row: StudentRow) {
+    setOpenStudentId(row.student_id)
+    setCollectChecked(new Set(row.open_entries.map(e => e.id)))
+    const fullTotal = row.open_entries.reduce((s, e) => s + Number(e.balance), 0)
+    setPayAmount(String(fullTotal))   // default to full; admin can override for partial
+    setPayMode('cash'); setPayRef(''); setPayCollectedBy(adminName || '')
+    setPayDate(new Date().toISOString().slice(0, 10)); setPayNotes('')
+    setPayError(''); setPaySuccess(null)
+    setShowCollectForm(true)
+  }
+
+  // Multi-entry collection via the payments API (FIFO allocation across checked ledger ids)
+  async function submitCounterPayment() {
+    if (!openStudent) return
+    const ids = openStudent.open_entries.filter(e => collectChecked.has(e.id)).map(e => e.id)
+    if (ids.length === 0) { setPayError('Select at least one fee to collect'); return }
+    const enteredAmount = parseFloat(payAmount)
+    if (!enteredAmount || enteredAmount <= 0) { setPayError('Enter a valid amount'); return }
+    if (enteredAmount > checkedTotal + 0.01) {
+      setPayError(`Amount cannot exceed selected dues (${fmt(checkedTotal)})`); return
+    }
+    setCollectLoading(true); setPayError('')
+    const r = await fetch('/api/fees/payments', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        school_id: schoolId, student_id: openStudent.student_id,
+        ledger_ids: ids, total_amount: enteredAmount,
+        payment_mode: payMode, transaction_ref: payRef || null,
+        collected_by_name: payCollectedBy || null, notes: payNotes || null, paid_date: payDate,
+      }),
+    })
+    const d = await r.json()
+    if (r.ok) {
+      setPaySuccess({
+        receipt_number: d.receipt_number, student_name: d.student_name || openStudent.student_name,
+        amount: d.total_paid ?? enteredAmount,
+        school_name: d.school_name || '', roll_number: openStudent.roll_number,
+        grade: openStudent.grade, section: openStudent.section, parent_name: d.parent_name || null,
+        category_name: d.category_name || 'Multiple fees', period_label: d.period_label || '',
+        amount_due: d.amount_due || checkedTotal,
+        payment_mode: payMode, paid_date: payDate,
+        collected_by_name: payCollectedBy || null,
+        transaction_ref: payRef || null, notes: payNotes || null,
+      })
+      setShowCollectForm(false)
+      loadLedger(); loadStats()
+    } else {
+      setPayError(d.error || 'Payment failed')
+    }
+    setCollectLoading(false)
+  }
+
+  // Print a multi-line receipt for counter collection
+  function printCounterReceipt(row: StudentRow, paid: PaySuccess, lines: { cat: string; period: string; amount: number }[]) {
+    const modeLabel: Record<string, string> = { cash: 'Cash', cheque: 'Cheque', dd: 'Demand Draft', upi: 'UPI', online: 'Online Transfer' }
+    const lineRows = lines.map(l => `<tr><td>${l.cat}</td><td>${l.period}</td><td style="text-align:right">₹${Number(l.amount).toLocaleString('en-IN')}</td></tr>`).join('')
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${paid.receipt_number}</title>
+<style>
+  body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:720px;margin:0 auto}
+  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:20px}
+  .school{font-size:22px;font-weight:bold}.rtitle{font-size:15px;font-weight:bold;margin-top:6px;letter-spacing:1px}
+  .rno{font-size:12px;color:#555;margin-top:4px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+  .lbl{font-size:11px;color:#888;margin-bottom:2px}.val{font-size:14px;font-weight:500}
+  table{width:100%;border-collapse:collapse;margin:14px 0}
+  th{background:#f3f4f6;padding:9px 12px;text-align:left;font-size:12px;border:1px solid #ddd}
+  td{padding:9px 12px;font-size:13px;border:1px solid #ddd}
+  .tot td{font-weight:bold;background:#f9fafb}
+  .ftr{margin-top:28px;text-align:center;font-size:11px;color:#aaa;border-top:1px solid #eee;padding-top:12px}
+  @media print{body{padding:0}}
+</style></head><body>
+<div class="hdr"><div class="school">${paid.school_name || 'School'}</div>
+<div class="rtitle">FEE RECEIPT</div><div class="rno">Receipt No: <strong>${paid.receipt_number}</strong></div></div>
+<div class="grid2">
+  <div><div class="lbl">Student Name</div><div class="val">${row.student_name}</div></div>
+  <div><div class="lbl">Roll Number</div><div class="val">${row.roll_number}</div></div>
+  <div><div class="lbl">Class</div><div class="val">Grade ${row.grade}${row.section}</div></div>
+  <div><div class="lbl">Parent / Guardian</div><div class="val">${paid.parent_name || '—'}</div></div>
+</div>
+<table><thead><tr><th>Fee Head</th><th>Period</th><th style="text-align:right">Amount</th></tr></thead>
+<tbody>${lineRows}</tbody>
+<tfoot><tr class="tot"><td colspan="2" style="text-align:right">Total Paid:</td><td style="text-align:right">₹${Number(paid.amount).toLocaleString('en-IN')}</td></tr></tfoot></table>
+<div class="grid2">
+  <div><div class="lbl">Payment Mode</div><div class="val">${modeLabel[paid.payment_mode] || paid.payment_mode}</div></div>
+  <div><div class="lbl">Payment Date</div><div class="val">${paid.paid_date ? new Date(paid.paid_date).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' }) : '—'}</div></div>
+  ${paid.transaction_ref ? `<div><div class="lbl">Reference</div><div class="val">${paid.transaction_ref}</div></div>` : ''}
+  ${paid.collected_by_name ? `<div><div class="lbl">Collected By</div><div class="val">${paid.collected_by_name}</div></div>` : ''}
+</div>
+${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><div class="val">${paid.notes}</div></div>` : ''}
+<div class="ftr">Balance after this payment: ₹${Number(Math.max(0, row.outstanding - paid.amount)).toLocaleString('en-IN')} &nbsp;·&nbsp; Generated on ${new Date().toLocaleString('en-IN')} &nbsp;·&nbsp; Computer-generated receipt.</div>
+</body></html>`
+    const win = window.open('', '_blank', 'width=800,height=650')
+    if (win) { win.document.write(html); win.document.close(); win.print() }
+  }
+
+  // ── Day Close ──
+  const loadDayClose = useCallback(async (date: string) => {
+    setDayCloseLoading(true); setDayCloseMsg('')
+    const r = await fetch(`/api/fees/day-close?school_id=${schoolId}&date=${date}`)
+    if (r.ok) setDayCloseData(await r.json())
+    setDayCloseLoading(false)
+  }, [schoolId])
+
+  useEffect(() => {
+    if (activeTab === 'collect' && collectionView === 'dayclose') loadDayClose(dayCloseDate)
+  }, [activeTab, collectionView, dayCloseDate, loadDayClose])
+
+  async function submitDayClose() {
+    setDayCloseSubmitting(true); setDayCloseMsg('')
+    const r = await fetch('/api/fees/day-close', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId, date: dayCloseDate, actual_cash: actualCash || null, submitted_by: adminName || 'Admin' }),
+    })
+    const d = await r.json()
+    setDayCloseMsg(r.ok ? '✓ Day closed and locked' : (d.error || 'Failed'))
+    setDayCloseSubmitting(false)
+    if (r.ok) loadDayClose(dayCloseDate)
+  }
+
+  // ── Student Passbook helpers ────────────────────────────────────────────────
+  // Load the full student directory once when the Passbook tab opens
+  const loadPbAllStudents = useCallback(async () => {
+    setPbAllLoading(true)
+    try {
+      const r = await fetch(`/api/students?school_id=${schoolId}`)
+      if (r.ok) {
+        const data = await r.json()
+        const arr = Array.isArray(data) ? data : (data.students || [])
+        setPbAllStudents(arr.map((s: { id: number; name: string; roll_number: string; grade: string; section: string }) => ({
+          id: s.id, name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section,
+        })))
+      }
+    } catch { /* silent */ }
+    setPbAllLoading(false)
+  }, [schoolId])
+
+  useEffect(() => {
+    if (activeTab === 'students' && pbAllStudents.length === 0) loadPbAllStudents()
+  }, [activeTab, pbAllStudents.length, loadPbAllStudents])
+
+  async function loadPassbook(studentId: number) {
+    setPbLoading(true); setPbErr('')
+    try {
+      const r = await fetch(`/api/fees/passbook?school_id=${schoolId}&student_id=${studentId}&academic_year=${academicYear}`)
+      if (r.ok) { setPbData(await r.json()); setPbSection('bills') }
+      else { const d = await r.json().catch(() => ({})); setPbErr(d.error || `Could not open passbook (HTTP ${r.status})`) }
+    } catch { setPbErr('Network error while opening passbook') }
+    setPbLoading(false)
+  }
+
+  function openCancel(paymentId: number) {
+    setCancelPmtId(paymentId); setCancelMode('cancel')
+    setCancelReason(''); setCorrectAmount(''); setCancelMsg('')
+  }
+
+  // origin: 'passbook' refreshes the passbook; 'counter' refreshes ledger + counter payments
+  async function submitCancelCorrect(origin: 'passbook' | 'counter' = 'passbook', studentId?: number) {
+    if (!cancelPmtId) return
+    if (!cancelReason.trim()) { setCancelMsg('Reason is required.'); return }
+    if (cancelMode === 'correct' && !(parseFloat(correctAmount) > 0)) { setCancelMsg('Enter a valid corrected amount.'); return }
+    setCancelBusy(true); setCancelMsg('')
+    const r = await fetch('/api/fees/payments/cancel', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        payment_id: cancelPmtId, action: cancelMode, reason: cancelReason,
+        done_by: adminName || 'Admin',
+        ...(cancelMode === 'correct' ? { new_amount: parseFloat(correctAmount) } : {}),
+      }),
+    })
+    const d = await r.json()
+    if (r.ok) {
+      setCancelMsg(cancelMode === 'correct'
+        ? `✓ Corrected — new receipt ${d.new_receipt}`
+        : `✓ Payment cancelled (₹${d.reversed_amount} reversed)`)
+      setCancelPmtId(null)
+      // Always refresh the school-wide figures (Overview, class-wise, reports-on-open)
+      loadStats()
+      if (origin === 'passbook' && pbData) {
+        loadPassbook(pbData.student.id)
+      } else if (origin === 'counter') {
+        loadLedger()                                   // dues + balances + statuses
+        if (studentId) loadCounterPayments(studentId)  // refresh the counter payment list
+      }
+    } else {
+      setCancelMsg(d.error || 'Failed')
+    }
+    setCancelBusy(false)
+  }
+
+  // Print a receipt for any single completed payment from the passbook
+  function printPassbookReceipt(p: PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }) {
+    if (!pbData) return
+    const s = pbData.student
+    const modeLabel: Record<string, string> = { cash: 'Cash', cheque: 'Cheque', dd: 'Demand Draft', upi: 'UPI', online: 'Online Transfer' }
+    const head = p.fee_head_name || p.category_name || 'Fee'
+    const period = p.period_label || ''
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${p.receipt_number}</title>
+<style>
+  body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:720px;margin:0 auto}
+  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:20px}
+  .school{font-size:22px;font-weight:bold}.rtitle{font-size:15px;font-weight:bold;margin-top:6px;letter-spacing:1px}
+  .rno{font-size:12px;color:#555;margin-top:4px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+  .lbl{font-size:11px;color:#888;margin-bottom:2px}.val{font-size:14px;font-weight:500}
+  table{width:100%;border-collapse:collapse;margin:14px 0}
+  th{background:#f3f4f6;padding:9px 12px;text-align:left;font-size:12px;border:1px solid #ddd}
+  td{padding:9px 12px;font-size:13px;border:1px solid #ddd}
+  .tot td{font-weight:bold;background:#f9fafb}
+  .ftr{margin-top:28px;text-align:center;font-size:11px;color:#aaa;border-top:1px solid #eee;padding-top:12px}
+  @media print{body{padding:0}}
+</style></head><body>
+<div class="hdr"><div class="school">Fee Receipt</div>
+<div class="rtitle">PAYMENT RECEIPT</div><div class="rno">Receipt No: <strong>${p.receipt_number}</strong></div></div>
+<div class="grid2">
+  <div><div class="lbl">Student Name</div><div class="val">${s.name}</div></div>
+  <div><div class="lbl">Roll Number</div><div class="val">${s.roll_number}</div></div>
+  <div><div class="lbl">Class</div><div class="val">Grade ${s.grade}${s.section || ''}</div></div>
+  <div><div class="lbl">Parent / Guardian</div><div class="val">${s.parent_name || '—'}</div></div>
+</div>
+<table><thead><tr><th>Fee Head</th><th>Period</th><th style="text-align:right">Amount</th></tr></thead>
+<tbody><tr><td>${head}</td><td>${period}</td><td style="text-align:right">₹${Number(p.amount).toLocaleString('en-IN')}</td></tr></tbody>
+<tfoot><tr class="tot"><td colspan="2" style="text-align:right">Total Paid:</td><td style="text-align:right">₹${Number(p.amount).toLocaleString('en-IN')}</td></tr></tfoot></table>
+<div class="grid2">
+  <div><div class="lbl">Payment Mode</div><div class="val">${modeLabel[p.payment_mode] || p.payment_mode}</div></div>
+  <div><div class="lbl">Payment Date</div><div class="val">${p.paid_date ? new Date(p.paid_date).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' }) : '—'}</div></div>
+  ${p.transaction_ref ? `<div><div class="lbl">Reference</div><div class="val">${p.transaction_ref}</div></div>` : ''}
+  ${p.collected_by_name ? `<div><div class="lbl">Collected By</div><div class="val">${p.collected_by_name}</div></div>` : ''}
+</div>
+${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div></div>` : ''}
+<div class="ftr">Generated on ${new Date().toLocaleString('en-IN')} · Computer-generated receipt.</div>
+</body></html>`
+    const win = window.open('', '_blank', 'width=800,height=650')
+    if (win) { win.document.write(html); win.document.close(); win.print() }
+  }
+
+  function printPassbookStatement() {
+    if (!pbData) return
+    const s = pbData.student
+    const rows = pbData.timeline.map(t => `<tr>
+      <td>${new Date(t.date).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' })}</td>
+      <td>${t.description}</td>
+      <td style="text-align:right">${t.debit > 0 ? '₹' + Number(t.debit).toLocaleString('en-IN') : ''}</td>
+      <td style="text-align:right">${t.credit > 0 ? '₹' + Number(t.credit).toLocaleString('en-IN') : ''}</td>
+      <td style="text-align:right">₹${Number(t.balance).toLocaleString('en-IN')}</td>
+    </tr>`).join('')
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Statement ${s.name}</title>
+<style>
+  body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:820px;margin:0 auto}
+  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:18px}
+  .title{font-size:20px;font-weight:bold}.sub{font-size:13px;color:#555;margin-top:4px}
+  .info{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;font-size:13px}
+  .sumbox{display:flex;gap:16px;margin-bottom:18px}
+  .sumbox div{flex:1;border:1px solid #ddd;border-radius:8px;padding:10px;text-align:center}
+  .sumbox .l{font-size:11px;color:#888}.sumbox .v{font-size:16px;font-weight:bold;margin-top:2px}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  th{background:#f3f4f6;padding:8px;text-align:left;font-size:11px;border:1px solid #ddd}
+  td{padding:7px 8px;font-size:12px;border:1px solid #eee}
+  .ftr{margin-top:24px;text-align:center;font-size:11px;color:#aaa}
+  @media print{body{padding:0}}
+</style></head><body>
+<div class="hdr"><div class="title">Fee Statement (Passbook)</div>
+<div class="sub">${s.name} · Grade ${s.grade}${s.section} · Roll #${s.roll_number} · ${academicYear}</div></div>
+<div class="info">
+  <div>Parent: ${s.parent_name || '—'}</div>
+  <div>Phone: ${s.parent_phone || '—'}</div>
+</div>
+<div class="sumbox">
+  <div><div class="l">Total Billed</div><div class="v">₹${Number(pbData.summary.total_billed).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Paid</div><div class="v">₹${Number(pbData.summary.total_paid).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Waived</div><div class="v">₹${Number(pbData.summary.total_waived).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Outstanding</div><div class="v">₹${Number(pbData.summary.outstanding).toLocaleString('en-IN')}</div></div>
+</div>
+<table><thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Charge</th><th style="text-align:right">Paid</th><th style="text-align:right">Balance</th></tr></thead>
+<tbody>${rows}</tbody></table>
+<div class="ftr">Generated ${new Date().toLocaleString('en-IN')} · Computer-generated statement.</div>
+</body></html>`
+    const win = window.open('', '_blank', 'width=900,height=680')
+    if (win) { win.document.write(html); win.document.close(); win.print() }
+  }
+
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
@@ -824,11 +1569,9 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       <div className="flex gap-1 border-b border-gray-200">
         {([
           { key: 'overview',      label: 'Overview' },
-          { key: 'setup',         label: 'Fee Setup' },
-          { key: 'applicability', label: 'Applicability' },
-          { key: 'ledger',        label: 'Ledger' },
-          { key: 'collect',       label: 'Collect' },
-          { key: 'pending',       label: pendingPayments.length > 0 ? `Pending ● ${pendingPayments.length}` : 'Pending' },
+          { key: 'setup',         label: 'Fee Plan' },
+          { key: 'collect',       label: pendingPayments.length > 0 ? `Ledger ● ${pendingPayments.length}` : 'Ledger' },
+          { key: 'students',      label: 'Student Passbook' },
           { key: 'reports',       label: 'Reports' },
           { key: 'yearend',       label: 'Year-End' },
         ] as const).map(t => (
@@ -838,7 +1581,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
             className={`px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors ${
               activeTab === t.key
                 ? 'text-blue-700 bg-blue-50 border-b-2 border-blue-600'
-                : t.key === 'pending' && pendingPayments.length > 0
+                : t.key === 'collect' && pendingPayments.length > 0
                   ? 'text-red-600 hover:bg-red-50'
                   : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
             }`}
@@ -850,142 +1593,443 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
       {/* ═══ OVERVIEW ═══════════════════════════════════════════════════════════ */}
       {activeTab === 'overview' && (
-        <div className="space-y-6">
+        <div className="space-y-5">
+
+          {/* ── Action Required ── */}
+          {(() => {
+            const actions = []
+            if (pendingPayments.length > 0)
+              actions.push({ msg: `${pendingPayments.length} online payment${pendingPayments.length > 1 ? 's' : ''} waiting for your verification`, tab: 'pending' as const, color: 'text-red-700 bg-red-50 border-red-200' })
+            if (stats && stats.summary.overdue_count > 20)
+              actions.push({ msg: `${stats.summary.overdue_count} overdue entries — follow up with parents`, tab: 'ledger' as const, color: 'text-orange-700 bg-orange-50 border-orange-200' })
+            if (stats && stats.summary.defaulters_count > 0)
+              actions.push({ msg: `${stats.summary.defaulters_count} students have made zero payment this year`, tab: 'ledger' as const, color: 'text-amber-700 bg-amber-50 border-amber-200' })
+            if (actions.length === 0) return null
+            return (
+              <div className="rounded-xl border border-red-100 overflow-hidden">
+                <div className="bg-red-50 px-4 py-2 border-b border-red-100">
+                  <p className="text-xs font-bold text-red-700 uppercase tracking-wide">⚠ Needs Attention</p>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {actions.map((a, i) => (
+                    <div key={i} className="flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50">
+                      <p className="text-sm text-gray-700">{a.msg}</p>
+                      <button
+                        onClick={() => setActiveTab(a.tab)}
+                        className="text-xs font-semibold text-blue-600 hover:text-blue-800 ml-4 flex-shrink-0"
+                      >
+                        View →
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* ── Stat Cards ── */}
           {statsLoading ? (
             <div className="grid grid-cols-4 gap-4">
               {[...Array(4)].map((_, i) => (
                 <div key={i} className="bg-white rounded-xl border border-gray-100 p-5 animate-pulse">
-                  <div className="h-3 bg-gray-100 rounded w-24 mb-3" /><div className="h-7 bg-gray-200 rounded w-32" />
+                  <div className="h-3 bg-gray-100 rounded w-24 mb-3" />
+                  <div className="h-8 bg-gray-200 rounded w-28 mb-2" />
+                  <div className="h-3 bg-gray-100 rounded w-20" />
                 </div>
               ))}
             </div>
           ) : stats?.summary ? (
             <>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="bg-white rounded-xl border border-gray-100 p-5">
-                  <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">Total Due</p>
-                  <p className="text-2xl font-bold text-gray-900 mt-1">{fmt(stats.summary.total_due)}</p>
-                  <p className="text-xs text-gray-400 mt-1">{stats.summary.total_students} students</p>
-                </div>
-                <div className="bg-white rounded-xl border border-green-100 p-5">
-                  <p className="text-xs text-green-600 font-medium uppercase tracking-wide">Collected</p>
-                  <p className="text-2xl font-bold text-green-700 mt-1">{fmt(stats.summary.total_collected)}</p>
-                  <p className="text-xs text-green-500 mt-1">{pct(Number(stats.summary.total_collected), Number(stats.summary.total_due))}% of total</p>
-                </div>
-                <div className="bg-white rounded-xl border border-red-100 p-5">
-                  <p className="text-xs text-red-500 font-medium uppercase tracking-wide">Outstanding</p>
-                  <p className="text-2xl font-bold text-red-600 mt-1">{fmt(stats.summary.total_outstanding)}</p>
-                  <p className="text-xs text-red-400 mt-1">{stats.summary.overdue_count} overdue entries</p>
-                </div>
-                <div className="bg-white rounded-xl border border-orange-100 p-5">
-                  <p className="text-xs text-orange-500 font-medium uppercase tracking-wide">Defaulters</p>
-                  <p className="text-2xl font-bold text-orange-600 mt-1">{stats.summary.defaulters_count}</p>
-                  <p className="text-xs text-orange-400 mt-1">students with zero payment</p>
-                </div>
+                {[
+                  { label: 'Total Billed',  value: stats.summary.total_due,         sub: `${stats.summary.total_students} students`,           border: 'border-gray-100',   text: 'text-gray-900',  sub_color: 'text-gray-400' },
+                  { label: 'Collected',     value: stats.summary.total_collected,    sub: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due))}% of total`, border: 'border-green-100',  text: 'text-green-700', sub_color: 'text-green-500' },
+                  { label: 'Outstanding',   value: stats.summary.total_outstanding,  sub: `${stats.summary.overdue_count} overdue entries`,     border: 'border-red-100',    text: 'text-red-600',   sub_color: 'text-red-400' },
+                  { label: 'Zero Payers',   value: stats.summary.defaulters_count,   sub: 'students with no payment',                           border: 'border-orange-100', text: 'text-orange-600',sub_color: 'text-orange-400', isCount: true },
+                ].map(card => (
+                  <div key={card.label} className={`bg-white rounded-xl border ${card.border} p-5`}>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{card.label}</p>
+                    <p className={`text-2xl font-bold mt-1 ${card.text}`}>
+                      {card.isCount ? card.value : fmt(card.value)}
+                    </p>
+                    <p className={`text-xs mt-1 ${card.sub_color}`}>{card.sub}</p>
+                  </div>
+                ))}
               </div>
 
+              {/* ── Overall Progress Bar ── */}
               <div className="bg-white rounded-xl border border-gray-100 p-5">
-                <h3 className="text-sm font-semibold text-gray-700 mb-4">Collection Progress</h3>
-                <div className="flex gap-6 flex-wrap mb-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-gray-700">Overall Collection Progress — {academicYear}</h3>
+                  <span className="text-sm font-bold text-blue-600">{pct(Number(stats.summary.total_collected), Number(stats.summary.total_due))}%</span>
+                </div>
+                <div className="h-3 bg-gray-100 rounded-full overflow-hidden mb-3">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-blue-500 to-green-500 transition-all duration-700"
+                    style={{ width: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due))}%` }}
+                  />
+                </div>
+                <div className="flex gap-5 flex-wrap">
                   {[
-                    { label: 'Paid',    count: stats.summary.paid_count,    color: 'bg-green-500' },
-                    { label: 'Partial', count: stats.summary.partial_count, color: 'bg-yellow-400' },
-                    { label: 'Pending', count: stats.summary.pending_count, color: 'bg-gray-300' },
-                    { label: 'Overdue', count: stats.summary.overdue_count, color: 'bg-red-500' },
+                    { label: 'Paid',    count: stats.summary.paid_count,    dot: 'bg-green-500' },
+                    { label: 'Partial', count: stats.summary.partial_count, dot: 'bg-yellow-400' },
+                    { label: 'Pending', count: stats.summary.pending_count, dot: 'bg-gray-300' },
+                    { label: 'Overdue', count: stats.summary.overdue_count, dot: 'bg-red-500' },
                   ].map(s => (
                     <div key={s.label} className="flex items-center gap-2">
-                      <div className={`w-3 h-3 rounded-full ${s.color}`} />
-                      <span className="text-sm text-gray-600">{s.label}</span>
-                      <span className="text-sm font-semibold text-gray-900">{s.count}</span>
+                      <div className={`w-2.5 h-2.5 rounded-full ${s.dot}`} />
+                      <span className="text-xs text-gray-500">{s.label}</span>
+                      <span className="text-xs font-bold text-gray-800">{s.count}</span>
                     </div>
                   ))}
                 </div>
-                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <div className="bg-green-500 h-full transition-all" style={{ width: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due))}%` }} />
-                </div>
-                <p className="text-xs text-green-600 font-medium mt-1 text-right">{pct(Number(stats.summary.total_collected), Number(stats.summary.total_due))}% collected</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              {/* ── Class-wise Analysis ── */}
+              {gradeStats.length > 0 && (() => {
+                const label = (g: GradeStat) => g.section ? `${g.grade}-${g.section}` : `Grade ${g.grade}`
+                const withRate = gradeStats.map(g => ({ ...g, rate: pct(Number(g.total_collected), Number(g.total_due)), label: label(g) }))
+                const ranked = [...withRate].filter(g => Number(g.total_due) > 0).sort((a, b) => b.rate - a.rate)
+                const best = ranked[0]
+                const worst = ranked[ranked.length - 1]
+                const totDue = gradeStats.reduce((s, g) => s + Number(g.total_due), 0)
+                const totCol = gradeStats.reduce((s, g) => s + Number(g.total_collected), 0)
+                const totStu = gradeStats.reduce((s, g) => s + Number(g.students), 0)
+                const totDef = gradeStats.reduce((s, g) => s + Number(g.defaulter_students || 0), 0)
+                return (
+                  <div className="bg-white rounded-xl border border-gray-100 p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-sm font-semibold text-gray-700">Class-wise Collection Analysis</h3>
+                      <div className="flex items-center gap-3">
+                        <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download
+                          className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-2.5 py-1 rounded-lg">Export</a>
+                        <button onClick={() => setActiveTab('reports')} className="text-xs text-blue-600 hover:text-blue-800">Full report →</button>
+                      </div>
+                    </div>
+
+                    {/* Highlight cards */}
+                    <div className="grid grid-cols-4 gap-3 mb-5">
+                      <div className="bg-green-50 border border-green-100 rounded-lg px-3 py-2.5">
+                        <p className="text-[10px] text-green-600 uppercase font-semibold tracking-wide">Best Class</p>
+                        {best ? (
+                          <>
+                            <p className="text-sm font-bold text-green-800 mt-0.5">{best.label}</p>
+                            <p className="text-xs text-green-600">{best.rate}% collected</p>
+                          </>
+                        ) : <p className="text-sm text-gray-400 mt-0.5">—</p>}
+                      </div>
+                      <div className="bg-red-50 border border-red-100 rounded-lg px-3 py-2.5">
+                        <p className="text-[10px] text-red-500 uppercase font-semibold tracking-wide">Needs Focus</p>
+                        {worst && worst !== best ? (
+                          <>
+                            <p className="text-sm font-bold text-red-700 mt-0.5">{worst.label}</p>
+                            <p className="text-xs text-red-500">{worst.rate}% collected</p>
+                          </>
+                        ) : <p className="text-sm text-gray-400 mt-0.5">—</p>}
+                      </div>
+                      <div className="bg-gray-50 border border-gray-100 rounded-lg px-3 py-2.5">
+                        <p className="text-[10px] text-gray-400 uppercase font-semibold tracking-wide">Avg / Student</p>
+                        <p className="text-sm font-bold text-gray-800 mt-0.5">{totStu > 0 ? fmt(Math.round(totCol / totStu)) : '₹0'}</p>
+                        <p className="text-xs text-gray-400">collected</p>
+                      </div>
+                      <div className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2.5">
+                        <p className="text-[10px] text-amber-600 uppercase font-semibold tracking-wide">Defaulters</p>
+                        <p className="text-sm font-bold text-amber-700 mt-0.5">{totDef} <span className="text-xs font-normal text-amber-500">of {totStu}</span></p>
+                        <p className="text-xs text-amber-500">students owe</p>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-xs text-gray-400 border-b border-gray-100">
+                            <th className="text-left font-semibold pb-2">Class</th>
+                            <th className="text-right font-semibold pb-2">Students</th>
+                            <th className="text-right font-semibold pb-2">Paid / Owe</th>
+                            <th className="text-right font-semibold pb-2">Billed</th>
+                            <th className="text-right font-semibold pb-2">Collected</th>
+                            <th className="text-right font-semibold pb-2">Outstanding</th>
+                            <th className="text-left font-semibold pb-2 pl-4 w-44">Collection Rate</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {withRate.map(g => {
+                            const collected = Number(g.total_collected)
+                            const due = Number(g.total_due)
+                            const p = g.rate
+                            const color = p >= 80 ? 'bg-green-500' : p >= 50 ? 'bg-yellow-400' : 'bg-red-400'
+                            const badge = p >= 80 ? 'bg-green-100 text-green-700' : p >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-600'
+                            return (
+                              <tr key={g.label} className="border-b border-gray-50 hover:bg-gray-50/60">
+                                <td className="py-2.5 font-medium text-gray-800">{g.label}</td>
+                                <td className="py-2.5 text-right text-gray-500">{g.students}</td>
+                                <td className="py-2.5 text-right text-xs">
+                                  <span className="text-green-600 font-medium">{g.fully_paid_students ?? 0}</span>
+                                  <span className="text-gray-300"> / </span>
+                                  <span className="text-red-500 font-medium">{g.defaulter_students ?? 0}</span>
+                                </td>
+                                <td className="py-2.5 text-right text-gray-700">{fmt(due)}</td>
+                                <td className="py-2.5 text-right text-green-600 font-medium">{fmt(collected)}</td>
+                                <td className="py-2.5 text-right text-red-600 font-medium">{fmt(g.outstanding)}</td>
+                                <td className="py-2.5 pl-4">
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                                      <div className={`${color} h-full rounded-full transition-all`} style={{ width: `${p}%` }} />
+                                    </div>
+                                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${badge} w-10 text-center`}>{p}%</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t-2 border-gray-100 font-semibold">
+                            <td className="pt-2.5 text-gray-700">Total</td>
+                            <td className="pt-2.5 text-right text-gray-600">{totStu}</td>
+                            <td className="pt-2.5 text-right text-xs">
+                              <span className="text-green-600">{gradeStats.reduce((s, g) => s + Number(g.fully_paid_students || 0), 0)}</span>
+                              <span className="text-gray-300"> / </span>
+                              <span className="text-red-500">{totDef}</span>
+                            </td>
+                            <td className="pt-2.5 text-right text-gray-700">{fmt(totDue)}</td>
+                            <td className="pt-2.5 text-right text-green-700">{fmt(totCol)}</td>
+                            <td className="pt-2.5 text-right text-red-700">{fmt(gradeStats.reduce((s, g) => s + Number(g.outstanding), 0))}</td>
+                            <td className="pt-2.5 pl-4">
+                              <span className="text-xs font-bold text-blue-600">{pct(totCol, totDue)}% overall</span>
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* ── Two Columns ── */}
+              <div className="grid grid-cols-2 gap-5">
+
+                {/* Fee Head Health */}
                 <div className="bg-white rounded-xl border border-gray-100 p-5">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-4">Collection by Category</h3>
-                  {stats.by_category.length === 0 ? <p className="text-sm text-gray-400">No data yet</p> : (
-                    <div className="space-y-3">
-                      {stats.by_category.map(cat => (
-                        <div key={cat.category_name}>
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="text-sm text-gray-700">{cat.category_name}</span>
-                            <span className="text-xs text-gray-400">{fmt(cat.total_collected)} / {fmt(cat.total_due)}</span>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-4">Fee Head Collection Health</h3>
+                  {stats.by_category.length === 0 ? (
+                    <p className="text-sm text-gray-400">No fee heads configured yet.</p>
+                  ) : (
+                    <div className="space-y-4">
+                      {stats.by_category.map(cat => {
+                        const collected = Number(cat.total_collected)
+                        const due = Number(cat.total_due)
+                        const p = pct(collected, due)
+                        const color = p >= 80 ? 'bg-green-500' : p >= 50 ? 'bg-yellow-400' : 'bg-red-400'
+                        return (
+                          <div key={cat.category_name}>
+                            <div className="flex justify-between items-center mb-1.5">
+                              <div>
+                                <span className="text-sm font-medium text-gray-700">{cat.category_name}</span>
+                                <span className="text-xs text-gray-400 ml-2 capitalize">{cat.frequency}</span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-xs font-bold text-gray-700">{p}%</span>
+                                <span className="text-xs text-gray-400 ml-1">{fmt(collected)} / {fmt(due)}</span>
+                              </div>
+                            </div>
+                            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                              <div className={`${color} h-full rounded-full transition-all`} style={{ width: `${p}%` }} />
+                            </div>
+                            {cat.overdue_count > 0 && (
+                              <p className="text-[10px] text-red-500 mt-0.5">{cat.overdue_count} overdue entries</p>
+                            )}
                           </div>
-                          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                            <div className="bg-blue-500 h-full rounded-full" style={{ width: `${pct(Number(cat.total_collected), Number(cat.total_due))}%` }} />
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </div>
 
+                {/* Right column: Top Defaulters + Recent Payments */}
                 <div className="space-y-4">
+
+                  {/* Top Defaulters */}
                   <div className="bg-white rounded-xl border border-gray-100 p-5">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-3">Payment Modes</h3>
-                    {stats.by_payment_mode.length === 0 ? <p className="text-sm text-gray-400">No payments yet</p> : (
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-semibold text-gray-700">Top Defaulters</h3>
+                      <button
+                        onClick={() => setActiveTab('ledger')}
+                        className="text-xs text-blue-600 hover:text-blue-800"
+                      >
+                        View all →
+                      </button>
+                    </div>
+                    {stats.top_defaulters.length === 0 ? (
+                      <div className="flex items-center gap-2 py-2">
+                        <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
+                          <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                        </div>
+                        <p className="text-sm text-green-600 font-medium">No defaulters — great!</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {stats.top_defaulters.slice(0, 5).map((d, i) => (
+                          <div key={d.student_id} className="flex items-center gap-3">
+                            <span className="text-xs font-bold text-gray-300 w-4">{i + 1}</span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-gray-800 truncate">{d.student_name}</p>
+                              <p className="text-xs text-gray-400">Gr.{d.grade}{d.section} · #{d.roll_number}</p>
+                            </div>
+                            <div className="text-right flex-shrink-0">
+                              <p className="text-sm font-bold text-red-600">{fmt(d.outstanding)}</p>
+                              {d.overdue_entries > 0 && (
+                                <p className="text-[10px] text-red-400">{d.overdue_entries} overdue</p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Recent Payments */}
+                  <div className="bg-white rounded-xl border border-gray-100 p-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-semibold text-gray-700">Recent Payments</h3>
+                      <button
+                        onClick={() => setActiveTab('collect')}
+                        className="text-xs text-blue-600 hover:text-blue-800"
+                      >
+                        Collect →
+                      </button>
+                    </div>
+                    {recentPayments.length === 0 ? (
+                      <p className="text-sm text-gray-400">No payments recorded yet.</p>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {recentPayments.map(p => (
+                          <div key={p.id} className="flex items-center justify-between">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium text-gray-800 truncate">{p.student_name}</p>
+                              <p className="text-xs text-gray-400 truncate">{p.category_name} · {p.period_label}</p>
+                            </div>
+                            <div className="text-right flex-shrink-0 ml-3">
+                              <p className="text-sm font-bold text-green-600">{fmt(p.amount)}</p>
+                              <p className="text-[10px] text-gray-400 uppercase">{p.payment_mode}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Payment Mode Breakdown */}
+                  {stats.by_payment_mode.length > 0 && (
+                    <div className="bg-white rounded-xl border border-gray-100 p-5">
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Payment Mode Breakdown</h3>
                       <div className="grid grid-cols-2 gap-2">
                         {stats.by_payment_mode.map(m => (
                           <div key={m.payment_mode} className="bg-gray-50 rounded-lg px-3 py-2">
-                            <p className="text-xs text-gray-400 capitalize">{m.payment_mode}</p>
-                            <p className="text-sm font-semibold text-gray-800">{fmt(m.total)}</p>
-                            <p className="text-xs text-gray-400">{m.count} txns</p>
+                            <p className="text-xs text-gray-400 uppercase font-medium">{m.payment_mode}</p>
+                            <p className="text-sm font-bold text-gray-800">{fmt(m.total)}</p>
+                            <p className="text-xs text-gray-400">{m.count} transactions</p>
                           </div>
                         ))}
                       </div>
-                    )}
-                  </div>
-                  <div className="bg-white rounded-xl border border-red-50 p-5">
-                    <h3 className="text-sm font-semibold text-gray-700 mb-3">Top Defaulters</h3>
-                    {stats.top_defaulters.length === 0 ? <p className="text-sm text-gray-400">No defaulters</p> : (
-                      <div className="space-y-2">
-                        {stats.top_defaulters.slice(0, 5).map(d => (
-                          <div key={d.student_id} className="flex items-center justify-between">
-                            <div>
-                              <p className="text-sm font-medium text-gray-800">{d.student_name}</p>
-                              <p className="text-xs text-gray-400">Gr.{d.grade}{d.section} · {d.roll_number}</p>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-sm font-bold text-red-600">{fmt(d.outstanding)}</p>
-                              <p className="text-xs text-red-400">{d.overdue_entries} overdue</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </>
           ) : (
-            <div className="bg-white rounded-xl border border-gray-100 p-12 text-center">
-              <p className="text-gray-400">No fee data for {academicYear}.</p>
-              <button onClick={() => setActiveTab('setup')} className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
-                Set Up Fee Structure
+            <div className="bg-white rounded-xl border border-dashed border-gray-200 p-16 text-center">
+              <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <p className="text-gray-500 font-medium mb-1">No fee data for {academicYear}</p>
+              <p className="text-gray-400 text-sm mb-5">Set up fee heads, enter amounts, then generate bills to see collection data here.</p>
+              <button
+                onClick={() => setActiveTab('setup')}
+                className="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700"
+              >
+                Go to Fee Setup →
               </button>
             </div>
           )}
         </div>
       )}
 
-      {/* ═══ SETUP ══════════════════════════════════════════════════════════════ */}
+      {/* ═══ FEE PLAN ════════════════════════════════════════════════════════════ */}
       {activeTab === 'setup' && (
         <div className="space-y-5">
 
-          {/* Lock status banner */}
+          {/* ── Setup progress strip ── */}
+          {(() => {
+            const hasHeads = categories.length > 0
+            const allAmountsSet = fixedAmountsComplete()   // fixed fees only — variable are optional
+            const anyGenerated = anyBillsGenerated()
+            const steps = [
+              { n: 1, label: 'Add Fee Heads',     done: hasHeads },
+              { n: 2, label: 'Set Fixed Amounts', done: allAmountsSet },
+              { n: 3, label: 'Generate Bills',    done: anyGenerated },
+              { n: 4, label: 'Lock Plan',         done: !!structureLock },
+            ]
+            const doneCount = steps.filter(s => s.done).length
+            return (
+              <div className="bg-white rounded-xl border border-gray-100 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-gray-700">Fee Plan Setup — {academicYear}</h3>
+                  <span className="text-xs text-gray-400">{doneCount} of 4 steps done</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {steps.map((s, i) => (
+                    <Fragment key={s.n}>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${s.done ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500'}`}>
+                          {s.done ? '✓' : s.n}
+                        </div>
+                        <span className={`text-xs font-medium ${s.done ? 'text-green-700' : 'text-gray-500'}`}>{s.label}</span>
+                      </div>
+                      {i < steps.length - 1 && <div className={`flex-1 h-0.5 ${s.done ? 'bg-green-300' : 'bg-gray-200'}`} />}
+                    </Fragment>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+
+          {/* ── Mandated order hint ── */}
+          {!structureLock && categories.length > 0 && (() => {
+            const missing = fixedFeesMissingAmounts()
+            const generated = anyBillsGenerated()
+            if (missing.length > 0) {
+              return (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
+                  <strong>Next step — set fixed fee amounts.</strong> Generate Bills unlocks once every fixed fee has amounts.
+                  Still missing: <strong>{missing.join(', ')}</strong>. (Variable fees are optional and set per student.)
+                </div>
+              )
+            }
+            if (!generated) {
+              return (
+                <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-800">
+                  <strong>All fixed amounts set.</strong> Now click <strong>Generate All Bills</strong>. After bills are generated you can lock the plan.
+                </div>
+              )
+            }
+            return (
+              <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-3 text-sm text-green-800">
+                <strong>Bills generated.</strong> You can now collect fees, or lock the plan to prevent accidental changes.
+              </div>
+            )
+          })()}
+
+          {/* ── Lock banner ── */}
           {structureLock ? (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <span className="text-amber-600 text-lg">🔒</span>
                 <div>
-                  <p className="text-sm font-semibold text-amber-800">Structure Locked</p>
-                  <p className="text-xs text-amber-600">Locked by <strong>{structureLock.locked_by}</strong> on {fmtDate(structureLock.locked_at)} · Use Amend to change amounts</p>
+                  <p className="text-sm font-semibold text-amber-800">Fee Plan Locked</p>
+                  <p className="text-xs text-amber-600">Locked by <strong>{structureLock.locked_by}</strong> on {fmtDate(structureLock.locked_at)} · Changes need an Amendment with a reason</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -997,20 +2041,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
                 </button>
               </div>
             </div>
-          ) : (
-            <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-green-600 text-lg">🔓</span>
-                <div>
-                  <p className="text-sm font-semibold text-green-800">Structure is editable</p>
-                  <p className="text-xs text-green-600">Lock it once finalized to prevent accidental changes</p>
-                </div>
-              </div>
-              <button onClick={lockStructure} disabled={lockingStructure || categories.length === 0} className="text-xs bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50">
-                {lockingStructure ? 'Locking…' : 'Lock Structure'}
-              </button>
-            </div>
-          )}
+          ) : null}
 
           {/* Amendment log */}
           {showAmendLog && amendments.length > 0 && (
@@ -1047,1160 +2078,1466 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
             </div>
           )}
 
-          {/* Amendment form */}
-          {showAmendForm && (
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-              <p className="text-sm font-semibold text-blue-900 mb-3">
-                Amend: {showAmendForm.cat_name} — Grade {showAmendForm.grade} · Current: {fmt(showAmendForm.current)}
-              </p>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-gray-600">New Amount (₹)</label>
-                  <input type="number" value={amendForm.new_amount} onChange={e => setAmendForm(p => ({ ...p, new_amount: e.target.value }))}
-                    className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                </div>
-                <div className="col-span-2">
-                  <label className="text-xs font-medium text-gray-600">Reason (required)</label>
-                  <input type="text" placeholder="e.g. Annual revision, board decision" value={amendForm.reason}
-                    onChange={e => setAmendForm(p => ({ ...p, reason: e.target.value }))}
-                    className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                </div>
-              </div>
-              <div className="flex items-center gap-3 mt-3">
-                <button onClick={submitAmendment} disabled={!amendForm.new_amount || !amendForm.reason}
-                  className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                  Save Amendment
-                </button>
-                <button onClick={() => { setShowAmendForm(null); setAmendImpact(null) }} className="text-sm text-gray-500 px-3 py-1.5">Cancel</button>
-                {amendImpactLoading && <span className="text-xs text-gray-400">Checking impact…</span>}
-                {!amendImpactLoading && amendImpact !== null && (
-                  <span className={`text-xs font-medium px-2.5 py-1 rounded-lg ${amendImpact > 0 ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-gray-50 text-gray-400'}`}>
-                    {amendImpact > 0 ? `Will update ${amendImpact} unpaid ledger ${amendImpact === 1 ? 'entry' : 'entries'}` : 'No unpaid entries affected'}
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Header row */}
+          {/* ── Top action bar ── */}
           <div className="flex items-center justify-between">
+            <p className="text-sm text-gray-500">
+              {categories.length} fee {categories.length === 1 ? 'head' : 'heads'} ·{' '}
+              <span className="text-green-600 font-medium">{categories.filter(c => feeBillsGenerated(c)).length} with bills generated</span>
+            </p>
             <div className="flex items-center gap-2">
               {structureMsg && (
                 <span className={`text-sm ${structureMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{structureMsg}</span>
               )}
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setShowAddCategory(true)} className="text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 px-3 py-1.5 rounded-lg">
-                + Add Category
-              </button>
               {!structureLock && (
                 <>
-                  <button onClick={saveStructures} disabled={savingStructure}
-                    className="text-sm bg-blue-600 text-white hover:bg-blue-700 px-4 py-1.5 rounded-lg disabled:opacity-50">
-                    {savingStructure ? 'Saving…' : 'Save Structure'}
+                  <button onClick={() => { setShowAddFee(true); setAddFeeStep(1) }}
+                    className="text-sm border border-blue-200 text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-lg font-medium">
+                    + Add Fee Head
                   </button>
-                  <button onClick={generateLedger} disabled={generatingLedger}
-                    className="text-sm bg-green-600 text-white hover:bg-green-700 px-4 py-1.5 rounded-lg disabled:opacity-50">
-                    {generatingLedger ? 'Generating…' : 'Generate Ledger'}
+                  <button onClick={generateLedger}
+                    disabled={generatingLedger || categories.length === 0 || !fixedAmountsComplete()}
+                    title={!fixedAmountsComplete() ? `Set amounts for all fixed fees first${fixedFeesMissingAmounts().length ? ': ' + fixedFeesMissingAmounts().join(', ') : ''}` : 'Generate bills for all students'}
+                    className="text-sm bg-green-600 text-white hover:bg-green-700 px-4 py-2 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                    {generatingLedger ? 'Generating…' : 'Generate All Bills'}
                   </button>
                 </>
               )}
             </div>
           </div>
 
-          {/* Add category panel */}
-          {showAddCategory && (
-            <div className="bg-white border border-blue-200 rounded-xl overflow-hidden shadow-sm">
-              {/* Header */}
-              <div className="bg-blue-50 px-4 py-3 border-b border-blue-100 flex items-center justify-between">
-                <p className="text-sm font-semibold text-blue-800">Add Fee Category</p>
-                <button onClick={() => { setShowAddCategory(false); setNewCategory({ name: '', frequency: 'monthly', description: '', category_type: 'fixed' }) }}
-                  className="text-blue-400 hover:text-blue-600 text-lg leading-none">×</button>
-              </div>
-
-              <div className="p-4 space-y-4">
-                {/* Step 1: Quick pick */}
-                <div>
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                    Step 1 — Pick a common category <span className="font-normal normal-case text-gray-400">(auto-fills frequency &amp; type)</span>
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {CATEGORY_SUGGESTIONS.map(s => {
-                      const selected = newCategory.name === s.name
-                      return (
-                        <button
-                          key={s.name}
-                          type="button"
-                          onClick={() => setNewCategory(p => ({ ...p, name: s.name, frequency: s.frequency, category_type: s.category_type }))}
-                          className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-all ${
-                            selected
-                              ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                              : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50'
-                          }`}
-                        >
-                          {s.name}
-                          {selected && <span className="ml-1">✓</span>}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                {/* Step 2: Customize */}
-                <div>
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-                    Step 2 — Confirm or customise
-                  </p>
-                  <div className="flex items-end gap-3">
-                    <div className="flex-1">
-                      <label className="text-xs font-medium text-gray-600">Category Name</label>
-                      <input
-                        type="text"
-                        placeholder="Or type a custom name…"
-                        value={newCategory.name}
-                        onChange={e => setNewCategory(p => ({ ...p, name: e.target.value }))}
-                        className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-gray-600">Frequency</label>
-                      <select
-                        value={newCategory.frequency}
-                        onChange={e => setNewCategory(p => ({ ...p, frequency: e.target.value }))}
-                        className="mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                      >
-                        <option value="monthly">Monthly</option>
-                        <option value="quarterly">Quarterly</option>
-                        <option value="annual">Annual</option>
-                        <option value="one_time">One Time</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Fixed / Variable */}
-                  <div className="mt-3 flex items-stretch gap-3">
-                    <button
-                      onClick={() => setNewCategory(p => ({ ...p, category_type: 'fixed' }))}
-                      className={`flex-1 rounded-xl border-2 px-4 py-3 text-left transition-all ${
-                        newCategory.category_type === 'fixed'
-                          ? 'border-green-500 bg-green-50'
-                          : 'border-gray-200 bg-white hover:border-gray-300'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 mb-1">
-                        <div className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${newCategory.category_type === 'fixed' ? 'border-green-500 bg-green-500' : 'border-gray-300'}`} />
-                        <span className={`text-sm font-semibold ${newCategory.category_type === 'fixed' ? 'text-green-700' : 'text-gray-600'}`}>Fixed</span>
-                      </div>
-                      <p className="text-xs text-gray-400 pl-5">Same amount for all students in a grade. Set once in the grid.</p>
-                    </button>
-                    <button
-                      onClick={() => setNewCategory(p => ({ ...p, category_type: 'variable' }))}
-                      className={`flex-1 rounded-xl border-2 px-4 py-3 text-left transition-all ${
-                        newCategory.category_type === 'variable'
-                          ? 'border-orange-400 bg-orange-50'
-                          : 'border-gray-200 bg-white hover:border-gray-300'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 mb-1">
-                        <div className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${newCategory.category_type === 'variable' ? 'border-orange-500 bg-orange-500' : 'border-gray-300'}`} />
-                        <span className={`text-sm font-semibold ${newCategory.category_type === 'variable' ? 'text-orange-700' : 'text-gray-600'}`}>Variable</span>
-                      </div>
-                      <p className="text-xs text-gray-400 pl-5">Different amount per student. Set per-student in Applicability tab.</p>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Action buttons */}
-                <div className="flex items-center justify-end gap-2 pt-1 border-t border-gray-100">
-                  <button
-                    onClick={() => { setShowAddCategory(false); setNewCategory({ name: '', frequency: 'monthly', description: '', category_type: 'fixed' }) }}
-                    className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={addCategory}
-                    disabled={!newCategory.name.trim()}
-                    className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium disabled:opacity-40"
-                  >
-                    Add Category
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Fee structure grid */}
-          {categories.length === 0 ? (
-            <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-              <p className="text-gray-400 text-sm">No fee categories yet. Add one to get started.</p>
-            </div>
-          ) : (
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-100">
-                      <th className="text-left px-4 py-3 font-semibold text-gray-600">Category</th>
-                      <th className="text-left px-4 py-3 font-semibold text-gray-600">Freq</th>
-                      <th className="text-center px-2 py-3 font-semibold text-gray-600 text-xs">Due Day</th>
-                      {GRADES.map(g => (
-                        <th key={g} className="text-center px-1 py-3 font-semibold text-gray-600 text-xs">Gr.{g}</th>
-                      ))}
-                      {!structureLock && <th className="w-8" />}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {categories.map(cat => (
-                      <tr key={cat.id} className="border-b border-gray-50 hover:bg-gray-50/50">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className={`font-medium ${cat.is_active ? 'text-gray-800' : 'text-gray-400 line-through'}`}>{cat.name}</span>
-                            {!cat.is_active && (
-                              <span className="text-[10px] bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded font-medium">Inactive</span>
-                            )}
-                            <button onClick={() => loadStructHistory(cat.id)}
-                              title="Amount change history"
-                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${structHistCatId === cat.id ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'border-gray-200 text-gray-300 hover:text-indigo-600 hover:border-indigo-300'}`}>
-                              Hist
-                            </button>
-                            <button onClick={() => loadCatChangelog(cat.id)}
-                              title="Config change log"
-                              className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${catChangelogId === cat.id ? 'bg-amber-50 border-amber-300 text-amber-700' : 'border-gray-200 text-gray-300 hover:text-amber-600 hover:border-amber-300'}`}>
-                              Log
-                            </button>
-                          </div>
-
-                          {/* Structure history panel */}
-                          {structHistCatId === cat.id && (
-                            <div className="mt-2 bg-indigo-50 rounded-lg p-2 text-[10px] max-h-40 overflow-y-auto">
-                              <p className="font-semibold text-indigo-700 mb-1 uppercase tracking-wide">Amount Change History</p>
-                              {structHistLoading ? <p className="text-indigo-400">Loading…</p> :
-                               !(structHistories[cat.id]?.length) ? <p className="text-gray-400 italic">No changes recorded yet. History is tracked from next save onwards.</p> : (
-                                <div className="space-y-1">
-                                  {structHistories[cat.id].map(h => (
-                                    <div key={h.id} className="bg-white rounded px-2 py-1 border border-indigo-100 flex items-center gap-2 flex-wrap">
-                                      <span className="font-semibold text-indigo-600">Gr.{h.grade}</span>
-                                      {h.old_amount !== null && <><span className="line-through text-gray-400">₹{h.old_amount}</span><span className="text-gray-300">→</span></>}
-                                      <span className="font-bold text-indigo-800">₹{h.new_amount}</span>
-                                      {h.old_due_day !== null && h.old_due_day !== h.new_due_day && (
-                                        <span className="text-gray-400">due:{h.old_due_day}→{h.new_due_day}</span>
-                                      )}
-                                      <span className="text-gray-400">· {h.changed_by}</span>
-                                      <span className="text-gray-400">· {new Date(h.changed_at).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Category changelog panel */}
-                          {catChangelogId === cat.id && (
-                            <div className="mt-2 bg-amber-50 rounded-lg p-2 text-[10px] max-h-40 overflow-y-auto">
-                              <p className="font-semibold text-amber-700 mb-1 uppercase tracking-wide">Config Change Log</p>
-                              {catChangelogLoading ? <p className="text-amber-400">Loading…</p> :
-                               !(catChangelogs[cat.id]?.length) ? <p className="text-gray-400 italic">No config changes recorded yet.</p> : (
-                                <div className="space-y-1">
-                                  {catChangelogs[cat.id].map(h => (
-                                    <div key={h.id} className="bg-white rounded px-2 py-1 border border-amber-100 flex items-center gap-2 flex-wrap">
-                                      <span className="font-semibold text-amber-700 capitalize">{h.field_changed}</span>
-                                      <span className="line-through text-gray-400">{h.old_value}</span>
-                                      <span className="text-gray-300">→</span>
-                                      <span className="font-bold text-amber-800">{h.new_value}</span>
-                                      <span className="text-gray-400">· {h.changed_by}</span>
-                                      <span className="text-gray-400">· {new Date(h.changed_at).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' })}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {!structureLock && deletingCatId === cat.id && (
-                            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
-                              {Number(cat.ledger_count) > 0 ? (
-                                <>
-                                  <span className="text-xs text-amber-700">Has {cat.ledger_count} fee records — deactivate to preserve history.</span>
-                                  <button onClick={() => deactivateCategory(cat.id)}
-                                    className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-2.5 py-0.5 rounded-md font-medium">Deactivate</button>
-                                </>
-                              ) : (
-                                <>
-                                  <span className="text-xs text-red-600">Permanently delete this unused category?</span>
-                                  <button onClick={() => deleteCategory(cat.id)}
-                                    className="text-xs bg-red-600 hover:bg-red-700 text-white px-2.5 py-0.5 rounded-md font-medium">Yes, delete</button>
-                                </>
-                              )}
-                              <button onClick={() => setDeletingCatId(null)}
-                                className="text-xs text-gray-400 hover:text-gray-600 px-2 py-0.5">Cancel</button>
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full capitalize">{cat.frequency}</span>
-                        </td>
-                        <td className="px-1 py-2 text-center">
-                          {structureLock ? (
-                            <span className="text-xs text-gray-500">{dueDays[cat.id] || '10'}</span>
-                          ) : (
-                            <div>
-                              <input
-                                type="number" min="1" max="28" placeholder="10"
-                                value={dueDays[cat.id] || ''}
-                                onChange={e => setDueDays(p => ({ ...p, [cat.id]: e.target.value }))}
-                                className="w-14 text-center border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                              />
-                              <p className="text-[10px] text-gray-400 mt-0.5">of month</p>
-                            </div>
-                          )}
-                        </td>
-                        {GRADES.map(grade => {
-                          const key = `${cat.id}_${grade}`
-                          const currentAmt = parseFloat(editAmounts[key] || '0')
-                          if (cat.category_type === 'variable') {
-                            return (
-                              <td key={grade} className="px-1 py-2 text-center">
-                                <span className="text-[10px] text-gray-300">per student</span>
-                              </td>
-                            )
-                          }
-                          return (
-                            <td key={grade} className="px-1 py-2">
-                              {structureLock ? (
-                                <div className="text-center">
-                                  {currentAmt > 0 ? (
-                                    <button
-                                      onClick={() => { setShowAmendForm({ cat_id: cat.id, grade, cat_name: cat.name, current: currentAmt }); setAmendImpact(null); fetchAmendImpact(cat.id, grade) }}
-                                      className="text-xs text-blue-600 hover:underline w-16 text-center"
-                                      title="Click to amend"
-                                    >
-                                      {fmt(currentAmt)}
-                                    </button>
-                                  ) : (
-                                    <span className="text-xs text-gray-300">—</span>
-                                  )}
-                                </div>
-                              ) : (
-                                <input
-                                  type="number" min="0" placeholder="0"
-                                  value={editAmounts[key] || ''}
-                                  onChange={e => setEditAmounts(p => ({ ...p, [key]: e.target.value }))}
-                                  className="w-16 text-center border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                                />
-                              )}
-                            </td>
-                          )
-                        })}
-                        {!structureLock && (
-                          <td className="px-2 py-2 text-center">
-                            {cat.is_active ? (
-                              <button
-                                onClick={() => setDeletingCatId(deletingCatId === cat.id ? null : cat.id)}
-                                title={Number(cat.ledger_count) > 0 ? 'Deactivate category' : 'Delete category'}
-                                className={`w-6 h-6 flex items-center justify-center rounded transition-colors ${
-                                  deletingCatId === cat.id
-                                    ? 'bg-red-100 text-red-600'
-                                    : 'text-gray-300 hover:text-red-500 hover:bg-red-50'
-                                }`}
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => reactivateCategory(cat.id)}
-                                title="Reactivate category"
-                                className="text-[10px] text-green-600 hover:text-green-700 hover:bg-green-50 px-1.5 py-0.5 rounded font-medium border border-green-200 whitespace-nowrap"
-                              >
-                                Restore
-                              </button>
-                            )}
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {!structureLock && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
-              <strong>Setup steps:</strong> 1) Add categories → 2) Enter amounts per grade → 3) Save Structure → 4) Generate Ledger → 5) Lock once finalized
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ═══ APPLICABILITY ═══════════════════════════════════════════════════════ */}
-      {activeTab === 'applicability' && (
-        <div className="space-y-4">
-          {/* Info + grade selector */}
-          <div className="flex items-center gap-4">
-            <div className="flex-1 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-800">
-              Set per-student amounts for <strong>Variable</strong> categories (e.g. Transport). Fixed categories apply to all students automatically.
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              <select value={academicYear} onChange={e => setAcademicYear(e.target.value)}
-                className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
-                {academicYears.map(y => <option key={y} value={y}>{y}</option>)}
-              </select>
-              <select value={applGrade} onChange={e => { setApplGrade(e.target.value); setApplStudents([]); setApplCategories([]); setApplAmounts({}); setApplMsg('') }}
-                className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
-                <option value="">Select grade…</option>
-                {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
-              </select>
-              <button onClick={() => loadApplicability(applGrade)} disabled={!applGrade || applLoading}
-                className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
-                {applLoading ? 'Loading…' : 'Load'}
-              </button>
-            </div>
-          </div>
-
-          {/* Category type overview */}
+          {/* ── Sub-view toggle ── */}
           {categories.length > 0 && (
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                <p className="text-sm font-semibold text-gray-700">Fee Categories</p>
-                <p className="text-xs text-gray-400">Click to toggle Fixed / Variable per category</p>
-              </div>
-              <div className="divide-y divide-gray-50">
-                {categories.map(cat => (
-                  <div key={cat.id} className="px-4 py-3 flex items-center justify-between">
-                    <div>
-                      <span className="text-sm font-medium text-gray-800">{cat.name}</span>
-                      <span className="text-xs text-gray-400 capitalize ml-2">{cat.frequency}</span>
-                    </div>
-                    <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
-                      <button
-                        onClick={() => cat.category_type !== 'fixed' && toggleCategoryType(cat)}
-                        className={`px-3 py-1 transition-colors ${cat.category_type === 'fixed' ? 'bg-green-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
-                      >Fixed</button>
-                      <button
-                        onClick={() => cat.category_type !== 'variable' && toggleCategoryType(cat)}
-                        className={`px-3 py-1 border-l border-gray-200 transition-colors ${cat.category_type === 'variable' ? 'bg-orange-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}
-                      >Variable</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+              {([
+                { key: 'heads',    label: 'Fee Heads & Amounts' },
+                { key: 'variable', label: 'All Variable Fees (one grid)' },
+              ] as const).map(v => (
+                <button key={v.key} onClick={() => setPlanView(v.key)}
+                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                    planView === v.key ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}>{v.label}</button>
+              ))}
             </div>
           )}
 
-          {/* Per-student amount grid */}
-          {applGrade && !applLoading && applStudents.length > 0 && applCategories.length > 0 && (
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                <p className="text-sm font-semibold text-gray-700">
-                  Grade {applGrade} — Variable Fee Amounts <span className="text-gray-400 font-normal">({applStudents.length} students)</span>
-                </p>
-                <p className="text-xs text-gray-400">Leave blank = not applicable for that student</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-100">
-                      <th className="text-left px-4 py-2.5 font-medium text-gray-600 whitespace-nowrap">Student</th>
-                      <th className="text-left px-3 py-2.5 font-medium text-gray-500 text-xs whitespace-nowrap">Section</th>
-                      {applCategories.map(c => (
-                        <th key={c.id} className="text-center px-3 py-2.5 font-medium text-gray-600 text-xs whitespace-nowrap min-w-28">
-                          {c.name}
-                          <div className="text-gray-400 font-normal capitalize">{c.frequency}</div>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {applStudents.map(s => (
-                      <tr key={s.id} className="hover:bg-gray-50/50">
-                        <td className="px-4 py-2">
-                          <p className="font-medium text-gray-800 text-sm">{s.name}</p>
-                          <p className="text-xs text-gray-400">#{s.roll_number}</p>
-                        </td>
-                        <td className="px-3 py-2 text-xs text-gray-500">{s.section}</td>
-                        {applCategories.map(c => {
-                          const key = `${s.id}:${c.id}`
-                          const isShowingHist = assignHistoryKey === key
-                          return (
-                            <td key={c.id} className="px-2 py-2 text-center">
-                              <div className="relative inline-flex items-center gap-1">
-                                <span className="absolute left-2 text-gray-400 text-xs pointer-events-none">₹</span>
-                                <input
-                                  type="number" min="0" placeholder="—"
-                                  value={applAmounts[key] || ''}
-                                  onChange={e => setApplAmounts(p => ({ ...p, [key]: e.target.value }))}
-                                  className="w-24 pl-5 pr-1 py-1 text-center border border-gray-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                                />
-                                <button
-                                  onClick={() => loadAssignHistory(s.id, c.id)}
-                                  title="View change history"
-                                  className={`text-[10px] px-1 py-0.5 rounded transition-colors flex-shrink-0 ${isShowingHist ? 'bg-indigo-100 text-indigo-700' : 'text-gray-300 hover:text-indigo-500'}`}
-                                >
-                                  ⟳
-                                </button>
-                              </div>
-                              {/* Inline history for this cell */}
-                              {isShowingHist && (
-                                <div className="mt-1 text-left bg-indigo-50 rounded-lg p-2 min-w-52 text-[10px]">
-                                  {assignHistLoading ? (
-                                    <p className="text-indigo-400">Loading…</p>
-                                  ) : (assignHistories[key] || []).length === 0 ? (
-                                    <p className="text-gray-400 italic">No changes recorded yet</p>
-                                  ) : (
-                                    <div className="space-y-1">
-                                      {(assignHistories[key] || []).map(h => (
-                                        <div key={h.id} className="bg-white rounded px-2 py-1 border border-indigo-100">
-                                          <span className={`font-semibold capitalize mr-1 ${h.change_type === 'removed' ? 'text-red-500' : h.change_type === 'added' ? 'text-green-600' : 'text-amber-600'}`}>
-                                            {h.change_type}
-                                          </span>
-                                          {h.old_amount !== null && <><span className="line-through text-gray-400">₹{h.old_amount}</span> → </>}
-                                          <span className="font-bold text-gray-700">₹{h.new_amount}</span>
-                                          <span className="text-gray-400 ml-1">by {h.changed_by}</span>
-                                          <div className="text-gray-400">{new Date(h.changed_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                          )
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
-                {applMsg && (
-                  <span className={`text-sm ${applMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{applMsg}</span>
-                )}
-                <div className="ml-auto flex gap-2">
-                  <button
-                    onClick={() => {
-                      applCategories.forEach(c => {
-                        applStudents.forEach(s => {
-                          const key = `${s.id}:${c.id}`
-                          if (!applAmounts[key]) setApplAmounts(p => ({ ...p, [key]: '' }))
-                        })
-                      })
-                    }}
-                    className="text-sm text-gray-500 px-3 py-1.5 hover:text-gray-700"
-                  >Clear All</button>
-                  <button onClick={saveApplicability} disabled={applSaving}
-                    className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg font-medium disabled:opacity-50">
-                    {applSaving ? 'Saving…' : 'Save & Update Ledger'}
-                  </button>
+          {/* ═══ ALL VARIABLE FEES — combined grid ═══ */}
+          {planView === 'variable' && categories.length > 0 && (() => {
+            const varHeads = categories.filter(c => c.category_type === 'variable' && c.is_active)
+            if (varHeads.length === 0) {
+              return (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center text-sm text-amber-700">
+                  No variable fee heads yet. Mark a fee head as <strong>Variable</strong> (per student) under “Fee Heads &amp; Amounts” first.
                 </div>
-              </div>
-            </div>
-          )}
+              )
+            }
+            const changedCount = Object.keys(vgAmounts).filter(k => (vgAmounts[k] || '') !== (vgOriginal[k] || '')).length
+              + Object.keys(vgOriginal).filter(k => !(k in vgAmounts) && vgOriginal[k]).length
+            return (
+              <div className="space-y-3">
+                {/* Class picker */}
+                <div className="bg-white rounded-xl border border-gray-100 p-4 flex items-center gap-3 flex-wrap">
+                  <span className="text-sm font-medium text-gray-600">Class:</span>
+                  <select value={vgGrade} onChange={e => { setVgGrade(e.target.value); setVgStudents([]); setVgCategories([]); setVgMsg('') }}
+                    className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
+                    <option value="">Select grade…</option>
+                    {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                  </select>
+                  <select value={vgSection} onChange={e => setVgSection(e.target.value)}
+                    className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
+                    <option value="all">All sections</option>
+                    {['A','B','C','D','E','F'].map(s => <option key={s} value={s}>Section {s}</option>)}
+                  </select>
+                  <button onClick={loadVarGrid} disabled={!vgGrade || vgLoading}
+                    className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
+                    {vgLoading ? 'Loading…' : 'Load'}
+                  </button>
+                  <p className="text-xs text-gray-400 ml-auto">Enter every variable fee for a student in one row, save once.</p>
+                </div>
 
-          {applGrade && !applLoading && applCategories.length === 0 && applStudents.length > 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
-              No variable categories found. Mark at least one category as <strong>Variable</strong> above to set per-student amounts.
-            </div>
-          )}
+                {vgMsg && <p className={`text-sm font-medium ${vgMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{vgMsg}</p>}
 
-          {applGrade && !applLoading && applStudents.length === 0 && (
-            <div className="bg-gray-50 border border-gray-200 rounded-xl p-8 text-center text-sm text-gray-400">
-              No active students in Grade {applGrade}.
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ═══ LEDGER ══════════════════════════════════════════════════════════════ */}
-      {activeTab === 'ledger' && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <select value={ledgerGrade} onChange={e => setLedgerGrade(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
-              <option value="">All Grades</option>
-              {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
-            </select>
-            <select value={ledgerStatus} onChange={e => setLedgerStatus(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
-              <option value="">All Statuses</option>
-              <option value="pending">Pending</option>
-              <option value="partial">Partial</option>
-              <option value="overdue">Overdue</option>
-              <option value="paid">Paid</option>
-              <option value="waived">Waived</option>
-            </select>
-            <input type="text" placeholder="Search student / roll no…" value={ledgerSearch}
-              onChange={e => setLedgerSearch(e.target.value)}
-              className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            <button onClick={loadLedger} className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700">Refresh</button>
-            <a
-              href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger${ledgerGrade ? `&grade=${ledgerGrade}` : ''}${ledgerStatus ? `&status=${ledgerStatus}` : ''}`}
-              download
-              className="text-sm border border-gray-200 text-gray-600 hover:bg-gray-50 px-3 py-1.5 rounded-lg"
-            >
-              Export CSV
-            </a>
-          </div>
-
-          {ledgerLoading ? (
-            <div className="bg-white rounded-xl border border-gray-100 p-12 text-center">
-              <p className="text-gray-400 text-sm">Loading…</p>
-            </div>
-          ) : filteredLedger.length === 0 ? (
-            <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-              <p className="text-gray-400 text-sm">No entries found. Generate ledger from Fee Setup first.</p>
-            </div>
-          ) : (
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-100 flex justify-between items-center">
-                <p className="text-sm text-gray-500">{filteredLedger.length} entries</p>
-                <p className="text-sm font-medium text-gray-700">
-                  Outstanding: <span className="text-red-600">{fmt(filteredLedger.reduce((s, e) => s + Number(e.balance), 0))}</span>
-                </p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-100">
-                      <th className="text-left px-4 py-2.5 font-semibold text-gray-600">Student</th>
-                      <th className="text-left px-4 py-2.5 font-semibold text-gray-600">Category · Period</th>
-                      <th className="text-right px-4 py-2.5 font-semibold text-gray-600">Due</th>
-                      <th className="text-right px-4 py-2.5 font-semibold text-gray-600">Paid</th>
-                      <th className="text-right px-4 py-2.5 font-semibold text-gray-600">Balance</th>
-                      <th className="text-left px-4 py-2.5 font-semibold text-gray-600">Due Date</th>
-                      <th className="text-left px-4 py-2.5 font-semibold text-gray-600">Status</th>
-                      <th className="px-4 py-2.5" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredLedger.map(entry => {
-                      const canEdit = !['paid', 'waived'].includes(entry.status)
-                      const isEditing = editingId === entry.id
-                      const history = editHistories[entry.id]
-                      const hasEdits = entry.has_edits || (history && history.length > 0)
-                      return (
-                        <Fragment key={entry.id}>
-                          <tr className={`border-b border-gray-50 hover:bg-gray-50 ${isEditing ? 'bg-amber-50' : ''}`}>
-                            <td className="px-4 py-2.5">
-                              <div className="font-medium text-gray-800">{entry.student_name}</div>
-                              <div className="text-xs text-gray-400">Gr.{entry.grade}{entry.section} · {entry.roll_number}</div>
-                            </td>
-                            <td className="px-4 py-2.5 text-gray-600">
-                              <span>{entry.category_name}</span>
-                              <span className="text-gray-400"> · {entry.period_label}</span>
-                            </td>
-                            <td className="px-4 py-2.5 text-right">
-                              <span className="font-medium text-gray-800">{fmt(entry.amount_due)}</span>
-                              {hasEdits && (
-                                <button
-                                  onClick={() => setShowHistoryId(showHistoryId === entry.id ? null : entry.id)}
-                                  className="ml-1.5 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium"
-                                  title="This entry was edited — click to see history"
-                                >
-                                  edited
-                                </button>
-                              )}
-                            </td>
-                            <td className="px-4 py-2.5 text-right">
-                              <span className="text-green-600">{fmt(entry.amount_paid)}</span>
-                              {Number(entry.waiver_amount) > 0 && (
-                                <div className="text-[10px] text-purple-600 font-medium">incl. {fmt(entry.waiver_amount)} waived</div>
-                              )}
-                            </td>
-                            <td className="px-4 py-2.5 text-right font-bold text-red-600">{fmt(entry.balance)}</td>
-                            <td className="px-4 py-2.5 text-gray-500 text-xs">
-                              {entry.due_date}
-                              {Number(entry.days_overdue) > 0 && <span className="ml-1 text-red-400">({entry.days_overdue}d)</span>}
-                            </td>
-                            <td className="px-4 py-2.5">
-                              <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${STATUS_COLORS[entry.status]}`}>
-                                {entry.status}
-                              </span>
-                            </td>
-                            <td className="px-4 py-2.5">
-                              {deletingId === entry.id ? (
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs text-red-600 font-medium">Delete?</span>
-                                  <button onClick={() => deleteEntry(entry)}
-                                    className="text-xs bg-red-600 text-white px-2.5 py-1 rounded-lg hover:bg-red-700">
-                                    Yes
-                                  </button>
-                                  <button onClick={() => setDeletingId(null)}
-                                    className="text-xs text-gray-400 hover:text-gray-600 px-1.5 py-1">
-                                    No
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  {['pending', 'partial', 'overdue'].includes(entry.status) && (
-                                    <button onClick={() => openCollect(entry)}
-                                      className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 font-medium whitespace-nowrap">
-                                      Collect →
-                                    </button>
-                                  )}
-                                  {canEdit && (
-                                    <button
-                                      onClick={() => {
-                                        if (isEditing) { setEditingId(null); setEditForm({ new_amount: '', reason: '' }); setEditError('') }
-                                        else { setEditingId(entry.id); setEditForm({ new_amount: String(entry.amount_due), reason: '' }); setEditError('') }
-                                      }}
-                                      className={`text-xs px-2.5 py-1 rounded-lg font-medium border transition-colors ${isEditing ? 'bg-amber-100 border-amber-300 text-amber-700' : 'border-gray-200 text-gray-500 hover:bg-gray-100'}`}
-                                    >
-                                      {isEditing ? 'Cancel' : 'Edit'}
-                                    </button>
-                                  )}
-                                  {Number(entry.amount_paid) === 0 && !['paid', 'waived'].includes(entry.status) && (
-                                    <button onClick={() => { setDeletingId(entry.id); setEditingId(null) }}
-                                      className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1 rounded-lg">
-                                      Delete
-                                    </button>
-                                  )}
-                                  {entry.has_edits && !history && (
-                                    <button onClick={() => loadEditHistory(entry.id)}
-                                      className="text-xs text-gray-400 hover:text-gray-600"
-                                      title="Load edit history">
-                                      ⟳
-                                    </button>
-                                  )}
-                                  <button
-                                    onClick={() => loadPaymentHistory(entry.id)}
-                                    className={`text-xs px-2.5 py-1 rounded-lg font-medium border transition-colors ${showPaymentsId === entry.id ? 'bg-indigo-50 border-indigo-300 text-indigo-700' : 'border-gray-200 text-gray-500 hover:bg-gray-100'}`}
-                                    title="View payment history"
-                                  >
-                                    Pmts
-                                  </button>
-                                </div>
-                              )}
+                {vgStudents.length > 0 && (
+                  <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                    <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                      <p className="text-sm text-gray-600">{vgStudents.length} students · {varHeads.length} variable fees</p>
+                      {changedCount > 0 && <p className="text-xs text-amber-600 font-medium">{changedCount} unsaved change{changedCount !== 1 ? 's' : ''}</p>}
+                    </div>
+                    <div className="overflow-x-auto max-h-[540px]">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-gray-50 z-10">
+                          <tr className="text-xs text-gray-500 border-b border-gray-100">
+                            <th className="text-left px-4 py-2 font-semibold whitespace-nowrap">Student</th>
+                            {varHeads.map(c => (
+                              <th key={c.id} className="text-right px-3 py-2 font-semibold whitespace-nowrap">
+                                {c.name}<div className="text-[10px] text-gray-400 font-normal capitalize">{c.frequency}</div>
+                              </th>
+                            ))}
+                            <th className="text-right px-4 py-2 font-semibold whitespace-nowrap">Row total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {vgStudents.map(s => {
+                            const rowTotal = varHeads.reduce((sum, c) => sum + (parseFloat(vgAmounts[`${s.id}:${c.id}`] || '0') || 0), 0)
+                            return (
+                              <tr key={s.id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                                <td className="px-4 py-2 whitespace-nowrap">
+                                  <p className="font-medium text-gray-800">{s.name}</p>
+                                  <p className="text-xs text-gray-400">{s.section ? `Sec ${s.section} · ` : ''}#{s.roll_number}</p>
+                                </td>
+                                {varHeads.map(c => {
+                                  const key = `${s.id}:${c.id}`
+                                  const changed = (vgAmounts[key] || '') !== (vgOriginal[key] || '')
+                                  return (
+                                    <td key={c.id} className="px-2 py-2 text-right">
+                                      <div className="relative inline-flex items-center">
+                                        <span className="absolute left-2 text-gray-400 text-xs pointer-events-none">₹</span>
+                                        <input type="number" min="0" placeholder="—"
+                                          value={vgAmounts[key] || ''}
+                                          onChange={e => setVgAmounts(p => ({ ...p, [key]: e.target.value }))}
+                                          className={`w-24 pl-5 pr-1 py-1 text-right border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 ${changed ? 'border-amber-400 bg-amber-50' : 'border-gray-200'}`} />
+                                      </div>
+                                    </td>
+                                  )
+                                })}
+                                <td className="px-4 py-2 text-right font-semibold text-gray-700 whitespace-nowrap">{rowTotal > 0 ? fmt(rowTotal) : '—'}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr className="bg-gray-50 border-t-2 border-gray-100 font-semibold">
+                            <td className="px-4 py-2 text-gray-700">Column total</td>
+                            {varHeads.map(c => {
+                              const colTotal = vgStudents.reduce((sum, s) => sum + (parseFloat(vgAmounts[`${s.id}:${c.id}`] || '0') || 0), 0)
+                              return <td key={c.id} className="px-3 py-2 text-right text-gray-700 whitespace-nowrap">{colTotal > 0 ? fmt(colTotal) : '—'}</td>
+                            })}
+                            <td className="px-4 py-2 text-right text-blue-700 whitespace-nowrap">
+                              {fmt(vgStudents.reduce((sum, s) => sum + varHeads.reduce((rs, c) => rs + (parseFloat(vgAmounts[`${s.id}:${c.id}`] || '0') || 0), 0), 0))}
                             </td>
                           </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                    <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+                      <p className="text-xs text-gray-400">Blank = not applicable. Changed cells are highlighted until saved.</p>
+                      <div className="flex gap-2">
+                        <button onClick={() => { setVgAmounts({ ...vgOriginal }); setVgMsg('') }}
+                          className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5">Reset</button>
+                        <button onClick={saveVarGrid} disabled={vgSaving || changedCount === 0}
+                          className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg font-medium disabled:opacity-50">
+                          {vgSaving ? 'Saving…' : 'Save All & Update Ledger'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-                          {/* Inline edit form */}
-                          {isEditing && (
-                            <tr className="bg-amber-50 border-b border-amber-100">
-                              <td colSpan={8} className="px-4 py-3">
-                                <div className="flex items-end gap-3">
-                                  <div>
-                                    <label className="text-xs font-medium text-gray-600">New Amount (₹)</label>
-                                    <input
-                                      type="number"
-                                      value={editForm.new_amount}
-                                      onChange={e => setEditForm(p => ({ ...p, new_amount: e.target.value }))}
-                                      className="mt-1 w-32 border border-amber-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
-                                    />
-                                    {Number(entry.amount_paid) > 0 && (
-                                      <p className="text-xs text-gray-400 mt-0.5">Min: {fmt(entry.amount_paid)} (already paid)</p>
-                                    )}
-                                  </div>
-                                  <div className="flex-1">
-                                    <label className="text-xs font-medium text-gray-600">Reason for change (required)</label>
-                                    <input
-                                      type="text"
-                                      placeholder="e.g. Joined mid-month, prorated · Wrong amount entered · Fee revision"
-                                      value={editForm.reason}
-                                      onChange={e => setEditForm(p => ({ ...p, reason: e.target.value }))}
-                                      className="mt-1 w-full border border-amber-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
-                                    />
-                                  </div>
-                                  <div className="flex items-center gap-2 pb-0.5">
-                                    {editError && <span className="text-xs text-red-600">{editError}</span>}
-                                    <button
-                                      onClick={() => submitEdit(entry)}
-                                      disabled={editLoading || !editForm.new_amount || !editForm.reason}
-                                      className="text-sm bg-amber-600 text-white px-4 py-1.5 rounded-lg hover:bg-amber-700 disabled:opacity-50 font-medium whitespace-nowrap"
-                                    >
-                                      {editLoading ? 'Saving…' : 'Save Change'}
-                                    </button>
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
+                {vgGrade && !vgLoading && vgStudents.length === 0 && !vgMsg && (
+                  <p className="text-sm text-gray-400 px-1">Click Load to show students for this class.</p>
+                )}
+              </div>
+            )
+          })()}
 
-                          {/* Edit history panel */}
-                          {showHistoryId === entry.id && history && history.length > 0 && (
-                            <tr className="bg-amber-50 border-b border-amber-100">
-                              <td colSpan={8} className="px-4 py-3">
-                                <div className="flex items-center justify-between mb-2">
-                                  <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Edit History</p>
-                                  <button onClick={() => setShowHistoryId(null)} className="text-gray-400 hover:text-gray-600 text-xs">Close</button>
-                                </div>
-                                <div className="space-y-1.5">
-                                  {history.map(h => (
-                                    <div key={h.id} className="flex items-center gap-4 text-xs bg-white rounded-lg px-3 py-2 border border-amber-100">
-                                      <span className="text-red-500 line-through font-mono">{fmt(h.old_amount)}</span>
-                                      <span className="text-gray-400">→</span>
-                                      <span className="text-green-600 font-semibold font-mono">{fmt(h.new_amount)}</span>
-                                      <span className="text-gray-500 flex-1">"{h.reason}"</span>
-                                      <span className="text-gray-400">by <strong>{h.changed_by}</strong></span>
-                                      <span className="text-gray-400">{new Date(h.changed_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </td>
-                            </tr>
-                          )}
+          {/* ── Empty state ── */}
+          {planView === 'heads' && (categories.length === 0 ? (
+            <div className="bg-white rounded-xl border border-dashed border-gray-200 p-16 text-center">
+              <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">💰</div>
+              <p className="text-gray-600 font-medium mb-1">No fee heads yet</p>
+              <p className="text-gray-400 text-sm mb-5">Start by adding what your school charges — Tuition, Transport, Exam Fee, etc.</p>
+              <button onClick={() => { setShowAddFee(true); setAddFeeStep(1) }}
+                className="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700">
+                + Add Your First Fee Head
+              </button>
+            </div>
+          ) : (
+            /* ── Fee head cards ── */
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {categories.map(cat => {
+                const amountsSet = feeHasAmounts(cat.id, cat.category_type)
+                const generated = feeBillsGenerated(cat)
+                const catStat = stats?.by_category.find(c => c.category_name === cat.name)
+                const collected = catStat ? Number(catStat.total_collected) : 0
+                const due = catStat ? Number(catStat.total_due) : 0
+                const collPct = pct(collected, due)
+                return (
+                  <div key={cat.id} className={`bg-white rounded-xl border p-5 ${!cat.is_active ? 'border-gray-100 opacity-60' : 'border-gray-100'}`}>
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-gray-50 flex items-center justify-center text-xl">{feeIcon(cat.name)}</div>
+                        <div>
+                          <p className="font-semibold text-gray-800">{cat.name}{!cat.is_active && <span className="ml-2 text-[10px] bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded">Inactive</span>}</p>
+                          <p className="text-xs text-gray-400">
+                            {FREQ_LABEL[cat.frequency]} · {cat.category_type === 'variable' ? 'Per student' : 'Same for all'}
+                          </p>
+                        </div>
+                      </div>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${cat.category_type === 'variable' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'}`}>
+                        {cat.category_type === 'variable' ? 'Variable' : 'Fixed'}
+                      </span>
+                    </div>
 
-                          {/* Payment history panel */}
-                          {showPaymentsId === entry.id && (
-                            <tr className="bg-indigo-50 border-b border-indigo-100">
-                              <td colSpan={8} className="px-4 py-3">
-                                <div className="flex items-center justify-between mb-2">
-                                  <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">Payment History</p>
-                                  <button onClick={() => setShowPaymentsId(null)} className="text-gray-400 hover:text-gray-600 text-xs">Close</button>
-                                </div>
-                                {!paymentHistories[entry.id] ? (
-                                  <p className="text-xs text-indigo-400">Loading…</p>
-                                ) : paymentHistories[entry.id].length === 0 ? (
-                                  <p className="text-xs text-gray-400 italic">No payments recorded for this entry yet.</p>
-                                ) : (
-                                  <div className="overflow-x-auto">
-                                    <table className="w-full text-xs">
-                                      <thead>
-                                        <tr className="text-left text-indigo-600 border-b border-indigo-100">
-                                          <th className="pb-1.5 pr-4 font-semibold">Receipt #</th>
-                                          <th className="pb-1.5 pr-4 font-semibold">Date</th>
-                                          <th className="pb-1.5 pr-4 font-semibold text-right">Amount</th>
-                                          <th className="pb-1.5 pr-4 font-semibold">Mode</th>
-                                          <th className="pb-1.5 pr-4 font-semibold">Ref</th>
-                                          <th className="pb-1.5 pr-4 font-semibold">Collected By</th>
-                                          <th className="pb-1.5 font-semibold">Status</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-indigo-50">
-                                        {paymentHistories[entry.id].map(p => (
-                                          <tr key={p.id} className="bg-white/70 hover:bg-white">
-                                            <td className="py-1.5 pr-4 font-mono text-indigo-600">{p.receipt_number}</td>
-                                            <td className="py-1.5 pr-4 text-gray-600">{fmtDate(p.paid_date)}</td>
-                                            <td className="py-1.5 pr-4 text-right font-semibold text-green-700">{fmt(p.amount)}</td>
-                                            <td className="py-1.5 pr-4 uppercase text-gray-500">{p.payment_mode}</td>
-                                            <td className="py-1.5 pr-4 text-gray-400 font-mono">{p.transaction_ref || '—'}</td>
-                                            <td className="py-1.5 pr-4 text-gray-500">{p.collected_by_name || '—'}</td>
-                                            <td className="py-1.5">
-                                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium capitalize ${
-                                                p.payment_status === 'completed' ? 'bg-green-100 text-green-700' :
-                                                p.payment_status === 'rejected'  ? 'bg-red-100 text-red-600' :
-                                                'bg-yellow-100 text-yellow-700'
-                                              }`}>{p.payment_status}</span>
+                    {/* Status row */}
+                    <div className="flex items-center gap-4 mt-4 text-xs">
+                      <span className={amountsSet ? 'text-green-600' : 'text-amber-600'}>
+                        {amountsSet ? '✅ Amounts set' : '⚠ Amounts not set'}
+                      </span>
+                      <span className={generated ? 'text-green-600' : 'text-gray-400'}>
+                        {generated ? '✅ Bills generated' : '◌ Bills not generated'}
+                      </span>
+                    </div>
+
+                    {/* Collection progress (if bills exist) */}
+                    {generated && due > 0 && (
+                      <div className="mt-3">
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-gray-400">Collected</span>
+                          <span className="font-bold text-gray-600">{collPct}% · {fmt(collected)} / {fmt(due)}</span>
+                        </div>
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${collPct >= 80 ? 'bg-green-500' : collPct >= 50 ? 'bg-yellow-400' : 'bg-red-400'}`} style={{ width: `${collPct}%` }} />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-2 mt-4 pt-3 border-t border-gray-50">
+                      <button
+                        onClick={() => { setPlanManageCatId(planManageCatId === cat.id ? null : cat.id); setGroupAmounts({}); setStructureMsg(''); if (cat.category_type === 'variable') { setApplGrade(''); setApplStudents([]); setApplCategories([]); setApplAmounts({}) } }}
+                        className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-blue-700"
+                      >
+                        {planManageCatId === cat.id ? 'Close' : 'Manage →'}
+                      </button>
+                      <button onClick={() => loadStructHistory(cat.id)}
+                        className="text-xs border border-gray-200 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-50">
+                        History
+                      </button>
+                      {!structureLock && cat.is_active && (
+                        <button onClick={() => toggleCategoryType(cat)}
+                          className="text-xs border border-gray-200 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-50 ml-auto">
+                          Switch to {cat.category_type === 'fixed' ? 'Variable' : 'Fixed'}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Structure history inline */}
+                    {structHistCatId === cat.id && (
+                      <div className="mt-3 bg-indigo-50 rounded-lg p-2 text-[10px] max-h-40 overflow-y-auto">
+                        <p className="font-semibold text-indigo-700 mb-1 uppercase tracking-wide">Amount Change History</p>
+                        {structHistLoading ? <p className="text-indigo-400">Loading…</p> :
+                          !(structHistories[cat.id]?.length) ? <p className="text-gray-400 italic">No changes recorded yet.</p> : (
+                          <div className="space-y-1">
+                            {structHistories[cat.id].map(h => (
+                              <div key={h.id} className="bg-white rounded px-2 py-1 border border-indigo-100 flex items-center gap-2 flex-wrap">
+                                <span className="font-semibold text-indigo-600">Gr.{h.grade}</span>
+                                {h.old_amount !== null && <><span className="line-through text-gray-400">₹{h.old_amount}</span><span className="text-gray-300">→</span></>}
+                                <span className="font-bold text-indigo-800">₹{h.new_amount}</span>
+                                <span className="text-gray-400">· {h.changed_by}</span>
+                                <span className="text-gray-400">· {new Date(h.changed_at).toLocaleDateString('en-IN', { day:'2-digit', month:'short' })}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ── MANAGE PANEL (inline expand) ── */}
+                    {planManageCatId === cat.id && (
+                      <div className="mt-4 pt-4 border-t border-gray-100">
+                        {cat.category_type === 'variable' ? (
+                          /* ── Variable: per-student amounts ── */
+                          <div className="space-y-3">
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Set per-student amounts</p>
+                            <div className="flex items-center gap-2">
+                              <select value={applGrade}
+                                onChange={e => { setApplGrade(e.target.value); setApplStudents([]); setApplCategories([]); setApplAmounts({}); setApplMsg('') }}
+                                className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
+                                <option value="">Select grade…</option>
+                                {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                              </select>
+                              <button onClick={() => loadApplicability(applGrade)} disabled={!applGrade || applLoading}
+                                className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
+                                {applLoading ? 'Loading…' : 'Load Students'}
+                              </button>
+                              <span className="text-xs text-gray-400">Due day:</span>
+                              <input type="number" min="1" max="28" placeholder="10" value={dueDays[cat.id] || ''}
+                                onChange={e => setDueDays(p => ({ ...p, [cat.id]: e.target.value }))}
+                                className="w-14 text-center border border-gray-200 rounded px-1 py-1 text-xs" />
+                            </div>
+
+                            {applGrade && !applLoading && applStudents.length > 0 && (
+                              <>
+                                <div className="border border-gray-100 rounded-lg overflow-hidden max-h-80 overflow-y-auto">
+                                  <table className="w-full text-sm">
+                                    <thead className="sticky top-0 bg-gray-50">
+                                      <tr className="border-b border-gray-100 text-xs text-gray-500">
+                                        <th className="text-left px-3 py-2 font-semibold">Student</th>
+                                        <th className="text-left px-3 py-2 font-semibold">Sec</th>
+                                        <th className="text-center px-3 py-2 font-semibold">Amount (₹)</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-50">
+                                      {applStudents.map(s => {
+                                        const key = `${s.id}:${cat.id}`
+                                        return (
+                                          <tr key={s.id} className="hover:bg-gray-50/60">
+                                            <td className="px-3 py-1.5">
+                                              <p className="font-medium text-gray-800 text-sm">{s.name}</p>
+                                              <p className="text-[10px] text-gray-400">#{s.roll_number}</p>
+                                            </td>
+                                            <td className="px-3 py-1.5 text-xs text-gray-500">{s.section}</td>
+                                            <td className="px-3 py-1.5 text-center">
+                                              <input type="number" min="0" placeholder="—"
+                                                value={applAmounts[key] || ''}
+                                                onChange={e => setApplAmounts(p => ({ ...p, [key]: e.target.value }))}
+                                                className="w-24 text-center border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-blue-400" />
                                             </td>
                                           </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
+                                        )
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  {applMsg && <span className={`text-xs ${applMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{applMsg}</span>}
+                                  <button onClick={saveApplicability} disabled={applSaving}
+                                    className="ml-auto text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg font-medium disabled:opacity-50">
+                                    {applSaving ? 'Saving…' : 'Save Amounts'}
+                                  </button>
+                                </div>
+                                <p className="text-[10px] text-gray-400">Tip: leave blank = student is not charged this fee.</p>
+                              </>
+                            )}
+                            {applGrade && !applLoading && applStudents.length === 0 && (
+                              <p className="text-xs text-gray-400">No active students in Grade {applGrade}.</p>
+                            )}
+                          </div>
+                        ) : (
+                          /* ── Fixed: grade-group amounts ── */
+                          <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Set amounts by grade</p>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-gray-400">Due day:</span>
+                                <input type="number" min="1" max="28" placeholder="10" value={dueDays[cat.id] || ''}
+                                  onChange={e => setDueDays(p => ({ ...p, [cat.id]: e.target.value }))}
+                                  className="w-14 text-center border border-gray-200 rounded px-1 py-1 text-xs" />
+                                <span className="text-[10px] text-gray-400">of month</span>
+                              </div>
+                            </div>
+
+                            {/* Grade group quick-fill */}
+                            <div className="grid grid-cols-2 gap-2">
+                              {GRADE_GROUPS.map(grp => (
+                                <div key={grp.key} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2">
+                                  <div className="flex-1">
+                                    <p className="text-xs font-medium text-gray-700">{grp.label}</p>
+                                    <p className="text-[10px] text-gray-400">{grp.sub}</p>
                                   </div>
-                                )}
-                              </td>
-                            </tr>
-                          )}
-                        </Fragment>
-                      )
-                    })}
-                  </tbody>
-                </table>
+                                  <div className="relative">
+                                    <span className="absolute left-2 top-1.5 text-gray-400 text-xs">₹</span>
+                                    <input type="number" min="0" placeholder="0"
+                                      value={groupAmounts[grp.key] || ''}
+                                      onChange={e => setGroupAmounts(p => ({ ...p, [grp.key]: e.target.value }))}
+                                      className="w-24 pl-5 pr-1 py-1 text-xs border border-gray-200 rounded" />
+                                  </div>
+                                  <button onClick={() => applyGroupAmount(cat.id, grp.grades, groupAmounts[grp.key] || '')}
+                                    className="text-[10px] bg-blue-600 text-white px-2 py-1 rounded font-medium hover:bg-blue-700">
+                                    Apply
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Individual grades */}
+                            <div>
+                              <p className="text-[10px] text-gray-400 mb-1.5 uppercase tracking-wide">Individual grades (review &amp; adjust)</p>
+                              <div className="grid grid-cols-4 gap-2">
+                                {GRADES.map(g => (
+                                  <div key={g} className="flex items-center gap-1">
+                                    <span className="text-[10px] text-gray-400 w-8">Gr.{g}</span>
+                                    <input type="number" min="0" placeholder="0"
+                                      value={editAmounts[`${cat.id}_${g}`] || ''}
+                                      onChange={e => setEditAmounts(p => ({ ...p, [`${cat.id}_${g}`]: e.target.value }))}
+                                      className="w-full text-center border border-gray-200 rounded px-1 py-1 text-xs" />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-end">
+                              <button onClick={() => saveFeeAmounts(cat)} disabled={savingStructure}
+                                className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg font-medium disabled:opacity-50">
+                                {savingStructure ? 'Saving…' : 'Save Amounts'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+
+          {/* ── Lock plan CTA (when not locked) ── */}
+          {!structureLock && categories.length > 0 && (
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-blue-800">Finished setting up?</p>
+                <p className="text-xs text-blue-600">
+                  {anyBillsGenerated()
+                    ? "Lock the plan so amounts can't be changed accidentally. After locking, changes need an amendment with a reason."
+                    : 'Generate bills first — the plan can only be locked after bills are generated.'}
+                </p>
+              </div>
+              <button onClick={lockStructure} disabled={lockingStructure || !anyBillsGenerated()}
+                title={!anyBillsGenerated() ? 'Generate bills before locking' : 'Lock the fee plan'}
+                className="text-sm bg-blue-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
+                {lockingStructure ? 'Locking…' : '🔒 Lock Fee Plan'}
+              </button>
+            </div>
+          )}
+
+          {/* ── Add Fee Head wizard (modal) ── */}
+          {showAddFee && (
+            <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-4" onClick={() => { setShowAddFee(false); setAddFeeStep(1) }}>
+              <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl" onClick={e => e.stopPropagation()}>
+                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                  <p className="font-semibold text-gray-800">Add Fee Head — Step {addFeeStep} of 3</p>
+                  <button onClick={() => { setShowAddFee(false); setAddFeeStep(1) }} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+                </div>
+
+                <div className="p-5">
+                  {/* Step 1 — name */}
+                  {addFeeStep === 1 && (
+                    <div className="space-y-4">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">What fee is this?</p>
+                      <div className="flex flex-wrap gap-2">
+                        {CATEGORY_SUGGESTIONS.map(s => (
+                          <button key={s.name} type="button"
+                            onClick={() => setNewCategory({ name: s.name, frequency: s.frequency, description: '', category_type: s.category_type })}
+                            className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-all ${newCategory.name === s.name ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:bg-blue-50'}`}>
+                            {s.name}
+                          </button>
+                        ))}
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-600">Or type a custom name</label>
+                        <input type="text" placeholder="e.g. Smart Class Fee" value={newCategory.name}
+                          onChange={e => setNewCategory(p => ({ ...p, name: e.target.value }))}
+                          className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Step 2 — frequency */}
+                  {addFeeStep === 2 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">How often is it charged?</p>
+                      {(['monthly','quarterly','annual','one_time'] as const).map(f => (
+                        <button key={f} type="button"
+                          onClick={() => setNewCategory(p => ({ ...p, frequency: f }))}
+                          className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${newCategory.frequency === f ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                          <div className="flex items-center gap-2">
+                            <div className={`w-3.5 h-3.5 rounded-full border-2 ${newCategory.frequency === f ? 'border-blue-500 bg-blue-500' : 'border-gray-300'}`} />
+                            <span className="text-sm font-semibold text-gray-700">{FREQ_LABEL[f]}</span>
+                          </div>
+                          <p className="text-xs text-gray-400 pl-5">{FREQ_HELP[f]}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Step 3 — type */}
+                  {addFeeStep === 3 && (
+                    <div className="space-y-3">
+                      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Same amount or different per student?</p>
+                      <button type="button" onClick={() => setNewCategory(p => ({ ...p, category_type: 'fixed' }))}
+                        className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${newCategory.category_type === 'fixed' ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className={`w-3.5 h-3.5 rounded-full border-2 ${newCategory.category_type === 'fixed' ? 'border-green-500 bg-green-500' : 'border-gray-300'}`} />
+                          <span className="text-sm font-semibold text-gray-700">Same for everyone in a grade</span>
+                        </div>
+                        <p className="text-xs text-gray-400 pl-5">One amount per grade. Example: Tuition Fee.</p>
+                      </button>
+                      <button type="button" onClick={() => setNewCategory(p => ({ ...p, category_type: 'variable' }))}
+                        className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${newCategory.category_type === 'variable' ? 'border-orange-400 bg-orange-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className={`w-3.5 h-3.5 rounded-full border-2 ${newCategory.category_type === 'variable' ? 'border-orange-500 bg-orange-500' : 'border-gray-300'}`} />
+                          <span className="text-sm font-semibold text-gray-700">Different per student</span>
+                        </div>
+                        <p className="text-xs text-gray-400 pl-5">Set individual amounts. Example: Transport (varies by route).</p>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between">
+                  <button onClick={() => addFeeStep > 1 ? setAddFeeStep(addFeeStep - 1) : (setShowAddFee(false), setAddFeeStep(1))}
+                    className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2">
+                    {addFeeStep > 1 ? '← Back' : 'Cancel'}
+                  </button>
+                  {addFeeStep < 3 ? (
+                    <button onClick={() => setAddFeeStep(addFeeStep + 1)} disabled={addFeeStep === 1 && !newCategory.name.trim()}
+                      className="text-sm bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-40">
+                      Next →
+                    </button>
+                  ) : (
+                    <button onClick={createFeeHead}
+                      className="text-sm bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700">
+                      Create Fee Head
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* ═══ COLLECT ═════════════════════════════════════════════════════════════ */}
+      {/* ═══ COLLECTION ══════════════════════════════════════════════════════════ */}
       {activeTab === 'collect' && (
-        <div className="grid grid-cols-5 gap-5">
-          {/* Left: search */}
-          <div className="col-span-2 space-y-3">
-            <div className="bg-white rounded-xl border border-gray-100 p-4">
-              <h3 className="text-sm font-semibold text-gray-700 mb-3">Find Student</h3>
-              <input type="text" placeholder="Search by name or roll number…" value={collectSearch}
-                onChange={e => { setCollectSearch(e.target.value); searchStudent(e.target.value) }}
-                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            {collectLoading && <div className="bg-white rounded-xl border border-gray-100 p-4 text-center text-sm text-gray-400">Searching…</div>}
-            {collectEntries.length > 0 && (
-              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                <div className="px-4 py-2.5 border-b border-gray-100">
-                  <p className="text-xs text-gray-400 font-medium">Pending Entries ({collectEntries.length})</p>
-                </div>
-                <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto">
-                  {collectEntries.map(entry => (
-                    <button key={entry.id} onClick={() => openCollect(entry)}
-                      className={`w-full text-left px-4 py-3 hover:bg-blue-50 transition-colors ${selectedEntry?.id === entry.id ? 'bg-blue-50 border-l-2 border-blue-500' : ''}`}>
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="text-sm font-medium text-gray-800">{entry.student_name}</p>
-                          <p className="text-xs text-gray-400">{entry.category_name} · {entry.period_label}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm font-bold text-red-600">{fmt(entry.balance)}</p>
-                          <span className={`text-xs px-1.5 py-0.5 rounded-full capitalize ${STATUS_COLORS[entry.status]}`}>{entry.status}</span>
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+        <div className="space-y-4">
+
+          {/* Online payments alert banner */}
+          {pendingPayments.length > 0 && collectionView !== 'online' && (
+            <button onClick={() => setCollectionView('online')}
+              className="w-full flex items-center justify-between bg-red-50 border border-red-200 rounded-xl px-4 py-3 hover:bg-red-100 transition-colors">
+              <span className="flex items-center gap-2 text-sm font-medium text-red-700">
+                <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                {pendingPayments.length} online payment{pendingPayments.length > 1 ? 's' : ''} waiting for verification
+              </span>
+              <span className="text-xs font-semibold text-red-600">Review →</span>
+            </button>
+          )}
+
+          {/* Sub-view switcher */}
+          <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+            {([
+              { key: 'counter',    label: 'Daily Counter' },
+              { key: 'online',     label: pendingPayments.length > 0 ? `Online (${pendingPayments.length})` : 'Online' },
+              { key: 'defaulters', label: 'Defaulters' },
+              { key: 'dayclose',   label: 'Day Close' },
+            ] as const).map(v => (
+              <button key={v.key} onClick={() => setCollectionView(v.key)}
+                className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                  collectionView === v.key ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                }`}>
+                {v.label}
+              </button>
+            ))}
           </div>
 
-          {/* Right: form */}
-          <div className="col-span-3">
-            {paySuccess ? (
-              <div className="bg-green-50 border border-green-200 rounded-xl p-8 text-center">
-                <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-bold text-green-800 mb-1">Payment Recorded!</h3>
-                <p className="text-green-700 mb-1">{paySuccess.student_name}</p>
-                <p className="text-2xl font-bold text-green-800 mb-2">{fmt(paySuccess.amount)}</p>
-                <div className="bg-white border border-green-200 rounded-lg px-4 py-2 inline-block mb-4">
-                  <p className="text-xs text-green-500 font-medium">Receipt Number</p>
-                  <p className="text-base font-bold text-green-800 font-mono">{paySuccess.receipt_number}</p>
-                </div>
-                <div className="flex items-center gap-3 justify-center">
-                  <button
-                    onClick={() => printReceipt(paySuccess!)}
-                    className="bg-white border border-green-300 text-green-700 px-5 py-2 rounded-lg text-sm font-medium hover:bg-green-50 flex items-center gap-2"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                    </svg>
-                    Print Receipt
-                  </button>
-                  <button onClick={() => { setPaySuccess(null); setCollectSearch(''); setCollectEntries([]) }}
-                    className="bg-green-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-green-700">
-                    Collect Another
-                  </button>
-                </div>
+          {/* ─── DAILY COUNTER ─── */}
+          {collectionView === 'counter' && (
+            <div className="space-y-4">
+              {/* Filters */}
+              <div className="flex items-center gap-3">
+                <input type="text" placeholder="Search student name or roll number…" value={ledgerSearch}
+                  onChange={e => setLedgerSearch(e.target.value)}
+                  className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <select value={ledgerGrade} onChange={e => setLedgerGrade(e.target.value)}
+                  className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
+                  <option value="">All Grades</option>
+                  {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                </select>
+                <button onClick={loadLedger} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Refresh</button>
+                <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download
+                  className="text-sm border border-gray-200 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-50">Export</a>
               </div>
-            ) : selectedEntry ? (
-              <div className="bg-white rounded-xl border border-gray-100 p-5">
-                {/* Entry info */}
-                <div className="bg-gray-50 rounded-lg p-4 mb-5">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="text-base font-semibold text-gray-800">{selectedEntry.student_name}</p>
-                      <p className="text-sm text-gray-500">Grade {selectedEntry.grade}{selectedEntry.section} · {selectedEntry.roll_number}</p>
-                      <p className="text-sm text-gray-500 mt-1">{selectedEntry.category_name} · {selectedEntry.period_label}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-gray-400">Balance Due</p>
-                      <p className="text-2xl font-bold text-red-600">{fmt(selectedEntry.balance > 0 ? selectedEntry.balance : selectedEntry.amount_due)}</p>
-                      <p className="text-xs text-gray-400">of {fmt(selectedEntry.amount_due)}</p>
-                    </div>
+
+              {/* Quick filter chips */}
+              <div className="flex gap-2 flex-wrap">
+                {([
+                  { key: '',        label: `All Students (${studentRows.length})` },
+                  { key: 'overdue', label: `Overdue (${studentRows.filter(r => r.has_overdue).length})` },
+                  { key: 'partial', label: `Partially Paid (${studentRows.filter(r => r.total_paid > 0 && r.outstanding > 0).length})` },
+                  { key: 'never',   label: `Never Paid (${studentRows.filter(r => r.never_paid && r.outstanding > 0).length})` },
+                  { key: 'clear',   label: `Fully Cleared (${studentRows.filter(r => r.outstanding === 0).length})` },
+                ] as const).map(f => (
+                  <button key={f.key} onClick={() => setLedgerStatus(f.key)}
+                    className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                      ledgerStatus === f.key ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                    }`}>
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Student list */}
+              {ledgerLoading ? (
+                <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-sm text-gray-400">Loading…</div>
+              ) : collectionFiltered.length === 0 ? (
+                <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center text-sm text-gray-400">
+                  No students found. Generate bills from Fee Plan first.
+                </div>
+              ) : (
+                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                  <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 grid grid-cols-12 gap-2 text-xs font-semibold text-gray-500">
+                    <div className="col-span-4">Student</div>
+                    <div className="col-span-2 text-right">Billed</div>
+                    <div className="col-span-2 text-right">Paid</div>
+                    <div className="col-span-2 text-right">Outstanding</div>
+                    <div className="col-span-2 text-center">Action</div>
+                  </div>
+                  <div className="divide-y divide-gray-50 max-h-[600px] overflow-y-auto">
+                    {collectionFiltered.map(row => (
+                      <Fragment key={row.student_id}>
+                        <div className={`px-4 py-3 grid grid-cols-12 gap-2 items-center hover:bg-gray-50/60 cursor-pointer ${openStudentId === row.student_id ? 'bg-blue-50/40' : ''}`}
+                          onClick={() => toggleStudent(row.student_id)}>
+                          <div className="col-span-4">
+                            <p className="text-sm font-medium text-gray-800">{row.student_name}</p>
+                            <p className="text-xs text-gray-400">Gr.{row.grade}{row.section} · #{row.roll_number}</p>
+                          </div>
+                          <div className="col-span-2 text-right text-sm text-gray-600">{fmt(row.total_billed)}</div>
+                          <div className="col-span-2 text-right text-sm text-green-600">{fmt(row.total_paid)}</div>
+                          <div className="col-span-2 text-right text-sm font-bold text-red-600">{fmt(row.outstanding)}</div>
+                          <div className="col-span-2 flex justify-center gap-1.5" onClick={e => e.stopPropagation()}>
+                            {row.outstanding > 0 ? (
+                              <button onClick={() => startCollect(row)}
+                                className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg font-medium hover:bg-blue-700">Collect</button>
+                            ) : (
+                              <span className="text-xs text-green-600 font-medium px-2 py-1">✓ Clear</span>
+                            )}
+                            <button onClick={() => toggleStudent(row.student_id)}
+                              className="text-xs border border-gray-200 text-gray-500 px-2 py-1 rounded-lg hover:bg-gray-50">
+                              {openStudentId === row.student_id ? '▲' : '▼'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Expanded student panel */}
+                        {openStudentId === row.student_id && (
+                          <div className="px-4 py-4 bg-gray-50 border-t border-gray-100">
+                            {/* Pay success */}
+                            {paySuccess ? (
+                              <div className="bg-white border border-green-200 rounded-xl p-5">
+                                <div className="flex items-center gap-2 mb-3">
+                                  <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                                    <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
+                                  </div>
+                                  <div>
+                                    <p className="font-bold text-green-800">Payment Recorded</p>
+                                    <p className="text-xs text-gray-500">Receipt {paySuccess.receipt_number} · {fmt(paySuccess.amount)}</p>
+                                  </div>
+                                </div>
+                                <div className="flex gap-2">
+                                  <button onClick={() => {
+                                    const selected = row.open_entries.filter(e => collectChecked.has(e.id))
+                                    const selectedTotal = selected.reduce((s, e) => s + Number(e.balance), 0)
+                                    let lines: { cat: string; period: string; amount: number }[]
+                                    if (paySuccess.amount >= selectedTotal - 0.01 && selected.length > 0) {
+                                      // full payment of selected bills — itemise each
+                                      lines = selected.map(e => ({ cat: e.category_name, period: e.period_label, amount: Number(e.balance) }))
+                                    } else {
+                                      // partial payment — single line for the actual amount taken
+                                      lines = [{ cat: 'Part payment towards dues', period: selected.map(e => e.period_label).join(', ') || paySuccess.period_label, amount: paySuccess.amount }]
+                                    }
+                                    printCounterReceipt(row, paySuccess, lines)
+                                  }}
+                                    className="text-sm bg-white border border-green-300 text-green-700 px-4 py-1.5 rounded-lg font-medium hover:bg-green-50">🖨 Print Receipt</button>
+                                  <button onClick={() => { setPaySuccess(null); setOpenStudentId(null) }}
+                                    className="text-sm bg-green-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-green-700">Done</button>
+                                </div>
+                              </div>
+                            ) : showCollectForm ? (
+                              /* Collect form */
+                              <div className="bg-white border border-blue-200 rounded-xl p-5 space-y-4">
+                                <p className="text-sm font-semibold text-gray-700">Collect Payment — {row.student_name}</p>
+                                <div className="space-y-1.5">
+                                  {row.open_entries.map(e => (
+                                    <label key={e.id} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 cursor-pointer">
+                                      <input type="checkbox" checked={collectChecked.has(e.id)}
+                                        onChange={ev => {
+                                          const next = new Set(collectChecked)
+                                          if (ev.target.checked) next.add(e.id); else next.delete(e.id)
+                                          setCollectChecked(next)
+                                          // re-sync the amount field to the new selected total
+                                          const newTotal = row.open_entries.filter(x => next.has(x.id)).reduce((s, x) => s + Number(x.balance), 0)
+                                          setPayAmount(String(newTotal))
+                                        }}
+                                        className="w-4 h-4 rounded border-gray-300 text-blue-600" />
+                                      <span className="flex-1 text-sm text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></span>
+                                      <span className={`text-xs px-1.5 py-0.5 rounded-full capitalize ${STATUS_COLORS[e.status]}`}>{e.status}</span>
+                                      <span className="text-sm font-bold text-gray-800 w-20 text-right">{fmt(e.balance)}</span>
+                                    </label>
+                                  ))}
+                                </div>
+
+                                {/* Amount being collected — editable for partial payments */}
+                                <div className="border-t border-gray-100 pt-3">
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <span className="text-sm text-gray-500">Selected dues</span>
+                                    <span className="text-sm font-medium text-gray-700">{fmt(checkedTotal)}</span>
+                                  </div>
+                                  <label className="text-xs font-medium text-gray-600">Amount being collected now</label>
+                                  <div className="relative mt-1">
+                                    <span className="absolute left-3 top-2.5 text-gray-400 text-sm">₹</span>
+                                    <input
+                                      type="number" min="0" step="0.01" value={payAmount}
+                                      onChange={e => setPayAmount(e.target.value)}
+                                      className="w-full pl-7 pr-3 py-2 border border-gray-200 rounded-lg text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                  </div>
+                                  {(() => {
+                                    const entered = parseFloat(payAmount) || 0
+                                    if (entered > 0 && entered < checkedTotal) {
+                                      return (
+                                        <p className="text-xs text-amber-600 mt-1">
+                                          Partial payment — ₹{(checkedTotal - entered).toLocaleString('en-IN')} will remain due.
+                                          Applied to oldest bill first.
+                                        </p>
+                                      )
+                                    }
+                                    if (entered > checkedTotal) {
+                                      return <p className="text-xs text-red-600 mt-1">Amount exceeds selected dues ({fmt(checkedTotal)}).</p>
+                                    }
+                                    return <p className="text-xs text-gray-400 mt-1">Edit to take a partial amount (e.g. ₹5,000 of ₹10,000).</p>
+                                  })()}
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="text-xs font-medium text-gray-600">Mode</label>
+                                    <select value={payMode} onChange={e => setPayMode(e.target.value)}
+                                      className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                                      <option value="cash">Cash</option><option value="cheque">Cheque</option>
+                                      <option value="dd">Demand Draft</option><option value="upi">UPI</option>
+                                      <option value="online">Online Transfer</option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="text-xs font-medium text-gray-600">Date</label>
+                                    <input type="date" value={payDate} onChange={e => setPayDate(e.target.value)}
+                                      className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                                  </div>
+                                  <div>
+                                    <label className="text-xs font-medium text-gray-600">Collected By</label>
+                                    <input type="text" value={payCollectedBy} onChange={e => setPayCollectedBy(e.target.value)}
+                                      className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                                  </div>
+                                  {['cheque','dd','upi','online'].includes(payMode) && (
+                                    <div>
+                                      <label className="text-xs font-medium text-gray-600">Reference / Cheque No</label>
+                                      <input type="text" value={payRef} onChange={e => setPayRef(e.target.value)}
+                                        className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                                    </div>
+                                  )}
+                                </div>
+                                <div>
+                                  <label className="text-xs font-medium text-gray-600">Remarks (optional)</label>
+                                  <input type="text" value={payNotes} onChange={e => setPayNotes(e.target.value)}
+                                    placeholder="e.g. Paid by elder brother · Late fee waived verbally · Cash short ₹10"
+                                    className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                                </div>
+                                {payError && <p className="text-sm text-red-600">{payError}</p>}
+                                <div className="flex gap-2">
+                                  <button onClick={submitCounterPayment}
+                                    disabled={collectLoading || !(parseFloat(payAmount) > 0) || parseFloat(payAmount) > checkedTotal + 0.01}
+                                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50">
+                                    {collectLoading ? 'Recording…' : `Record ${payAmount ? fmt(parseFloat(payAmount) || 0) : '₹0'} & Print`}
+                                  </button>
+                                  <button onClick={() => setShowCollectForm(false)}
+                                    className="text-sm text-gray-500 px-4 py-2.5 hover:text-gray-700">Cancel</button>
+                                </div>
+                              </div>
+                            ) : (
+                              /* Dues list (read mode) */
+                              <div className="space-y-3">
+                                <div className="space-y-2">
+                                  {row.open_entries.length === 0 ? (
+                                    <p className="text-sm text-green-600 font-medium px-1">✓ All fees cleared for this student.</p>
+                                  ) : (
+                                    <>
+                                      {row.open_entries.map(e => (
+                                        <div key={e.id} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-gray-100">
+                                          <div>
+                                            <p className="text-sm text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></p>
+                                            <p className="text-xs text-gray-400">Due {e.due_date}{Number(e.days_overdue) > 0 ? ` · ${e.days_overdue}d overdue` : ''}</p>
+                                          </div>
+                                          <div className="flex items-center gap-3">
+                                            <span className="text-sm font-bold text-red-600">{fmt(e.balance)}</span>
+                                            <span className={`text-xs px-1.5 py-0.5 rounded-full capitalize ${STATUS_COLORS[e.status]}`}>{e.status}</span>
+                                          </div>
+                                        </div>
+                                      ))}
+                                      <button onClick={() => startCollect(row)}
+                                        className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-semibold mt-1">
+                                        Collect All ({fmt(row.outstanding)})
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+
+                                {/* Recent payments — view / cancel / correct */}
+                                <div className="border-t border-gray-100 pt-3">
+                                  {!showCounterHistory ? (
+                                    <button onClick={() => loadCounterPayments(row.student_id)}
+                                      className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
+                                      View payments &amp; corrections →
+                                    </button>
+                                  ) : (
+                                    <div className="space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Payments</p>
+                                        <button onClick={() => { setShowCounterHistory(false); setCancelPmtId(null) }} className="text-xs text-gray-400 hover:text-gray-600">Hide</button>
+                                      </div>
+                                      {counterPmtLoading ? (
+                                        <p className="text-xs text-gray-400">Loading…</p>
+                                      ) : counterPayments.length === 0 ? (
+                                        <p className="text-xs text-gray-400 italic">No payments recorded yet.</p>
+                                      ) : (
+                                        counterPayments.map(p => {
+                                          const cancelled = p.payment_status === 'cancelled'
+                                          return (
+                                            <div key={p.id} className={`rounded-lg border px-3 py-2 ${cancelled ? 'bg-gray-50 border-gray-100' : 'bg-white border-gray-100'}`}>
+                                              <div className="flex items-center justify-between">
+                                                <div>
+                                                  <p className={`text-sm ${cancelled ? 'text-gray-400 line-through' : 'text-gray-700'}`}>
+                                                    <span className="font-mono text-xs text-indigo-600">{p.receipt_number}</span> · {fmt(p.amount)} · {p.payment_mode.toUpperCase()}
+                                                  </p>
+                                                  <p className="text-xs text-gray-400">{fmtDate(p.paid_date)}{p.collected_by_name ? ` · ${p.collected_by_name}` : ''}</p>
+                                                </div>
+                                                {cancelled ? (
+                                                  <span className="text-[10px] bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full font-medium">Cancelled</span>
+                                                ) : p.payment_status === 'completed' ? (
+                                                  cancelPmtId === p.id ? (
+                                                    <button onClick={() => setCancelPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
+                                                  ) : (
+                                                    <button onClick={() => openCancel(p.id)}
+                                                      className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
+                                                  )
+                                                ) : (
+                                                  <span className="text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-medium capitalize">{p.payment_status.replace('_', ' ')}</span>
+                                                )}
+                                              </div>
+
+                                              {/* Inline cancel/correct form */}
+                                              {cancelPmtId === p.id && (
+                                                <div className="mt-2 pt-2 border-t border-amber-100 bg-amber-50 -mx-3 -mb-2 px-3 py-2 rounded-b-lg space-y-2">
+                                                  <div className="flex gap-2">
+                                                    <button onClick={() => setCancelMode('cancel')}
+                                                      className={`text-xs px-3 py-1 rounded-lg font-medium ${cancelMode === 'cancel' ? 'bg-red-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}>Cancel</button>
+                                                    <button onClick={() => { setCancelMode('correct'); setCorrectAmount(String(p.amount)) }}
+                                                      className={`text-xs px-3 py-1 rounded-lg font-medium ${cancelMode === 'correct' ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}>Correct Amount</button>
+                                                  </div>
+                                                  <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                                                    {cancelMode === 'cancel'
+                                                      ? <>⚠ Reverses <strong>{fmt(p.amount)}</strong> from the ledger. Balance increases by {fmt(p.amount)}; receipt {p.receipt_number} stays on record as cancelled.</>
+                                                      : <>⚠ Cancels {p.receipt_number} ({fmt(p.amount)}) and issues a new receipt for <strong>{correctAmount ? fmt(parseFloat(correctAmount) || 0) : '₹0'}</strong>. Net change: {fmt((parseFloat(correctAmount) || 0) - Number(p.amount))}.</>}
+                                                  </div>
+                                                  {cancelMode === 'correct' && (
+                                                    <input type="number" min="0" value={correctAmount} onChange={e => setCorrectAmount(e.target.value)}
+                                                      placeholder="Correct amount" className="w-40 border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                                  )}
+                                                  <input type="text" placeholder="Reason (required — recorded in audit log)"
+                                                    value={cancelReason} onChange={e => setCancelReason(e.target.value)}
+                                                    className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                                  {cancelMsg && <p className={`text-xs ${cancelMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{cancelMsg}</p>}
+                                                  <div className="flex gap-2">
+                                                    <button onClick={() => submitCancelCorrect('counter', row.student_id)} disabled={cancelBusy || !cancelReason.trim()}
+                                                      className={`text-xs text-white px-4 py-1.5 rounded-lg font-medium disabled:opacity-50 ${cancelMode === 'cancel' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                                                      {cancelBusy ? 'Working…' : cancelMode === 'cancel' ? `Confirm Cancel (${fmt(p.amount)})` : 'Confirm Correction'}
+                                                    </button>
+                                                    <button onClick={() => setCancelPmtId(null)} className="text-xs text-gray-500 px-3 py-1.5">Close</button>
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          )
+                                        })
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </Fragment>
+                    ))}
                   </div>
                 </div>
+              )}
+            </div>
+          )}
 
-                <div className="flex gap-2 mb-4">
-                  <button onClick={() => setShowWaiver(false)}
-                    className={`text-sm px-4 py-1.5 rounded-lg font-medium transition-colors ${!showWaiver ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                    Record Payment
-                  </button>
-                  <button onClick={() => setShowWaiver(true)}
-                    className={`text-sm px-4 py-1.5 rounded-lg font-medium transition-colors ${showWaiver ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-                    Grant Waiver
-                  </button>
+          {/* ─── ONLINE PAYMENTS ─── */}
+          {collectionView === 'online' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-semibold text-gray-800">Online Payments — Pending Verification</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Check your school's UPI/bank statement, then approve or reject. Parent is notified by email.</p>
                 </div>
+                <button onClick={loadPending} className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Refresh</button>
+              </div>
 
-                {!showWaiver ? (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs font-medium text-gray-600">Amount (₹)</label>
-                        <input type="number" value={payAmount} onChange={e => setPayAmount(e.target.value)}
-                          className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                        <p className="text-xs text-gray-400 mt-0.5">Partial payment allowed</p>
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-gray-600">Payment Mode</label>
-                        <select value={payMode} onChange={e => setPayMode(e.target.value)}
-                          className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                          <option value="cash">Cash</option>
-                          <option value="cheque">Cheque</option>
-                          <option value="dd">Demand Draft</option>
-                          <option value="upi">UPI</option>
-                          <option value="online">Online Transfer</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-gray-600">Payment Date</label>
-                        <input type="date" value={payDate} onChange={e => setPayDate(e.target.value)}
-                          className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-gray-600">Collected By</label>
-                        <input type="text" placeholder="Staff name" value={payCollectedBy}
-                          onChange={e => setPayCollectedBy(e.target.value)}
-                          className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                      </div>
-                    </div>
-                    {['cheque', 'dd', 'upi', 'online'].includes(payMode) && (
-                      <div>
-                        <label className="text-xs font-medium text-gray-600">Transaction Ref / Cheque No</label>
-                        <input type="text" placeholder="Reference number" value={payRef}
-                          onChange={e => setPayRef(e.target.value)}
-                          className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                      </div>
-                    )}
-                    <div>
-                      <label className="text-xs font-medium text-gray-600">Notes (optional)</label>
-                      <input type="text" placeholder="Any remarks" value={payNotes}
-                        onChange={e => setPayNotes(e.target.value)}
-                        className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    </div>
-                    {payError && <p className="text-sm text-red-600">{payError}</p>}
-                    <button onClick={submitPayment} disabled={collectLoading || !payAmount}
-                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-lg text-sm disabled:opacity-50">
-                      {collectLoading ? 'Recording…' : `Record Payment of ${payAmount ? fmt(payAmount) : '₹0'}`}
-                    </button>
+              {verifyMsg && (
+                <div className={`text-sm px-4 py-3 rounded-lg ${verifyMsg.startsWith('✓') ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-600 border border-red-200'}`}>{verifyMsg}</div>
+              )}
+
+              {pendingLoading ? (
+                <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-sm text-gray-400">Loading…</div>
+              ) : pendingPayments.length === 0 ? (
+                <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
+                  <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                   </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="text-xs font-medium text-gray-600">Waiver Type</label>
-                        <select value={waiverForm.waiver_type} onChange={e => setWaiverForm(p => ({ ...p, waiver_type: e.target.value }))}
-                          className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none">
-                          <option value="percentage">Percentage (%)</option>
-                          <option value="fixed_amount">Fixed Amount (₹)</option>
-                          <option value="full">Full Waiver</option>
-                        </select>
+                  <p className="text-green-700 font-medium">All clear!</p>
+                  <p className="text-gray-400 text-sm mt-1">No online payments waiting.</p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden divide-y divide-gray-50">
+                  {pendingPayments.map(pmt => (
+                    <div key={pmt.id} className="px-4 py-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <p className="text-sm font-semibold text-gray-800">{pmt.student_name}</p>
+                            <span className="text-xs text-gray-400">Gr.{pmt.grade}{pmt.section} · #{pmt.roll_number}</span>
+                          </div>
+                          <p className="text-xs text-gray-500">{pmt.category_name} · {pmt.period_label}</p>
+                          <div className="flex items-center gap-3 mt-2 text-xs text-gray-400 flex-wrap">
+                            <span className="font-mono bg-yellow-50 border border-yellow-200 text-yellow-800 px-2 py-0.5 rounded">{pmt.receipt_number}</span>
+                            <span>{pmt.paid_date}</span>
+                            <span className="uppercase font-medium">{pmt.payment_mode}</span>
+                            {pmt.transaction_ref && <span className="font-mono">UTR: {pmt.transaction_ref}</span>}
+                          </div>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <p className="text-lg font-bold text-gray-800">{fmt(pmt.amount)}</p>
+                        </div>
                       </div>
-                      {waiverForm.waiver_type !== 'full' && (
-                        <div>
-                          <label className="text-xs font-medium text-gray-600">
-                            {waiverForm.waiver_type === 'percentage' ? 'Percentage (%)' : 'Amount (₹)'}
-                          </label>
-                          <input type="number" value={waiverForm.waiver_value}
-                            onChange={e => setWaiverForm(p => ({ ...p, waiver_value: e.target.value }))}
-                            className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
+                      {showRejectForm === pmt.id ? (
+                        <div className="mt-3 flex items-center gap-2">
+                          <input type="text" placeholder="Reason for rejection…" value={rejectReason}
+                            onChange={e => setRejectReason(e.target.value)}
+                            className="flex-1 text-sm border border-red-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-red-400" />
+                          <button onClick={() => verifyPayment(pmt.id, 'reject')} disabled={verifyingId === pmt.id || !rejectReason.trim()}
+                            className="text-sm bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50">Confirm Reject</button>
+                          <button onClick={() => { setShowRejectForm(null); setRejectReason('') }}
+                            className="text-sm text-gray-400 px-3 py-1.5">Cancel</button>
+                        </div>
+                      ) : (
+                        <div className="mt-3 flex gap-2">
+                          <button onClick={() => verifyPayment(pmt.id, 'approve')} disabled={verifyingId === pmt.id}
+                            className="text-sm bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50">✓ Approve</button>
+                          <button onClick={() => setShowRejectForm(pmt.id)}
+                            className="text-sm border border-red-200 text-red-600 px-4 py-1.5 rounded-lg hover:bg-red-50">✗ Reject</button>
                         </div>
                       )}
                     </div>
-                    <div>
-                      <label className="text-xs font-medium text-gray-600">Reason (required)</label>
-                      <input type="text" placeholder="e.g. Financial hardship, merit scholarship" value={waiverForm.reason}
-                        onChange={e => setWaiverForm(p => ({ ...p, reason: e.target.value }))}
-                        className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-gray-600">Approved By</label>
-                      <input type="text" placeholder="Principal / Admin name" value={waiverForm.granted_by_name}
-                        onChange={e => setWaiverForm(p => ({ ...p, granted_by_name: e.target.value }))}
-                        className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none" />
-                    </div>
-                    <button onClick={submitWaiver} disabled={waiverLoading || !waiverForm.reason}
-                      className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2.5 rounded-lg text-sm disabled:opacity-50">
-                      {waiverLoading ? 'Granting…' : 'Grant Waiver'}
-                    </button>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-                <p className="text-gray-400 text-sm">Search a student on the left, or click <strong>Collect →</strong> on any Ledger row</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ═══ PENDING VERIFICATIONS ═══════════════════════════════════════════════ */}
-      {activeTab === 'pending' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-base font-semibold text-gray-800">Online Payments — Pending Verification</h2>
-              <p className="text-xs text-gray-400 mt-0.5">Parents submit payments online. Approve once confirmed, reject if not received.</p>
-            </div>
-            <button onClick={loadPending} className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Refresh</button>
-          </div>
-
-          {verifyMsg && (
-            <div className={`text-sm px-4 py-3 rounded-lg ${verifyMsg.startsWith('✓') ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-600 border border-red-200'}`}>
-              {verifyMsg}
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
-          {pendingLoading ? (
-            <div className="bg-white rounded-xl border border-gray-100 p-12 text-center">
-              <p className="text-gray-400 text-sm">Loading…</p>
-            </div>
-          ) : pendingPayments.length === 0 ? (
-            <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-              <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
+          {/* ─── DEFAULTERS ─── */}
+          {collectionView === 'defaulters' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-semibold text-gray-800">Defaulters — Outstanding Dues</h3>
+                <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&status=overdue`} download
+                  className="text-sm border border-red-200 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50">Export Defaulters</a>
               </div>
-              <p className="text-green-700 font-medium">All clear!</p>
-              <p className="text-gray-400 text-sm mt-1">No online payments pending verification.</p>
-            </div>
-          ) : (
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <div className="px-4 py-3 bg-yellow-50 border-b border-yellow-100 flex items-center gap-2">
-                <span className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
-                <p className="text-sm font-semibold text-yellow-800">{pendingPayments.length} payment{pendingPayments.length !== 1 ? 's' : ''} awaiting verification</p>
-              </div>
-              <div className="divide-y divide-gray-50">
-                {pendingPayments.map(pmt => (
-                  <div key={pmt.id} className="px-4 py-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <p className="text-sm font-semibold text-gray-800">{pmt.student_name}</p>
-                          <span className="text-xs text-gray-400">Gr.{pmt.grade}{pmt.section} · {pmt.roll_number}</span>
-                        </div>
-                        <p className="text-xs text-gray-500">{pmt.category_name} · {pmt.period_label}</p>
-                        <div className="flex items-center gap-2 mt-2">
-                          <span className="inline-flex items-center gap-1.5 bg-yellow-100 border border-yellow-200 text-yellow-800 text-xs font-bold font-mono px-2.5 py-1 rounded-lg">
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                            {pmt.receipt_number}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-3 mt-1.5 text-xs text-gray-400">
-                          <span>{pmt.paid_date}</span>
-                          <span>·</span>
-                          <span className="uppercase font-medium">{pmt.payment_mode}</span>
-                          {pmt.transaction_ref && <><span>·</span><span className="font-mono">{pmt.transaction_ref}</span></>}
-                        </div>
-                        {pmt.notes && <p className="text-xs text-gray-400 mt-1 italic">{pmt.notes}</p>}
-                      </div>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-lg font-bold text-gray-800">{fmt(pmt.amount)}</p>
-                        <p className="text-xs text-gray-400">of {fmt(pmt.ledger_balance)} balance</p>
-                      </div>
+              {(() => {
+                const defaulters = studentRows.filter(r => r.outstanding > 0).sort((a, b) => b.outstanding - a.outstanding)
+                if (ledgerLoading) return <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-sm text-gray-400">Loading…</div>
+                if (defaulters.length === 0) return (
+                  <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
+                    <p className="text-green-700 font-medium">No defaulters — all dues cleared!</p>
+                  </div>
+                )
+                return (
+                  <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                    <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex justify-between">
+                      <p className="text-sm text-gray-500">{defaulters.length} students with outstanding dues</p>
+                      <p className="text-sm font-bold text-red-600">Total: {fmt(defaulters.reduce((s, r) => s + r.outstanding, 0))}</p>
                     </div>
+                    <div className="overflow-x-auto max-h-[600px]">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-gray-50">
+                          <tr className="text-xs text-gray-500 border-b border-gray-100">
+                            <th className="text-left px-4 py-2 font-semibold">Student</th>
+                            <th className="text-left px-4 py-2 font-semibold">Grade</th>
+                            <th className="text-right px-4 py-2 font-semibold">Outstanding</th>
+                            <th className="text-center px-4 py-2 font-semibold">Open Bills</th>
+                            <th className="text-center px-4 py-2 font-semibold">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {defaulters.map(r => (
+                            <tr key={r.student_id} className="border-b border-gray-50 hover:bg-gray-50">
+                              <td className="px-4 py-2.5">
+                                <p className="font-medium text-gray-800">{r.student_name}</p>
+                                <p className="text-xs text-gray-400">#{r.roll_number}</p>
+                              </td>
+                              <td className="px-4 py-2.5 text-gray-600">Gr.{r.grade}{r.section}</td>
+                              <td className="px-4 py-2.5 text-right font-bold text-red-600">{fmt(r.outstanding)}</td>
+                              <td className="px-4 py-2.5 text-center">
+                                <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">{r.open_entries.length}</span>
+                                {r.has_overdue && <span className="text-[10px] text-red-400 ml-1">overdue</span>}
+                              </td>
+                              <td className="px-4 py-2.5 text-center">
+                                <button onClick={() => { setCollectionView('counter'); setLedgerSearch(r.roll_number); setOpenStudentId(r.student_id); startCollect(r) }}
+                                  className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg font-medium hover:bg-blue-700">Collect</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })()}
+            </div>
+          )}
 
-                    {showRejectForm === pmt.id ? (
-                      <div className="mt-3 flex items-center gap-2">
-                        <input type="text" placeholder="Reason for rejection…" value={rejectReason}
-                          onChange={e => setRejectReason(e.target.value)}
-                          className="flex-1 text-sm border border-red-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-red-300" />
-                        <button onClick={() => verifyPayment(pmt.id, 'reject')} disabled={verifyingId === pmt.id || !rejectReason}
-                          className="text-sm bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50">
-                          {verifyingId === pmt.id ? 'Rejecting…' : 'Confirm Reject'}
-                        </button>
-                        <button onClick={() => setShowRejectForm(null)} className="text-sm text-gray-400 px-2 py-1.5">Cancel</button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2 mt-3">
-                        <button onClick={() => verifyPayment(pmt.id, 'approve')} disabled={verifyingId === pmt.id}
-                          className="text-sm bg-green-600 text-white px-5 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium">
-                          {verifyingId === pmt.id ? 'Approving…' : '✓ Approve'}
-                        </button>
-                        <button onClick={() => setShowRejectForm(pmt.id)}
-                          className="text-sm border border-red-200 text-red-600 px-4 py-1.5 rounded-lg hover:bg-red-50">
-                          ✗ Reject
-                        </button>
+          {/* ─── DAY CLOSE ─── */}
+          {collectionView === 'dayclose' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-semibold text-gray-800">Day Close — End of Day Reconciliation</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Review the day's collections and verify cash in hand. Closing locks the day's record.</p>
+                </div>
+                <input type="date" value={dayCloseDate} onChange={e => setDayCloseDate(e.target.value)}
+                  className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white" />
+              </div>
+
+              {dayCloseLoading ? (
+                <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-sm text-gray-400">Loading…</div>
+              ) : dayCloseData ? (
+                <>
+                  <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-gray-100">
+                      <p className="text-sm font-semibold text-gray-700">Collections on {fmtDate(dayCloseDate)}</p>
+                    </div>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
+                          <th className="text-left px-4 py-2 font-semibold">Mode</th>
+                          <th className="text-right px-4 py-2 font-semibold">Transactions</th>
+                          <th className="text-right px-4 py-2 font-semibold">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {['cash','cheque','dd','upi','online'].map(mode => {
+                          const m = dayCloseData.by_mode[mode]
+                          if (!m) return null
+                          return (
+                            <tr key={mode} className="border-b border-gray-50">
+                              <td className="px-4 py-2.5 capitalize text-gray-700">{mode}</td>
+                              <td className="px-4 py-2.5 text-right text-gray-500">{m.count}</td>
+                              <td className="px-4 py-2.5 text-right font-medium text-gray-800">{fmt(m.total)}</td>
+                            </tr>
+                          )
+                        })}
+                        <tr className="bg-gray-50 font-bold">
+                          <td className="px-4 py-2.5 text-gray-700">Total</td>
+                          <td className="px-4 py-2.5 text-right text-gray-600">{dayCloseData.receipts.count}</td>
+                          <td className="px-4 py-2.5 text-right text-gray-900">{fmt(dayCloseData.receipts.total)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    {dayCloseData.receipts.first && (
+                      <div className="px-4 py-2.5 border-t border-gray-100 text-xs text-gray-400">
+                        Receipts issued: {dayCloseData.receipts.first} → {dayCloseData.receipts.last}
                       </div>
                     )}
                   </div>
-                ))}
-              </div>
+
+                  {/* Cash verification */}
+                  <div className="bg-white rounded-xl border border-gray-100 p-5">
+                    <p className="text-sm font-semibold text-gray-700 mb-3">Cash Verification</p>
+                    <div className="grid grid-cols-3 gap-4 items-end">
+                      <div>
+                        <p className="text-xs text-gray-400">System says cash collected</p>
+                        <p className="text-lg font-bold text-gray-800">{fmt(dayCloseData.by_mode['cash']?.total || 0)}</p>
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-600">Actual cash in hand</label>
+                        <div className="relative mt-1">
+                          <span className="absolute left-3 top-2.5 text-gray-400 text-sm">₹</span>
+                          <input type="number" min="0" placeholder="0" value={actualCash}
+                            onChange={e => setActualCash(e.target.value)}
+                            className="w-full pl-7 pr-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-400">Difference</p>
+                        {(() => {
+                          const sys = dayCloseData.by_mode['cash']?.total || 0
+                          const diff = actualCash !== '' ? parseFloat(actualCash) - sys : null
+                          if (diff === null) return <p className="text-lg font-bold text-gray-300">—</p>
+                          return <p className={`text-lg font-bold ${diff === 0 ? 'text-green-600' : 'text-red-600'}`}>{diff === 0 ? '✓ Matches' : fmt(diff)}</p>
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+
+                  {dayCloseData.already_closed && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-700">
+                      🔒 This day was already closed. Re-submitting will update the record.
+                    </div>
+                  )}
+                  {dayCloseMsg && (
+                    <p className={`text-sm font-medium ${dayCloseMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{dayCloseMsg}</p>
+                  )}
+                  <div className="flex justify-end gap-2">
+                    <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=payments`} download
+                      className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">Export Day Report</a>
+                    <button onClick={submitDayClose} disabled={dayCloseSubmitting || dayCloseData.receipts.count === 0}
+                      className="text-sm bg-blue-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
+                      {dayCloseSubmitting ? 'Closing…' : dayCloseData.already_closed ? 'Update Day Close' : 'Submit Day Close'}
+                    </button>
+                  </div>
+                </>
+              ) : null}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ═══ STUDENT PASSBOOK ════════════════════════════════════════════════════ */}
+      {activeTab === 'students' && (
+        <div className="space-y-4">
+          {/* Directory: grade dropdown + search + list (hidden once a passbook is open) */}
+          {!pbData && (
+            <div className="bg-white rounded-xl border border-gray-100 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <label className="text-sm font-semibold text-gray-700">Student Directory</label>
+                  <p className="text-xs text-gray-400">Pick a class, or search by name / roll number, then click a student to open their passbook.</p>
+                </div>
+                <button onClick={loadPbAllStudents} className="text-xs border border-gray-200 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-50">Refresh</button>
+              </div>
+              <div className="flex items-center gap-3 mb-3">
+                <select value={pbGrade} onChange={e => setPbGrade(e.target.value)}
+                  className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
+                  <option value="">All Grades</option>
+                  {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                </select>
+                <input type="text" placeholder="Search name or roll number…" value={pbSearch}
+                  onChange={e => setPbSearch(e.target.value)}
+                  className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+
+              {pbAllLoading ? (
+                <p className="text-sm text-gray-400 py-8 text-center">Loading students…</p>
+              ) : (() => {
+                const q = pbSearch.trim().toLowerCase()
+                const list = pbAllStudents.filter(s =>
+                  (!pbGrade || String(s.grade) === pbGrade) &&
+                  (!q || s.name.toLowerCase().includes(q) || (s.roll_number || '').toLowerCase().includes(q))
+                )
+                if (pbAllStudents.length === 0) return <p className="text-sm text-gray-400 py-8 text-center">No students found for this school.</p>
+                if (list.length === 0) return <p className="text-sm text-gray-400 py-8 text-center">No students match your filter.</p>
+                return (
+                  <div className="border border-gray-100 rounded-lg overflow-hidden">
+                    <div className="px-3 py-2 bg-gray-50 border-b border-gray-100 text-xs text-gray-500">{list.length} student{list.length !== 1 ? 's' : ''}</div>
+                    <div className="divide-y divide-gray-50 max-h-[480px] overflow-y-auto">
+                      {list.map(s => (
+                        <button key={s.id} onClick={() => loadPassbook(s.id)}
+                          className="w-full text-left px-4 py-2.5 hover:bg-blue-50 flex items-center justify-between group">
+                          <span className="text-sm font-medium text-gray-800">{s.name}</span>
+                          <span className="flex items-center gap-3">
+                            <span className="text-xs text-gray-400">Gr.{s.grade}{s.section} · #{s.roll_number}</span>
+                            <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100">Open →</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })()}
+            </div>
+          )}
+
+          {pbErr && !pbData && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-600">{pbErr}</div>
+          )}
+
+          {pbLoading ? (
+            <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-sm text-gray-400">Loading passbook…</div>
+          ) : pbData ? (
+            <>
+              <button onClick={() => setPbData(null)}
+                className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1">← Back to student list</button>
+
+              {/* Header card */}
+              <div className="bg-white rounded-xl border border-gray-100 p-5">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">{pbData.student.name}</h3>
+                    <p className="text-sm text-gray-500">Grade {pbData.student.grade}{pbData.student.section} · Roll #{pbData.student.roll_number}</p>
+                    {(pbData.student.parent_name || pbData.student.parent_phone) && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        Parent: {pbData.student.parent_name || '—'}{pbData.student.parent_phone ? ` · 📞 ${pbData.student.parent_phone}` : ''}
+                      </p>
+                    )}
+                  </div>
+                  <button onClick={printPassbookStatement}
+                    className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">🖨 Print Statement</button>
+                </div>
+                <div className="grid grid-cols-4 gap-3 mt-4">
+                  {[
+                    { l: 'Total Billed', v: pbData.summary.total_billed, c: 'text-gray-900' },
+                    { l: 'Paid',         v: pbData.summary.total_paid,    c: 'text-green-700' },
+                    { l: 'Waived',       v: pbData.summary.total_waived,  c: 'text-purple-700' },
+                    { l: 'Outstanding',  v: pbData.summary.outstanding,   c: 'text-red-600' },
+                  ].map(s => (
+                    <div key={s.l} className="bg-gray-50 rounded-lg px-3 py-2.5 text-center">
+                      <p className="text-xs text-gray-400">{s.l}</p>
+                      <p className={`text-lg font-bold mt-0.5 ${s.c}`}>{fmt(s.v)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Section switcher */}
+              <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
+                {([
+                  { key: 'bills',    label: `Current Bills (${pbData.ledger.length})` },
+                  { key: 'payments', label: `Payments (${pbData.payments.length})` },
+                  { key: 'waivers',  label: `Waivers (${pbData.waivers.length})` },
+                  { key: 'timeline', label: 'Full Timeline' },
+                ] as const).map(v => (
+                  <button key={v.key} onClick={() => setPbSection(v.key)}
+                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                      pbSection === v.key ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                    }`}>{v.label}</button>
+                ))}
+              </div>
+
+              {/* Bills */}
+              {pbSection === 'bills' && (
+                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                  {pbData.ledger.length === 0 ? (
+                    <p className="text-sm text-gray-400 p-8 text-center">No bills for {academicYear}.</p>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
+                          <th className="text-left px-4 py-2 font-semibold">Fee Head · Period</th>
+                          <th className="text-right px-4 py-2 font-semibold">Billed</th>
+                          <th className="text-right px-4 py-2 font-semibold">Paid</th>
+                          <th className="text-right px-4 py-2 font-semibold">Waived</th>
+                          <th className="text-right px-4 py-2 font-semibold">Balance</th>
+                          <th className="text-left px-4 py-2 font-semibold">Due Date</th>
+                          <th className="text-left px-4 py-2 font-semibold">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pbData.ledger.map(e => (
+                          <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
+                            <td className="px-4 py-2.5 text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></td>
+                            <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
+                            <td className="px-4 py-2.5 text-right text-green-600">{fmt(e.amount_paid)}</td>
+                            <td className="px-4 py-2.5 text-right text-purple-600">{Number(e.waiver_amount) > 0 ? fmt(e.waiver_amount) : '—'}</td>
+                            <td className="px-4 py-2.5 text-right font-bold text-red-600">{fmt(e.balance)}</td>
+                            <td className="px-4 py-2.5 text-gray-500 text-xs">{e.due_date}</td>
+                            <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full capitalize ${STATUS_COLORS[e.status]}`}>{e.status}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+
+              {/* Payments */}
+              {pbSection === 'payments' && (
+                <div className="space-y-3">
+                  {pbData.pending_payments.length > 0 && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-xl overflow-hidden">
+                      <div className="px-4 py-2 border-b border-yellow-100"><p className="text-xs font-semibold text-yellow-700 uppercase">Pending / Rejected</p></div>
+                      <div className="divide-y divide-yellow-100">
+                        {pbData.pending_payments.map(p => (
+                          <div key={p.id} className="px-4 py-2.5 flex items-center justify-between">
+                            <div>
+                              <p className="text-sm text-gray-700 font-mono">{p.receipt_number}</p>
+                              <p className="text-xs text-gray-400">{p.paid_date} · {p.payment_mode.toUpperCase()}{p.rejection_reason ? ` · Rejected: ${p.rejection_reason}` : ''}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-bold text-gray-700">{fmt(p.amount)}</p>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${p.payment_status === 'rejected' ? 'bg-red-100 text-red-600' : 'bg-yellow-100 text-yellow-700'}`}>
+                                {p.payment_status === 'rejected' ? 'Rejected' : 'Pending'}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                    {pbData.payments.length === 0 ? (
+                      <p className="text-sm text-gray-400 p-8 text-center">No payments recorded.</p>
+                    ) : (
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
+                            <th className="text-left px-4 py-2 font-semibold">Receipt</th>
+                            <th className="text-left px-4 py-2 font-semibold">Date</th>
+                            <th className="text-right px-4 py-2 font-semibold">Amount</th>
+                            <th className="text-left px-4 py-2 font-semibold">Mode</th>
+                            <th className="text-left px-4 py-2 font-semibold">Collected By</th>
+                            <th className="text-right px-4 py-2 font-semibold">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pbData.payments.map(p => {
+                            const isCancelled = p.payment_status === 'cancelled'
+                            return (
+                            <Fragment key={p.id}>
+                              <tr className={`border-b border-gray-50 ${isCancelled ? 'bg-gray-50/60' : 'hover:bg-gray-50'}`}>
+                                <td className={`px-4 py-2.5 font-mono text-xs ${isCancelled ? 'text-gray-400 line-through' : 'text-indigo-600'}`}>{p.receipt_number}</td>
+                                <td className="px-4 py-2.5 text-gray-600">{fmtDate(p.paid_date)}</td>
+                                <td className={`px-4 py-2.5 text-right font-bold ${isCancelled ? 'text-gray-400 line-through' : 'text-green-700'}`}>{fmt(p.amount)}</td>
+                                <td className="px-4 py-2.5 uppercase text-gray-500 text-xs">{p.payment_mode}</td>
+                                <td className="px-4 py-2.5 text-gray-500">{p.collected_by_name || '—'}</td>
+                                <td className="px-4 py-2.5 text-right">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    {isCancelled ? (
+                                      <span className="text-[10px] bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full font-medium">Cancelled</span>
+                                    ) : cancelPmtId === p.id ? (
+                                      <button onClick={() => setCancelPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
+                                    ) : (
+                                      <button onClick={() => openCancel(p.id)}
+                                        className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
+                                    )}
+                                    <button onClick={() => printPassbookReceipt(p)} title="Print receipt"
+                                      className="text-xs border border-indigo-200 text-indigo-600 px-2.5 py-1 rounded-lg hover:bg-indigo-50">🖨 Print</button>
+                                  </div>
+                                </td>
+                              </tr>
+                              {cancelPmtId === p.id && (
+                                <tr className="bg-amber-50 border-b border-amber-100">
+                                  <td colSpan={6} className="px-4 py-3">
+                                    <div className="space-y-3">
+                                      <div className="flex gap-2">
+                                        <button onClick={() => setCancelMode('cancel')}
+                                          className={`text-xs px-3 py-1.5 rounded-lg font-medium ${cancelMode === 'cancel' ? 'bg-red-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}>Cancel Payment</button>
+                                        <button onClick={() => { setCancelMode('correct'); setCorrectAmount(String(p.amount)) }}
+                                          className={`text-xs px-3 py-1.5 rounded-lg font-medium ${cancelMode === 'correct' ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}>Correct Amount</button>
+                                      </div>
+
+                                      {/* Consequence preview */}
+                                      <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                                        {cancelMode === 'cancel' ? (
+                                          <>⚠ This will reverse <strong>{fmt(p.amount)}</strong> from the student&apos;s ledger. The bill balance will increase by {fmt(p.amount)} and its status may revert to pending/overdue. Receipt {p.receipt_number} stays on record marked cancelled.</>
+                                        ) : (
+                                          <>⚠ This cancels receipt {p.receipt_number} ({fmt(p.amount)}) and records a fresh payment of <strong>{correctAmount ? fmt(parseFloat(correctAmount) || 0) : '₹0'}</strong> with a new receipt number. Net ledger change: {fmt((parseFloat(correctAmount) || 0) - Number(p.amount))}.</>
+                                        )}
+                                      </div>
+
+                                      {cancelMode === 'correct' && (
+                                        <div>
+                                          <label className="text-xs font-medium text-gray-600">Corrected amount (₹)</label>
+                                          <input type="number" min="0" value={correctAmount}
+                                            onChange={e => setCorrectAmount(e.target.value)}
+                                            className="mt-1 w-40 border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                        </div>
+                                      )}
+                                      <div>
+                                        <label className="text-xs font-medium text-gray-600">Reason (required — recorded in audit log)</label>
+                                        <input type="text" placeholder="e.g. Wrong amount entered · Cheque bounced · Duplicate entry"
+                                          value={cancelReason} onChange={e => setCancelReason(e.target.value)}
+                                          className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                      </div>
+                                      {cancelMsg && <p className={`text-xs ${cancelMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{cancelMsg}</p>}
+                                      <div className="flex gap-2">
+                                        <button onClick={() => submitCancelCorrect('passbook')} disabled={cancelBusy || !cancelReason.trim()}
+                                          className={`text-sm text-white px-4 py-1.5 rounded-lg font-medium disabled:opacity-50 ${cancelMode === 'cancel' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                                          {cancelBusy ? 'Working…' : cancelMode === 'cancel' ? `Confirm Cancel (${fmt(p.amount)})` : 'Confirm Correction'}
+                                        </button>
+                                        <button onClick={() => setCancelPmtId(null)} className="text-sm text-gray-500 px-3 py-1.5">Cancel</button>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          ) })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Waivers */}
+              {pbSection === 'waivers' && (
+                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                  {pbData.waivers.length === 0 ? (
+                    <p className="text-sm text-gray-400 p-8 text-center">No waivers granted to this student.</p>
+                  ) : (
+                    <div className="divide-y divide-gray-50">
+                      {pbData.waivers.map(w => (
+                        <div key={w.id} className="px-4 py-3 flex items-center justify-between">
+                          <div>
+                            <p className="text-sm font-medium text-gray-800">{w.fee_head_name} · {w.period_label}</p>
+                            <p className="text-xs text-gray-400">{w.reason}{w.granted_by_name ? ` · by ${w.granted_by_name}` : ''} · {fmtDate(w.created_at)}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-purple-700">−{fmt(w.waiver_amount)}</p>
+                            <p className="text-[10px] text-purple-400 capitalize">{w.waiver_type.replace('_', ' ')}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Timeline (bank passbook) */}
+              {pbSection === 'timeline' && (
+                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                  <div className="px-4 py-2.5 border-b border-gray-100">
+                    <p className="text-sm font-semibold text-gray-700">Complete Financial Timeline</p>
+                    <p className="text-xs text-gray-400">Every charge, payment, waiver and revision — chronological with running balance.</p>
+                  </div>
+                  {pbData.timeline.length === 0 ? (
+                    <p className="text-sm text-gray-400 p-8 text-center">No activity yet.</p>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
+                          <th className="text-left px-4 py-2 font-semibold">Date</th>
+                          <th className="text-left px-4 py-2 font-semibold">Description</th>
+                          <th className="text-right px-4 py-2 font-semibold">Charge</th>
+                          <th className="text-right px-4 py-2 font-semibold">Paid/Waived</th>
+                          <th className="text-right px-4 py-2 font-semibold">Balance</th>
+                          <th className="text-left px-4 py-2 font-semibold">By</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pbData.timeline.map((t, i) => {
+                          const icon = t.type === 'bill' ? '📌' : t.type === 'payment' ? '💸' : t.type === 'waiver' ? '🎁' : '✏️'
+                          return (
+                            <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                              <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{fmtDate(t.date)}</td>
+                              <td className="px-4 py-2.5 text-gray-700">
+                                <span className="mr-1.5">{icon}</span>{t.description}
+                                {t.reference && <span className="text-xs text-indigo-500 ml-1 font-mono">({t.reference})</span>}
+                              </td>
+                              <td className="px-4 py-2.5 text-right text-red-500">{t.debit > 0 ? fmt(t.debit) : ''}</td>
+                              <td className="px-4 py-2.5 text-right text-green-600">{t.credit > 0 ? fmt(t.credit) : ''}</td>
+                              <td className="px-4 py-2.5 text-right font-semibold text-gray-800">{fmt(t.balance)}</td>
+                              <td className="px-4 py-2.5 text-gray-400 text-xs">{t.by}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+            </>
+          ) : null}
         </div>
       )}
 
@@ -2246,16 +3583,17 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
               </div>
 
               <div className="grid grid-cols-2 gap-5">
-                {/* Grade-wise collection */}
+                {/* Class-wise collection */}
                 <div className="bg-white rounded-xl border border-gray-100 p-5">
-                  <h3 className="text-sm font-semibold text-gray-700 mb-4">Grade-wise Collection</h3>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-4">Class-wise Collection</h3>
                   <div className="space-y-3">
                     {reportData.byGrade.map(g => {
                       const pct = g.total_due > 0 ? Math.round((Number(g.total_collected) / Number(g.total_due)) * 100) : 0
+                      const cls = g.section ? `${g.grade}-${g.section}` : `Grade ${g.grade}`
                       return (
-                        <div key={g.grade}>
+                        <div key={cls}>
                           <div className="flex justify-between text-xs mb-1">
-                            <span className="font-medium text-gray-700">Grade {g.grade} <span className="text-gray-400">({g.students} students)</span></span>
+                            <span className="font-medium text-gray-700">{cls} <span className="text-gray-400">({g.students} students)</span></span>
                             <span className="text-gray-500">{fmt(g.total_collected)} / {fmt(g.total_due)} <span className="font-bold text-blue-600">{pct}%</span></span>
                           </div>
                           <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
@@ -2365,6 +3703,69 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
                   </div>
                 </div>
               )}
+
+              {/* ── Audit Log ── */}
+              <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700">Audit Log — Every Financial Action</p>
+                    <p className="text-xs text-gray-400">Permanent record of all payments, waivers, edits and config changes. Cannot be deleted.</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <a href={`/api/fees/audit-log?school_id=${schoolId}&academic_year=${academicYear}&format=csv&generated_by=${encodeURIComponent(adminName || 'Admin')}&limit=5000`} download
+                      className="text-sm border border-gray-800 text-gray-800 px-3 py-1.5 rounded-lg hover:bg-gray-100">⬇ Export Audit (CSV)</a>
+                    {!showAuditLog ? (
+                      <button onClick={loadAuditLog}
+                        className="text-sm bg-gray-800 text-white px-4 py-1.5 rounded-lg hover:bg-gray-900">View Audit Log</button>
+                    ) : (
+                      <button onClick={() => setShowAuditLog(false)}
+                        className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Hide</button>
+                    )}
+                  </div>
+                </div>
+                {showAuditLog && (
+                  auditLoading ? (
+                    <p className="text-sm text-gray-400 p-8 text-center">Loading audit log…</p>
+                  ) : auditLog.length === 0 ? (
+                    <p className="text-sm text-gray-400 p-8 text-center">No financial actions recorded yet.</p>
+                  ) : (
+                    <div className="overflow-x-auto max-h-[480px]">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-gray-50">
+                          <tr className="text-xs text-gray-500 border-b border-gray-100">
+                            <th className="text-left px-4 py-2 font-semibold whitespace-nowrap">Date / Time</th>
+                            <th className="text-left px-4 py-2 font-semibold">Who</th>
+                            <th className="text-left px-4 py-2 font-semibold">Action</th>
+                            <th className="text-left px-4 py-2 font-semibold">Detail</th>
+                            <th className="text-right px-4 py-2 font-semibold">Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {auditLog.map((a, i) => {
+                            const actionColor =
+                              a.action.includes('rejected') || a.action.includes('revoked') ? 'text-red-600' :
+                              a.action.includes('Payment recorded') ? 'text-green-600' :
+                              a.action.includes('Waiver granted') ? 'text-purple-600' :
+                              a.action.includes('edited') || a.action.includes('changed') ? 'text-amber-600' :
+                              'text-gray-600'
+                            return (
+                              <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
+                                <td className="px-4 py-2 text-gray-500 text-xs whitespace-nowrap">
+                                  {new Date(a.at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                </td>
+                                <td className="px-4 py-2 text-gray-700">{a.who}</td>
+                                <td className={`px-4 py-2 font-medium ${actionColor}`}>{a.action}</td>
+                                <td className="px-4 py-2 text-gray-500 text-xs">{a.detail}</td>
+                                <td className="px-4 py-2 text-right text-gray-700">{a.amount != null ? fmt(a.amount) : '—'}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
+                )}
+              </div>
             </>
           ) : (
             <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
@@ -2378,124 +3779,203 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       {activeTab === 'yearend' && (
         <div className="space-y-5">
           <div>
-            <h2 className="text-base font-semibold text-gray-800">Year-End Fee Management — {academicYear}</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Handle unpaid entries at year-end: write them off or carry them forward to the next year.</p>
+            <h2 className="text-base font-semibold text-gray-800">Year-End Closure — {academicYear}</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Resolve unpaid dues, then close the books for this year. Closing locks the year against further changes.</p>
           </div>
 
-          {/* Action controls */}
-          <div className="bg-white rounded-xl border border-gray-100 p-5 space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <button
-                onClick={() => setYearEndAction('write_off')}
-                className={`rounded-xl border-2 px-4 py-3 text-left transition-all ${yearEndAction === 'write_off' ? 'border-red-400 bg-red-50' : 'border-gray-200 hover:border-gray-300'}`}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <div className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${yearEndAction === 'write_off' ? 'border-red-500 bg-red-500' : 'border-gray-300'}`} />
-                  <span className={`text-sm font-semibold ${yearEndAction === 'write_off' ? 'text-red-700' : 'text-gray-600'}`}>Write Off</span>
-                </div>
-                <p className="text-xs text-gray-400 pl-5">Mark selected unpaid entries as waived. Fee history preserved. No new entry in next year.</p>
-              </button>
-              <button
-                onClick={() => setYearEndAction('carry_forward')}
-                className={`rounded-xl border-2 px-4 py-3 text-left transition-all ${yearEndAction === 'carry_forward' ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <div className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${yearEndAction === 'carry_forward' ? 'border-blue-500 bg-blue-500' : 'border-gray-300'}`} />
-                  <span className={`text-sm font-semibold ${yearEndAction === 'carry_forward' ? 'text-blue-700' : 'text-gray-600'}`}>Carry Forward</span>
-                </div>
-                <p className="text-xs text-gray-400 pl-5">Create a new pending entry in next year's ledger for the balance. Student still owes the amount.</p>
-              </button>
-            </div>
-
-            <div className="flex items-end gap-3">
-              {yearEndAction === 'carry_forward' && (
-                <div>
-                  <label className="text-xs font-medium text-gray-600">Carry forward to year</label>
-                  <input type="text" placeholder="e.g. 2026-27" value={yearEndToYear}
-                    onChange={e => setYearEndToYear(e.target.value)}
-                    className="mt-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-32" />
-                </div>
-              )}
-              <div className="flex-1">
-                <label className="text-xs font-medium text-gray-600">Reason (optional)</label>
-                <input type="text" placeholder={yearEndAction === 'write_off' ? 'e.g. Year-end reconciliation' : 'e.g. Carrying forward dues to next year'}
-                  value={yearEndReason} onChange={e => setYearEndReason(e.target.value)}
-                  className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <button onClick={runYearEnd} disabled={yearEndProcessing || yearEndSelected.size === 0 || (yearEndAction === 'carry_forward' && !yearEndToYear.trim())}
-                className={`px-5 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-40 ${yearEndAction === 'write_off' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
-                {yearEndProcessing ? 'Processing…' : `${yearEndAction === 'write_off' ? 'Write Off' : 'Carry Forward'} ${yearEndSelected.size > 0 ? `(${yearEndSelected.size})` : ''}`}
-              </button>
-            </div>
-            {yearEndMsg && (
-              <p className={`text-sm font-medium ${yearEndMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{yearEndMsg}</p>
-            )}
-          </div>
-
-          {/* Unpaid entries table */}
           {yearEndLoading ? (
             <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-sm text-gray-400">Loading…</div>
-          ) : yearEndEntries.length === 0 ? (
-            <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-              <p className="text-green-600 font-medium">All fees settled!</p>
-              <p className="text-gray-400 text-sm mt-1">No unpaid entries for {academicYear}.</p>
+          ) : !yearEnd ? (
+            <div className="bg-white rounded-xl border border-gray-100 p-8 text-center">
+              <button onClick={loadYearEnd} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Load Year-End Review</button>
             </div>
           ) : (
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <input type="checkbox"
-                    checked={yearEndSelected.size === yearEndEntries.length}
-                    onChange={e => setYearEndSelected(e.target.checked ? new Set(yearEndEntries.map(r => r.id)) : new Set())}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-600" />
-                  <p className="text-sm text-gray-600">{yearEndEntries.length} unpaid entries · {yearEndSelected.size} selected</p>
+            <>
+              {/* Closed banner */}
+              {yearEnd.is_closed && (
+                <div className="bg-gray-800 text-white rounded-xl px-5 py-4 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-bold flex items-center gap-2">🔒 This year is CLOSED</p>
+                    <p className="text-xs text-gray-300 mt-0.5">
+                      Closed by {yearEnd.close_record?.closed_by} on {yearEnd.close_record ? fmtDate(yearEnd.close_record.closed_at) : ''}
+                      {' '}· Ledger and payments are locked.
+                    </p>
+                  </div>
+                  <button onClick={reopenYear} disabled={yeClosing}
+                    className="text-xs bg-white text-gray-800 px-4 py-1.5 rounded-lg font-medium hover:bg-gray-100 disabled:opacity-50">
+                    {yeClosing ? 'Working…' : 'Reopen Year'}
+                  </button>
                 </div>
-                <p className="text-sm font-medium text-red-600">
-                  Total Outstanding: {fmt(yearEndEntries.reduce((s, e) => s + Number(e.balance), 0))}
+              )}
+
+              {/* STEP 1 — Review summary */}
+              <div className="bg-white rounded-xl border border-gray-100 p-5">
+                <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Step 1 · Review</p>
+                <div className="grid grid-cols-4 gap-3">
+                  {[
+                    { l: 'Total Billed', v: yearEnd.summary.total_billed,    c: 'text-gray-900' },
+                    { l: 'Collected',    v: yearEnd.summary.total_collected, c: 'text-green-700' },
+                    { l: 'Waived',       v: yearEnd.summary.total_waived,    c: 'text-purple-700' },
+                    { l: 'Still Unpaid', v: yearEnd.summary.total_unpaid,    c: 'text-red-600' },
+                  ].map(s => (
+                    <div key={s.l} className="bg-gray-50 rounded-lg px-3 py-2.5 text-center">
+                      <p className="text-xs text-gray-400">{s.l}</p>
+                      <p className={`text-lg font-bold mt-0.5 ${s.c}`}>{fmt(s.v)}</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-gray-400 mt-3">
+                  {yearEnd.students.length} students have unpaid dues ({yearEnd.unpaid_count} bills). Decide what to do with each below.
                 </p>
               </div>
-              <div className="overflow-x-auto max-h-96">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-gray-50 border-b border-gray-100">
-                    <tr className="text-xs text-gray-500">
-                      <th className="px-4 py-2 w-8" />
-                      <th className="text-left px-4 py-2 font-semibold">Student</th>
-                      <th className="text-left px-4 py-2 font-semibold">Category · Period</th>
-                      <th className="text-right px-4 py-2 font-semibold">Due</th>
-                      <th className="text-right px-4 py-2 font-semibold">Paid</th>
-                      <th className="text-right px-4 py-2 font-semibold">Balance</th>
-                      <th className="text-left px-4 py-2 font-semibold">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {yearEndEntries.map(e => (
-                      <tr key={e.id} className={`border-b border-gray-50 hover:bg-gray-50 ${yearEndSelected.has(e.id) ? 'bg-blue-50' : ''}`}>
-                        <td className="px-4 py-2">
-                          <input type="checkbox" checked={yearEndSelected.has(e.id)}
-                            onChange={ev => {
-                              const next = new Set(yearEndSelected)
-                              if (ev.target.checked) next.add(e.id); else next.delete(e.id)
-                              setYearEndSelected(next)
-                            }}
-                            className="w-4 h-4 rounded border-gray-300 text-blue-600" />
-                        </td>
-                        <td className="px-4 py-2">
-                          <p className="font-medium text-gray-800">{e.student_name}</p>
-                          <p className="text-xs text-gray-400">Gr.{e.grade}{e.section} · #{e.roll_number}</p>
-                        </td>
-                        <td className="px-4 py-2 text-gray-600">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></td>
-                        <td className="px-4 py-2 text-right text-gray-700">{fmt(e.amount_due)}</td>
-                        <td className="px-4 py-2 text-right text-green-600">{fmt(e.amount_paid)}</td>
-                        <td className="px-4 py-2 text-right font-bold text-red-600">{fmt(e.balance)}</td>
-                        <td className="px-4 py-2">
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${STATUS_COLORS[e.status] || 'bg-gray-100 text-gray-600'}`}>{e.status}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+
+              {yearEnd.students.length === 0 ? (
+                <div className="bg-white rounded-xl border border-dashed border-green-200 p-10 text-center">
+                  <p className="text-green-700 font-medium">All dues settled — nothing to resolve!</p>
+                  <p className="text-gray-400 text-sm mt-1">You can close the year directly in Step 3 below.</p>
+                </div>
+              ) : (
+                <>
+                  {/* STEP 2 — Decide per student */}
+                  <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Step 2 · Decide each student</p>
+                      <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5">
+                        {([
+                          { key: 'all', label: `All (${yearEnd.students.length})` },
+                          { key: 'continuing', label: `Continuing (${yearEnd.students.filter(s => !s.is_leaver).length})` },
+                          { key: 'leavers', label: `Leaving (${yearEnd.students.filter(s => s.is_leaver).length})` },
+                        ] as const).map(f => (
+                          <button key={f.key} onClick={() => setYeFilter(f.key)}
+                            className={`px-3 py-1 text-xs font-medium rounded-md ${yeFilter === f.key ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500'}`}>
+                            {f.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Bulk helpers */}
+                    {!yearEnd.is_closed && (
+                      <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-gray-400">Bulk set visible:</span>
+                        <button onClick={() => { const next = { ...yeDecisions }; visibleYeStudents.forEach(s => { if (!s.is_leaver) next[s.student_id] = 'carry' }); setYeDecisions(next) }}
+                          className="text-xs border border-blue-200 text-blue-600 px-2.5 py-1 rounded-lg hover:bg-blue-50">All → Carry Forward</button>
+                        <button onClick={() => { const next = { ...yeDecisions }; visibleYeStudents.forEach(s => { next[s.student_id] = 'writeoff' }); setYeDecisions(next) }}
+                          className="text-xs border border-red-200 text-red-600 px-2.5 py-1 rounded-lg hover:bg-red-50">All → Write Off</button>
+                        <button onClick={() => { const next = { ...yeDecisions }; visibleYeStudents.forEach(s => { next[s.student_id] = 'open' }); setYeDecisions(next) }}
+                          className="text-xs border border-gray-200 text-gray-500 px-2.5 py-1 rounded-lg hover:bg-gray-100">All → Leave Open</button>
+                      </div>
+                    )}
+
+                    <div className="divide-y divide-gray-50 max-h-[460px] overflow-y-auto">
+                      {visibleYeStudents.map(s => {
+                        const decision = yeDecisions[s.student_id] || 'open'
+                        return (
+                          <div key={s.student_id} className="px-4 py-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm font-medium text-gray-800">{s.student_name}</p>
+                                  <span className="text-xs text-gray-400">Gr.{s.grade}{s.section} · #{s.roll_number}</span>
+                                  {s.is_leaver && (
+                                    <span className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">⚠ {s.leaver_reason}</span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-gray-400 mt-0.5">{s.bills.length} unpaid bill{s.bills.length > 1 ? 's' : ''}</p>
+                              </div>
+                              <div className="flex items-center gap-3 flex-shrink-0">
+                                <span className="text-sm font-bold text-red-600">{fmt(s.total_unpaid)}</span>
+                                {!yearEnd.is_closed && (
+                                  <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
+                                    <button
+                                      onClick={() => !s.is_leaver && setYeDecisions(p => ({ ...p, [s.student_id]: 'carry' }))}
+                                      disabled={s.is_leaver}
+                                      title={s.is_leaver ? 'Leavers cannot carry forward' : ''}
+                                      className={`px-2.5 py-1 transition-colors ${decision === 'carry' ? 'bg-blue-600 text-white' : s.is_leaver ? 'bg-gray-50 text-gray-300 cursor-not-allowed' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                                      Carry
+                                    </button>
+                                    <button
+                                      onClick={() => setYeDecisions(p => ({ ...p, [s.student_id]: 'writeoff' }))}
+                                      className={`px-2.5 py-1 border-l border-gray-200 transition-colors ${decision === 'writeoff' ? 'bg-red-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                                      Write Off
+                                    </button>
+                                    <button
+                                      onClick={() => setYeDecisions(p => ({ ...p, [s.student_id]: 'open' }))}
+                                      className={`px-2.5 py-1 border-l border-gray-200 transition-colors ${decision === 'open' ? 'bg-gray-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                                      Leave Open
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            {/* write-off reason inline */}
+                            {!yearEnd.is_closed && decision === 'writeoff' && (
+                              <input type="text" placeholder="Reason for write-off (recommended)…"
+                                value={yeReasons[s.student_id] || ''}
+                                onChange={e => setYeReasons(p => ({ ...p, [s.student_id]: e.target.value }))}
+                                className="mt-2 w-full text-xs border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-red-300" />
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* STEP 3 — Carry target + apply */}
+                  {!yearEnd.is_closed && (
+                    <div className="bg-white rounded-xl border border-gray-100 p-5 space-y-3">
+                      <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Step 3 · Carry-forward target</p>
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="text-sm text-gray-600">Carry unpaid dues forward to:</span>
+                        <span className="text-sm font-bold text-gray-800">{yearEnd.target_year}</span>
+                        {yearEnd.target_year_exists ? (
+                          <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">✓ Year exists</span>
+                        ) : (
+                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">⚠ Not created yet — create it in Academic Calendar before carrying forward</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-400">
+                        Carried dues become a single <strong>“Previous Year Dues ({academicYear})”</strong> bill on each student, due {startYearLabel(yearEnd.target_year)}-04-30. Works regardless of the student&apos;s new class.
+                      </p>
+                      {yeMsg && <p className={`text-sm font-medium ${yeMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{yeMsg}</p>}
+                      {(() => {
+                        const carryN = Object.values(yeDecisions).filter(d => d === 'carry').length
+                        const woN = Object.values(yeDecisions).filter(d => d === 'writeoff').length
+                        const total = carryN + woN
+                        return (
+                          <button onClick={applyYearEndDecisions} disabled={yeProcessing || total === 0}
+                            className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
+                            {yeProcessing ? 'Applying…' : `Apply Decisions (${carryN} carry, ${woN} write off)`}
+                          </button>
+                        )
+                      })()}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* STEP 4 & 5 — Statement + Close */}
+              {!yearEnd.is_closed && (
+                <div className="bg-white rounded-xl border border-gray-100 p-5 space-y-3">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Step 4 · Statement &amp; Close</p>
+                  <p className="text-xs text-gray-500">
+                    Print the year-end financial statement for your records, then close the year. Closing locks {academicYear} —
+                    no further payments or edits until reopened. Any students still “Leave Open” keep their dues unresolved.
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button onClick={printYearEndStatement}
+                      className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">🖨 Print Statement</button>
+                    <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download
+                      className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">Export Ledger CSV</a>
+                    <button onClick={() => { if (window.confirm(`Close ${academicYear}? This locks the year. You can reopen later if needed.`)) closeYear() }}
+                      disabled={yeClosing}
+                      className="ml-auto text-sm bg-gray-800 text-white px-5 py-2 rounded-lg font-medium hover:bg-gray-900 disabled:opacity-50">
+                      {yeClosing ? 'Closing…' : `🔒 Close Financial Year ${academicYear}`}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
