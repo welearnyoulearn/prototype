@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/stats?school_id=X&academic_year=2025-26
 export async function GET(req: NextRequest) {
@@ -11,6 +12,7 @@ export async function GET(req: NextRequest) {
     if (!school_id || !academic_year) {
       return NextResponse.json({ error: 'school_id and academic_year required' }, { status: 400 })
     }
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     try {
       // Auto-mark overdue
@@ -116,6 +118,18 @@ export async function GET(req: NextRequest) {
         [school_id, academic_year]
       )
 
+      // Students who are active but have NO ledger rows for this year (need billing)
+      const { rows: [{ unbilled_students }] } = await pool.query(
+        `SELECT COUNT(*) AS unbilled_students
+         FROM students s
+         WHERE s.school_id = $1 AND s.status = 'active'
+           AND NOT EXISTS (
+             SELECT 1 FROM student_fee_ledger l
+             WHERE l.student_id = s.id AND l.academic_year = $2
+           )`,
+        [school_id, academic_year]
+      )
+
       return NextResponse.json({
         summary,
         by_category,
@@ -123,6 +137,7 @@ export async function GET(req: NextRequest) {
         top_defaulters,
         by_payment_mode,
         by_class,
+        unbilled_students: Number(unbilled_students),
       })
     } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
 } catch (err: unknown) {

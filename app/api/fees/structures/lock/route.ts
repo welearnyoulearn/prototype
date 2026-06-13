@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireFeeAccess } from '@/lib/auth'
 
 // POST /api/fees/structures/lock — lock or unlock a fee structure for an academic year
-// Body: { school_id, academic_year, action: 'lock'|'unlock', locked_by }
+// Body: { school_id, academic_year, action: 'lock'|'unlock', locked_by? }
+// locked_by is derived server-side from the session.
 export async function POST(req: NextRequest) {
   try {
-    const { school_id, academic_year, action, locked_by } = await req.json()
+    const { school_id, academic_year, action, locked_by: clientActor } = await req.json()
+    const access = await requireFeeAccess(school_id)
+    if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const locked_by = clientActor || access.actor
     if (!school_id || !academic_year || !action) {
       return NextResponse.json({ error: 'school_id, academic_year, action required' }, { status: 400 })
     }
@@ -44,6 +49,7 @@ export async function GET(req: NextRequest) {
     if (!school_id || !academic_year) {
       return NextResponse.json({ error: 'school_id and academic_year required' }, { status: 400 })
     }
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
       const { rows: [tbl] } = await pool.query(`SELECT to_regclass('fee_structure_locks') IS NOT NULL AS exists`)
       if (!tbl.exists) return NextResponse.json(null)

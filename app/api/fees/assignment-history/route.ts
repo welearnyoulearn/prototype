@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/assignment-history?school_id=X&student_id=Y&fee_category_id=Z&academic_year=W
 // Returns change history for a specific student+category variable fee assignment
@@ -12,6 +13,7 @@ export async function GET(req: NextRequest) {
     const academic_year   = p.get('academic_year')
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     try {
       // Table may not exist yet if no changes have been saved

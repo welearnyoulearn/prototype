@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { requireSchoolAdmin } from '@/lib/auth'
+import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/structures?school_id=X&academic_year=2025-26
 export async function GET(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const school_id = req.nextUrl.searchParams.get('school_id')
     const academic_year = req.nextUrl.searchParams.get('academic_year')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
       const { rows } = await pool.query(
         `SELECT fs.*, fc.name AS category_name, fc.frequency
@@ -29,9 +29,11 @@ export async function GET(req: NextRequest) {
 // POST /api/fees/structures — upsert array of structures
 export async function POST(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     try {
-      const { school_id, academic_year, structures, changed_by = 'Admin' } = await req.json()
+      const { school_id, academic_year, structures, changed_by: clientActor } = await req.json()
+      const access = await requireFeeAccess(school_id)
+      if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      const changed_by = clientActor || access.actor
       if (!school_id || !academic_year || !Array.isArray(structures)) {
         return NextResponse.json({ error: 'school_id, academic_year, structures required' }, { status: 400 })
       }

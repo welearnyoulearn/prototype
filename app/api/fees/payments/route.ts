@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { requireSchoolAdmin, getAnySession } from '@/lib/auth'
+import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/payments?school_id=X&student_id=Y&ledger_id=Z
 export async function GET(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const p = req.nextUrl.searchParams
     const school_id  = p.get('school_id')
     const student_id = p.get('student_id')
     const ledger_id  = p.get('ledger_id')
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const conditions = ['fp.school_id = $1']
     const values: (string | number)[] = [school_id]
@@ -50,9 +50,6 @@ export async function GET(req: NextRequest) {
 //
 export async function POST(req: NextRequest) {
   try {
-    const session = await getAnySession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
     const client = await pool.connect()
     try {
       const body = await req.json()
@@ -63,9 +60,14 @@ export async function POST(req: NextRequest) {
         amount,                  // single-entry
         total_amount,            // multi-entry total
         payment_mode, transaction_ref,
-        collected_by_name, notes, paid_date,
+        collected_by_name: clientCollector, notes, paid_date,
         payment_status = 'completed',
       } = body
+
+      const access = await requireFeeAccess(school_id)
+      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      // Trust the session for the collector identity (fall back to provided name only as display)
+      const collected_by_name = clientCollector || access.actor
 
       if (!school_id || !student_id || !payment_mode) {
         return NextResponse.json({ error: 'school_id, student_id, payment_mode required' }, { status: 400 })

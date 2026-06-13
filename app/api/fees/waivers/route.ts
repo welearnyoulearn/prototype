@@ -1,17 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { requireSchoolAdmin } from '@/lib/auth'
+import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/waivers?school_id=X&student_id=Y
 export async function GET(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const p = req.nextUrl.searchParams
     const school_id  = p.get('school_id')
     const student_id = p.get('student_id')
     const ledger_id  = p.get('ledger_id')
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     // Self-heal: add soft-delete columns
     await pool.query(`ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS is_revoked    BOOLEAN     NOT NULL DEFAULT FALSE`)
@@ -49,10 +49,12 @@ export async function GET(req: NextRequest) {
 // POST /api/fees/waivers — grant a waiver and update ledger
 export async function POST(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const client = await pool.connect()
     try {
-      const { school_id, student_id, ledger_id, waiver_type, waiver_value, reason, granted_by_name } = await req.json()
+      const { school_id, student_id, ledger_id, waiver_type, waiver_value, reason, granted_by_name: clientActor } = await req.json()
+      const access = await requireFeeAccess(school_id)
+      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      const granted_by_name = clientActor || access.actor
       if (!school_id || !student_id || !ledger_id || !waiver_type || !reason) {
         return NextResponse.json({ error: 'school_id, student_id, ledger_id, waiver_type, reason required' }, { status: 400 })
       }
@@ -119,15 +121,19 @@ export async function POST(req: NextRequest) {
 // DELETE /api/fees/waivers?id=X&revoked_by=Admin&reason=... — soft-revoke waiver
 export async function DELETE(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const p          = req.nextUrl.searchParams
     const id         = p.get('id')
-    const revoked_by = p.get('revoked_by') || 'Admin'
     const reason     = p.get('reason') || 'Revoked by admin'
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
     const client = await pool.connect()
     try {
+      const { rows: [w0] } = await client.query(`SELECT school_id FROM fee_waivers WHERE id = $1`, [id])
+      if (!w0) { client.release(); return NextResponse.json({ error: 'Waiver not found' }, { status: 404 }) }
+      const access = await requireFeeAccess(w0.school_id)
+      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      const revoked_by = access.actor
+
       await client.query('BEGIN')
 
       // Soft-delete — mark as revoked, keep the record

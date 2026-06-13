@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/audit-log?school_id=X&academic_year=Y&limit=200
 // Unifies every financial action into one chronological audit trail:
@@ -12,6 +13,7 @@ export async function GET(req: NextRequest) {
     const academic_year = p.get('academic_year')
     const limit         = parseInt(p.get('limit') || '300')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     type AuditRow = { at: string; who: string; action: string; detail: string; amount: number | null }
     const rows: AuditRow[] = []

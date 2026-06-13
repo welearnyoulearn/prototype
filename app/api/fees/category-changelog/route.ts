@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/category-changelog?school_id=X&category_id=Y
 export async function GET(req: NextRequest) {
@@ -9,6 +10,7 @@ export async function GET(req: NextRequest) {
     const category_id = p.get('category_id')
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     try {
       const { rows: [tbl] } = await pool.query(

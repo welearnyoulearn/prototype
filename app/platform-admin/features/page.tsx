@@ -12,7 +12,7 @@ const TIERS = [
   { key: 'premium',  label: 'Premium',  color: 'text-purple-700', bg: 'bg-purple-50', ring: 'ring-purple-400', check: 'bg-purple-500' },
 ]
 
-const CATEGORY_ORDER = ['Core', 'Academic', 'Analytics', 'Finance', 'Communication', 'Administration']
+const CATEGORY_ORDER = ['Core', 'Scheduling', 'Analytics', 'Finance', 'Communication', 'Administration']
 
 export default function FeaturePlansPage() {
   const [features, setFeatures] = useState<Feature[]>([])

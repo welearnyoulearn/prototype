@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { requireSchoolAdmin } from '@/lib/auth'
+import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/ledger?school_id=X&academic_year=2025-26&grade=8&status=overdue&student_id=Y
 export async function GET(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const p = req.nextUrl.searchParams
     const school_id    = p.get('school_id')
     const academic_year = p.get('academic_year')
@@ -14,6 +13,7 @@ export async function GET(req: NextRequest) {
     const student_id   = p.get('student_id')
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const conditions = ['l.school_id = $1']
     const values: (string | number)[] = [school_id]

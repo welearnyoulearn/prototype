@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireFeeAccess } from '@/lib/auth'
 
 function toCSV(rows: Record<string, unknown>[], cols: { key: string; label: string }[]): string {
   const header = cols.map(c => `"${c.label}"`).join(',')
@@ -25,6 +26,7 @@ export async function GET(req: NextRequest) {
     if (!school_id || !academic_year) {
       return NextResponse.json({ error: 'school_id and academic_year required' }, { status: 400 })
     }
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     try {
       if (type === 'ledger') {
@@ -35,6 +37,7 @@ export async function GET(req: NextRequest) {
 
         const { rows } = await pool.query(
           `SELECT s.name AS student_name, s.roll_number, s.grade, s.section,
+                  s.parent_name, s.parent_phone,
                   fc.name AS category_name, l.period_label, l.amount_due,
                   l.amount_paid,
                   COALESCE(l.waiver_amount, 0) AS waiver_amount,
@@ -53,6 +56,8 @@ export async function GET(req: NextRequest) {
           { key: 'roll_number',   label: 'Roll Number' },
           { key: 'grade',         label: 'Grade' },
           { key: 'section',       label: 'Section' },
+          { key: 'parent_name',   label: 'Parent Name' },
+          { key: 'parent_phone',  label: 'Parent Phone' },
           { key: 'category_name', label: 'Fee Category' },
           { key: 'period_label',  label: 'Period' },
           { key: 'amount_due',    label: 'Amount Due (₹)' },
@@ -76,6 +81,7 @@ export async function GET(req: NextRequest) {
       if (type === 'payments') {
         const { rows } = await pool.query(
           `SELECT s.name AS student_name, s.roll_number, s.grade, s.section,
+                  s.parent_name, s.parent_phone,
                   fc.name AS category_name, l.period_label,
                   fp.receipt_number, fp.amount, fp.payment_mode, fp.payment_status,
                   fp.paid_date, fp.transaction_ref, fp.collected_by_name, fp.notes
@@ -94,6 +100,8 @@ export async function GET(req: NextRequest) {
           { key: 'roll_number',      label: 'Roll Number' },
           { key: 'grade',            label: 'Grade' },
           { key: 'section',          label: 'Section' },
+          { key: 'parent_name',      label: 'Parent Name' },
+          { key: 'parent_phone',     label: 'Parent Phone' },
           { key: 'category_name',    label: 'Fee Category' },
           { key: 'period_label',     label: 'Period' },
           { key: 'receipt_number',   label: 'Receipt Number' },
