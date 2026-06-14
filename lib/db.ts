@@ -9,6 +9,9 @@ types.setTypeParser(types.builtins.DATE, (val: string) => val)
 // Auto-detect local vs Supabase: skip SSL for localhost connections
 const dbUrl = process.env.DATABASE_URL ?? ''
 const isLocal = dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1')
+// Vercel serverless: each function instance is isolated — 1 connection is enough,
+// keeps us well under Supabase PgBouncer's session-mode pool_size limit.
+const isVercel = process.env.VERCEL === '1'
 
 // If individual params are set (avoids special-char URL encoding issues on Vercel),
 // use them directly. Otherwise fall back to the connection string URL.
@@ -20,14 +23,14 @@ const poolConfig = (process.env.PGHOST)
       user:     process.env.PGUSER,
       password: process.env.PGPASSWORD,
       ssl: { rejectUnauthorized: false },
-      max: 3,
-      idleTimeoutMillis: 30000,
+      max: 1,
+      idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 10000,
     }
   : {
       connectionString: dbUrl,
-      max: isLocal ? 10 : 3,
-      idleTimeoutMillis: 30000,
+      max: isLocal ? 10 : 1,
+      idleTimeoutMillis: isVercel ? 10000 : 30000,
       connectionTimeoutMillis: isLocal ? 5000 : 10000,
       ssl: isLocal ? false : { rejectUnauthorized: false },
     }
@@ -998,6 +1001,7 @@ export async function initDB() {
     `CREATE INDEX IF NOT EXISTS idx_fee_ledger_student ON student_fee_ledger(student_id)`,
     `CREATE INDEX IF NOT EXISTS idx_fee_ledger_school ON student_fee_ledger(school_id, status)`,
     `CREATE INDEX IF NOT EXISTS idx_fee_ledger_year ON student_fee_ledger(school_id, academic_year)`,
+    `ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`,
 
     `CREATE TABLE IF NOT EXISTS fee_payments (
       id SERIAL PRIMARY KEY,
@@ -1229,6 +1233,249 @@ export async function initDB() {
     `CREATE INDEX IF NOT EXISTS idx_textbook_chunks_book ON textbook_chunks(textbook_id, chunk_index)`,
     `CREATE INDEX IF NOT EXISTS idx_textbook_chunks_school ON textbook_chunks(school_id, grade, subject)`,
     `CREATE INDEX IF NOT EXISTS idx_textbook_chunks_fts ON textbook_chunks USING GIN (to_tsvector('english', content))`,
+
+    // ── Plan Pricing ──────────────────────────────────────────────────────────────
+    // Extends the existing tier system (school_subscriptions.tier) with pricing,
+    // quotas and capability flags. Does NOT replace school_subscriptions.
+    `CREATE TABLE IF NOT EXISTS plan_pricing (
+      id SERIAL PRIMARY KEY,
+      tier VARCHAR(20) NOT NULL UNIQUE,
+      display_name VARCHAR(50) NOT NULL,
+      monthly_price NUMERIC(10,2) NOT NULL DEFAULT 0,
+      included_whatsapp_messages INTEGER NOT NULL DEFAULT 0,
+      whatsapp_overage_rate NUMERIC(10,4) NOT NULL DEFAULT 0,
+      online_payments_included BOOLEAN NOT NULL DEFAULT FALSE,
+      whatsapp_included BOOLEAN NOT NULL DEFAULT FALSE,
+      usage_billing_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `INSERT INTO plan_pricing (tier, display_name, monthly_price, included_whatsapp_messages, whatsapp_overage_rate, online_payments_included, whatsapp_included, usage_billing_enabled)
+     VALUES
+       ('none',     'No Plan',  0,    0,    0,    false, false, false),
+       ('basic',    'Basic',    499,  0,    0,    false, false, false),
+       ('standard', 'Standard', 999,  1000, 0.20, true,  true,  true),
+       ('premium',  'Premium',  1999, 5000, 0.20, true,  true,  true)
+     ON CONFLICT (tier) DO NOTHING`,
+
+    // ── Per-school feature overrides ──────────────────────────────────────────────
+    // Overrides tier-level plan_features on a per-school basis.
+    // Only used for: online-payments, whatsapp, saas-billing.
+    // All other features continue to be governed by plan_features unchanged.
+    `CREATE TABLE IF NOT EXISTS school_feature_overrides (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      feature_key VARCHAR(50) NOT NULL,
+      enabled BOOLEAN NOT NULL,
+      updated_by TEXT,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, feature_key)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_feature_overrides_school ON school_feature_overrides(school_id)`,
+
+    // ── Cashfree configuration (per school) ───────────────────────────────────────
+    // Schools connect their own Cashfree account — money flows school → bank directly.
+    // Secret is AES-256-GCM encrypted; never stored or returned in plaintext.
+    `CREATE TABLE IF NOT EXISTS school_payment_config (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE UNIQUE,
+      cashfree_app_id TEXT,
+      cashfree_secret_encrypted TEXT,
+      cashfree_env VARCHAR(10) NOT NULL DEFAULT 'sandbox',
+      is_active BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // ── Payment transactions (school fee collection via Cashfree) ─────────────────
+    // Tracks online payment links created for parents. On PAID: creates fee_payments row.
+    `CREATE TABLE IF NOT EXISTS payment_transactions (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      ledger_ids INTEGER[] NOT NULL,
+      cashfree_order_id VARCHAR(100) NOT NULL UNIQUE,
+      cashfree_payment_id VARCHAR(100),
+      amount NUMERIC(10,2) NOT NULL,
+      currency VARCHAR(3) NOT NULL DEFAULT 'INR',
+      status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+      idempotency_key VARCHAR(100) NOT NULL UNIQUE,
+      payment_link TEXT,
+      payment_link_expiry TIMESTAMPTZ,
+      parent_name VARCHAR(255),
+      parent_phone VARCHAR(50),
+      parent_email VARCHAR(255),
+      failure_reason TEXT,
+      webhook_received_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_payment_txn_school ON payment_transactions(school_id, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_payment_txn_student ON payment_transactions(student_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_payment_txn_order ON payment_transactions(cashfree_order_id)`,
+
+    // ── Webhook log (Cashfree) ────────────────────────────────────────────────────
+    // All incoming webhooks logged before processing for idempotency and audit.
+    `CREATE TABLE IF NOT EXISTS payment_webhook_log (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER REFERENCES schools(id) ON DELETE SET NULL,
+      cashfree_order_id VARCHAR(100),
+      event_type VARCHAR(50),
+      raw_payload JSONB NOT NULL DEFAULT '{}',
+      signature_valid BOOLEAN NOT NULL DEFAULT FALSE,
+      processed BOOLEAN NOT NULL DEFAULT FALSE,
+      processing_error TEXT,
+      received_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_webhook_log_order ON payment_webhook_log(cashfree_order_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_webhook_log_received ON payment_webhook_log(received_at DESC)`,
+
+    // ── WhatsApp configuration (per school) ───────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS school_whatsapp_config (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE UNIQUE,
+      provider VARCHAR(20) NOT NULL DEFAULT 'meta',
+      access_token_encrypted TEXT,
+      phone_number_id VARCHAR(50),
+      waba_id VARCHAR(50),
+      fee_reminder_template VARCHAR(100),
+      payment_receipt_template VARCHAR(100),
+      is_active BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `ALTER TABLE school_whatsapp_config ADD COLUMN IF NOT EXISTS access_token_encrypted TEXT`,
+    `ALTER TABLE school_whatsapp_config ADD COLUMN IF NOT EXISTS phone_number_id VARCHAR(50)`,
+    `ALTER TABLE school_whatsapp_config ADD COLUMN IF NOT EXISTS waba_id VARCHAR(50)`,
+    `ALTER TABLE school_whatsapp_config ADD COLUMN IF NOT EXISTS fee_reminder_template VARCHAR(100)`,
+    `ALTER TABLE school_whatsapp_config ADD COLUMN IF NOT EXISTS payment_receipt_template VARCHAR(100)`,
+
+    // ── WhatsApp messages (audit trail + delivery tracking) ───────────────────────
+    `CREATE TABLE IF NOT EXISTS whatsapp_messages (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      sent_by_user_id INTEGER,
+      sent_by_name TEXT,
+      recipient_phone VARCHAR(20) NOT NULL,
+      recipient_name TEXT,
+      message_type VARCHAR(50) NOT NULL,
+      template_name VARCHAR(100),
+      template_params JSONB DEFAULT '{}',
+      provider VARCHAR(20) NOT NULL,
+      provider_message_id TEXT,
+      status VARCHAR(20) NOT NULL DEFAULT 'queued',
+      failure_reason TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      sent_at TIMESTAMPTZ,
+      delivered_at TIMESTAMPTZ,
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_whatsapp_msg_school ON whatsapp_messages(school_id, created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_whatsapp_msg_type ON whatsapp_messages(school_id, message_type)`,
+    `CREATE INDEX IF NOT EXISTS idx_whatsapp_msg_status ON whatsapp_messages(school_id, status)`,
+
+    // ── WhatsApp usage summary (monthly rollup for billing) ───────────────────────
+    `CREATE TABLE IF NOT EXISTS whatsapp_usage_summary (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      year_month VARCHAR(7) NOT NULL,
+      message_type VARCHAR(50) NOT NULL,
+      sent_count INTEGER NOT NULL DEFAULT 0,
+      delivered_count INTEGER NOT NULL DEFAULT 0,
+      failed_count INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(school_id, year_month, message_type)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_whatsapp_usage_school ON whatsapp_usage_summary(school_id, year_month)`,
+
+    // ── Billing cycles (SaaS — school pays platform) ──────────────────────────────
+    // Created when a school is assigned a usage-billing-enabled plan.
+    // Platform Admin manually closes and invoices each cycle.
+    `CREATE TABLE IF NOT EXISTS billing_cycles (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      cycle_start DATE NOT NULL,
+      cycle_end DATE NOT NULL,
+      tier VARCHAR(20) NOT NULL,
+      plan_fee NUMERIC(10,2) NOT NULL DEFAULT 0,
+      included_whatsapp INTEGER NOT NULL DEFAULT 0,
+      overage_rate NUMERIC(10,4) NOT NULL DEFAULT 0,
+      status VARCHAR(20) NOT NULL DEFAULT 'active',
+      closed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_billing_cycles_school ON billing_cycles(school_id, status)`,
+
+    // ── Usage ledger (per-event billable record) ──────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS usage_ledger (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      billing_cycle_id INTEGER NOT NULL REFERENCES billing_cycles(id) ON DELETE CASCADE,
+      event_type VARCHAR(50) NOT NULL,
+      quantity NUMERIC(10,2) NOT NULL DEFAULT 1,
+      reference_id INTEGER,
+      reference_type VARCHAR(30),
+      is_billable BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_usage_ledger_cycle ON usage_ledger(billing_cycle_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_usage_ledger_school ON usage_ledger(school_id, created_at DESC)`,
+
+    // ── SaaS invoices ─────────────────────────────────────────────────────────────
+    // Generated manually by Platform Admin after reviewing the billing cycle.
+    `CREATE TABLE IF NOT EXISTS saas_invoices (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      billing_cycle_id INTEGER NOT NULL REFERENCES billing_cycles(id),
+      invoice_number VARCHAR(50) NOT NULL UNIQUE,
+      invoice_date DATE NOT NULL,
+      due_date DATE NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+      plan_fee NUMERIC(10,2) NOT NULL DEFAULT 0,
+      whatsapp_included INTEGER NOT NULL DEFAULT 0,
+      whatsapp_used INTEGER NOT NULL DEFAULT 0,
+      whatsapp_overage INTEGER NOT NULL DEFAULT 0,
+      overage_charge NUMERIC(10,2) NOT NULL DEFAULT 0,
+      total_amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+      paid_amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+      notes TEXT,
+      generated_by TEXT,
+      generated_at TIMESTAMPTZ,
+      sent_at TIMESTAMPTZ,
+      paid_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_saas_invoices_school ON saas_invoices(school_id, status)`,
+    `CREATE INDEX IF NOT EXISTS idx_saas_invoices_status ON saas_invoices(status, due_date)`,
+
+    // ── SaaS invoice line items ───────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS saas_invoice_items (
+      id SERIAL PRIMARY KEY,
+      invoice_id INTEGER NOT NULL REFERENCES saas_invoices(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      item_type VARCHAR(50) NOT NULL,
+      description TEXT NOT NULL,
+      quantity NUMERIC(10,2) NOT NULL DEFAULT 1,
+      unit_rate NUMERIC(10,4) NOT NULL DEFAULT 0,
+      amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
+    // ── SaaS payments (school pays platform — manually recorded in v1) ────────────
+    `CREATE TABLE IF NOT EXISTS saas_payments (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      invoice_id INTEGER NOT NULL REFERENCES saas_invoices(id),
+      amount NUMERIC(10,2) NOT NULL,
+      payment_mode VARCHAR(30) NOT NULL,
+      transaction_ref TEXT,
+      payment_date DATE NOT NULL,
+      recorded_by TEXT NOT NULL,
+      notes TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_saas_payments_school ON saas_payments(school_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_saas_payments_invoice ON saas_payments(invoice_id)`,
   ]
 
   for (const sql of migrations) {
