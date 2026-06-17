@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireFeeAccess } from '@/lib/auth'
 
-// GET /api/fees/ledger/[id]/edits — fetch edit history for one ledger entry
+// Verify a ledger entry belongs to the caller's school. Returns the entry's school_id or null.
+async function ledgerSchoolId(id: string): Promise<string | null> {
+  const { rows: [row] } = await pool.query(`SELECT school_id FROM student_fee_ledger WHERE id = $1`, [id])
+  return row ? String(row.school_id) : null
+}
+
+// GET /api/fees/ledger/[id] — fetch edit history for one ledger entry
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
+    const sid = await ledgerSchoolId(id)
+    if (!sid) return NextResponse.json([])
+    if (!await requireFeeAccess(sid)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
       const { rows: [tbl] } = await pool.query(`SELECT to_regclass('student_fee_ledger_edits') IS NOT NULL AS exists`)
       if (!tbl.exists) return NextResponse.json([])
@@ -27,6 +37,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     const { id } = await params
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
       const { rows: [entry] } = await pool.query(
         `SELECT * FROM student_fee_ledger WHERE id = $1 AND school_id = $2`,
@@ -60,10 +71,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const { id } = await params
     const client = await pool.connect()
     try {
-      const { new_amount, reason, changed_by, school_id } = await req.json()
+      const { new_amount, reason, changed_by: clientActor, school_id } = await req.json()
+      const access = await requireFeeAccess(school_id)
+      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      const changed_by = clientActor || access.actor
 
-      if (!new_amount || !reason || !changed_by || !school_id) {
-        return NextResponse.json({ error: 'new_amount, reason, changed_by, school_id required' }, { status: 400 })
+      if (!new_amount || !reason || !school_id) {
+        return NextResponse.json({ error: 'new_amount, reason, school_id required' }, { status: 400 })
       }
       if (Number(new_amount) <= 0) {
         return NextResponse.json({ error: 'Amount must be greater than 0' }, { status: 400 })

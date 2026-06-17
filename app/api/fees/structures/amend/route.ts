@@ -1,17 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireFeeAccess } from '@/lib/auth'
 
 // POST /api/fees/structures/amend — amend a locked fee structure amount
 // Updates fee_structures + creates amendment record + updates unpaid ledger entries
-// Body: { school_id, academic_year, fee_category_id, grade, new_amount, reason, changed_by, effective_from? }
+// Body: { school_id, academic_year, fee_category_id, grade, new_amount, reason, changed_by?, effective_from? }
+// changed_by is derived server-side from the session (client value ignored for audit integrity)
 export async function POST(req: NextRequest) {
   try {
     const client = await pool.connect()
     try {
-      const { school_id, academic_year, fee_category_id, grade, new_amount, reason, changed_by, effective_from } = await req.json()
+      const body = await req.json()
+      const { school_id, academic_year, fee_category_id, grade, new_amount, reason, changed_by: clientActor, effective_from } = body
+      const access = await requireFeeAccess(school_id)
+      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      const changed_by = clientActor || access.actor
 
-      if (!school_id || !academic_year || !fee_category_id || !grade || new_amount == null || !reason || !changed_by) {
-        return NextResponse.json({ error: 'school_id, academic_year, fee_category_id, grade, new_amount, reason, changed_by required' }, { status: 400 })
+      if (!school_id || !academic_year || !fee_category_id || !grade || new_amount == null || !reason) {
+        return NextResponse.json({ error: 'school_id, academic_year, fee_category_id, grade, new_amount, reason required' }, { status: 400 })
       }
 
       await client.query('BEGIN')
@@ -100,6 +106,7 @@ export async function GET(req: NextRequest) {
     const p             = req.nextUrl.searchParams
     const school_id     = p.get('school_id')
     const academic_year = p.get('academic_year')
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     // Preview mode: returns how many ledger entries will be affected
     if (p.get('preview') === '1') {
       const fee_category_id = p.get('fee_category_id')

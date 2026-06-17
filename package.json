@@ -6,7 +6,8 @@
     "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "backup": "node scripts/backup-db.js"
   },
   "engines": {
     "node": ">=18.17.0",
@@ -20,6 +21,7 @@
     "@types/qrcode": "^1.5.6",
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.9.0",
+    "exceljs": "^4.4.0",
     "html2canvas": "^1.4.1",
     "jsonwebtoken": "^9.0.3",
     "jspdf": "^4.2.1",

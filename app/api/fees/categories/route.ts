@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { requireSchoolAdmin } from '@/lib/auth'
+import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/categories?school_id=X
 export async function GET(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
       // Self-heal: rename applicability_type → category_type if needed, add if missing
       await pool.query(`
@@ -36,10 +36,10 @@ export async function GET(req: NextRequest) {
 // POST /api/fees/categories
 export async function POST(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     try {
       const { school_id, name, description, frequency, category_type } = await req.json()
       if (!school_id || !name) return NextResponse.json({ error: 'school_id and name required' }, { status: 400 })
+      if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const { rows: [row] } = await pool.query(
         `INSERT INTO fee_categories (school_id, name, description, frequency, category_type)
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
@@ -60,12 +60,11 @@ export async function POST(req: NextRequest) {
 // PUT /api/fees/categories?id=X
 export async function PUT(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const id = req.nextUrl.searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
     const client = await pool.connect()
     try {
-      const { name, description, frequency, is_active, category_type, changed_by = 'Admin' } = await req.json()
+      const { name, description, frequency, is_active, category_type, changed_by: clientActor } = await req.json()
 
       // Ensure changelog table exists
       await client.query(`
@@ -84,6 +83,10 @@ export async function PUT(req: NextRequest) {
       const { rows: [current] } = await client.query(
         `SELECT school_id, name, frequency, is_active, category_type FROM fee_categories WHERE id = $1`, [id]
       )
+      if (!current) { client.release(); return NextResponse.json({ error: 'Category not found' }, { status: 404 }) }
+      const access = await requireFeeAccess(current.school_id)
+      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      const changed_by = clientActor || access.actor
 
       const { rows: [row] } = await client.query(
         `UPDATE fee_categories SET
@@ -129,11 +132,13 @@ export async function PUT(req: NextRequest) {
 // If ledger entries exist, returns 409 — caller should deactivate instead.
 export async function DELETE(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const id = req.nextUrl.searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
     const client = await pool.connect()
     try {
+      const { rows: [cat] } = await client.query(`SELECT school_id FROM fee_categories WHERE id = $1`, [id])
+      if (!cat) { client.release(); return NextResponse.json({ error: 'Category not found' }, { status: 404 }) }
+      if (!await requireFeeAccess(cat.school_id)) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
       await client.query('BEGIN')
       const { rows: [{ cnt }] } = await client.query(
         `SELECT COUNT(*) AS cnt FROM student_fee_ledger WHERE fee_category_id = $1`, [id]

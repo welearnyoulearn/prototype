@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireFeeAccess } from '@/lib/auth'
 
 const ENSURE = `
   CREATE TABLE IF NOT EXISTS fee_day_close (
@@ -32,6 +33,7 @@ export async function GET(req: NextRequest) {
   const date      = p.get('date') || new Date().toISOString().slice(0, 10)
 
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+  if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
     await pool.query(ENSURE)
@@ -105,9 +107,12 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     await pool.query(ENSURE)
-    const { school_id, date, actual_cash, submitted_by, notes } = await req.json()
-    if (!school_id || !date || !submitted_by) {
-      return NextResponse.json({ error: 'school_id, date, submitted_by required' }, { status: 400 })
+    const { school_id, date, actual_cash, submitted_by: clientActor, notes } = await req.json()
+    const access = await requireFeeAccess(school_id)
+    if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const submitted_by = clientActor || access.actor
+    if (!school_id || !date) {
+      return NextResponse.json({ error: 'school_id, date required' }, { status: 400 })
     }
 
     // Get system totals for the day

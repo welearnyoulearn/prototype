@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireFeeAccess } from '@/lib/auth'
 
 const ENSURE_TABLE = `
   CREATE TABLE IF NOT EXISTS student_fee_category_assignments (
@@ -71,6 +72,7 @@ export async function GET(req: NextRequest) {
     if (!school_id || !grade || !academic_year) {
       return NextResponse.json({ error: 'school_id, grade, academic_year required' }, { status: 400 })
     }
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
       await ensureSchema(pool)
 
@@ -117,7 +119,10 @@ export async function POST(req: NextRequest) {
   try {
     const client = await pool.connect()
     try {
-      const { school_id, academic_year, assignments, changed_by = 'Admin' } = await req.json()
+      const { school_id, academic_year, assignments, changed_by: clientActor } = await req.json()
+      const access = await requireFeeAccess(school_id)
+      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      const changed_by = clientActor || access.actor
       if (!school_id || !academic_year || !Array.isArray(assignments)) {
         return NextResponse.json({ error: 'school_id, academic_year, assignments required' }, { status: 400 })
       }

@@ -206,6 +206,38 @@ export function getParentSessionFromRequest(req: NextRequest): ParentJWTPayload 
   return verifyParentToken(token)
 }
 
+// ─── Fee-module access guard (tenant isolation) ───────────────────────────────
+// Requires a school-admin (or platform-admin) session AND verifies the requested
+// school_id belongs to that admin's school. Platform admins may access any school.
+// Returns the resolved { schoolId, role, userId, name } or null if denied.
+//
+// Usage in a fee route:
+//   const access = await requireFeeAccess(requestedSchoolId)
+//   if (!access) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
+//   // use access.schoolId (trusted) and access.actor for audit fields
+export async function requireFeeAccess(requestedSchoolId: string | number | null | undefined):
+  Promise<{ schoolId: number; role: string; userId: number; actor: string } | null> {
+  const session = await getSession()
+  if (!session) return null
+
+  // Platform admin: full access to any school
+  if (session.role === 'platform_admin') {
+    const sid = requestedSchoolId != null ? Number(requestedSchoolId) : (session.schoolId ?? 0)
+    if (!sid) return null
+    return { schoolId: sid, role: 'platform_admin', userId: session.userId, actor: 'Platform Admin' }
+  }
+
+  // School admin: must match their own school
+  if (session.role === 'school_admin' && session.schoolId) {
+    if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(session.schoolId)) {
+      return null   // cross-tenant attempt
+    }
+    return { schoolId: session.schoolId, role: 'school_admin', userId: session.userId, actor: 'School Admin' }
+  }
+
+  return null
+}
+
 // ─── Any authenticated session ────────────────────────────────────────────────
 // Returns the schoolId and role for whichever session cookie is present.
 // Used on routes accessible by teachers, students, and school admins alike.

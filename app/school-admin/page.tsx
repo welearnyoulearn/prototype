@@ -37,6 +37,7 @@ const AnnouncementBoard     = dynamic(() => import('./components/AnnouncementBoa
 const ExportCenter          = dynamic(() => import('./components/ExportCenter'),           { loading: () => <ModuleSkeleton /> })
 const SchoolSettings        = dynamic(() => import('./components/SchoolSettings'),         { loading: () => <ModuleSkeleton /> })
 const FeeManagement         = dynamic(() => import('./components/FeeManagement'),          { loading: () => <ModuleSkeleton /> })
+const YearRollover          = dynamic(() => import('./components/YearRollover'),           { loading: () => <ModuleSkeleton /> })
 
 type School = {
   id: number
@@ -63,7 +64,7 @@ const NAV_SECTIONS = [
   { label: 'MANAGEMENT',    keys: ['fee-management'] },
   { label: 'SCHEDULING',    keys: ['timetable', 'attendance', 'leave-requests', 'emergency-cover', 'exam-schedule'] },
   { label: 'COMMUNICATION', keys: ['announcements'] },
-  { label: 'TOOLS',         keys: ['export', 'settings'] },
+  { label: 'TOOLS',         keys: ['export', 'settings', 'year-rollover'] },
 ]
 
 const NAV_ITEMS: NavItem[] = [
@@ -195,6 +196,16 @@ const NAV_ITEMS: NavItem[] = [
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'year-rollover',
+    label: 'Year Rollover',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
       </svg>
     ),
   },
@@ -554,6 +565,7 @@ export default function SchoolAdmin() {
                 {visited.has('export')           && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}
                 {visited.has('settings')         && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} /></div>}
                 {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} /></div>}
+                {visited.has('year-rollover')    && <div hidden={activeNav !== 'year-rollover'}><YearRollover schoolId={selectedSchool.id} /></div>}
               </FeaturesProvider>
             )}
           </main>

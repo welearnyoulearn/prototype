@@ -1,24 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getAnySession } from '@/lib/auth'
+import { requireFeeAccess } from '@/lib/auth'
 
 // POST /api/fees/payments/cancel
 // Cancel (reverse) a completed payment, OR correct it (cancel + re-record with new values).
 // Body:
-//   { payment_id, action: 'cancel', reason, done_by }
-//   { payment_id, action: 'correct', reason, done_by,
+//   { payment_id, action: 'cancel', reason }
+//   { payment_id, action: 'correct', reason,
 //     new_amount?, new_payment_mode?, new_transaction_ref?, new_paid_date? }
+// done_by is derived server-side from the session.
 //
 // Always: reverses the ledger, soft-marks the payment 'cancelled', records an audit row.
 export async function POST(req: NextRequest) {
   try {
-    const session = await getAnySession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
     const body = await req.json()
-    const { payment_id, action = 'cancel', reason, done_by } = body
-    if (!payment_id || !reason || !done_by) {
-      return NextResponse.json({ error: 'payment_id, reason, done_by required' }, { status: 400 })
+    const { payment_id, action = 'cancel', reason } = body
+    if (!payment_id || !reason) {
+      return NextResponse.json({ error: 'payment_id, reason required' }, { status: 400 })
     }
 
     const client = await pool.connect()
@@ -37,7 +35,11 @@ export async function POST(req: NextRequest) {
          WHERE fp.id = $1`,
         [payment_id]
       )
-      if (!pmt) return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
+      if (!pmt) { client.release(); return NextResponse.json({ error: 'Payment not found' }, { status: 404 }) }
+      // Verify the caller owns this payment's school (school-admin only)
+      const access = await requireFeeAccess(pmt.school_id)
+      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      const done_by = access.actor
       if (pmt.payment_status === 'cancelled') {
         return NextResponse.json({ error: 'Payment already cancelled' }, { status: 409 })
       }

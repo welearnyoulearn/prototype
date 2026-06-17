@@ -120,7 +120,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       if (!r.email.trim())        missing.push(`Row ${i + 1}: Student Email is required — login credentials will be sent here`)
       if (r.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email.trim())) missing.push(`Row ${i + 1}: Invalid email`)
       if (!r.grade.trim())        missing.push(`Row ${i + 1}: Grade is required`)
-      if (!r.section.trim())      missing.push(`Row ${i + 1}: Section is required`)
+      // Section is optional
       if (!r.parent_name.trim())  missing.push(`Row ${i + 1}: Parent Name is required`)
       if (!r.parent_phone.trim()) missing.push(`Row ${i + 1}: Parent Phone is required`)
     })
@@ -280,7 +280,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">First Name <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[140px]">Student Email</th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Grade <span className="text-red-400">*</span></th>
-                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Section <span className="text-red-400">*</span></th>
+                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Section</th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[120px]">Parent Name <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Parent Phone <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[150px] bg-orange-50">Parent Email</th>

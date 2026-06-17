@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { requireSchoolAdmin } from '@/lib/auth'
+import { requireFeeAccess } from '@/lib/auth'
 
 // POST /api/fees/generate
 // Generates ledger entries for all students in a grade/all grades for an academic year
 // Idempotent — skips students who already have entries for this category+year+period
 export async function POST(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     try {
       const { school_id, academic_year, grade } = await req.json()
       if (!school_id || !academic_year) {
         return NextResponse.json({ error: 'school_id and academic_year required' }, { status: 400 })
       }
+      if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
       // Get fee structures (fixed categories only — variable handled via assignments)
       const { rows: structures } = await pool.query(

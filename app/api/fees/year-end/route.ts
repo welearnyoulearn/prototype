@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { requireSchoolAdmin } from '@/lib/auth'
+import { requireFeeAccess } from '@/lib/auth'
 
 const ENSURE_CLOSE = `
   CREATE TABLE IF NOT EXISTS fee_year_close (
@@ -41,13 +41,13 @@ function nextYearLabel(label: string): string {
 // /api/fees/year-end?school_id=X&academic_year=Y
 export async function GET(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const p = req.nextUrl.searchParams
     const school_id     = p.get('school_id')
     const academic_year = p.get('academic_year')
     if (!school_id || !academic_year) {
       return NextResponse.json({ error: 'school_id and academic_year required' }, { status: 400 })
     }
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     await pool.query(ENSURE_CLOSE)
 
@@ -160,11 +160,13 @@ export async function GET(req: NextRequest) {
 // }
 export async function POST(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const body = await req.json()
-    const { action = 'apply', school_id, from_year, to_year, done_by } = body
-    if (!school_id || !from_year || !done_by) {
-      return NextResponse.json({ error: 'school_id, from_year, done_by required' }, { status: 400 })
+    const { action = 'apply', school_id, from_year, to_year, done_by: clientActor } = body
+    const access = await requireFeeAccess(school_id)
+    if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const done_by = clientActor || access.actor
+    if (!school_id || !from_year) {
+      return NextResponse.json({ error: 'school_id, from_year required' }, { status: 400 })
     }
 
     const client = await pool.connect()

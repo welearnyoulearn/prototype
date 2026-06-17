@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/structure-history?school_id=X&fee_category_id=Y&grade=Z&academic_year=W
 export async function GET(req: NextRequest) {
@@ -11,6 +12,7 @@ export async function GET(req: NextRequest) {
     const academic_year   = p.get('academic_year')
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     try {
       const { rows: [tbl] } = await pool.query(

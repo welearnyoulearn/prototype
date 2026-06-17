@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/passbook?school_id=X&student_id=Y&academic_year=Z
 // Returns complete financial history for one student — like a bank passbook
@@ -12,6 +13,7 @@ export async function GET(req: NextRequest) {
   if (!school_id || !student_id) {
     return NextResponse.json({ error: 'school_id and student_id required' }, { status: 400 })
   }
+  if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
     const yr = academic_year
@@ -225,6 +227,7 @@ export async function GET(req: NextRequest) {
   } catch (e) {
     console.error('[passbook]', e)
     const msg = e instanceof Error ? e.message : String(e)
-    return NextResponse.json({ error: 'Failed to load passbook', detail: msg }, { status: 500 })
+    void msg
+    return NextResponse.json({ error: 'Failed to load passbook' }, { status: 500 })
   }
 }

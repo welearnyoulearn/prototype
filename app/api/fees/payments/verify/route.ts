@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { sendFeePaymentConfirmedEmail, sendFeePaymentRejectedEmail } from '@/lib/email'
-import { requireSchoolAdmin } from '@/lib/auth'
+import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/payments/verify?school_id=X — list pending_verification payments
 export async function GET(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
       const { rows } = await pool.query(
         `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section,
@@ -34,14 +34,18 @@ export async function GET(req: NextRequest) {
 // Body: { payment_id, action: 'approve'|'reject', verified_by, rejection_reason? }
 export async function POST(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
     const client = await pool.connect()
     try {
-      const { payment_id, action, verified_by, rejection_reason } = await req.json()
-      if (!payment_id || !action || !verified_by) {
-        return NextResponse.json({ error: 'payment_id, action, verified_by required' }, { status: 400 })
+      const { payment_id, action, verified_by: clientActor, rejection_reason } = await req.json()
+      if (!payment_id || !action) {
+        return NextResponse.json({ error: 'payment_id, action required' }, { status: 400 })
       }
+      // Resolve the payment's school and verify ownership
+      const { rows: [pmtRow] } = await client.query(`SELECT school_id FROM fee_payments WHERE id = $1`, [payment_id])
+      if (!pmtRow) { client.release(); return NextResponse.json({ error: 'Payment not found' }, { status: 404 }) }
+      const access = await requireFeeAccess(pmtRow.school_id)
+      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      const verified_by = clientActor || access.actor
 
       // Ensure audit columns exist (idempotent — safe to call every time)
       await client.query(`

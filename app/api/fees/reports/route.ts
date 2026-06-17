@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { requireSchoolAdmin } from '@/lib/auth'
+import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/fees/reports?school_id=X&academic_year=Y
 // Returns comprehensive annual financial report data
 export async function GET(req: NextRequest) {
   try {
-    if (!await requireSchoolAdmin()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const p = req.nextUrl.searchParams
     const school_id     = p.get('school_id')
     const academic_year = p.get('academic_year')
     if (!school_id || !academic_year) {
       return NextResponse.json({ error: 'school_id and academic_year required' }, { status: 400 })
     }
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const [startYStr] = academic_year.split('-')
     const startYear = parseInt(startYStr)
