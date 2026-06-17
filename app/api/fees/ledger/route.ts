@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
       const { rows } = await pool.query(
         `SELECT
            l.*,
-           s.name AS student_name, s.roll_number, s.grade, s.section,
+           s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
            fc.name AS category_name, fc.frequency,
            COALESCE(
              (SELECT SUM(fp.amount) FROM fee_payments fp WHERE fp.ledger_id = l.id AND fp.payment_status = 'completed'),
@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
          JOIN students s ON s.id = l.student_id
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE ${conditions.join(' AND ')}
-         ORDER BY l.due_date, s.grade, s.section, s.name`,
+         ORDER BY l.due_date, s.grade, s.section, s.school_roll_number NULLS LAST, s.name`,
         values
       )
       return NextResponse.json(rows)
