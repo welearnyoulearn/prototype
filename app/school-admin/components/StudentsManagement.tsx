@@ -11,6 +11,7 @@ type Student = {
   grade: string
   section: string
   roll_number: string
+  school_roll_number: number | null
   parent_name: string
   parent_phone: string
   parent_email: string
@@ -186,7 +187,8 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
     const matchesGrade   = gradeFilter === 'all' || s.grade === gradeFilter
     const matchesSection = sectionFilter === 'all' || sec === sectionFilter.toUpperCase()
     const matchesSearch  = !search || s.name.toLowerCase().includes(search.toLowerCase()) ||
-      (s.roll_number || '').toLowerCase().includes(search.toLowerCase())
+      (s.roll_number || '').toLowerCase().includes(search.toLowerCase()) ||
+      (s.school_roll_number != null && String(s.school_roll_number).includes(search))
     return matchesGrade && matchesSection && matchesSearch
   })
 
@@ -279,7 +281,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-100">
                     <tr>
-                      <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">Student ID</th>
+                      <th className="text-left px-3 py-2.5 font-medium text-amber-700 text-xs bg-amber-50 w-14">Roll</th>
                       <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">Name</th>
                       <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">Parent</th>
                       <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">Contact</th>
@@ -287,10 +289,17 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {members.map(s => (
+                    {[...members].sort((a, b) => {
+                      if (a.school_roll_number != null && b.school_roll_number != null) return a.school_roll_number - b.school_roll_number
+                      if (a.school_roll_number != null) return -1
+                      if (b.school_roll_number != null) return 1
+                      return a.name.localeCompare(b.name)
+                    }).map(s => (
                       <tr key={s.id} onClick={() => { setSelected(s); setEditing(false); setDetailTab('info'); setStudentPerf(null); setStudentRewards(null) }}
                         className={`cursor-pointer transition-colors ${selected?.id === s.id ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
-                        <td className="px-5 py-3 font-mono text-xs text-gray-400">{s.roll_number || '—'}</td>
+                        <td className="px-3 py-3 text-center font-semibold text-sm text-amber-700 bg-amber-50/40">
+                          {s.school_roll_number ?? <span className="text-gray-300 font-normal text-xs">—</span>}
+                        </td>
                         <td className="px-5 py-3 font-medium text-gray-900">{s.name}</td>
                         <td className="px-5 py-3 text-gray-600 text-xs">{s.parent_name || '—'}</td>
                         <td className="px-5 py-3 text-gray-500 text-xs">{s.parent_phone || s.phone || '—'}</td>

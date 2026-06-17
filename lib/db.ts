@@ -1476,6 +1476,12 @@ export async function initDB() {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_saas_payments_school ON saas_payments(school_id)`,
     `CREATE INDEX IF NOT EXISTS idx_saas_payments_invoice ON saas_payments(invoice_id)`,
+
+    // ── School roll number (class roll number assigned by school) ─────────────
+    `ALTER TABLE students ADD COLUMN IF NOT EXISTS school_roll_number INTEGER`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_students_school_roll_unique
+       ON students(school_id, grade, section, school_roll_number)
+       WHERE school_roll_number IS NOT NULL`,
   ]
 
   for (const sql of migrations) {
