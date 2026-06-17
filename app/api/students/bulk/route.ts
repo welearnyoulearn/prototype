@@ -50,6 +50,28 @@ export async function POST(req: NextRequest) {
           }
         }
 
+        // school_roll_number validation and duplicate check
+        const schoolRollRaw = s.school_roll_number ?? s.roll_no
+        let school_roll_number: number | null = null
+        if (schoolRollRaw !== undefined && schoolRollRaw !== null && String(schoolRollRaw).trim() !== '') {
+          const parsed = parseInt(String(schoolRollRaw).trim(), 10)
+          if (isNaN(parsed) || parsed <= 0) {
+            errors.push({ row: i + 1, message: `Roll No must be a positive integer (got: ${schoolRollRaw})` })
+            continue
+          }
+          school_roll_number = parsed
+          if (s.grade?.trim() && s.section?.trim()) {
+            const rollDup = await client.query(
+              `SELECT id, name FROM students WHERE school_id = $1 AND grade = $2 AND section = $3 AND school_roll_number = $4`,
+              [school_id, s.grade.trim(), s.section.trim(), school_roll_number]
+            )
+            if (rollDup.rows.length > 0) {
+              errors.push({ row: i + 1, message: `Roll No ${school_roll_number} already exists in Grade ${s.grade} Section ${s.section} (${rollDup.rows[0].name})` })
+              continue
+            }
+          }
+        }
+
         // Auto-create class if grade+section provided but class doesn't exist yet
         if (s.grade?.trim() && s.section?.trim()) {
           await client.query(
@@ -63,8 +85,8 @@ export async function POST(req: NextRequest) {
         const roll_number = generateStudentId(schoolName)
         const res = await client.query(
           `INSERT INTO students
-             (school_id, name, email, grade, section, roll_number, parent_name, parent_phone, parent_email, phone, status)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active') RETURNING *`,
+             (school_id, name, email, grade, section, roll_number, school_roll_number, parent_name, parent_phone, parent_email, phone, status)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active') RETURNING *`,
           [
             school_id,
             s.name.trim(),
@@ -72,6 +94,7 @@ export async function POST(req: NextRequest) {
             s.grade?.trim() || null,
             s.section?.trim() || null,
             roll_number,
+            school_roll_number,
             s.parent_name?.trim() || null,
             s.parent_phone?.trim() || null,
             s.parent_email?.trim() || null,
