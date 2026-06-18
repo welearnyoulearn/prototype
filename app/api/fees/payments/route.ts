@@ -73,6 +73,22 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'school_id, student_id, payment_mode required' }, { status: 400 })
       }
 
+      // BUG 5: Validate paid_date format and range
+      if (paid_date !== undefined && paid_date !== null) {
+        const dateRe = /^\d{4}-\d{2}-\d{2}$/
+        if (!dateRe.test(paid_date)) {
+          client.release()
+          return NextResponse.json({ error: 'paid_date must be YYYY-MM-DD' }, { status: 400 })
+        }
+        const d = new Date(paid_date)
+        const now = new Date()
+        const minDate = new Date('2000-01-01')
+        if (isNaN(d.getTime()) || d > now || d < minDate) {
+          client.release()
+          return NextResponse.json({ error: 'paid_date must be a valid past date' }, { status: 400 })
+        }
+      }
+
       const isMulti = Array.isArray(ledger_ids) && ledger_ids.length > 0
 
       // Guard: block payments against a closed academic year
@@ -110,6 +126,24 @@ export async function POST(req: NextRequest) {
 
       if (!isMulti) {
         // ── Single-entry mode (offline admin collection) ──────────────────────────
+
+        // BUG 6: Guard against overpayment
+        const { rows: [ledgerRow] } = await client.query(
+          `SELECT amount_due, amount_paid FROM student_fee_ledger WHERE id = $1 AND school_id = $2`,
+          [ledger_id, school_id]
+        )
+        if (!ledgerRow) {
+          await client.query('ROLLBACK')
+          client.release()
+          return NextResponse.json({ error: 'Ledger entry not found' }, { status: 404 })
+        }
+        const balance = parseFloat(ledgerRow.amount_due) - parseFloat(ledgerRow.amount_paid)
+        if (parseFloat(String(amount)) > balance + 0.001) {
+          await client.query('ROLLBACK')
+          client.release()
+          return NextResponse.json({ error: `Amount exceeds balance due (₹${balance.toFixed(2)})` }, { status: 400 })
+        }
+
         const { rows: [payment] } = await client.query(
           `INSERT INTO fee_payments
              (school_id, student_id, ledger_id, amount, payment_mode, payment_status,

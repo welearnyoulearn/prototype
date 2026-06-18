@@ -91,6 +91,29 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `Year ${from_year} is already closed.` }, { status: 409 })
       }
 
+      // BUG 13 fix: check for pending dues and require explicit confirmation before rolling over
+      const { rows: [pendingSummary] } = await client.query(
+        `SELECT COUNT(*) AS count, COALESCE(SUM(amount_due - amount_paid), 0) AS total
+         FROM student_fee_ledger l
+         JOIN students s ON s.id = l.student_id
+         WHERE l.school_id = $1 AND l.academic_year = $2
+           AND l.status IN ('pending','overdue','partial')
+           AND l.amount_paid < l.amount_due
+           AND s.status = 'active'`,
+        [school_id, from_year]
+      )
+      const pendingCount = parseInt(pendingSummary.count)
+      const pendingTotal = parseFloat(pendingSummary.total)
+      if (pendingCount > 0 && !body.confirmed) {
+        client.release()
+        return NextResponse.json({
+          requires_confirmation: true,
+          pending_count: pendingCount,
+          pending_total: pendingTotal,
+          message: `${pendingCount} unpaid ledger entries totalling ₹${pendingTotal.toFixed(2)} will be carried forward as "Previous Year Dues". Pass confirmed: true to proceed.`,
+        }, { status: 200 })
+      }
+
       await client.query('BEGIN')
 
       // ── STEP 1: Get or create "Previous Year Dues" fee head ──────────────────
