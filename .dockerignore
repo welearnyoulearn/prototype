@@ -1,0 +1,12 @@
+node_modules
+.next
+.env
+.env.*
+!.env.example
+test-results
+playwright-report
+.git
+.DS_Store
+dump.sql
+backup_*.sql
+*.pem

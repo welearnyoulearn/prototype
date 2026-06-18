@@ -1,0 +1,67 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: wlyl
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      target: builder
+    command: npm run dev
+    ports:
+      - "3000:3000"
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: wlyl
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      JWT_SECRET: docker-dev-secret-change-in-production
+      SETUP_SECRET: wlyl-setup-2024
+      APP_URL: http://localhost:3000
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+
+  e2e:
+    build:
+      context: .
+      target: e2e
+    environment:
+      CI: "true"
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: wlyl
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      JWT_SECRET: docker-dev-secret-change-in-production
+      SETUP_SECRET: wlyl-setup-2024
+      APP_URL: http://app:3000
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_started
+    volumes:
+      - ./test-results:/app/test-results
+    profiles:
+      - test
+
+volumes:
+  pgdata:
