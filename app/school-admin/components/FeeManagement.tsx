@@ -106,10 +106,10 @@ const GRADE_GROUPS = [
 ]
 
 const FREQ_LABEL: Record<string, string> = {
-  monthly: 'Monthly', quarterly: 'Quarterly', annual: 'Annual', one_time: 'One Time',
+  monthly: 'Monthly', quarterly: 'Quarterly', half_yearly: 'Half Yearly', annual: 'Annual', one_time: 'One Time',
 }
 const FREQ_HELP: Record<string, string> = {
-  monthly: '12 bills/year (Apr–Mar)', quarterly: '4 bills/year', annual: '1 bill/year, repeats', one_time: '1 bill ever, never repeats',
+  monthly: '12 bills/year (Apr–Mar)', quarterly: '4 bills/year', half_yearly: '2 bills/year (Apr & Oct)', annual: '1 bill/year, repeats', one_time: '1 bill ever, never repeats',
 }
 const FEE_ICONS: Record<string, string> = {
   tuition: '📘', transport: '🚌', exam: '📝', admission: '🎓', hostel: '🏠',
@@ -374,6 +374,9 @@ export default function FeeManagement({
   const [rejectReason, setRejectReason]         = useState('')
   const [showRejectForm, setShowRejectForm]     = useState<number | null>(null)
   const [verifyMsg, setVerifyMsg]               = useState('')
+
+  // Generate bills confirmation dialog
+  const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
 
   // ── Collection (new Tab 3) ──
   type CollectionView = 'counter' | 'online' | 'defaulters' | 'dayclose'
@@ -966,6 +969,12 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       setStructureMsg(`⚠ Set amounts for all fixed fees first — missing: ${missing.join(', ')}`)
       return
     }
+    // Show confirmation with due-day summary before running
+    setShowGenerateConfirm(true)
+  }
+
+  async function confirmGenerateLedger() {
+    setShowGenerateConfirm(false)
     setGeneratingLedger(true); setStructureMsg('')
     const r = await fetch('/api/fees/generate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1284,7 +1293,14 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     const d = await r.json()
     setYeMsg(r.ok ? '✓ Financial year closed and locked' : (d.error || 'Failed to close'))
     setYeClosing(false)
-    if (r.ok) loadYearEnd()
+    if (r.ok) {
+      loadYearEnd()
+      // BUG 14: prompt admin to generate fee ledger for the new year
+      const nextYear = yearEnd?.target_year
+      if (nextYear && window.confirm(`Year ${academicYear} is now closed.\n\nDo you want to go to the Setup tab to generate fee ledger for ${nextYear}?`)) {
+        setActiveTab('setup' as Tab)
+      }
+    }
   }
 
   async function reopenYear() {
@@ -1785,7 +1801,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
         ] as const).map(t => (
           <button
             key={t.key}
-            onClick={() => setActiveTab(t.key)}
+            onClick={() => setActiveTab(t.key as Tab)}
             className={`px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors ${
               activeTab === t.key
                 ? 'text-blue-700 bg-blue-50 border-b-2 border-blue-600'
@@ -2523,12 +2539,29 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     </div>
 
                     {/* Status row */}
-                    <div className="flex items-center gap-4 mt-4 text-xs">
+                    <div className="flex items-center gap-4 mt-4 text-xs flex-wrap">
                       <span className={amountsSet ? 'text-green-600' : 'text-amber-600'}>
                         {amountsSet ? '✅ Amounts set' : '⚠ Amounts not set'}
                       </span>
                       <span className={generated ? 'text-green-600' : 'text-gray-400'}>
                         {generated ? '✅ Bills generated' : '◌ Bills not generated'}
+                      </span>
+                      {/* Due day — always visible, inline editable */}
+                      <span className="flex items-center gap-1 ml-auto">
+                        <span className="text-gray-400">Due on</span>
+                        {structureLock ? (
+                          <span className="font-semibold text-gray-700">{dueDays[cat.id] || '10'}</span>
+                        ) : (
+                          <input
+                            type="number" min="1" max="28"
+                            value={dueDays[cat.id] || ''}
+                            placeholder="10"
+                            onChange={e => setDueDays(p => ({ ...p, [cat.id]: e.target.value }))}
+                            onBlur={() => { if (feeHasAmounts(cat.id, cat.category_type)) saveFeeAmounts(cat) }}
+                            className="w-10 text-center border border-gray-300 rounded px-1 py-0.5 text-xs font-semibold text-gray-700 focus:ring-1 focus:ring-blue-400 focus:outline-none"
+                          />
+                        )}
+                        <span className="text-gray-400">of month</span>
                       </span>
                     </div>
 
@@ -2604,10 +2637,6 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                 className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
                                 {applLoading ? 'Loading…' : 'Load Students'}
                               </button>
-                              <span className="text-xs text-gray-400">Due day:</span>
-                              <input type="number" min="1" max="28" placeholder="10" value={dueDays[cat.id] || ''}
-                                onChange={e => setDueDays(p => ({ ...p, [cat.id]: e.target.value }))}
-                                className="w-14 text-center border border-gray-200 rounded px-1 py-1 text-xs" />
                             </div>
 
                             {applGrade && !applLoading && applStudents.length > 0 && (
@@ -2662,13 +2691,6 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                           <div className="space-y-4">
                             <div className="flex items-center justify-between">
                               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Set amounts by grade</p>
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs text-gray-400">Due day:</span>
-                                <input type="number" min="1" max="28" placeholder="10" value={dueDays[cat.id] || ''}
-                                  onChange={e => setDueDays(p => ({ ...p, [cat.id]: e.target.value }))}
-                                  className="w-14 text-center border border-gray-200 rounded px-1 py-1 text-xs" />
-                                <span className="text-[10px] text-gray-400">of month</span>
-                              </div>
                             </div>
 
                             {/* Grade group quick-fill */}
@@ -2745,6 +2767,59 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             </div>
           )}
 
+          {/* ── Generate Bills confirmation modal ── */}
+          {showGenerateConfirm && (
+            <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-4" onClick={() => setShowGenerateConfirm(false)}>
+              <div className="bg-white rounded-2xl w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                  <p className="font-semibold text-gray-800">Confirm Due Dates Before Generating Bills</p>
+                  <button onClick={() => setShowGenerateConfirm(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+                </div>
+                <div className="p-5 space-y-3">
+                  <p className="text-sm text-gray-500">Bills will be generated with the following due dates. Check each one before continuing.</p>
+                  <div className="border border-gray-100 rounded-xl overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50">
+                        <tr className="text-xs text-gray-500 border-b border-gray-100">
+                          <th className="text-left px-4 py-2 font-semibold">Fee Head</th>
+                          <th className="text-left px-4 py-2 font-semibold">Frequency</th>
+                          <th className="text-center px-4 py-2 font-semibold">Due Day</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {categories.filter(c => c.is_active).map(cat => {
+                          const day = parseInt(dueDays[cat.id] || '10') || 10
+                          const isDefault = !dueDays[cat.id] || dueDays[cat.id] === '10'
+                          return (
+                            <tr key={cat.id} className="hover:bg-gray-50/60">
+                              <td className="px-4 py-2.5 font-medium text-gray-800">{cat.name}</td>
+                              <td className="px-4 py-2.5 text-gray-500">{FREQ_LABEL[cat.frequency]}</td>
+                              <td className="px-4 py-2.5 text-center">
+                                <span className={`font-semibold ${isDefault ? 'text-amber-600' : 'text-gray-800'}`}>{day}</span>
+                                {isDefault && <span className="ml-1 text-[10px] text-amber-500">(default)</span>}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-xs text-amber-600">⚠ Dates marked <strong>default</strong> were not explicitly set. Go back to change them on the fee head card before generating.</p>
+                </div>
+                <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between">
+                  <button onClick={() => setShowGenerateConfirm(false)}
+                    className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2">
+                    ← Go back & edit
+                  </button>
+                  <button onClick={confirmGenerateLedger}
+                    className="text-sm bg-green-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-green-700">
+                    Looks correct — Generate Bills
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── Add Fee Head wizard (modal) ── */}
           {showAddFee && (
             <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-4" onClick={() => { setShowAddFee(false); setAddFeeStep(1) }}>
@@ -2781,7 +2856,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   {addFeeStep === 2 && (
                     <div className="space-y-2">
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">How often is it charged?</p>
-                      {(['monthly','quarterly','annual','one_time'] as const).map(f => (
+                      {(['monthly','quarterly','half_yearly','annual','one_time'] as const).map(f => (
                         <button key={f} type="button"
                           onClick={() => setNewCategory(p => ({ ...p, frequency: f }))}
                           className={`w-full text-left px-4 py-3 rounded-xl border-2 transition-all ${newCategory.frequency === f ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
