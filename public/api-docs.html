@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WLYL API Documentation</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui.css">
+  <style>
+    body { margin: 0; padding: 0; }
+    .swagger-ui .topbar { display: none; }
+    .header {
+      background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+      color: white;
+      padding: 24px 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header h1 { margin: 0; font-size: 24px; font-weight: 700; }
+    .header p { margin: 4px 0 0; opacity: 0.8; font-size: 14px; }
+    .header a { color: #93c5fd; text-decoration: none; font-size: 14px; }
+    .header a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>WLYL API Documentation</h1>
+      <p>We Learn You Learn — School Management Platform &bull; 126 endpoints</p>
+    </div>
+    <a href="/">← Back to Home</a>
+  </div>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: "/api/openapi",
+      dom_id: "#swagger-ui",
+      deepLinking: false,
+      docExpansion: "list",
+      filter: true,
+      tryItOutEnabled: true
+    });
+  </script>
+</body>
+</html>

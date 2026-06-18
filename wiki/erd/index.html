@@ -1,0 +1,2046 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WLYL School — Database ERD Diagrams</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      display: flex;
+      min-height: 100vh;
+    }
+    .sidebar {
+      width: 280px;
+      background: #1e293b;
+      border-right: 1px solid #334155;
+      padding: 24px 16px;
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+    .sidebar h1 {
+      font-size: 18px;
+      font-weight: 700;
+      color: #38bdf8;
+      margin-bottom: 8px;
+    }
+    .sidebar .subtitle {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-bottom: 24px;
+    }
+    .nav-item {
+      display: block;
+      padding: 10px 12px;
+      margin-bottom: 4px;
+      border-radius: 8px;
+      color: #cbd5e1;
+      text-decoration: none;
+      font-size: 13px;
+      transition: all 0.15s;
+    }
+    .nav-item:hover {
+      background: #334155;
+      color: #f1f5f9;
+    }
+    .main {
+      margin-left: 280px;
+      flex: 1;
+      padding: 32px 48px;
+      max-width: calc(100% - 280px);
+    }
+    .erd-section {
+      margin-bottom: 64px;
+      scroll-margin-top: 24px;
+    }
+    .erd-section h2 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #38bdf8;
+    }
+    .desc-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 24px;
+      font-size: 13px;
+    }
+    .desc-table th {
+      background: #1e293b;
+      color: #94a3b8;
+      text-align: left;
+      padding: 8px 12px;
+      border: 1px solid #334155;
+      font-weight: 600;
+    }
+    .desc-table td {
+      padding: 8px 12px;
+      border: 1px solid #334155;
+      color: #cbd5e1;
+    }
+    .desc-table tr:hover td {
+      background: #1e293b;
+    }
+    .mermaid-container {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 32px;
+      overflow-x: auto;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+    }
+    .mermaid {
+      text-align: center;
+    }
+    .stats {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 32px;
+      flex-wrap: wrap;
+    }
+    .stat-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 16px 20px;
+      text-align: center;
+    }
+    .stat-card .num {
+      font-size: 28px;
+      font-weight: 700;
+      color: #38bdf8;
+    }
+    .stat-card .label {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <nav class="sidebar">
+    <h1>WLYL ERD Diagrams</h1>
+    <p class="subtitle">Database Entity Relationship Diagrams</p>
+    <a href="#core-schools" class="nav-item">Core: Schools & Configuration</a>
+<a href="#people" class="nav-item">People: Teachers, Students, Parents, Classes</a>
+<a href="#scheduling" class="nav-item">Scheduling: Timetable, Attendance, Leave</a>
+<a href="#academics" class="nav-item">Academics: Exams, Tasks, Doubts, Syllabus</a>
+<a href="#fees" class="nav-item">Fees: Categories, Payments, Waivers</a>
+<a href="#engagement" class="nav-item">Engagement: Announcements, Rewards, Notifications</a>
+<a href="#full-schema" class="nav-item">Full Schema: All Tables</a>
+
+  </nav>
+  <main class="main">
+    <h1 style="font-size:32px;margin-bottom:8px;">Database Schema — ERD Diagrams</h1>
+    <p style="color:#94a3b8;margin-bottom:24px;">WLYL School Management Platform — 60+ tables across 7 domains</p>
+    <div class="stats">
+      <div class="stat-card"><div class="num">60+</div><div class="label">Tables</div></div>
+      <div class="stat-card"><div class="num">7</div><div class="label">Domains</div></div>
+      <div class="stat-card"><div class="num">127</div><div class="label">API Routes</div></div>
+      <div class="stat-card"><div class="num">5</div><div class="label">Portals</div></div>
+    </div>
+    
+    <section id="core-schools" class="erd-section">
+      <h2>Core: Schools & Configuration</h2>
+      <table class="desc-table"><thead><tr><th>Table</th><th>Purpose</th></tr></thead><tbody><tr><td>**schools**</td><td>Central entity. Every record in the system belongs to a school. Holds contact info, branding, plan dates, soft-delete.</td></tr><tr><td>**school_subscriptions**</td><td>1:1 with school. Tracks the subscription tier (none/basic/standard/premium).</td></tr><tr><td>**users**</td><td>School admins and platform admins. School admins log in via school_code, platform admins via email.</td></tr><tr><td>**user_profiles**</td><td>1:1 extension of users with full name, phone, designation, bio.</td></tr><tr><td>**password_reset_tokens**</td><td>Time-limited tokens for password recovery across all roles.</td></tr><tr><td>**plan_features**</td><td>Feature-flag matrix: which features are enabled for each subscription tier.</td></tr><tr><td>**plan_pricing**</td><td>Pricing, quotas, and capability flags per tier.</td></tr><tr><td>**school_feature_overrides**</td><td>Per-school overrides on top of tier-level plan_features.</td></tr><tr><td>**school_schedule_settings**</td><td>1:1. Configures periods per day, break timings, start/end times.</td></tr><tr><td>**schedule_templates**</td><td>Named saved schedule configurations (Full Day, Half Day, Exam Day).</td></tr><tr><td>**school_subject_templates**</td><td>Default subject sets per grade range, auto-applied when creating classes.</td></tr><tr><td>**school_calendar**</td><td>Academic calendar: holidays, events, meetings.</td></tr><tr><td>**academic_years**</td><td>Tracks academic year labels (e.g. "2024-25") with start/end dates and current flag.</td></tr><tr><td>**curriculum_assignments**</td><td>Maps which curriculum (CBSE/APSSC) a school uses per grade.</td></tr><tr><td>**display_tokens**</td><td>Authentication tokens for TV/kiosk display screens.</td></tr><tr><td>**platform_audit_log**</td><td>Immutable log of every platform admin action (create, update, delete).</td></tr><tr><td>**app_bootstrap_state**</td><td>Internal: tracks whether schema bootstrap has completed.</td></tr><tr><td>## Entity Relationship Diagram</td></tr></tbody></table>
+      <div class="mermaid-container">
+        <pre class="mermaid">
+erDiagram
+    schools {
+        SERIAL id PK
+        VARCHAR name
+        VARCHAR type
+        VARCHAR city
+        VARCHAR country
+        VARCHAR phone
+        VARCHAR email
+        TEXT address
+        VARCHAR school_code UK
+        VARCHAR logo_url
+        JSONB grading_scheme
+        VARCHAR status
+        VARCHAR board
+        DATE plan_start_date
+        DATE plan_end_date
+        NUMERIC plan_amount
+        TIMESTAMPTZ deleted_at
+        TIMESTAMP created_at
+    }
+
+    school_subscriptions {
+        SERIAL id PK
+        INTEGER school_id FK, UK
+        VARCHAR tier
+        TIMESTAMP updated_at
+    }
+
+    users {
+        SERIAL id PK
+        VARCHAR email
+        VARCHAR school_code UK
+        VARCHAR password_hash
+        VARCHAR role
+        INTEGER school_id FK
+        BOOLEAN first_login
+        BOOLEAN profile_completed
+        VARCHAR full_name
+        VARCHAR status
+        TIMESTAMPTZ last_login_at
+        TIMESTAMP created_at
+    }
+
+    user_profiles {
+        SERIAL id PK
+        INTEGER user_id FK, UK
+        VARCHAR full_name
+        VARCHAR phone
+        VARCHAR designation
+        TEXT bio
+        TIMESTAMP updated_at
+    }
+
+    password_reset_tokens {
+        SERIAL id PK
+        INTEGER user_id FK
+        VARCHAR token UK
+        TIMESTAMP expires_at
+        BOOLEAN used
+        VARCHAR role
+        INTEGER reference_id
+    }
+
+    plan_features {
+        SERIAL id PK
+        VARCHAR feature_key
+        VARCHAR tier
+        BOOLEAN enabled
+    }
+
+    plan_pricing {
+        SERIAL id PK
+        VARCHAR tier UK
+        VARCHAR display_name
+        NUMERIC monthly_price
+        INTEGER included_whatsapp_messages
+        NUMERIC whatsapp_overage_rate
+        BOOLEAN online_payments_included
+        BOOLEAN whatsapp_included
+        BOOLEAN usage_billing_enabled
+    }
+
+    school_feature_overrides {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR feature_key
+        BOOLEAN enabled
+        TEXT updated_by
+    }
+
+    school_schedule_settings {
+        SERIAL id PK
+        INTEGER school_id FK, UK
+        INTEGER periods_per_day
+        VARCHAR start_time
+        VARCHAR end_time
+        INTEGER morning_break_after_period
+        INTEGER lunch_after_period
+    }
+
+    schedule_templates {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        JSONB settings
+    }
+
+    school_subject_templates {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        INTEGER from_grade
+        INTEGER to_grade
+        JSONB subjects
+    }
+
+    school_calendar {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR title
+        DATE event_date
+        DATE end_date
+        VARCHAR event_type
+        VARCHAR color
+    }
+
+    academic_years {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR label
+        DATE start_date
+        DATE end_date
+        BOOLEAN is_current
+    }
+
+    curriculum_assignments {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR grade
+        VARCHAR curriculum_type
+    }
+
+    display_tokens {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR token UK
+        VARCHAR label
+    }
+
+    platform_audit_log {
+        SERIAL id PK
+        INTEGER actor_id FK
+        VARCHAR actor_email
+        VARCHAR action
+        VARCHAR entity_type
+        INTEGER entity_id
+        JSONB details
+    }
+
+    schools ||--o| school_subscriptions : "has subscription"
+    schools ||--o{ users : "has admins"
+    schools ||--o| school_schedule_settings : "has schedule config"
+    schools ||--o{ schedule_templates : "has templates"
+    schools ||--o{ school_subject_templates : "has subject sets"
+    schools ||--o{ school_calendar : "has calendar events"
+    schools ||--o{ academic_years : "has academic years"
+    schools ||--o{ curriculum_assignments : "has curricula"
+    schools ||--o{ display_tokens : "has display tokens"
+    schools ||--o{ school_feature_overrides : "has feature overrides"
+    users ||--o| user_profiles : "has profile"
+    users ||--o{ password_reset_tokens : "has reset tokens"
+    users ||--o{ platform_audit_log : "performed actions"
+        </pre>
+      </div>
+    </section>
+
+    <section id="people" class="erd-section">
+      <h2>People: Teachers, Students, Parents, Classes</h2>
+      <table class="desc-table"><thead><tr><th>Table</th><th>Purpose</th></tr></thead><tbody><tr><td>**teachers**</td><td>School staff. Can be teaching or support staff. Logs in via employee_id + password. Soft-deleted via removed_at.</td></tr><tr><td>**students**</td><td>Enrolled students. Assigned to a grade + section. Logs in via roll_number + password.</td></tr><tr><td>**parents**</td><td>Parent/guardian records. Linked to students via the student_parents join table. Logs in via email.</td></tr><tr><td>**student_parents**</td><td>Many-to-many join: a student can have multiple parents, a parent can have multiple children.</td></tr><tr><td>**classes**</td><td>A specific grade + section combination (e.g. "6A"). Has a class teacher. Unique per school.</td></tr><tr><td>**class_subjects**</td><td>Subjects taught in a class, with the assigned teacher and periods-per-week for timetable generation.</td></tr><tr><td>**department_hods**</td><td>Head of Department assignments. A teacher can be HOD for a department overseeing specific classes.</td></tr><tr><td>**student_class_history**</td><td>Immutable audit trail: which grade+section a student was in for each academic year. Written during rollover.</td></tr><tr><td>## Entity Relationship Diagram</td></tr></tbody></table>
+      <div class="mermaid-container">
+        <pre class="mermaid">
+erDiagram
+    schools {
+        SERIAL id PK
+        VARCHAR name
+    }
+
+    teachers {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        VARCHAR email
+        VARCHAR subject
+        VARCHAR phone
+        VARCHAR employee_id
+        VARCHAR department
+        VARCHAR qualification
+        DATE date_of_joining
+        VARCHAR staff_type
+        TEXT teaches_grades
+        VARCHAR password_hash
+        BOOLEAN password_changed
+        VARCHAR status
+        TIMESTAMPTZ removed_at
+    }
+
+    students {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        VARCHAR email
+        VARCHAR grade
+        VARCHAR section
+        VARCHAR roll_number
+        VARCHAR phone
+        VARCHAR parent_name
+        VARCHAR parent_phone
+        VARCHAR parent_email
+        VARCHAR password_hash
+        BOOLEAN password_changed
+        VARCHAR status
+    }
+
+    parents {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        VARCHAR email
+        VARCHAR phone
+        VARCHAR password_hash
+        BOOLEAN password_changed
+    }
+
+    student_parents {
+        SERIAL id PK
+        INTEGER student_id FK
+        INTEGER parent_id FK
+    }
+
+    classes {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR grade
+        VARCHAR section
+        INTEGER class_teacher_id FK
+        TIMESTAMPTZ timetable_generated_at
+        VARCHAR timetable_generated_by
+        TIMESTAMPTZ timetable_circulated_at
+        TIMESTAMPTZ deleted_at
+    }
+
+    class_subjects {
+        SERIAL id PK
+        INTEGER class_id FK
+        VARCHAR subject_name
+        INTEGER teacher_id FK
+        INTEGER periods_per_week
+    }
+
+    department_hods {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR department
+        INTEGER teacher_id FK
+        INTEGER_ARRAY class_ids
+    }
+
+    student_class_history {
+        SERIAL id PK
+        INTEGER student_id FK
+        INTEGER school_id
+        INTEGER academic_year_id FK
+        VARCHAR grade
+        VARCHAR section
+        VARCHAR promoted_to_grade
+        TIMESTAMPTZ promoted_at
+    }
+
+    academic_years {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR label
+    }
+
+    schools ||--o{ teachers : "employs"
+    schools ||--o{ students : "enrolls"
+    schools ||--o{ parents : "has parents"
+    schools ||--o{ classes : "has classes"
+    schools ||--o{ department_hods : "has HODs"
+    teachers ||--o{ class_subjects : "teaches"
+    teachers ||--o| classes : "is class teacher of"
+    teachers ||--o{ department_hods : "assigned as HOD"
+    students ||--o{ student_parents : "has parents"
+    parents ||--o{ student_parents : "has children"
+    classes ||--o{ class_subjects : "has subjects"
+    students ||--o{ student_class_history : "promotion trail"
+    academic_years ||--o{ student_class_history : "for year"
+        </pre>
+      </div>
+    </section>
+
+    <section id="scheduling" class="erd-section">
+      <h2>Scheduling: Timetable, Attendance, Leave</h2>
+      <table class="desc-table"><thead><tr><th>Table</th><th>Purpose</th></tr></thead><tbody><tr><td>**class_timetable**</td><td>Source of truth for each class's schedule. One row per class + day + period. Includes breaks, lock state, and source tracking (auto/manual/cloned).</td></tr><tr><td>**timetable**</td><td>Teacher's personal schedule view, synced from class_timetable. Denormalized for fast teacher-portal queries.</td></tr><tr><td>**timetable_versions**</td><td>Version tracking for timetable snapshots (draft vs. published).</td></tr><tr><td>**class_timetable_modes**</td><td>Master/slave/independent mode per class. Slave classes clone their timetable from a master source class.</td></tr><tr><td>**teacher_unavailability**</td><td>Hard constraints for the timetable generator. Teachers mark specific day+period slots as unavailable.</td></tr><tr><td>**attendance**</td><td>Student attendance records. Two sessions per day (morning + afternoon). Marked by a teacher.</td></tr><tr><td>**leave_requests**</td><td>Teacher leave applications. Flows through pending -> approved/rejected.</td></tr><tr><td>**substitute_assignments**</td><td>When a teacher is on approved leave, admin assigns substitute teachers per period. Linked to the leave request.</td></tr><tr><td>## Entity Relationship Diagram</td></tr></tbody></table>
+      <div class="mermaid-container">
+        <pre class="mermaid">
+erDiagram
+    classes {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR grade
+        VARCHAR section
+        INTEGER class_teacher_id FK
+    }
+
+    class_timetable {
+        SERIAL id PK
+        INTEGER class_id FK
+        INTEGER school_id FK
+        VARCHAR day_of_week
+        INTEGER period_number
+        VARCHAR time_from
+        VARCHAR time_to
+        VARCHAR subject_name
+        INTEGER teacher_id FK
+        VARCHAR room
+        BOOLEAN is_break
+        VARCHAR break_label
+        BOOLEAN is_locked
+        BOOLEAN is_manual
+        VARCHAR source
+        INTEGER template_id FK
+    }
+
+    timetable {
+        SERIAL id PK
+        INTEGER teacher_id FK
+        INTEGER school_id FK
+        VARCHAR day_of_week
+        INTEGER period_number
+        VARCHAR time_from
+        VARCHAR time_to
+        VARCHAR subject
+        VARCHAR grade
+        VARCHAR section
+        VARCHAR room
+    }
+
+    timetable_versions {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        VARCHAR status
+        BOOLEAN is_active
+        TIMESTAMPTZ circulated_at
+    }
+
+    class_timetable_modes {
+        SERIAL id PK
+        INTEGER class_id FK, UK
+        INTEGER school_id FK
+        VARCHAR mode
+        INTEGER master_source_id FK
+    }
+
+    teacher_unavailability {
+        SERIAL id PK
+        INTEGER teacher_id FK
+        INTEGER school_id FK
+        VARCHAR day_of_week
+        INTEGER period_number
+        TEXT reason
+    }
+
+    schedule_templates {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        JSONB settings
+    }
+
+    attendance {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER class_id FK
+        INTEGER student_id FK
+        DATE date
+        VARCHAR session
+        VARCHAR status
+        INTEGER marked_by_teacher_id FK
+        TIMESTAMPTZ marked_at
+    }
+
+    leave_requests {
+        SERIAL id PK
+        INTEGER teacher_id FK
+        INTEGER school_id FK
+        VARCHAR leave_type
+        DATE start_date
+        DATE end_date
+        TEXT reason
+        VARCHAR status
+        TIMESTAMP reviewed_at
+    }
+
+    substitute_assignments {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER leave_request_id FK
+        INTEGER original_teacher_id FK
+        INTEGER substitute_teacher_id FK
+        INTEGER class_id FK
+        DATE date
+        VARCHAR day_of_week
+        INTEGER period_number
+        VARCHAR subject_name
+    }
+
+    teachers {
+        SERIAL id PK
+        VARCHAR name
+    }
+
+    students {
+        SERIAL id PK
+        VARCHAR name
+    }
+
+    schools {
+        SERIAL id PK
+        VARCHAR name
+    }
+
+    schools ||--o{ class_timetable : "has schedules"
+    schools ||--o{ timetable : "has teacher schedules"
+    schools ||--o{ timetable_versions : "has versions"
+    schools ||--o{ attendance : "tracks attendance"
+    schools ||--o{ leave_requests : "manages leaves"
+    schools ||--o{ substitute_assignments : "assigns subs"
+    classes ||--o{ class_timetable : "has periods"
+    classes ||--o| class_timetable_modes : "has mode"
+    classes ||--o{ attendance : "has attendance"
+    classes ||--o{ substitute_assignments : "receives subs"
+    classes ||--o| class_timetable_modes : "is master for"
+    teachers ||--o{ class_timetable : "assigned to period"
+    teachers ||--o{ timetable : "personal schedule"
+    teachers ||--o{ teacher_unavailability : "blocked slots"
+    teachers ||--o{ leave_requests : "applies for leave"
+    teachers ||--o{ attendance : "marks attendance"
+    students ||--o{ attendance : "has records"
+    leave_requests ||--o{ substitute_assignments : "needs coverage"
+    schedule_templates ||--o{ class_timetable : "used by"
+        </pre>
+      </div>
+    </section>
+
+    <section id="academics" class="erd-section">
+      <h2>Academics: Exams, Tasks, Doubts, Syllabus</h2>
+      <table class="desc-table"><thead><tr><th>Table</th><th>Purpose</th></tr></thead><tbody><tr><td>**exam_records**</td><td>An exam event (Unit Test 1, Mid Term, etc.) for a specific class. Created by a teacher, flows through draft -> collecting -> published.</td></tr><tr><td>**exam_subjects**</td><td>Subjects included in an exam, with max marks and the teacher responsible for entering marks.</td></tr><tr><td>**exam_marks**</td><td>Individual student marks per subject per exam. Includes absent tracking.</td></tr><tr><td>**parent_mark_acks**</td><td>Parent acknowledgement that they have seen their child's exam results.</td></tr><tr><td>**report_card_config**</td><td>1:1 per school. Configures what appears on report cards (attendance, rank, grading scheme).</td></tr><tr><td>**report_card_remarks**</td><td>Per-student per-exam remarks from the class teacher (conduct, advice, etc.).</td></tr><tr><td>**tasks**</td><td>Homework, practice, or test assignments created by a teacher for a class. Has due date/time.</td></tr><tr><td>**task_submissions**</td><td>Student submissions for a task. Includes file upload, score, feedback, resubmission flow.</td></tr><tr><td>**task_reminders**</td><td>Records of reminder notifications sent by teachers for pending task submissions.</td></tr><tr><td>**doubts**</td><td>Student questions about a subject or task. Can be answered by AI or teacher. Supports FAQ marking and upvotes.</td></tr><tr><td>**doubt_messages**</td><td>Live chat messages within a doubt thread between student and teacher.</td></tr><tr><td>**doubt_upvotes**</td><td>Peer upvoting of doubts by other students.</td></tr><tr><td>**syllabus_topics**</td><td>Chapter and topic tracking per class per subject. Teachers mark coverage, HODs review progress.</td></tr><tr><td>**weekly_tests**</td><td>AI-generated MCQ tests per student per week, based on covered syllabus.</td></tr><tr><td>**textbook_library**</td><td>Uploaded textbook PDFs per school/grade/subject. Text is extracted for AI context.</td></tr><tr><td>**textbook_chunks**</td><td>Extracted text chunks from textbooks, indexed for full-text search.</td></tr><tr><td>**ai_chat_sessions**</td><td>Student AI chat history (floating assistant). Visible to parents.</td></tr><tr><td>**teacher_ai_sessions**</td><td>Teacher AI chat history (professional assistant). Not parent-visible.</td></tr><tr><td>## Entity Relationship Diagram</td></tr></tbody></table>
+      <div class="mermaid-container">
+        <pre class="mermaid">
+erDiagram
+    classes {
+        SERIAL id PK
+        VARCHAR grade
+        VARCHAR section
+    }
+
+    teachers {
+        SERIAL id PK
+        VARCHAR name
+    }
+
+    students {
+        SERIAL id PK
+        VARCHAR name
+    }
+
+    schools {
+        SERIAL id PK
+        VARCHAR name
+    }
+
+    exam_records {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER class_id FK
+        INTEGER created_by FK
+        VARCHAR exam_name
+        VARCHAR exam_type
+        DATE exam_date
+        INTEGER passing_pct
+        VARCHAR status
+        TIMESTAMPTZ published_at
+    }
+
+    exam_subjects {
+        SERIAL id PK
+        INTEGER exam_id FK
+        INTEGER school_id
+        VARCHAR subject_name
+        INTEGER teacher_id FK
+        VARCHAR teacher_name
+        INTEGER max_marks
+        VARCHAR status
+        INTEGER submitted_by FK
+    }
+
+    exam_marks {
+        SERIAL id PK
+        INTEGER exam_id FK
+        INTEGER school_id
+        INTEGER student_id FK
+        VARCHAR subject_name
+        NUMERIC marks_obtained
+        BOOLEAN is_absent
+        INTEGER entered_by FK
+    }
+
+    parent_mark_acks {
+        SERIAL id PK
+        INTEGER exam_id FK
+        INTEGER student_id FK
+        INTEGER school_id
+        VARCHAR parent_name
+        TIMESTAMPTZ acknowledged_at
+    }
+
+    report_card_config {
+        SERIAL id PK
+        INTEGER school_id FK, UK
+        BOOLEAN show_attendance
+        BOOLEAN show_rank
+        BOOLEAN show_remarks
+        JSONB grading_scheme
+        TEXT header_text
+    }
+
+    report_card_remarks {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER student_id FK
+        INTEGER exam_id FK
+        TEXT class_teacher_remark
+        VARCHAR conduct
+        TEXT next_term_advice
+    }
+
+    tasks {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER class_id FK
+        INTEGER teacher_id FK
+        VARCHAR title
+        VARCHAR subject
+        VARCHAR task_type
+        INTEGER max_marks
+        TEXT instructions
+        VARCHAR status
+        DATE due_date
+        TIME due_time
+    }
+
+    task_submissions {
+        SERIAL id PK
+        INTEGER task_id FK
+        INTEGER student_id FK
+        INTEGER school_id FK
+        TIMESTAMPTZ submitted_at
+        TEXT submission_text
+        VARCHAR file_url
+        NUMERIC score
+        TEXT feedback
+        VARCHAR status
+        INTEGER reviewed_by FK
+    }
+
+    task_reminders {
+        SERIAL id PK
+        INTEGER task_id FK
+        INTEGER school_id FK
+        INTEGER sent_by FK
+        VARCHAR target_type
+        INTEGER student_count
+    }
+
+    doubts {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER class_id FK
+        INTEGER student_id FK
+        VARCHAR subject
+        TEXT question
+        INTEGER task_id FK
+        TEXT ai_answer
+        INTEGER answered_by FK
+        VARCHAR status
+        BOOLEAN is_class_faq
+        INTEGER upvote_count
+        INTEGER message_count
+    }
+
+    doubt_messages {
+        SERIAL id PK
+        INTEGER doubt_id FK
+        INTEGER school_id
+        VARCHAR sender_type
+        INTEGER sender_id
+        VARCHAR sender_name
+        TEXT message
+        BOOLEAN is_final_answer
+    }
+
+    doubt_upvotes {
+        SERIAL id PK
+        INTEGER doubt_id FK
+        INTEGER student_id FK
+        INTEGER school_id
+    }
+
+    syllabus_topics {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER class_id FK
+        VARCHAR subject
+        VARCHAR chapter_name
+        INTEGER chapter_order
+        VARCHAR topic_name
+        INTEGER topic_order
+        VARCHAR status
+        DATE covered_date
+        INTEGER covered_by FK
+        DATE target_date
+        TEXT delay_reason
+        TEXT hod_remark
+        BOOLEAN published
+    }
+
+    weekly_tests {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER class_id FK
+        INTEGER student_id FK
+        DATE week_start
+        JSONB questions
+        JSONB student_answers
+        INTEGER score
+        VARCHAR status
+    }
+
+    textbook_library {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR grade
+        VARCHAR subject
+        VARCHAR book_title
+        VARCHAR file_name
+        INTEGER total_chunks
+    }
+
+    textbook_chunks {
+        SERIAL id PK
+        INTEGER textbook_id FK
+        INTEGER school_id
+        VARCHAR grade
+        VARCHAR subject
+        INTEGER chunk_index
+        TEXT content
+    }
+
+    ai_chat_sessions {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER student_id FK
+        VARCHAR subject
+        JSONB messages
+    }
+
+    teacher_ai_sessions {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER teacher_id FK
+        VARCHAR context
+        JSONB messages
+    }
+
+    schools ||--o{ exam_records : "has exams"
+    schools ||--o| report_card_config : "has config"
+    schools ||--o{ tasks : "has tasks"
+    schools ||--o{ doubts : "has doubts"
+    schools ||--o{ syllabus_topics : "has syllabus"
+    schools ||--o{ weekly_tests : "has tests"
+    schools ||--o{ textbook_library : "has textbooks"
+    classes ||--o{ exam_records : "has exams"
+    classes ||--o{ tasks : "assigned to"
+    classes ||--o{ doubts : "raised in"
+    classes ||--o{ syllabus_topics : "covers"
+    classes ||--o{ weekly_tests : "generates for"
+    teachers ||--o{ exam_records : "creates"
+    teachers ||--o{ exam_subjects : "enters marks"
+    teachers ||--o{ exam_marks : "entered by"
+    teachers ||--o{ tasks : "assigns"
+    teachers ||--o{ task_submissions : "reviews"
+    teachers ||--o{ task_reminders : "sends"
+    teachers ||--o{ doubts : "answers"
+    teachers ||--o{ syllabus_topics : "covers topic"
+    teachers ||--o{ teacher_ai_sessions : "chats with AI"
+    students ||--o{ exam_marks : "receives marks"
+    students ||--o{ parent_mark_acks : "marks acknowledged"
+    students ||--o{ report_card_remarks : "has remarks"
+    students ||--o{ task_submissions : "submits"
+    students ||--o{ doubts : "asks"
+    students ||--o{ doubt_upvotes : "upvotes"
+    students ||--o{ weekly_tests : "takes"
+    students ||--o{ ai_chat_sessions : "chats with AI"
+    exam_records ||--o{ exam_subjects : "has subjects"
+    exam_records ||--o{ exam_marks : "has marks"
+    exam_records ||--o{ parent_mark_acks : "acknowledged by"
+    exam_records ||--o{ report_card_remarks : "has remarks"
+    tasks ||--o{ task_submissions : "receives"
+    tasks ||--o{ task_reminders : "sends reminders"
+    tasks ||--o{ doubts : "doubt about"
+    doubts ||--o{ doubt_messages : "has chat"
+    doubts ||--o{ doubt_upvotes : "has upvotes"
+    textbook_library ||--o{ textbook_chunks : "split into"
+        </pre>
+      </div>
+    </section>
+
+    <section id="fees" class="erd-section">
+      <h2>Fees: Categories, Payments, Waivers</h2>
+      <table class="desc-table"><thead><tr><th>Table</th><th>Purpose</th></tr></thead><tbody><tr><td>**fee_categories**</td><td>Fee types defined by a school (Tuition, Transport, Exam Fee, etc.). Each has a frequency (monthly/quarterly/annual/one_time).</td></tr><tr><td>**fee_structures**</td><td>Amount per category per grade per academic year. Defines how much each grade pays for each fee category.</td></tr><tr><td>**fee_structure_locks**</td><td>Locks a school's fee structure for an academic year to prevent accidental edits after finalization.</td></tr><tr><td>**fee_structure_amendments**</td><td>Audit trail when a locked fee structure amount is changed. Records old/new amounts and reason.</td></tr><tr><td>**student_fee_ledger**</td><td>Per-student billing records. One row per student per fee category per period. Tracks amount due, paid, and status.</td></tr><tr><td>**student_fee_ledger_edits**</td><td>Audit trail for manual edits to individual student ledger entries.</td></tr><tr><td>**fee_payments**</td><td>Payment records against ledger entries. Supports cash, cheque, DD, online, UPI. Each gets a receipt number.</td></tr><tr><td>**fee_waivers**</td><td>Discount/waiver records (percentage, fixed amount, or full). Linked to specific ledger entries.</td></tr><tr><td>**school_payment_config**</td><td>Per-school Cashfree gateway configuration. Secret is AES-256-GCM encrypted.</td></tr><tr><td>**payment_transactions**</td><td>Online payment link records created for parents. Tracks Cashfree order lifecycle.</td></tr><tr><td>**payment_webhook_log**</td><td>Raw Cashfree webhook payloads logged for idempotency and audit.</td></tr><tr><td>## Entity Relationship Diagram</td></tr></tbody></table>
+      <div class="mermaid-container">
+        <pre class="mermaid">
+erDiagram
+    schools {
+        SERIAL id PK
+        VARCHAR name
+    }
+
+    students {
+        SERIAL id PK
+        VARCHAR name
+        VARCHAR grade
+    }
+
+    fee_categories {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        TEXT description
+        VARCHAR frequency
+        BOOLEAN is_active
+    }
+
+    fee_structures {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER fee_category_id FK
+        VARCHAR grade
+        NUMERIC amount
+        INTEGER due_day
+        VARCHAR academic_year
+    }
+
+    fee_structure_locks {
+        SERIAL id PK
+        INTEGER school_id
+        TEXT academic_year
+        TEXT locked_by
+        TIMESTAMPTZ locked_at
+    }
+
+    fee_structure_amendments {
+        SERIAL id PK
+        INTEGER school_id
+        INTEGER fee_structure_id FK
+        INTEGER fee_category_id FK
+        TEXT grade
+        TEXT academic_year
+        NUMERIC old_amount
+        NUMERIC new_amount
+        DATE effective_from
+        TEXT reason
+        TEXT changed_by
+    }
+
+    student_fee_ledger {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER student_id FK
+        INTEGER fee_category_id FK
+        INTEGER fee_structure_id FK
+        VARCHAR academic_year
+        VARCHAR period_label
+        NUMERIC amount_due
+        NUMERIC amount_paid
+        NUMERIC waiver_amount
+        DATE due_date
+        VARCHAR status
+    }
+
+    student_fee_ledger_edits {
+        SERIAL id PK
+        INTEGER ledger_id FK
+        INTEGER school_id
+        INTEGER student_id
+        NUMERIC old_amount
+        NUMERIC new_amount
+        TEXT reason
+        TEXT changed_by
+    }
+
+    fee_payments {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER student_id FK
+        INTEGER ledger_id FK
+        NUMERIC amount
+        VARCHAR payment_mode
+        VARCHAR payment_status
+        VARCHAR receipt_number UK
+        VARCHAR transaction_ref
+        DATE paid_date
+        VARCHAR collected_by_name
+        TEXT verified_by
+        TIMESTAMPTZ verified_at
+        TEXT rejection_reason
+    }
+
+    fee_waivers {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER student_id FK
+        INTEGER ledger_id FK
+        VARCHAR waiver_type
+        NUMERIC waiver_value
+        NUMERIC waiver_amount
+        TEXT reason
+        VARCHAR granted_by_name
+    }
+
+    school_payment_config {
+        SERIAL id PK
+        INTEGER school_id FK, UK
+        TEXT cashfree_app_id
+        TEXT cashfree_secret_encrypted
+        VARCHAR cashfree_env
+        BOOLEAN is_active
+    }
+
+    payment_transactions {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER student_id FK
+        INTEGER_ARRAY ledger_ids
+        VARCHAR cashfree_order_id UK
+        VARCHAR cashfree_payment_id
+        NUMERIC amount
+        VARCHAR status
+        VARCHAR idempotency_key UK
+        TEXT payment_link
+        VARCHAR parent_name
+        VARCHAR parent_phone
+        TEXT failure_reason
+    }
+
+    payment_webhook_log {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR cashfree_order_id
+        VARCHAR event_type
+        JSONB raw_payload
+        BOOLEAN signature_valid
+        BOOLEAN processed
+    }
+
+    schools ||--o{ fee_categories : "defines"
+    schools ||--o{ fee_structures : "sets amounts"
+    schools ||--o{ fee_structure_locks : "locks structure"
+    schools ||--o| school_payment_config : "has gateway config"
+    schools ||--o{ payment_transactions : "has online payments"
+    schools ||--o{ payment_webhook_log : "receives webhooks"
+    fee_categories ||--o{ fee_structures : "has amounts per grade"
+    fee_categories ||--o{ student_fee_ledger : "billed under"
+    fee_categories ||--o{ fee_structure_amendments : "amended"
+    fee_structures ||--o{ student_fee_ledger : "generates entries"
+    fee_structures ||--o{ fee_structure_amendments : "amended"
+    students ||--o{ student_fee_ledger : "owes"
+    students ||--o{ fee_payments : "pays"
+    students ||--o{ fee_waivers : "receives waiver"
+    students ||--o{ payment_transactions : "online payment"
+    student_fee_ledger ||--o{ fee_payments : "paid via"
+    student_fee_ledger ||--o{ fee_waivers : "waived via"
+    student_fee_ledger ||--o{ student_fee_ledger_edits : "edit history"
+        </pre>
+      </div>
+    </section>
+
+    <section id="engagement" class="erd-section">
+      <h2>Engagement: Announcements, Rewards, Notifications</h2>
+      <table class="desc-table"><thead><tr><th>Table</th><th>Purpose</th></tr></thead><tbody><tr><td>**announcements**</td><td>School-wide circulars. Targeted to all/teachers/students/parents. Has priority levels and expiration dates.</td></tr><tr><td>**notifications**</td><td>In-app notifications. Can target a teacher, student, or school-wide. Sent by teachers or system-generated.</td></tr><tr><td>**student_points**</td><td>Point transaction log. Students earn points for tasks, doubts, reading, quizzes, streaks.</td></tr><tr><td>**student_badges**</td><td>Badge awards (first_task, task_10, high_scorer, streak_7, etc.). One of each badge per student.</td></tr><tr><td>**student_streaks**</td><td>Current and longest activity streaks per student. One row per student.</td></tr><tr><td>**daily_newspapers**</td><td>Pre-written educational articles rotated by date. One per school per day. Includes quiz questions.</td></tr><tr><td>**student_newspaper_reads**</td><td>Tracks which students have read each daily newspaper article. Awards points.</td></tr><tr><td>**hub_daily_content**</td><td>AI-generated daily knowledge hub content: GK questions, word of the day, riddles, debates, challenges, reading/writing/speaking prompts.</td></tr><tr><td>**student_hub_completions**</td><td>Tracks student completion of daily hub activities with scores and points earned.</td></tr><tr><td>**marketplace_items**</td><td>Reward shop items students can purchase with earned points.</td></tr><tr><td>**marketplace_orders**</td><td>Purchase orders when students redeem points for marketplace items.</td></tr><tr><td>**student_portal_sessions**</td><td>Session tracking for student portal logins (start time, end time, duration).</td></tr><tr><td>**student_portal_activity**</td><td>Granular activity log within each session (page views, task views, submissions, etc.).</td></tr><tr><td>**school_whatsapp_config**</td><td>Per-school WhatsApp Business API configuration (Meta provider).</td></tr><tr><td>**whatsapp_messages**</td><td>Audit trail of all WhatsApp messages sent, with delivery tracking.</td></tr><tr><td>**whatsapp_usage_summary**</td><td>Monthly rollup of WhatsApp message counts per type, for billing.</td></tr><tr><td>**billing_cycles**</td><td>SaaS billing cycles for schools paying the platform. Monthly cycle with plan fee and overages.</td></tr><tr><td>**usage_ledger**</td><td>Per-event billable usage records within a billing cycle.</td></tr><tr><td>**saas_invoices**</td><td>Generated invoices for platform billing. Includes plan fee + WhatsApp overage charges.</td></tr><tr><td>**saas_invoice_items**</td><td>Line items on each invoice (plan fee, overage, etc.).</td></tr><tr><td>**saas_payments**</td><td>Payment records when schools pay platform invoices.</td></tr><tr><td>## Entity Relationship Diagram</td></tr></tbody></table>
+      <div class="mermaid-container">
+        <pre class="mermaid">
+erDiagram
+    schools {
+        SERIAL id PK
+        VARCHAR name
+    }
+
+    students {
+        SERIAL id PK
+        VARCHAR name
+    }
+
+    announcements {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR title
+        TEXT content
+        VARCHAR announcement_type
+        VARCHAR target_audience
+        VARCHAR priority
+        VARCHAR created_by_name
+        DATE expires_at
+    }
+
+    notifications {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER recipient_teacher_id FK
+        INTEGER recipient_student_id FK
+        INTEGER recipient_school_id FK
+        INTEGER sender_teacher_id FK
+        VARCHAR type
+        VARCHAR title
+        TEXT message
+        JSONB data
+        BOOLEAN is_read
+    }
+
+    student_points {
+        SERIAL id PK
+        INTEGER student_id FK
+        INTEGER school_id
+        VARCHAR action_type
+        INTEGER points
+        INTEGER reference_id
+        VARCHAR reference_type
+        VARCHAR points_type
+    }
+
+    student_badges {
+        SERIAL id PK
+        INTEGER student_id FK
+        INTEGER school_id
+        VARCHAR badge_type
+        TIMESTAMPTZ earned_at
+    }
+
+    student_streaks {
+        INTEGER student_id PK, FK
+        INTEGER school_id
+        INTEGER current_streak
+        INTEGER longest_streak
+        DATE last_activity_date
+    }
+
+    daily_newspapers {
+        SERIAL id PK
+        INTEGER school_id FK
+        DATE date
+        VARCHAR title
+        TEXT content
+        TEXT fun_fact
+        TEXT quiz_question
+        TEXT quiz_answer
+        VARCHAR topic
+        VARCHAR category
+    }
+
+    student_newspaper_reads {
+        SERIAL id PK
+        INTEGER student_id FK
+        INTEGER newspaper_id FK
+        INTEGER school_id
+        INTEGER points_awarded
+    }
+
+    hub_daily_content {
+        SERIAL id PK
+        DATE content_date UK
+        JSONB gk_questions
+        JSONB word_of_day
+        JSONB riddle
+        JSONB fact_myth_questions
+        JSONB debate_statement
+        JSONB challenge_problem
+        JSONB reading_passage
+        JSONB writing_prompt
+        JSONB speaking_sentences
+    }
+
+    student_hub_completions {
+        SERIAL id PK
+        INTEGER student_id FK
+        INTEGER school_id
+        VARCHAR activity_type
+        DATE completed_date
+        INTEGER score
+        INTEGER points_earned
+    }
+
+    marketplace_items {
+        SERIAL id PK
+        VARCHAR name UK
+        TEXT description
+        VARCHAR emoji
+        INTEGER cost_points
+        BOOLEAN active
+    }
+
+    marketplace_orders {
+        SERIAL id PK
+        INTEGER student_id FK
+        INTEGER school_id
+        INTEGER item_id FK
+        VARCHAR item_name
+        INTEGER points_spent
+        VARCHAR status
+        VARCHAR student_name
+    }
+
+    student_portal_sessions {
+        SERIAL id PK
+        INTEGER student_id FK
+        INTEGER school_id
+        TIMESTAMPTZ started_at
+        TIMESTAMPTZ ended_at
+        INTEGER duration_minutes
+    }
+
+    student_portal_activity {
+        SERIAL id PK
+        INTEGER student_id FK
+        INTEGER school_id
+        INTEGER session_id FK
+        VARCHAR action_type
+        VARCHAR action_detail
+    }
+
+    school_whatsapp_config {
+        SERIAL id PK
+        INTEGER school_id FK, UK
+        VARCHAR provider
+        TEXT access_token_encrypted
+        VARCHAR phone_number_id
+        BOOLEAN is_active
+    }
+
+    whatsapp_messages {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR recipient_phone
+        VARCHAR message_type
+        VARCHAR template_name
+        VARCHAR provider
+        VARCHAR status
+        INTEGER retry_count
+    }
+
+    whatsapp_usage_summary {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR year_month
+        VARCHAR message_type
+        INTEGER sent_count
+        INTEGER delivered_count
+        INTEGER failed_count
+    }
+
+    billing_cycles {
+        SERIAL id PK
+        INTEGER school_id FK
+        DATE cycle_start
+        DATE cycle_end
+        VARCHAR tier
+        NUMERIC plan_fee
+        VARCHAR status
+    }
+
+    usage_ledger {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER billing_cycle_id FK
+        VARCHAR event_type
+        NUMERIC quantity
+        BOOLEAN is_billable
+    }
+
+    saas_invoices {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER billing_cycle_id FK
+        VARCHAR invoice_number UK
+        DATE invoice_date
+        DATE due_date
+        VARCHAR status
+        NUMERIC total_amount
+        NUMERIC paid_amount
+    }
+
+    saas_invoice_items {
+        SERIAL id PK
+        INTEGER invoice_id FK
+        INTEGER school_id FK
+        VARCHAR item_type
+        TEXT description
+        NUMERIC quantity
+        NUMERIC unit_rate
+        NUMERIC amount
+    }
+
+    saas_payments {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER invoice_id FK
+        NUMERIC amount
+        VARCHAR payment_mode
+        DATE payment_date
+        TEXT recorded_by
+    }
+
+    schools ||--o{ announcements : "posts"
+    schools ||--o{ notifications : "sends"
+    schools ||--o{ daily_newspapers : "has articles"
+    schools ||--o| school_whatsapp_config : "has WA config"
+    schools ||--o{ whatsapp_messages : "sends WA msgs"
+    schools ||--o{ whatsapp_usage_summary : "WA usage"
+    schools ||--o{ billing_cycles : "billed"
+    schools ||--o{ saas_invoices : "invoiced"
+    schools ||--o{ saas_payments : "pays platform"
+    students ||--o{ student_points : "earns points"
+    students ||--o{ student_badges : "earns badges"
+    students ||--o| student_streaks : "has streak"
+    students ||--o{ student_newspaper_reads : "reads articles"
+    students ||--o{ student_hub_completions : "completes activities"
+    students ||--o{ marketplace_orders : "places orders"
+    students ||--o{ student_portal_sessions : "portal sessions"
+    students ||--o{ student_portal_activity : "portal actions"
+    daily_newspapers ||--o{ student_newspaper_reads : "read by"
+    marketplace_items ||--o{ marketplace_orders : "ordered"
+    student_portal_sessions ||--o{ student_portal_activity : "contains"
+    billing_cycles ||--o{ usage_ledger : "has usage"
+    billing_cycles ||--o{ saas_invoices : "generates invoice"
+    saas_invoices ||--o{ saas_invoice_items : "has line items"
+    saas_invoices ||--o{ saas_payments : "paid via"
+        </pre>
+      </div>
+    </section>
+
+    <section id="full-schema" class="erd-section">
+      <h2>Full Schema: All Tables</h2>
+      
+      <div class="mermaid-container">
+        <pre class="mermaid">
+erDiagram
+    %% ━━━ CORE ━━━
+    schools {
+        SERIAL id PK
+        VARCHAR name
+        VARCHAR school_code UK
+        VARCHAR status
+        VARCHAR board
+        TIMESTAMPTZ deleted_at
+    }
+    school_subscriptions {
+        SERIAL id PK
+        INTEGER school_id FK, UK
+        VARCHAR tier
+    }
+    users {
+        SERIAL id PK
+        VARCHAR email
+        VARCHAR school_code UK
+        VARCHAR role
+        INTEGER school_id FK
+    }
+    user_profiles {
+        SERIAL id PK
+        INTEGER user_id FK, UK
+        VARCHAR full_name
+    }
+    password_reset_tokens {
+        SERIAL id PK
+        INTEGER user_id FK
+        VARCHAR token UK
+        VARCHAR role
+    }
+    plan_features {
+        SERIAL id PK
+        VARCHAR feature_key
+        VARCHAR tier
+        BOOLEAN enabled
+    }
+    plan_pricing {
+        SERIAL id PK
+        VARCHAR tier UK
+        NUMERIC monthly_price
+    }
+    school_feature_overrides {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR feature_key
+        BOOLEAN enabled
+    }
+    app_bootstrap_state {
+        TEXT key PK
+        TIMESTAMPTZ completed_at
+    }
+
+    %% ━━━ SCHOOL CONFIG ━━━
+    school_schedule_settings {
+        SERIAL id PK
+        INTEGER school_id FK, UK
+        INTEGER periods_per_day
+    }
+    schedule_templates {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        JSONB settings
+    }
+    school_subject_templates {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        JSONB subjects
+    }
+    school_calendar {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR title
+        DATE event_date
+    }
+    academic_years {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR label
+        BOOLEAN is_current
+    }
+    curriculum_assignments {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR grade
+        VARCHAR curriculum_type
+    }
+    display_tokens {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR token UK
+    }
+    platform_audit_log {
+        SERIAL id PK
+        INTEGER actor_id FK
+        VARCHAR action
+        VARCHAR entity_type
+    }
+
+    %% ━━━ PEOPLE ━━━
+    teachers {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        VARCHAR employee_id
+        VARCHAR department
+        VARCHAR staff_type
+        TIMESTAMPTZ removed_at
+    }
+    students {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        VARCHAR grade
+        VARCHAR section
+        VARCHAR roll_number
+    }
+    parents {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        VARCHAR email
+    }
+    student_parents {
+        SERIAL id PK
+        INTEGER student_id FK
+        INTEGER parent_id FK
+    }
+    classes {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR grade
+        VARCHAR section
+        INTEGER class_teacher_id FK
+        TIMESTAMPTZ deleted_at
+    }
+    class_subjects {
+        SERIAL id PK
+        INTEGER class_id FK
+        VARCHAR subject_name
+        INTEGER teacher_id FK
+        INTEGER periods_per_week
+    }
+    department_hods {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR department
+        INTEGER teacher_id FK
+    }
+    student_class_history {
+        SERIAL id PK
+        INTEGER student_id FK
+        INTEGER academic_year_id FK
+        VARCHAR grade
+        VARCHAR section
+    }
+
+    %% ━━━ SCHEDULING ━━━
+    class_timetable {
+        SERIAL id PK
+        INTEGER class_id FK
+        INTEGER school_id FK
+        INTEGER teacher_id FK
+        VARCHAR day_of_week
+        INTEGER period_number
+        VARCHAR subject_name
+        BOOLEAN is_break
+        INTEGER template_id FK
+    }
+    timetable {
+        SERIAL id PK
+        INTEGER teacher_id FK
+        INTEGER school_id FK
+        VARCHAR day_of_week
+        INTEGER period_number
+        VARCHAR subject
+    }
+    timetable_versions {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        VARCHAR status
+    }
+    class_timetable_modes {
+        SERIAL id PK
+        INTEGER class_id FK, UK
+        INTEGER school_id FK
+        VARCHAR mode
+        INTEGER master_source_id FK
+    }
+    teacher_unavailability {
+        SERIAL id PK
+        INTEGER teacher_id FK
+        INTEGER school_id FK
+        VARCHAR day_of_week
+        INTEGER period_number
+    }
+
+    %% ━━━ ATTENDANCE & LEAVE ━━━
+    attendance {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER class_id FK
+        INTEGER student_id FK
+        DATE date
+        VARCHAR session
+        VARCHAR status
+        INTEGER marked_by_teacher_id FK
+    }
+    leave_requests {
+        SERIAL id PK
+        INTEGER teacher_id FK
+        INTEGER school_id FK
+        VARCHAR leave_type
+        DATE start_date
+        DATE end_date
+        VARCHAR status
+    }
+    substitute_assignments {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER leave_request_id FK
+        INTEGER original_teacher_id FK
+        INTEGER substitute_teacher_id FK
+        INTEGER class_id FK
+        DATE date
+        INTEGER period_number
+    }
+
+    %% ━━━ TASKS ━━━
+    tasks {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER class_id FK
+        INTEGER teacher_id FK
+        VARCHAR title
+        VARCHAR subject
+        VARCHAR task_type
+        VARCHAR status
+        DATE due_date
+    }
+    task_submissions {
+        SERIAL id PK
+        INTEGER task_id FK
+        INTEGER student_id FK
+        INTEGER school_id FK
+        NUMERIC score
+        VARCHAR status
+        INTEGER reviewed_by FK
+    }
+    task_reminders {
+        SERIAL id PK
+        INTEGER task_id FK
+        INTEGER school_id FK
+        INTEGER sent_by FK
+    }
+
+    %% ━━━ DOUBTS ━━━
+    doubts {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER class_id FK
+        INTEGER student_id FK
+        VARCHAR subject
+        TEXT question
+        INTEGER task_id FK
+        VARCHAR status
+    }
+    doubt_messages {
+        SERIAL id PK
+        INTEGER doubt_id FK
+        VARCHAR sender_type
+        TEXT message
+    }
+    doubt_upvotes {
+        SERIAL id PK
+        INTEGER doubt_id FK
+        INTEGER student_id FK
+    }
+
+    %% ━━━ EXAMS ━━━
+    exam_records {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER class_id FK
+        INTEGER created_by FK
+        VARCHAR exam_name
+        VARCHAR exam_type
+        VARCHAR status
+    }
+    exam_subjects {
+        SERIAL id PK
+        INTEGER exam_id FK
+        VARCHAR subject_name
+        INTEGER teacher_id FK
+        INTEGER max_marks
+    }
+    exam_marks {
+        SERIAL id PK
+        INTEGER exam_id FK
+        INTEGER student_id FK
+        VARCHAR subject_name
+        NUMERIC marks_obtained
+    }
+    parent_mark_acks {
+        SERIAL id PK
+        INTEGER exam_id FK
+        INTEGER student_id FK
+    }
+    report_card_config {
+        SERIAL id PK
+        INTEGER school_id FK, UK
+        JSONB grading_scheme
+    }
+    report_card_remarks {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER student_id FK
+        INTEGER exam_id FK
+        TEXT class_teacher_remark
+    }
+
+    %% ━━━ SYLLABUS ━━━
+    syllabus_topics {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER class_id FK
+        VARCHAR subject
+        VARCHAR chapter_name
+        VARCHAR topic_name
+        VARCHAR status
+        INTEGER covered_by FK
+        BOOLEAN published
+    }
+    weekly_tests {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER class_id FK
+        INTEGER student_id FK
+        DATE week_start
+        JSONB questions
+        VARCHAR status
+    }
+    textbook_library {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR grade
+        VARCHAR subject
+    }
+    textbook_chunks {
+        SERIAL id PK
+        INTEGER textbook_id FK
+        TEXT content
+    }
+
+    %% ━━━ FEES ━━━
+    fee_categories {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR name
+        VARCHAR frequency
+    }
+    fee_structures {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER fee_category_id FK
+        VARCHAR grade
+        NUMERIC amount
+        VARCHAR academic_year
+    }
+    fee_structure_locks {
+        SERIAL id PK
+        INTEGER school_id
+        TEXT academic_year
+    }
+    fee_structure_amendments {
+        SERIAL id PK
+        INTEGER fee_structure_id FK
+        INTEGER fee_category_id FK
+        NUMERIC old_amount
+        NUMERIC new_amount
+    }
+    student_fee_ledger {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER student_id FK
+        INTEGER fee_category_id FK
+        INTEGER fee_structure_id FK
+        NUMERIC amount_due
+        NUMERIC amount_paid
+        VARCHAR status
+    }
+    student_fee_ledger_edits {
+        SERIAL id PK
+        INTEGER ledger_id FK
+        NUMERIC old_amount
+        NUMERIC new_amount
+    }
+    fee_payments {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER student_id FK
+        INTEGER ledger_id FK
+        NUMERIC amount
+        VARCHAR payment_mode
+        VARCHAR receipt_number UK
+    }
+    fee_waivers {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER student_id FK
+        INTEGER ledger_id FK
+        VARCHAR waiver_type
+        NUMERIC waiver_amount
+    }
+    school_payment_config {
+        SERIAL id PK
+        INTEGER school_id FK, UK
+        TEXT cashfree_app_id
+        BOOLEAN is_active
+    }
+    payment_transactions {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER student_id FK
+        VARCHAR cashfree_order_id UK
+        NUMERIC amount
+        VARCHAR status
+    }
+    payment_webhook_log {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR cashfree_order_id
+        JSONB raw_payload
+    }
+
+    %% ━━━ ENGAGEMENT ━━━
+    announcements {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR title
+        VARCHAR target_audience
+        VARCHAR priority
+    }
+    notifications {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER recipient_teacher_id FK
+        INTEGER recipient_student_id FK
+        VARCHAR type
+        BOOLEAN is_read
+    }
+    daily_newspapers {
+        SERIAL id PK
+        INTEGER school_id FK
+        DATE date
+        VARCHAR title
+    }
+    student_newspaper_reads {
+        SERIAL id PK
+        INTEGER student_id FK
+        INTEGER newspaper_id FK
+    }
+    hub_daily_content {
+        SERIAL id PK
+        DATE content_date UK
+        JSONB gk_questions
+        JSONB word_of_day
+    }
+    student_hub_completions {
+        SERIAL id PK
+        INTEGER student_id FK
+        VARCHAR activity_type
+        DATE completed_date
+    }
+    student_points {
+        SERIAL id PK
+        INTEGER student_id FK
+        VARCHAR action_type
+        INTEGER points
+    }
+    student_badges {
+        SERIAL id PK
+        INTEGER student_id FK
+        VARCHAR badge_type
+    }
+    student_streaks {
+        INTEGER student_id PK, FK
+        INTEGER current_streak
+        INTEGER longest_streak
+    }
+    marketplace_items {
+        SERIAL id PK
+        VARCHAR name UK
+        INTEGER cost_points
+    }
+    marketplace_orders {
+        SERIAL id PK
+        INTEGER student_id FK
+        INTEGER item_id FK
+        INTEGER points_spent
+        VARCHAR status
+    }
+    student_portal_sessions {
+        SERIAL id PK
+        INTEGER student_id FK
+    }
+    student_portal_activity {
+        SERIAL id PK
+        INTEGER student_id FK
+        INTEGER session_id FK
+        VARCHAR action_type
+    }
+    ai_chat_sessions {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER student_id FK
+        VARCHAR subject
+    }
+    teacher_ai_sessions {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER teacher_id FK
+        VARCHAR context
+    }
+
+    %% ━━━ WHATSAPP & BILLING ━━━
+    school_whatsapp_config {
+        SERIAL id PK
+        INTEGER school_id FK, UK
+        VARCHAR provider
+        BOOLEAN is_active
+    }
+    whatsapp_messages {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR recipient_phone
+        VARCHAR message_type
+        VARCHAR status
+    }
+    whatsapp_usage_summary {
+        SERIAL id PK
+        INTEGER school_id FK
+        VARCHAR year_month
+        INTEGER sent_count
+    }
+    billing_cycles {
+        SERIAL id PK
+        INTEGER school_id FK
+        DATE cycle_start
+        DATE cycle_end
+        VARCHAR status
+    }
+    usage_ledger {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER billing_cycle_id FK
+        VARCHAR event_type
+    }
+    saas_invoices {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER billing_cycle_id FK
+        VARCHAR invoice_number UK
+        VARCHAR status
+        NUMERIC total_amount
+    }
+    saas_invoice_items {
+        SERIAL id PK
+        INTEGER invoice_id FK
+        INTEGER school_id FK
+        VARCHAR item_type
+        NUMERIC amount
+    }
+    saas_payments {
+        SERIAL id PK
+        INTEGER school_id FK
+        INTEGER invoice_id FK
+        NUMERIC amount
+    }
+
+    %% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    %% RELATIONSHIPS
+    %% ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    %% Core
+    schools ||--o| school_subscriptions : "subscription"
+    schools ||--o{ users : "admins"
+    schools ||--o| school_schedule_settings : "schedule config"
+    schools ||--o{ schedule_templates : "templates"
+    schools ||--o{ school_subject_templates : "subject sets"
+    schools ||--o{ school_calendar : "calendar"
+    schools ||--o{ academic_years : "years"
+    schools ||--o{ curriculum_assignments : "curricula"
+    schools ||--o{ display_tokens : "displays"
+    schools ||--o{ school_feature_overrides : "overrides"
+    schools ||--o| school_payment_config : "payment config"
+    schools ||--o| school_whatsapp_config : "WA config"
+    schools ||--o| report_card_config : "report config"
+    users ||--o| user_profiles : "profile"
+    users ||--o{ password_reset_tokens : "reset tokens"
+    users ||--o{ platform_audit_log : "audit trail"
+
+    %% People
+    schools ||--o{ teachers : "employs"
+    schools ||--o{ students : "enrolls"
+    schools ||--o{ parents : "has parents"
+    schools ||--o{ classes : "has classes"
+    schools ||--o{ department_hods : "has HODs"
+    teachers ||--o| classes : "class teacher"
+    teachers ||--o{ class_subjects : "teaches"
+    teachers ||--o{ department_hods : "HOD"
+    students ||--o{ student_parents : "parents"
+    parents ||--o{ student_parents : "children"
+    classes ||--o{ class_subjects : "subjects"
+    students ||--o{ student_class_history : "history"
+    academic_years ||--o{ student_class_history : "year"
+
+    %% Scheduling
+    classes ||--o{ class_timetable : "schedule"
+    classes ||--o| class_timetable_modes : "mode"
+    teachers ||--o{ class_timetable : "teaches period"
+    teachers ||--o{ timetable : "personal schedule"
+    teachers ||--o{ teacher_unavailability : "unavailable"
+    schedule_templates ||--o{ class_timetable : "template"
+    schools ||--o{ timetable_versions : "versions"
+
+    %% Attendance & Leave
+    classes ||--o{ attendance : "attendance"
+    students ||--o{ attendance : "attendance"
+    teachers ||--o{ attendance : "marks"
+    teachers ||--o{ leave_requests : "requests leave"
+    leave_requests ||--o{ substitute_assignments : "subs"
+    classes ||--o{ substitute_assignments : "receives subs"
+
+    %% Tasks
+    classes ||--o{ tasks : "assigned"
+    teachers ||--o{ tasks : "creates"
+    tasks ||--o{ task_submissions : "submissions"
+    tasks ||--o{ task_reminders : "reminders"
+    students ||--o{ task_submissions : "submits"
+
+    %% Doubts
+    classes ||--o{ doubts : "raised in"
+    students ||--o{ doubts : "asks"
+    tasks ||--o{ doubts : "about task"
+    doubts ||--o{ doubt_messages : "chat"
+    doubts ||--o{ doubt_upvotes : "upvotes"
+    students ||--o{ doubt_upvotes : "upvotes"
+
+    %% Exams
+    classes ||--o{ exam_records : "exams"
+    teachers ||--o{ exam_records : "creates"
+    exam_records ||--o{ exam_subjects : "subjects"
+    exam_records ||--o{ exam_marks : "marks"
+    exam_records ||--o{ parent_mark_acks : "acks"
+    exam_records ||--o{ report_card_remarks : "remarks"
+    students ||--o{ exam_marks : "scores"
+    students ||--o{ report_card_remarks : "remarks"
+
+    %% Syllabus
+    classes ||--o{ syllabus_topics : "syllabus"
+    teachers ||--o{ syllabus_topics : "covers"
+    classes ||--o{ weekly_tests : "tests"
+    students ||--o{ weekly_tests : "takes"
+    schools ||--o{ textbook_library : "textbooks"
+    textbook_library ||--o{ textbook_chunks : "chunks"
+
+    %% Fees
+    schools ||--o{ fee_categories : "fee types"
+    fee_categories ||--o{ fee_structures : "amounts"
+    fee_categories ||--o{ student_fee_ledger : "billed"
+    fee_structures ||--o{ student_fee_ledger : "generates"
+    fee_structures ||--o{ fee_structure_amendments : "amended"
+    students ||--o{ student_fee_ledger : "owes"
+    student_fee_ledger ||--o{ fee_payments : "paid"
+    student_fee_ledger ||--o{ fee_waivers : "waived"
+    student_fee_ledger ||--o{ student_fee_ledger_edits : "edits"
+    students ||--o{ payment_transactions : "online pay"
+
+    %% Engagement
+    schools ||--o{ announcements : "posts"
+    schools ||--o{ notifications : "notifies"
+    schools ||--o{ daily_newspapers : "newspapers"
+    daily_newspapers ||--o{ student_newspaper_reads : "reads"
+    students ||--o{ student_newspaper_reads : "reads"
+    students ||--o{ student_hub_completions : "hub"
+    students ||--o{ student_points : "points"
+    students ||--o{ student_badges : "badges"
+    students ||--o| student_streaks : "streak"
+    marketplace_items ||--o{ marketplace_orders : "ordered"
+    students ||--o{ marketplace_orders : "orders"
+    students ||--o{ student_portal_sessions : "sessions"
+    student_portal_sessions ||--o{ student_portal_activity : "activity"
+    students ||--o{ ai_chat_sessions : "AI chat"
+    teachers ||--o{ teacher_ai_sessions : "AI chat"
+
+    %% WhatsApp & Billing
+    schools ||--o{ whatsapp_messages : "sends"
+    schools ||--o{ whatsapp_usage_summary : "usage"
+    schools ||--o{ billing_cycles : "billed"
+    billing_cycles ||--o{ usage_ledger : "usage"
+    billing_cycles ||--o{ saas_invoices : "invoiced"
+    saas_invoices ||--o{ saas_invoice_items : "items"
+    saas_invoices ||--o{ saas_payments : "payments"
+        </pre>
+      </div>
+    </section>
+
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'default',
+      er: { useMaxWidth: false, layoutDirection: 'TB' },
+      securityLevel: 'loose'
+    });
+  </script>
+</body>
+</html>

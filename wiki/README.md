@@ -19,6 +19,21 @@
 
 ---
 
+## Database ERD (Entity Relationship Diagrams)
+
+| Diagram | Description |
+|---------|-------------|
+| [ERD Index](erd/README.md) | Overview and index of all diagrams |
+| [Core: Schools & Config](erd/core-schools.md) | Schools, subscriptions, users, settings, calendars |
+| [People](erd/people.md) | Teachers, students, parents, classes |
+| [Scheduling](erd/scheduling.md) | Timetable, attendance, leave, substitutes |
+| [Academics](erd/academics.md) | Exams, marks, tasks, doubts, syllabus, report cards |
+| [Fees](erd/fees.md) | Fee categories, structures, payments, waivers, online payments |
+| [Engagement](erd/engagement.md) | Announcements, notifications, rewards, daily content, WhatsApp, billing |
+| [Full Schema](erd/full-schema.md) | Complete ERD with all 60+ tables |
+
+---
+
 ## Task Log
 
 | Log | What it tracks |
