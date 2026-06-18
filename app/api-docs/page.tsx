@@ -20,7 +20,7 @@ export default function ApiDocsPage() {
       const script2 = document.createElement("script");
       script2.src = "https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-standalone-preset.js";
       script2.onload = () => {
-        const w = window as Record<string, unknown>;
+        const w = window as unknown as Record<string, unknown>;
         const SwaggerUIBundle = w.SwaggerUIBundle as (cfg: Record<string, unknown>) => void;
         const SwaggerUIStandalonePreset = w.SwaggerUIStandalonePreset;
         if (SwaggerUIBundle && containerRef.current) {
