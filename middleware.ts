@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { COOKIE_ADMIN, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from '@/lib/auth'
-import jwt from 'jsonwebtoken'
+import { jwtVerify } from 'jose'
+
+// Cookie names — must match lib/auth.ts
+const COOKIE_ADMIN   = 'wlyl-auth'
+const COOKIE_TEACHER = 'wlyl-teacher'
+const COOKIE_STUDENT = 'wlyl-student'
+const COOKIE_PARENT  = 'wlyl-parent'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'wlyl-super-secret-key-change-in-production'
+const secret = new TextEncoder().encode(JWT_SECRET)
 
-function getTokenPayload(token: string): Record<string, unknown> | null {
+async function getTokenPayload(token: string): Promise<Record<string, unknown> | null> {
   try {
-    return jwt.verify(token, JWT_SECRET) as Record<string, unknown>
+    const { payload } = await jwtVerify(token, secret)
+    return payload as Record<string, unknown>
   } catch {
     return null
   }
@@ -36,35 +43,30 @@ function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some(p => pathname.startsWith(p))
 }
 
-export function proxy(req: NextRequest) {
+export default async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
   const host = req.headers.get('host') ?? ''
   const isAdminSubdomain = host.startsWith('admin.')
 
   // ── admin.welearnyoulearn.com — Platform Admin only ───────────────────────
   if (isAdminSubdomain) {
-    // Allow static assets and API
     if (pathname.startsWith('/_next/') || pathname.startsWith('/api/') || pathname.startsWith('/favicon')) {
       return NextResponse.next()
     }
-    // Root → redirect to platform login
     if (pathname === '/') {
       return NextResponse.redirect(new URL('/login?role=platform', req.url))
     }
-    // Platform admin portal — check auth
     if (pathname.startsWith('/platform-admin')) {
       const token = req.cookies.get(COOKIE_ADMIN)?.value
-      const payload = token ? getTokenPayload(token) : null
+      const payload = token ? await getTokenPayload(token) : null
       if (!payload || payload.role !== 'platform_admin') {
         return NextResponse.redirect(new URL('/login?role=platform', req.url))
       }
       return NextResponse.next()
     }
-    // Allow login/forgot/reset pages on admin subdomain
     if (pathname.startsWith('/login') || pathname.startsWith('/forgot-password') || pathname.startsWith('/reset-password')) {
       return NextResponse.next()
     }
-    // Block everything else on admin subdomain
     return NextResponse.redirect(new URL('/login?role=platform', req.url))
   }
 
@@ -78,7 +80,7 @@ export function proxy(req: NextRequest) {
   // ── School Admin ──────────────────────────────────────────────────────────
   if (pathname.startsWith('/school-admin')) {
     const token = req.cookies.get(COOKIE_ADMIN)?.value
-    const payload = token ? getTokenPayload(token) : null
+    const payload = token ? await getTokenPayload(token) : null
     if (!payload || payload.role !== 'school_admin') {
       return NextResponse.redirect(new URL('/login?role=school', req.url))
     }
@@ -91,7 +93,7 @@ export function proxy(req: NextRequest) {
   // ── Teacher portal ────────────────────────────────────────────────────────
   if (pathname.startsWith('/teacher')) {
     const token = req.cookies.get(COOKIE_TEACHER)?.value
-    const payload = token ? getTokenPayload(token) : null
+    const payload = token ? await getTokenPayload(token) : null
     if (!payload || payload.role !== 'teacher') {
       return NextResponse.redirect(new URL('/teacher/login', req.url))
     }
@@ -104,7 +106,7 @@ export function proxy(req: NextRequest) {
   // ── Student portal ────────────────────────────────────────────────────────
   if (pathname.startsWith('/student')) {
     const token = req.cookies.get(COOKIE_STUDENT)?.value
-    const payload = token ? getTokenPayload(token) : null
+    const payload = token ? await getTokenPayload(token) : null
     if (!payload || payload.role !== 'student') {
       return NextResponse.redirect(new URL('/student/login', req.url))
     }
@@ -117,7 +119,7 @@ export function proxy(req: NextRequest) {
   // ── Parent portal ─────────────────────────────────────────────────────────
   if (pathname.startsWith('/parent')) {
     const token = req.cookies.get(COOKIE_PARENT)?.value
-    const payload = token ? getTokenPayload(token) : null
+    const payload = token ? await getTokenPayload(token) : null
     if (!payload || payload.role !== 'parent') {
       return NextResponse.redirect(new URL('/parent/login', req.url))
     }

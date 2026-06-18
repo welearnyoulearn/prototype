@@ -67,15 +67,40 @@ export default function SchoolDetailPage() {
   const [resetting, setResetting]   = useState(false)
   const [resetCreds, setResetCreds] = useState<{ code: string; pass: string } | null>(null)
 
+  // Feature overrides
+  const OVERRIDABLE = ['online-payments', 'whatsapp']
+  const [overrides, setOverrides]     = useState<Record<string, boolean | null>>({})
+  const [savingOvr, setSavingOvr]     = useState(false)
+  const [ovrMsg, setOvrMsg]           = useState('')
+
+  async function saveOverrides() {
+    setSavingOvr(true); setOvrMsg('')
+    try {
+      const res = await fetch(`/api/platform/school-overrides/${schoolId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ overrides }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setOvrMsg(data.error || 'Failed'); return }
+      setOvrMsg('Saved')
+      setTimeout(() => setOvrMsg(''), 2000)
+    } catch { setOvrMsg('Failed') }
+    finally { setSavingOvr(false) }
+  }
+
   useEffect(() => {
     async function load() {
       try {
-        const [schoolRes, featRes] = await Promise.all([
+        const [schoolRes, featRes, ovrRes] = await Promise.all([
           fetch(`/api/schools/${schoolId}`),
           fetch('/api/platform/features'),
+          fetch(`/api/platform/school-overrides/${schoolId}`),
         ])
         const schoolData = await schoolRes.json()
         const featData   = await featRes.json()
+        const ovrData    = await ovrRes.json()
+        if (ovrData.overrides) setOverrides(ovrData.overrides)
 
         if (!schoolRes.ok) throw new Error(schoolData.error)
 
@@ -479,6 +504,47 @@ export default function SchoolDetailPage() {
               Delete School
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* ── Feature Overrides ─────────────────────────────────────────────────── */}
+      <div className="bg-white rounded-2xl border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="font-semibold text-gray-900">Feature Overrides</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Override plan defaults for this school. Null = use plan default.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {ovrMsg && <span className={`text-xs ${ovrMsg === 'Saved' ? 'text-green-600' : 'text-red-600'}`}>{ovrMsg}</span>}
+            <button onClick={saveOverrides} disabled={savingOvr}
+              className="text-xs bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded-lg disabled:opacity-50">
+              {savingOvr ? 'Saving…' : 'Save Overrides'}
+            </button>
+          </div>
+        </div>
+        <div className="space-y-3">
+          {OVERRIDABLE.map(key => {
+            const val = overrides[key] ?? null
+            return (
+              <div key={key} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
+                <span className="text-sm font-medium text-gray-700">{key}</span>
+                <div className="flex gap-2">
+                  {([['Plan Default', null], ['Force Enable', true], ['Force Disable', false]] as const).map(([label, v]) => (
+                    <button key={label} onClick={() => setOverrides(prev => ({ ...prev, [key]: v }))}
+                      className={`text-xs px-3 py-1 rounded-full border transition-colors ${
+                        val === v
+                          ? v === true  ? 'bg-green-100 text-green-700 border-green-300'
+                          : v === false ? 'bg-red-100 text-red-700 border-red-300'
+                          : 'bg-gray-100 text-gray-700 border-gray-300'
+                          : 'border-gray-200 text-gray-400 hover:border-gray-300'
+                      }`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
         </div>
       </div>
 

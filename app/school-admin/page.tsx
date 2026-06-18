@@ -267,15 +267,25 @@ export default function SchoolAdmin() {
     if (!selectedSchool) return
     fetch(`/api/schools/${selectedSchool.id}/subscription`)
       .then(r => r.json())
-      .then(data => {
+      .then(async data => {
         const t = data.tier || 'none'
         setTier(t)
         if (t !== 'none') {
-          // Fetch which features are enabled for this plan from platform config
-          fetch(`/api/platform/features?tier=${t}`)
-            .then(r => r.json())
-            .then(fd => setEnabledFeatures(new Set(fd.enabled || [])))
-            .catch(() => setEnabledFeatures(new Set(NAV_ITEMS.map(n => n.key))))
+          try {
+            const [featRes, overrideRes] = await Promise.all([
+              fetch(`/api/platform/features?tier=${t}`).then(r => r.json()),
+              fetch(`/api/platform/school-overrides/${selectedSchool.id}`).then(r => r.json()),
+            ])
+            const base: Set<string> = new Set(featRes.enabled || [])
+            const overrides: Record<string, boolean> = overrideRes.overrides || {}
+            for (const [key, val] of Object.entries(overrides)) {
+              if (val) base.add(key)
+              else base.delete(key)
+            }
+            setEnabledFeatures(base)
+          } catch {
+            setEnabledFeatures(new Set(NAV_ITEMS.map(n => n.key)))
+          }
         }
       })
       .catch(() => setTier('none'))
@@ -564,7 +574,7 @@ export default function SchoolAdmin() {
                 {visited.has('announcements')    && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} /></div>}
                 {visited.has('export')           && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}
                 {visited.has('settings')         && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} /></div>}
-                {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} /></div>}
+                {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} onlinePaymentsEnabled={enabledFeatures.has('online-payments')} whatsappEnabled={enabledFeatures.has('whatsapp')} /></div>}
                 {visited.has('year-rollover')    && <div hidden={activeNav !== 'year-rollover'}><YearRollover schoolId={selectedSchool.id} /></div>}
               </FeaturesProvider>
             )}

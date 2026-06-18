@@ -35,6 +35,13 @@ export const ALL_FEATURES = [
   { key: 'settings',           label: 'School Settings',                 category: 'Administration' },
   { key: 'year-rollover',      label: 'Year Rollover',                   category: 'Administration' },
   { key: 'year-review',        label: 'Year-in-Review Report',           category: 'Administration' },
+
+  // ── Add-on features (platform-controlled, off by default) ─────────────────
+  { key: 'online-payments',    label: 'Online Fee Payments (Cashfree)',  category: 'Finance' },
+  { key: 'whatsapp',           label: 'WhatsApp Notifications',          category: 'Communication' },
 ]
 
 export const CATEGORY_ORDER = ['Core', 'Scheduling', 'Analytics', 'Finance', 'Communication', 'Administration']
+
+// Feature keys that platform admin can override per school
+export const OVERRIDABLE_FEATURE_KEYS = ['online-payments', 'whatsapp']

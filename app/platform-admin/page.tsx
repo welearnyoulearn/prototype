@@ -346,6 +346,10 @@ export default function PlatformAdmin() {
             className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors font-medium">
             Feature Plans
           </Link>
+          <Link href="/platform-admin/plan-pricing"
+            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors font-medium">
+            Plan Pricing
+          </Link>
           <Link href="/platform-admin/audit"
             className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors">
             Audit Log

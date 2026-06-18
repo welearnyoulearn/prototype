@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
 import { cookies } from 'next/headers'
 import { NextRequest } from 'next/server'
+import pool from '@/lib/db'
 
 if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
   console.error('[FATAL] JWT_SECRET env var is not set — auth cookies will not work correctly')
@@ -236,6 +237,29 @@ export async function requireFeeAccess(requestedSchoolId: string | number | null
   }
 
   return null
+}
+
+// ─── Feature flag check ───────────────────────────────────────────────────────
+// Checks override first, then falls back to tier-level plan_features.
+// Returns false if no row exists — features are OFF by default.
+export async function schoolHasFeature(schoolId: number, featureKey: string): Promise<boolean> {
+  try {
+    const res = await pool.query(
+      `SELECT sfo.enabled AS override, pf.enabled AS plan_enabled
+       FROM schools s
+       LEFT JOIN school_subscriptions ss ON ss.school_id = s.id AND ss.status = 'active'
+       LEFT JOIN school_feature_overrides sfo ON sfo.school_id = s.id AND sfo.feature_key = $2
+       LEFT JOIN plan_features pf ON pf.plan_name = ss.tier AND pf.feature_key = $2
+       WHERE s.id = $1`,
+      [schoolId, featureKey]
+    )
+    if (res.rows.length === 0) return false
+    const { override, plan_enabled } = res.rows[0]
+    if (override !== null) return Boolean(override)
+    return plan_enabled === true
+  } catch {
+    return false
+  }
 }
 
 // ─── Any authenticated session ────────────────────────────────────────────────
