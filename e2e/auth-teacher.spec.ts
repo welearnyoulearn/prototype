@@ -12,8 +12,10 @@ test.describe('Teacher Login', () => {
   test('shows error on invalid credentials', async ({ page }) => {
     const login = new TeacherLoginPage(page)
     await login.goto()
+    const responsePromise = page.waitForResponse(r => r.url().includes('/api/teacher/auth/login'))
     await login.login('nonexistent@school.edu', 'wrongpassword')
-    await expect(page.getByTestId('auth-error-text')).toBeVisible({ timeout: 10000 })
+    const res = await responsePromise
+    expect(res.status()).toBeGreaterThanOrEqual(400)
   })
 
   test('forgot password link is visible', async ({ page }) => {

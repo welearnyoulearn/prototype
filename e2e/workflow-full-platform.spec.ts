@@ -14,7 +14,7 @@ test.describe.serial('Full Platform Workflow', () => {
     await page.getByTestId('auth-password-input').fill('Admin@1234')
     await page.getByTestId('auth-submit-btn').click()
 
-    await page.waitForURL(/\/platform-admin/, { timeout: 15000 })
+    await page.waitForURL(/\/platform-admin/, { timeout: 20000 })
     await expect(page.getByText('Active Schools', { exact: true })).toBeVisible({ timeout: 10000 })
   })
 

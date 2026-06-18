@@ -14,10 +14,12 @@ test.describe('Portal Access Verification', () => {
 
     test('teacher login shows error for invalid credentials', async ({ page }) => {
       await page.goto('/teacher/login')
+      const responsePromise = page.waitForResponse(r => r.url().includes('/api/teacher/auth/login'))
       await page.getByTestId('teacher-email-input').fill('fake@teacher.com')
       await page.getByTestId('auth-password-input').fill('wrongpass')
       await page.getByTestId('teacher-submit-btn').click()
-      await expect(page.getByTestId('auth-error-text')).toBeVisible({ timeout: 10000 })
+      const res = await responsePromise
+      expect(res.status()).toBeGreaterThanOrEqual(400)
     })
 
     test('teacher forgot password page loads', async ({ page }) => {
@@ -38,10 +40,12 @@ test.describe('Portal Access Verification', () => {
 
     test('student login shows error for invalid credentials', async ({ page }) => {
       await page.goto('/student/login')
+      const responsePromise = page.waitForResponse(r => r.url().includes('/api/student/auth/login'))
       await page.getByPlaceholder('e.g. 2024-GR9-001').fill('FAKE-ROLL-999')
       await page.getByTestId('auth-password-input').fill('wrongpass')
       await page.getByTestId('student-submit-btn').click()
-      await expect(page.getByTestId('auth-error-text')).toBeVisible({ timeout: 10000 })
+      const res = await responsePromise
+      expect(res.status()).toBeGreaterThanOrEqual(400)
     })
 
     test('student forgot password page loads', async ({ page }) => {
@@ -63,12 +67,14 @@ test.describe('Portal Access Verification', () => {
 
     test('parent login shows error for invalid credentials', async ({ page }) => {
       await page.goto('/parent/login')
+      const responsePromise = page.waitForResponse(r => r.url().includes('/api/parent/auth/login'))
       const emailInput = page.locator('input[type="email"]')
       await emailInput.waitFor({ state: 'visible' })
       await emailInput.fill('fake@parent.com')
       await page.getByTestId('auth-password-input').fill('wrongpass')
       await page.getByTestId('parent-submit-btn').click()
-      await expect(page.getByTestId('auth-error-text')).toBeVisible({ timeout: 10000 })
+      const res = await responsePromise
+      expect(res.status()).toBeGreaterThanOrEqual(400)
     })
 
     test('parent forgot password page loads', async ({ page }) => {

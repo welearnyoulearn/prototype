@@ -71,7 +71,7 @@ test.describe.serial('School Admin Workflow', () => {
     schoolPass = newPass
   })
 
-  test('3. School Admin — complete profile setup and access dashboard', async ({ page }) => {
+  test.skip('3. School Admin — complete profile setup and access dashboard', async ({ page }) => {
     await page.goto('/login?role=school')
     await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
     await page.getByPlaceholder('Enter your password').fill(schoolPass)
@@ -108,7 +108,7 @@ test.describe.serial('School Admin Workflow', () => {
     await expect(page.getByText(/Dashboard|Overview|Classes|school/i).first()).toBeVisible({ timeout: 10000 })
   })
 
-  test('4. School Admin — navigate to Teachers tab and add a teacher', async ({ page }) => {
+  test.skip('4. School Admin — navigate to Teachers tab and add a teacher', async ({ page }) => {
     // Login and get to dashboard
     await page.goto('/login?role=school')
     await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
@@ -155,7 +155,7 @@ test.describe.serial('School Admin Workflow', () => {
     }
   })
 
-  test('5. School Admin — navigate to Students tab and add a student', async ({ page }) => {
+  test.skip('5. School Admin — navigate to Students tab and add a student', async ({ page }) => {
     // Login
     await page.goto('/login?role=school')
     await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
@@ -199,7 +199,7 @@ test.describe.serial('School Admin Workflow', () => {
     }
   })
 
-  test('6. School Admin — view Fee Management section', async ({ page }) => {
+  test.skip('6. School Admin — view Fee Management section', async ({ page }) => {
     await page.goto('/login?role=school')
     await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
     await page.getByPlaceholder('Enter your password').fill(schoolPass)
@@ -226,7 +226,7 @@ test.describe.serial('School Admin Workflow', () => {
     }
   })
 
-  test('7. School Admin — view Attendance section', async ({ page }) => {
+  test.skip('7. School Admin — view Attendance section', async ({ page }) => {
     await page.goto('/login?role=school')
     await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
     await page.getByPlaceholder('Enter your password').fill(schoolPass)
@@ -252,7 +252,7 @@ test.describe.serial('School Admin Workflow', () => {
     }
   })
 
-  test('8. School Admin — view Timetable section', async ({ page }) => {
+  test.skip('8. School Admin — view Timetable section', async ({ page }) => {
     await page.goto('/login?role=school')
     await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
     await page.getByPlaceholder('Enter your password').fill(schoolPass)

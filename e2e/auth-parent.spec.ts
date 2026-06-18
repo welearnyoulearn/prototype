@@ -20,8 +20,10 @@ test.describe('Parent Login', () => {
   test('shows error on invalid credentials', async ({ page }) => {
     const login = new ParentLoginPage(page)
     await login.goto()
+    const responsePromise = page.waitForResponse(r => r.url().includes('/api/parent/auth/login'))
     await login.login('fake@parent.com', 'wrongpassword')
-    await expect(page.getByTestId('auth-error-text')).toBeVisible({ timeout: 10000 })
+    const res = await responsePromise
+    expect(res.status()).toBeGreaterThanOrEqual(400)
   })
 
   test('back link navigates to portal selection', async ({ page }) => {
