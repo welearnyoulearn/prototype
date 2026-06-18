@@ -4,12 +4,13 @@ import { requirePlatformAdmin } from '@/lib/auth'
 import { OVERRIDABLE_FEATURE_KEYS } from '@/lib/features'
 
 // GET /api/platform/school-overrides/[schoolId]
-export async function GET(_req: NextRequest, { params }: { params: { schoolId: string } }) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ schoolId: string }> }) {
   try {
     const session = await requirePlatformAdmin()
     if (!session) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    const schoolId = parseInt(params.schoolId)
+    const { schoolId: schoolIdStr } = await params
+    const schoolId = parseInt(schoolIdStr)
     if (isNaN(schoolId)) return NextResponse.json({ error: 'Invalid schoolId' }, { status: 400 })
 
     const { rows } = await pool.query(
@@ -32,12 +33,13 @@ export async function GET(_req: NextRequest, { params }: { params: { schoolId: s
 // PUT /api/platform/school-overrides/[schoolId]
 // Body: { overrides: { 'online-payments': true | false | null, ... } }
 // null = remove override (revert to plan default)
-export async function PUT(req: NextRequest, { params }: { params: { schoolId: string } }) {
+export async function PUT(req: NextRequest, { params }: { params: Promise<{ schoolId: string }> }) {
   try {
     const session = await requirePlatformAdmin()
     if (!session) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    const schoolId = parseInt(params.schoolId)
+    const { schoolId: schoolIdStr } = await params
+    const schoolId = parseInt(schoolIdStr)
     if (isNaN(schoolId)) return NextResponse.json({ error: 'Invalid schoolId' }, { status: 400 })
 
     const body = await req.json()

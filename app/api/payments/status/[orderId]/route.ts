@@ -4,8 +4,9 @@ import { requireFeeAccess } from '@/lib/auth'
 import { decrypt } from '@/lib/encryption'
 
 // GET /api/payments/status/[orderId]?school_id=X
-export async function GET(req: NextRequest, { params }: { params: { orderId: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ orderId: string }> }) {
   try {
+    const { orderId } = await params
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 
@@ -15,7 +16,7 @@ export async function GET(req: NextRequest, { params }: { params: { orderId: str
     const txnRes = await pool.query(
       `SELECT cashfree_order_id, status, amount, payment_link, updated_at
        FROM payment_transactions WHERE cashfree_order_id = $1 AND school_id = $2`,
-      [params.orderId, access.schoolId]
+      [orderId, access.schoolId]
     )
     if (txnRes.rows.length === 0) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 })
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest, { params }: { params: { orderId: str
 
     // If already resolved, return from DB
     if (['PAID', 'FAILED', 'EXPIRED'].includes(txn.status)) {
-      return NextResponse.json({ order_id: params.orderId, status: txn.status, amount: txn.amount })
+      return NextResponse.json({ order_id: orderId, status: txn.status, amount: txn.amount })
     }
 
     // Check live status from Cashfree
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest, { params }: { params: { orderId: str
       [access.schoolId]
     )
     if (cfgRes.rows.length === 0) {
-      return NextResponse.json({ order_id: params.orderId, status: txn.status, amount: txn.amount })
+      return NextResponse.json({ order_id: orderId, status: txn.status, amount: txn.amount })
     }
 
     let secretKey: string
@@ -42,10 +43,10 @@ export async function GET(req: NextRequest, { params }: { params: { orderId: str
       secretKey = decrypt(cfgRes.rows[0].cashfree_secret_encrypted)
     } catch (e) {
       console.error('[payment-status] decrypt error:', e)
-      return NextResponse.json({ order_id: params.orderId, status: txn.status, amount: txn.amount })
+      return NextResponse.json({ order_id: orderId, status: txn.status, amount: txn.amount })
     }
 
-    const cfRes = await fetch(`https://api.cashfree.com/pg/links/${params.orderId}`, {
+    const cfRes = await fetch(`https://api.cashfree.com/pg/links/${orderId}`, {
       headers: {
         'x-client-id': cfgRes.rows[0].cashfree_app_id,
         'x-client-secret': secretKey,
@@ -55,7 +56,7 @@ export async function GET(req: NextRequest, { params }: { params: { orderId: str
     const cfData = await cfRes.json()
 
     return NextResponse.json({
-      order_id: params.orderId,
+      order_id: orderId,
       status: txn.status,
       cashfree_status: cfData.link_status,
       amount: txn.amount,
