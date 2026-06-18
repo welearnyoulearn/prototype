@@ -49,7 +49,7 @@ export default function StudentLoginPage() {
 
       <AuthError message={error} />
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} data-testid="student-login-form" className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-white/70 mb-1.5">Roll Number</label>
           <input
@@ -59,6 +59,7 @@ export default function StudentLoginPage() {
             placeholder="e.g. 2024-GR9-001"
             required
             autoComplete="username"
+            data-testid="student-roll-input"
             className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent transition backdrop-blur-sm font-mono`}
           />
           <p className="text-xs text-white/30 mt-1.5">Your roll number was shared in your welcome email</p>
@@ -82,6 +83,7 @@ export default function StudentLoginPage() {
         <button
           type="submit"
           disabled={loading}
+          data-testid="student-submit-btn"
           className={`w-full bg-gradient-to-r ${theme.btnGradient} text-white font-semibold py-3 rounded-xl text-sm transition-all disabled:opacity-50 shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2`}
         >
           {loading ? (

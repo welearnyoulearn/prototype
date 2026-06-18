@@ -53,7 +53,7 @@ export default function ParentLoginPage() {
 
       <AuthError message={error} />
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} data-testid="parent-login-form" className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-white/70 mb-1.5">Email Address</label>
           <input
@@ -63,6 +63,7 @@ export default function ParentLoginPage() {
             placeholder="your@email.com"
             required
             autoComplete="email"
+            data-testid="parent-email-input"
             className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent transition backdrop-blur-sm`}
           />
           <p className="text-xs text-white/30 mt-1.5">Use the email address your school has on record</p>
@@ -86,6 +87,7 @@ export default function ParentLoginPage() {
         <button
           type="submit"
           disabled={loading}
+          data-testid="parent-submit-btn"
           className={`w-full bg-gradient-to-r ${theme.btnGradient} text-white font-semibold py-3 rounded-xl text-sm transition-all disabled:opacity-50 shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2`}
         >
           {loading ? (

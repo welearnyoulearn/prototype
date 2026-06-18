@@ -14,6 +14,7 @@ function getTokenPayload(token: string): Record<string, unknown> | null {
 
 const PUBLIC_PREFIXES = [
   '/login',
+  '/admin',
   '/forgot-password',
   '/reset-password',
   '/change-password',
@@ -68,9 +69,14 @@ export function proxy(req: NextRequest) {
     return NextResponse.redirect(new URL('/login?role=platform', req.url))
   }
 
-  // ── Main domain — block platform admin access ─────────────────────────────
+  // ── Main domain — platform admin access requires valid platform_admin cookie ─
   if (pathname.startsWith('/platform-admin')) {
-    return NextResponse.redirect(new URL('/', req.url))
+    const token = req.cookies.get(COOKIE_ADMIN)?.value
+    const payload = token ? getTokenPayload(token) : null
+    if (!payload || payload.role !== 'platform_admin') {
+      return NextResponse.redirect(new URL('/admin', req.url))
+    }
+    return NextResponse.next()
   }
 
   if (isPublic(pathname) || pathname === '/') return NextResponse.next()

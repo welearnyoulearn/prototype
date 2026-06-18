@@ -118,11 +118,12 @@ export default function Home() {
             </div>
 
             {/* Role cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div data-testid="portal-selection" className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {roles.map((role) => (
                 <Link
                   key={role.href}
                   href={role.href}
+                  data-testid={`portal-card-${role.title.toLowerCase().replace(/\s+/g, '-')}`}
                   className={`group relative flex items-center gap-4 p-5 rounded-2xl border border-white/8 bg-white/5 backdrop-blur-sm hover:bg-white/10 transition-all duration-300 shadow-lg ${role.shadow} hover:shadow-xl ${role.glow} hover:-translate-y-0.5`}
                 >
                   {/* Gradient accent line */}

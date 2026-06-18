@@ -65,181 +65,44 @@ export async function initDB() {
     )
   `)
 
-  // Always-run incremental migrations — idempotent columns added after the bootstrap
-  // sentinel was set. These run on every cold start (fast: IF NOT EXISTS guard).
-  await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS board VARCHAR(20)`)
-
-  // ── Parent authentication ──────────────────────────────────────────────────
-  await pool.query(`ALTER TABLE parents ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)`)
-  await pool.query(`ALTER TABLE parents ADD COLUMN IF NOT EXISTS password_changed BOOLEAN DEFAULT FALSE`)
-  await pool.query(`ALTER TABLE parents ADD COLUMN IF NOT EXISTS school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE`)
-  // Deduplicate parents by email before creating unique index (keep lowest id)
-  await pool.query(`
-    DELETE FROM parents
-    WHERE id NOT IN (
-      SELECT MIN(id) FROM parents WHERE email IS NOT NULL GROUP BY email
-    ) AND email IS NOT NULL
+  // Check if core tables exist — on a fresh DB we must create them before any ALTER TABLE
+  const tablesExist = await pool.query(`
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'schools' LIMIT 1
   `)
-  // Allow one parent account per email (across schools via parent_email on students)
-  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS parents_email_unique ON parents(email) WHERE email IS NOT NULL`)
-
-  // ── Extend password_reset_tokens to support all roles (not just users) ─────
-  await pool.query(`ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'admin'`)
-  await pool.query(`ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS reference_id INTEGER`)
-
-  // ── Multi-role school staff + platform admin team ─────────────────────────
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(255)`)
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active'`)
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`)
-
-  // ── Two-tier rewards: points_type splits academic vs marketplace ──────────────
-  await pool.query(`ALTER TABLE student_points ADD COLUMN IF NOT EXISTS points_type VARCHAR(20) DEFAULT 'academic'`)
-
-  // ── Marketplace tables ────────────────────────────────────────────────────────
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS marketplace_items (
-      id SERIAL PRIMARY KEY,
-      name VARCHAR(100) UNIQUE NOT NULL,
-      description TEXT,
-      emoji VARCHAR(10) DEFAULT '🎁',
-      cost_points INTEGER NOT NULL,
-      active BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `)
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS marketplace_orders (
-      id SERIAL PRIMARY KEY,
-      student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
-      school_id INTEGER NOT NULL,
-      item_id INTEGER REFERENCES marketplace_items(id),
-      item_name VARCHAR(100),
-      item_emoji VARCHAR(10),
-      points_spent INTEGER NOT NULL,
-      status VARCHAR(20) DEFAULT 'pending',
-      student_name VARCHAR(255),
-      grade VARCHAR(20),
-      section VARCHAR(10),
-      ordered_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `)
-  // Seed default marketplace items
-  await pool.query(`
-    INSERT INTO marketplace_items (name, description, emoji, cost_points) VALUES
-      ('Eraser',       'Good quality rubber eraser',            '🔲', 100),
-      ('Pen',          'Ball point pen',                        '🖊️', 200),
-      ('Notebook',     'A4 ruled notebook (100 pages)',         '📔', 500),
-      ('Pencil Box',   'Coloured pencils set with box',         '🎨', 750),
-      ('Geometry Box', 'Complete geometry instruments set',     '📐', 1000)
-    ON CONFLICT (name) DO NOTHING
-  `)
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS hub_daily_content (
-      id SERIAL PRIMARY KEY,
-      content_date DATE UNIQUE NOT NULL,
-      gk_questions JSONB,
-      word_of_day JSONB,
-      riddle JSONB,
-      fact_myth_questions JSONB,
-      debate_statement JSONB,
-      challenge_problem JSONB,
-      generated_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `)
-  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS riddle JSONB`)
-  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS fact_myth_questions JSONB`)
-  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS debate_statement JSONB`)
-  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS challenge_problem JSONB`)
-  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS reading_passage JSONB`)
-  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS writing_prompt JSONB`)
-  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS speaking_sentences JSONB`)
-
-  // ── Fee management extended schema ───────────────────────────────────────────
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS fee_structure_locks (
-      id            SERIAL PRIMARY KEY,
-      school_id     INTEGER NOT NULL,
-      academic_year TEXT    NOT NULL,
-      locked_by     TEXT    NOT NULL,
-      locked_at     TIMESTAMPTZ DEFAULT NOW(),
-      UNIQUE(school_id, academic_year)
-    )
-  `)
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS fee_structure_amendments (
-      id               SERIAL PRIMARY KEY,
-      school_id        INTEGER NOT NULL,
-      fee_structure_id INTEGER REFERENCES fee_structures(id) ON DELETE SET NULL,
-      fee_category_id  INTEGER REFERENCES fee_categories(id) ON DELETE CASCADE,
-      grade            TEXT    NOT NULL,
-      academic_year    TEXT    NOT NULL,
-      old_amount       NUMERIC(10,2) NOT NULL,
-      new_amount       NUMERIC(10,2) NOT NULL,
-      effective_from   DATE    NOT NULL DEFAULT CURRENT_DATE,
-      reason           TEXT    NOT NULL,
-      changed_by       TEXT    NOT NULL,
-      created_at       TIMESTAMPTZ DEFAULT NOW()
-    )
-  `)
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS student_fee_ledger_edits (
-      id            SERIAL PRIMARY KEY,
-      ledger_id     INTEGER NOT NULL REFERENCES student_fee_ledger(id) ON DELETE CASCADE,
-      school_id     INTEGER NOT NULL,
-      student_id    INTEGER NOT NULL,
-      old_amount    NUMERIC(10,2) NOT NULL,
-      new_amount    NUMERIC(10,2) NOT NULL,
-      reason        TEXT    NOT NULL,
-      changed_by    TEXT    NOT NULL,
-      changed_at    TIMESTAMPTZ DEFAULT NOW()
-    )
-  `)
-  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS verified_by      TEXT`)
-  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS verified_at      TIMESTAMPTZ`)
-  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS rejection_reason TEXT`)
-  await pool.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS uq_student_fee_ledger_entry
-    ON student_fee_ledger (student_id, fee_category_id, academic_year, period_label)
-  `)
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS student_hub_completions (
-      id SERIAL PRIMARY KEY,
-      student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
-      school_id INTEGER NOT NULL,
-      activity_type VARCHAR(50) NOT NULL,
-      completed_date DATE NOT NULL DEFAULT CURRENT_DATE,
-      score INTEGER DEFAULT 0,
-      points_earned INTEGER DEFAULT 0,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      UNIQUE(student_id, activity_type, completed_date)
-    )
-  `)
+  const isFreshDB = tablesExist.rows.length === 0
 
   const bootstrap = await pool.query(
     `SELECT 1 FROM app_bootstrap_state WHERE key = $1 LIMIT 1`,
     [BOOTSTRAP_MARKER_KEY]
   )
-  if (bootstrap.rows.length > 0) return
 
-  // Check if schema is already fully applied. If yes, record the durable marker
-  // so future Vercel cold starts never scan the full migration list again.
-  const { rows } = await pool.query(`
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name   = $1
-      AND column_name  = $2
-    LIMIT 1
-  `, [SCHEMA_SENTINEL_TABLE, SCHEMA_SENTINEL_COLUMN])
-  if (rows.length > 0) {
-    await pool.query(
-      `INSERT INTO app_bootstrap_state (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
-      [BOOTSTRAP_MARKER_KEY]
-    )
+  if (!isFreshDB && bootstrap.rows.length > 0) {
+    // Schema fully bootstrapped — run only incremental migrations
+    await runIncrementalMigrations()
     return
   }
 
+  if (!isFreshDB) {
+    // Tables exist but no bootstrap marker — check sentinel
+    const { rows } = await pool.query(`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name   = $1
+        AND column_name  = $2
+      LIMIT 1
+    `, [SCHEMA_SENTINEL_TABLE, SCHEMA_SENTINEL_COLUMN])
+    if (rows.length > 0) {
+      await runIncrementalMigrations()
+      await pool.query(
+        `INSERT INTO app_bootstrap_state (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
+        [BOOTSTRAP_MARKER_KEY]
+      )
+      return
+    }
+  }
+
+  // Fresh DB or incomplete bootstrap — create all tables
   await pool.query(`
     CREATE TABLE IF NOT EXISTS schools (
       id SERIAL PRIMARY KEY,
@@ -1482,8 +1345,154 @@ export async function initDB() {
     await pool.query(sql).catch(() => { /* column already exists */ })
   }
 
+  // Run incremental migrations after bootstrap
+  await runIncrementalMigrations()
+
   await pool.query(
     `INSERT INTO app_bootstrap_state (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
     [BOOTSTRAP_MARKER_KEY]
   )
+}
+
+async function runIncrementalMigrations() {
+  await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS board VARCHAR(20)`)
+
+  await pool.query(`ALTER TABLE parents ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)`)
+  await pool.query(`ALTER TABLE parents ADD COLUMN IF NOT EXISTS password_changed BOOLEAN DEFAULT FALSE`)
+  await pool.query(`ALTER TABLE parents ADD COLUMN IF NOT EXISTS school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE`)
+  await pool.query(`
+    DELETE FROM parents
+    WHERE id NOT IN (
+      SELECT MIN(id) FROM parents WHERE email IS NOT NULL GROUP BY email
+    ) AND email IS NOT NULL
+  `)
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS parents_email_unique ON parents(email) WHERE email IS NOT NULL`)
+
+  await pool.query(`ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'admin'`)
+  await pool.query(`ALTER TABLE password_reset_tokens ADD COLUMN IF NOT EXISTS reference_id INTEGER`)
+
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(255)`)
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active'`)
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ`)
+
+  await pool.query(`ALTER TABLE student_points ADD COLUMN IF NOT EXISTS points_type VARCHAR(20) DEFAULT 'academic'`)
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS marketplace_items (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100) UNIQUE NOT NULL,
+      description TEXT,
+      emoji VARCHAR(10) DEFAULT '🎁',
+      cost_points INTEGER NOT NULL,
+      active BOOLEAN DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS marketplace_orders (
+      id SERIAL PRIMARY KEY,
+      student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL,
+      item_id INTEGER REFERENCES marketplace_items(id),
+      item_name VARCHAR(100),
+      item_emoji VARCHAR(10),
+      points_spent INTEGER NOT NULL,
+      status VARCHAR(20) DEFAULT 'pending',
+      student_name VARCHAR(255),
+      grade VARCHAR(20),
+      section VARCHAR(10),
+      ordered_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`
+    INSERT INTO marketplace_items (name, description, emoji, cost_points) VALUES
+      ('Eraser',       'Good quality rubber eraser',            '🔲', 100),
+      ('Pen',          'Ball point pen',                        '🖊️', 200),
+      ('Notebook',     'A4 ruled notebook (100 pages)',         '📔', 500),
+      ('Pencil Box',   'Coloured pencils set with box',         '🎨', 750),
+      ('Geometry Box', 'Complete geometry instruments set',     '📐', 1000)
+    ON CONFLICT (name) DO NOTHING
+  `)
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS hub_daily_content (
+      id SERIAL PRIMARY KEY,
+      content_date DATE UNIQUE NOT NULL,
+      gk_questions JSONB,
+      word_of_day JSONB,
+      riddle JSONB,
+      fact_myth_questions JSONB,
+      debate_statement JSONB,
+      challenge_problem JSONB,
+      generated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS riddle JSONB`)
+  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS fact_myth_questions JSONB`)
+  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS debate_statement JSONB`)
+  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS challenge_problem JSONB`)
+  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS reading_passage JSONB`)
+  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS writing_prompt JSONB`)
+  await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS speaking_sentences JSONB`)
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_structure_locks (
+      id            SERIAL PRIMARY KEY,
+      school_id     INTEGER NOT NULL,
+      academic_year TEXT    NOT NULL,
+      locked_by     TEXT    NOT NULL,
+      locked_at     TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, academic_year)
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_structure_amendments (
+      id               SERIAL PRIMARY KEY,
+      school_id        INTEGER NOT NULL,
+      fee_structure_id INTEGER REFERENCES fee_structures(id) ON DELETE SET NULL,
+      fee_category_id  INTEGER REFERENCES fee_categories(id) ON DELETE CASCADE,
+      grade            TEXT    NOT NULL,
+      academic_year    TEXT    NOT NULL,
+      old_amount       NUMERIC(10,2) NOT NULL,
+      new_amount       NUMERIC(10,2) NOT NULL,
+      effective_from   DATE    NOT NULL DEFAULT CURRENT_DATE,
+      reason           TEXT    NOT NULL,
+      changed_by       TEXT    NOT NULL,
+      created_at       TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS student_fee_ledger_edits (
+      id            SERIAL PRIMARY KEY,
+      ledger_id     INTEGER NOT NULL REFERENCES student_fee_ledger(id) ON DELETE CASCADE,
+      school_id     INTEGER NOT NULL,
+      student_id    INTEGER NOT NULL,
+      old_amount    NUMERIC(10,2) NOT NULL,
+      new_amount    NUMERIC(10,2) NOT NULL,
+      reason        TEXT    NOT NULL,
+      changed_by    TEXT    NOT NULL,
+      changed_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS verified_by      TEXT`)
+  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS verified_at      TIMESTAMPTZ`)
+  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS rejection_reason TEXT`)
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_student_fee_ledger_entry
+    ON student_fee_ledger (student_id, fee_category_id, academic_year, period_label)
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS student_hub_completions (
+      id SERIAL PRIMARY KEY,
+      student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL,
+      activity_type VARCHAR(50) NOT NULL,
+      completed_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      score INTEGER DEFAULT 0,
+      points_earned INTEGER DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(student_id, activity_type, completed_date)
+    )
+  `)
 }

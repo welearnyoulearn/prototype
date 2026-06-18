@@ -131,7 +131,7 @@ export default function AuthShell({
 export function AuthError({ message }: { message: string }) {
   if (!message) return null
   return (
-    <div className="mb-5 flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl backdrop-blur-sm">
+    <div data-testid="auth-error-text" className="mb-5 flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl backdrop-blur-sm">
       <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
       </svg>
@@ -170,6 +170,7 @@ export function AuthInput({
         placeholder={placeholder}
         autoComplete={autoComplete}
         required={required}
+        data-testid={`auth-${label.toLowerCase().replace(/\s+/g, '-')}-input`}
         className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 ${ring} focus:border-transparent transition backdrop-blur-sm`}
       />
       {hint && <p className="text-xs text-white/30 mt-1.5">{hint}</p>}
@@ -197,6 +198,7 @@ export function PasswordField({
           placeholder={placeholder}
           autoComplete={autoComplete}
           required={required}
+          data-testid="auth-password-input"
           className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 ${ring} focus:border-transparent transition backdrop-blur-sm pr-12`}
         />
         <button type="button" onClick={() => setShow(v => !v)}
@@ -220,6 +222,7 @@ export function AuthButton({
     <button
       type="submit"
       disabled={loading}
+      data-testid="auth-submit-btn"
       className={`w-full bg-gradient-to-r ${gradient} text-white font-semibold py-3 rounded-xl text-sm transition-all disabled:opacity-50 shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2`}
     >
       {loading ? (

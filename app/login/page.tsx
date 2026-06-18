@@ -47,7 +47,7 @@ function LoginForm() {
   return (
     <AuthShell theme={theme} title={title} subtitle={subtitle}>
       <AuthError message={error} />
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} data-testid="login-form" className="space-y-4">
         <AuthInput
           label={isPlatform ? 'Email Address' : 'School ID or Email'}
           value={identifier}
