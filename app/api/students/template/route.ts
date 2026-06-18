@@ -8,11 +8,11 @@ export async function GET() {
   const ws = wb.addWorksheet('Students')
 
   const headers = [
-    'Last Name', 'First Name', 'Student Email', 'Grade', 'Section',
-    'Parent Name', 'Parent Phone', 'Parent Email', 'Student Phone', 'Roll No',
+    'Roll No', 'Last Name', 'First Name', 'Student Email', 'Grade', 'Section',
+    'Parent Name', 'Parent Phone', 'Parent Email', 'Student Phone',
   ]
 
-  ws.columns = headers.map(h => ({ header: h, key: h, width: h === 'Student Email' || h === 'Parent Email' ? 28 : 16 }))
+  ws.columns = headers.map(h => ({ header: h, key: h, width: h === 'Student Email' || h === 'Parent Email' ? 28 : h === 'Roll No' ? 10 : 16 }))
 
   const headerRow = ws.getRow(1)
   headerRow.eachCell(cell => {
@@ -30,8 +30,8 @@ export async function GET() {
   headerRow.height = 22
 
   // Two example rows
-  ws.addRow(['Mehta', 'Arjun', 'arjun@student.com', '10', 'A', 'Suresh Mehta', '9876543210', 'suresh@parent.com', '', 1])
-  ws.addRow(['Patel', 'Priya', 'priya@student.com', '10', 'A', 'Ramesh Patel', '9876543211', 'ramesh@parent.com', '', 2])
+  ws.addRow([1, 'Mehta', 'Arjun', 'arjun@student.com', '10', 'A', 'Suresh Mehta', '9876543210', 'suresh@parent.com', ''])
+  ws.addRow([2, 'Patel', 'Priya', 'priya@student.com', '10', 'A', 'Ramesh Patel', '9876543211', 'ramesh@parent.com', ''])
 
   // Note row
   const noteRow = ws.addRow([])
