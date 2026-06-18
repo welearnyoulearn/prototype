@@ -108,6 +108,19 @@ export async function POST(req: NextRequest) {
       const createdPayments = []
 
       if (!isMulti) {
+        // BUG 11/12 fix: verify ledger_id belongs to this student before inserting
+        const { rows: [ledgerCheck] } = await client.query(
+          `SELECT id FROM student_fee_ledger
+           WHERE id = $1 AND school_id = $2 AND student_id = $3
+             AND status NOT IN ('paid', 'waived')`,
+          [ledger_id, school_id, student_id]
+        )
+        if (!ledgerCheck) {
+          await client.query('ROLLBACK')
+          client.release()
+          return NextResponse.json({ error: 'Ledger entry not found or not payable' }, { status: 404 })
+        }
+
         // Single ledger entry
         const { rows: [payment] } = await client.query(
           `INSERT INTO fee_payments
