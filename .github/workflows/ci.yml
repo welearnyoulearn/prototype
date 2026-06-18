@@ -1,22 +1,115 @@
-name: CI — Verify Build
+name: CI — Build & E2E Tests
 
 on:
+  push:
+    branches: [main, feat/*, fix/*, hotfix/*]
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
 jobs:
-  verify:
-    name: Verify PR
+  usage-guard:
+    name: Check Free Tier
+    uses: ./.github/workflows/usage-guard.yml
+
+  build:
+    name: Type Check & Build
     runs-on: ubuntu-latest
+    needs: usage-guard
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check test script exists
-        run: test -f scripts/test.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
 
-      - name: Confirm local CI was run
-        run: |
-          echo "================================================"
-          echo "  Tests run locally via pre-push hook."
-          echo "  To run manually: bash scripts/test.sh"
-          echo "================================================"
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGDATABASE: test
+          PGUSER: test
+          PGPASSWORD: test
+          JWT_SECRET: ci-test-secret
+          APP_URL: http://localhost:3000
+
+  e2e-tests:
+    name: E2E Tests (Playwright)
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: wlyl_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright (Chromium only)
+        run: npx playwright install --with-deps chromium
+
+      - name: Build app
+        run: npm run build
+        env:
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGDATABASE: wlyl_test
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          JWT_SECRET: ci-test-secret
+          APP_URL: http://localhost:3000
+
+      - name: Run E2E tests
+        run: npx playwright test
+        env:
+          CI: 'true'
+          PGHOST: localhost
+          PGPORT: '5432'
+          PGDATABASE: wlyl_test
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          JWT_SECRET: ci-test-secret
+          SETUP_SECRET: ci-test-setup
+          APP_URL: http://localhost:3000
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: test-results/
+          retention-days: 7

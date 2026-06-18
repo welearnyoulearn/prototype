@@ -10,10 +10,7 @@
     "backup": "node scripts/backup-db.js",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:headed": "playwright test --headed",
-    "test:ci": "bash scripts/test.sh",
-    "docker:dev": "docker compose up",
-    "docker:down": "docker compose --profile test down -v"
+    "test:e2e:headed": "playwright test --headed"
   },
   "engines": {
     "node": ">=18.17.0",
