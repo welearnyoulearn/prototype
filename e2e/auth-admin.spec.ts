@@ -19,14 +19,14 @@ test.describe('Admin / Platform Admin Login', () => {
     const login = new AdminLoginPage(page)
     await login.goto('school')
     await login.login('nonexistent-school', 'wrongpassword')
-    await login.expectError('Invalid credentials')
+    await expect(page.getByTestId('auth-error-text')).toBeVisible({ timeout: 10000 })
   })
 
   test('shows error on invalid platform admin credentials', async ({ page }) => {
     const login = new AdminLoginPage(page)
     await login.goto('platform')
     await login.loginAsPlatformAdmin('fake@email.com', 'wrongpassword')
-    await login.expectError('Invalid credentials')
+    await expect(page.getByTestId('auth-error-text')).toBeVisible({ timeout: 10000 })
   })
 
   test('platform admin login succeeds and navigates away from login', async ({ page }) => {

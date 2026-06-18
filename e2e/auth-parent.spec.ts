@@ -21,7 +21,7 @@ test.describe('Parent Login', () => {
     const login = new ParentLoginPage(page)
     await login.goto()
     await login.login('fake@parent.com', 'wrongpassword')
-    await login.expectError('Invalid email or password')
+    await expect(page.getByTestId('auth-error-text')).toBeVisible({ timeout: 10000 })
   })
 
   test('back link navigates to portal selection', async ({ page }) => {

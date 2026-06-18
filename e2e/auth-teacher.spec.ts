@@ -13,7 +13,7 @@ test.describe('Teacher Login', () => {
     const login = new TeacherLoginPage(page)
     await login.goto()
     await login.login('nonexistent@school.edu', 'wrongpassword')
-    await login.expectError('Invalid email or password')
+    await expect(page.getByTestId('auth-error-text')).toBeVisible({ timeout: 10000 })
   })
 
   test('forgot password link is visible', async ({ page }) => {

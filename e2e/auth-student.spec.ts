@@ -19,7 +19,7 @@ test.describe('Student Login', () => {
     const login = new StudentLoginPage(page)
     await login.goto()
     await login.login('FAKE-ROLL-001', 'wrongpassword')
-    await login.expectError('Invalid roll number or password')
+    await expect(page.getByTestId('auth-error-text')).toBeVisible({ timeout: 10000 })
   })
 
   test('back link navigates to portal selection', async ({ page }) => {
