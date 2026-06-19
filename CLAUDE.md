@@ -2,13 +2,13 @@
 
 ## Coding Standards
 
-Read and follow ALL standards from the workspace root before writing any code:
-- `../../coding-standards/STANDARDS.md` — tech stack, rules, conventions
-- `../../coding-standards/conventions/issue-workflow.md` — how bugs/features flow from discovery to resolution
-- `../../coding-standards/checklists/bug-fix.md` — follow for every bug fix
-- `../../coding-standards/checklists/feature-development.md` — follow for every new feature
-- `../../coding-standards/checklists/code-review.md` — follow for every PR
-- `../../coding-standards/conventions/git-workflow.md` — branch naming, commits, PR rules
+Read and follow ALL standards in this project's `coding-standards/` folder before writing any code:
+- `coding-standards/STANDARDS.md` — tech stack, rules, conventions
+- `coding-standards/conventions/issue-workflow.md` — how bugs/features flow from discovery to resolution
+- `coding-standards/checklists/bug-fix.md` — follow for every bug fix
+- `coding-standards/checklists/feature-development.md` — follow for every new feature
+- `coding-standards/checklists/code-review.md` — follow for every PR
+- `coding-standards/conventions/git-workflow.md` — branch naming, commits, PR rules
 
 ## Issue Workflow
 
