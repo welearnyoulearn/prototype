@@ -1,18 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool, { ensureDB } from '@/lib/db'
+import pool from '@/lib/db'
 import { invalidateCache } from '@/lib/responseCache'
+import { hashPassword, generateTempPassword } from '@/lib/auth'
+import { sendStudentWelcomeEmail, sendParentWelcomeEmail } from '@/lib/email'
 
 function generateStudentId(schoolName: string): string {
-  const slug = schoolName
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '')
-    .slice(0, 10)
+  const slug = schoolName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10)
   const num = Math.floor(10000 + Math.random() * 90000)
   return `wlyl-stu-${slug}-${num}`
 }
 
 export async function POST(req: NextRequest) {
-
   try {
     const { school_id, students } = await req.json()
     if (!school_id || !Array.isArray(students) || students.length === 0) {
@@ -20,23 +18,26 @@ export async function POST(req: NextRequest) {
     }
 
     const schoolRes = await pool.query('SELECT name FROM schools WHERE id = $1', [school_id])
-    if (schoolRes.rows.length === 0) {
-      return NextResponse.json({ error: 'School not found' }, { status: 404 })
-    }
+    if (schoolRes.rows.length === 0) return NextResponse.json({ error: 'School not found' }, { status: 404 })
     const schoolName = schoolRes.rows[0].name
+    const appUrl = process.env.APP_URL || 'http://localhost:3000'
 
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
+
       const inserted = []
       const errors: { row: number; message: string }[] = []
 
+      // credentials to return to school admin (shown once, never stored plaintext)
+      const studentCredentials: { name: string; grade: string; section: string; school_roll_number: number | null; login: string; temp_password: string }[] = []
+      const parentCredentials: { name: string; phone: string; login: string; temp_password: string; is_new: boolean }[] = []
+      // track parents already processed in this batch to avoid duplicate credential entries
+      const processedParentIds = new Set<number>()
+
       for (let i = 0; i < students.length; i++) {
         const s = students[i]
-        if (!s.name?.trim()) {
-          errors.push({ row: i + 1, message: 'Name is required' })
-          continue
-        }
+        if (!s.name?.trim()) { errors.push({ row: i + 1, message: 'Name is required' }); continue }
 
         // Phone duplicate check within this school
         if (s.phone?.trim()) {
@@ -72,66 +73,131 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Auto-create class if grade+section provided but class doesn't exist yet
+        // Auto-create class
         if (s.grade?.trim() && s.section?.trim()) {
           await client.query(
-            `INSERT INTO classes (school_id, grade, section)
-             VALUES ($1, $2, $3)
-             ON CONFLICT (school_id, grade, section) DO NOTHING`,
+            `INSERT INTO classes (school_id, grade, section) VALUES ($1,$2,$3) ON CONFLICT (school_id, grade, section) DO NOTHING`,
             [school_id, s.grade.trim(), s.section.trim()]
           )
         }
 
+        // Student account — always generate password
+        const studentTempPass = generateTempPassword(8)
+        const studentPassHash = await hashPassword(studentTempPass)
         const roll_number = generateStudentId(schoolName)
+
         const res = await client.query(
           `INSERT INTO students
-             (school_id, name, email, grade, section, roll_number, school_roll_number, parent_name, parent_phone, parent_email, phone, status)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active') RETURNING *`,
+             (school_id, name, email, grade, section, roll_number, school_roll_number,
+              parent_name, parent_phone, parent_email, phone, status, password_hash, password_changed)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',$12,FALSE) RETURNING *`,
           [
-            school_id,
-            s.name.trim(),
-            s.email?.trim() || null,
-            s.grade?.trim() || null,
-            s.section?.trim() || null,
-            roll_number,
-            school_roll_number,
-            s.parent_name?.trim() || null,
-            s.parent_phone?.trim() || null,
-            s.parent_email?.trim() || null,
-            s.phone?.trim() || null,
+            school_id, s.name.trim(), s.email?.trim() || null,
+            s.grade?.trim() || null, s.section?.trim() || null,
+            roll_number, school_roll_number,
+            s.parent_name?.trim() || null, s.parent_phone?.trim() || null,
+            s.parent_email?.trim() || null, s.phone?.trim() || null,
+            studentPassHash,
           ]
         )
         const student = res.rows[0]
         inserted.push(student)
 
-        // Auto-create parent account if parent_email provided
-        if (s.parent_email?.trim()) {
-          const existingParent = await client.query(
-            'SELECT id FROM parents WHERE school_id = $1 AND email = $2',
-            [school_id, s.parent_email.trim()]
-          )
-          let parentId: number
-          if (existingParent.rows.length > 0) {
-            parentId = existingParent.rows[0].id
-          } else {
-            const parentRes = await client.query(
-              `INSERT INTO parents (school_id, name, email, phone)
-               VALUES ($1, $2, $3, $4) RETURNING id`,
-              [school_id, s.parent_name?.trim() || null, s.parent_email.trim(), s.parent_phone?.trim() || null]
-            )
-            parentId = parentRes.rows[0].id
+        // Record student credentials
+        const studentLogin = s.email?.trim() || `(no email — share manually)`
+        studentCredentials.push({
+          name: s.name.trim(),
+          grade: s.grade?.trim() || '',
+          section: s.section?.trim() || '',
+          school_roll_number,
+          login: studentLogin,
+          temp_password: studentTempPass,
+        })
+
+        // Send student welcome email fire-and-forget
+        if (s.email?.trim()) {
+          sendStudentWelcomeEmail({
+            to: s.email.trim(), name: s.name.trim(), schoolName,
+            rollNumber: roll_number, tempPassword: studentTempPass,
+            loginUrl: `${appUrl}/student/login`,
+          }).catch(console.error)
+        }
+
+        // Parent account — lookup by email (global) first, then by phone+school
+        const parentEmail = s.parent_email?.trim() || null
+        const parentPhone = s.parent_phone?.trim() || null
+        const parentName  = s.parent_name?.trim() || null
+
+        let parentId: number | null = null
+        let isNewParent = false
+        let parentTempPass = ''
+
+        if (parentEmail) {
+          const existing = await client.query('SELECT id FROM parents WHERE LOWER(email) = LOWER($1)', [parentEmail])
+          if (existing.rows.length > 0) {
+            parentId = existing.rows[0].id
           }
+        }
+
+        if (!parentId && parentPhone) {
+          const existing = await client.query(
+            'SELECT id FROM parents WHERE school_id = $1 AND phone = $2',
+            [school_id, parentPhone]
+          )
+          if (existing.rows.length > 0) parentId = existing.rows[0].id
+        }
+
+        if (!parentId && (parentEmail || parentPhone)) {
+          // Create new parent account
+          isNewParent = true
+          parentTempPass = generateTempPassword(10)
+          const parentPassHash = await hashPassword(parentTempPass)
+          const parentRes = await client.query(
+            `INSERT INTO parents (school_id, name, email, phone, password_hash, password_changed)
+             VALUES ($1,$2,$3,$4,$5,FALSE) RETURNING id`,
+            [school_id, parentName, parentEmail, parentPhone, parentPassHash]
+          )
+          parentId = parentRes.rows[0].id
+        }
+
+        if (parentId) {
           await client.query(
-            `INSERT INTO student_parents (student_id, parent_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            `INSERT INTO student_parents (student_id, parent_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
             [student.id, parentId]
           )
+
+          // Record parent credentials (only for new accounts, only once per parent per batch)
+          if (isNewParent && !processedParentIds.has(parentId)) {
+            processedParentIds.add(parentId)
+            const parentLogin = parentEmail || parentPhone || '(no contact)'
+            parentCredentials.push({
+              name: parentName || parentLogin,
+              phone: parentPhone || '',
+              login: parentLogin,
+              temp_password: parentTempPass,
+              is_new: true,
+            })
+
+            // Send parent welcome email fire-and-forget
+            if (parentEmail) {
+              sendParentWelcomeEmail({
+                to: parentEmail, parentName: parentName || parentEmail,
+                studentName: s.name.trim(), schoolName,
+                tempPassword: parentTempPass, loginUrl: `${appUrl}/parent/login`,
+              }).catch(console.error)
+            }
+          }
         }
       }
 
       await client.query('COMMIT')
-      // Invalidate classes cache so Class Management reflects new student counts immediately
       invalidateCache(`classes:${school_id}`)
-      return NextResponse.json({ inserted: inserted.length, students: inserted, errors }, { status: 201 })
+      return NextResponse.json({
+        inserted: inserted.length,
+        students: inserted,
+        errors,
+        credentials: { students: studentCredentials, parents: parentCredentials },
+      }, { status: 201 })
     } catch (err) {
       await client.query('ROLLBACK')
       throw err
