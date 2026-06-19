@@ -234,14 +234,17 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 import dynamic from 'next/dynamic'
+import SendPaymentLinkModal from './SendPaymentLinkModal'
+const OnlinePaymentsTab = dynamic(() => import('./OnlinePaymentsTab'), { ssr: false })
 
 export default function FeeManagement({
-  schoolId, adminName
+  schoolId, adminName, onlinePaymentsEnabled = false
 }: {
   schoolId: number
   adminName?: string
+  onlinePaymentsEnabled?: boolean
 }) {
-  type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'pending' | 'students' | 'reports' | 'yearend'
+  type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'pending' | 'students' | 'reports' | 'yearend' | 'online-payments'
   const [activeTab, setActiveTab] = useState<Tab>('overview')
 
   // Shared
@@ -353,6 +356,7 @@ export default function FeeManagement({
   const [showWaiver, setShowWaiver]         = useState(false)
   const [waiverForm, setWaiverForm]         = useState({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' })
   const [waiverLoading, setWaiverLoading]   = useState(false)
+  const [sendLinkEntry, setSendLinkEntry] = useState<import('./SendPaymentLinkModal').PaymentLedgerEntry | null>(null)
 
 
   // WhatsApp reminder state
@@ -1786,6 +1790,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           { key: 'students',         label: 'Student Passbook' },
           { key: 'reports',          label: 'Reports' },
           { key: 'yearend',          label: 'Year-End' },
+          ...(onlinePaymentsEnabled ? [{ key: 'online-payments', label: '💳 Online Payments' }] : []),
         ] as const).map(t => (
           <button
             key={t.key}
@@ -4353,7 +4358,19 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
         </div>
       )}
 
+      {/* ═══ ONLINE PAYMENTS ════════════════════════════════════════════════════ */}
+      {activeTab === 'online-payments' && onlinePaymentsEnabled && (
+        <OnlinePaymentsTab schoolId={schoolId} />
+      )}
 
+      {/* ── Payment Link Modal ── */}
+      {sendLinkEntry && (
+        <SendPaymentLinkModal
+          entry={sendLinkEntry}
+          schoolId={schoolId}
+          onClose={() => setSendLinkEntry(null)}
+        />
+      )}
 
     </div>
   )
