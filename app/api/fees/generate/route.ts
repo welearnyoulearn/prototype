@@ -34,12 +34,12 @@ export async function POST(req: NextRequest) {
           [school_id]
         )
         if (varCats.length > 0) {
-          // Get due_day from fee_structures for variable categories (use first matching structure)
+          // Get due_day from fee_structures for variable categories (take max to be deterministic)
           const { rows: varStructures } = await pool.query(
-            `SELECT DISTINCT ON (fs.fee_category_id) fs.fee_category_id, fs.due_day
+            `SELECT fs.fee_category_id, MAX(fs.due_day) AS due_day
              FROM fee_structures fs WHERE fs.school_id = $1 AND fs.academic_year = $2
                AND fs.fee_category_id = ANY($3)
-             ORDER BY fs.fee_category_id, fs.id`,
+             GROUP BY fs.fee_category_id`,
             [school_id, academic_year, varCats.map(c => c.id)]
           )
           const dueDayMap: Record<number, number> = {}
@@ -55,6 +55,7 @@ export async function POST(req: NextRequest) {
              JOIN students s ON s.id = sfca.student_id
              WHERE sfca.school_id = $1 AND sfca.academic_year = $2
                AND sfca.fee_category_id = ANY($3) AND sfca.amount > 0
+               AND s.status = 'active'
                ${gradeFilter}`,
             params
           )
@@ -167,6 +168,12 @@ function buildPeriods(frequency: string, academicYear: string, dueDay: number): 
       { label: `Q2 ${academicYear}`, due_date: `${startYear}-07-${String(dueDay).padStart(2, '0')}` },
       { label: `Q3 ${academicYear}`, due_date: `${startYear}-10-${String(dueDay).padStart(2, '0')}` },
       { label: `Q4 ${academicYear}`, due_date: `${endYear}-01-${String(dueDay).padStart(2, '0')}` },
+    ]
+  }
+  if (frequency === 'half_yearly') {
+    return [
+      { label: `H1 ${academicYear}`, due_date: `${startYear}-04-${String(dueDay).padStart(2, '0')}` },
+      { label: `H2 ${academicYear}`, due_date: `${startYear}-10-${String(dueDay).padStart(2, '0')}` },
     ]
   }
   // annual or one_time

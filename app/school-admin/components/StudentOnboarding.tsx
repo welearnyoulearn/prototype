@@ -7,24 +7,22 @@ type Props = { schoolId: number; onRefresh?: () => void }
 
 type StudentRow = {
   last_name: string; first_name: string; email: string; grade: string; section: string
-  parent_name: string; parent_phone: string; parent_email: string; phone: string
+  parent_name: string; parent_phone: string; parent_email: string; phone: string; school_roll_number: string
 }
 
-const EMPTY_ROW: StudentRow = { last_name: '', first_name: '', email: '', grade: '', section: '', parent_name: '', parent_phone: '', parent_email: '', phone: '' }
-const CSV_HEADER = 'last_name,first_name,email,grade,section,parent_name,parent_phone,parent_email,phone'
-const CSV_EXAMPLE = `Mehta,Arjun,arjun@student.com,10,A,Suresh Mehta,9876543210,suresh@parent.com,
-Patel,Priya,priya@student.com,10,A,Ramesh Patel,9876543211,ramesh@parent.com,`
+const EMPTY_ROW: StudentRow = { last_name: '', first_name: '', email: '', grade: '', section: '', parent_name: '', parent_phone: '', parent_email: '', phone: '', school_roll_number: '' }
+const CSV_HEADER = 'roll_no,last_name,first_name,email,grade,section,parent_name,parent_phone,parent_email,phone'
+const CSV_EXAMPLE = `1,Mehta,Arjun,arjun@student.com,10,A,Suresh Mehta,9876543210,suresh@parent.com,
+2,Patel,Priya,priya@student.com,10,A,Ramesh Patel,9876543211,ramesh@parent.com,`
 
 // Staff CSV markers — if uploaded to student form by mistake
 const STAFF_CSV_MARKERS = ['department', 'qualification', 'staff_type', 'subject', 'employee_id', 'teaches_grades']
 
 function downloadTemplate() {
-  const content = CSV_HEADER + '\n' + CSV_EXAMPLE
-  const blob = new Blob([content], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = url; a.download = 'student_template.csv'; a.click()
-  URL.revokeObjectURL(url)
+  a.href = '/api/students/template'
+  a.download = 'student_template.xlsx'
+  a.click()
 }
 
 export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
@@ -34,6 +32,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
   const [filterSection, setFilterSection] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<{ inserted: number; students: { roll_number: string }[]; errors: { row: number; message: string }[] } | null>(null)
+  const [dupRollError, setDupRollError] = useState('')
   const [error, setError] = useState('')
   const [csvWarn, setCsvWarn] = useState('')
   const [studentCount, setStudentCount] = useState<number | null>(null)
@@ -81,15 +80,16 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
 
     const dataRows = hasHeader ? allRows.slice(1) : allRows
     const parsed: StudentRow[] = dataRows.map(cols => ({
-      last_name: cols[0] ?? '',
-      first_name: cols[1] ?? '',
-      email: cols[2] ?? '',
-      grade: cols[3] ?? filterGrade,
-      section: cols[4] ?? filterSection,
-      parent_name: cols[5] ?? '',
-      parent_phone: cols[6] ?? '',
-      parent_email: cols[7] ?? '',
-      phone: cols[8] ?? '',
+      school_roll_number: cols[0] ?? '',
+      last_name: cols[1] ?? '',
+      first_name: cols[2] ?? '',
+      email: cols[3] ?? '',
+      grade: cols[4] ?? filterGrade,
+      section: cols[5] ?? filterSection,
+      parent_name: cols[6] ?? '',
+      parent_phone: cols[7] ?? '',
+      parent_email: cols[8] ?? '',
+      phone: cols[9] ?? '',
     }))
     if (parsed.length > 0) { setRows(parsed); setMode('manual') }
   }
@@ -123,15 +123,34 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       // Section is optional
       if (!r.parent_name.trim())  missing.push(`Row ${i + 1}: Parent Name is required`)
       if (!r.parent_phone.trim()) missing.push(`Row ${i + 1}: Parent Phone is required`)
+      if (!r.school_roll_number.trim()) missing.push(`Row ${i + 1}: Roll No is required`)
+      else if (!/^\d+$/.test(r.school_roll_number.trim()) || parseInt(r.school_roll_number.trim()) <= 0)
+        missing.push(`Row ${i + 1}: Roll No must be a positive number`)
     })
     if (missing.length > 0) { setError(missing.join(' · ')); return }
+
+    // Duplicate roll number check within this batch (same grade+section)
+    const rollMap = new Map<string, number>()
+    let dupFound = false
+    for (let i = 0; i < valid.length; i++) {
+      const r = valid[i]
+      const key = `${r.grade.trim()}|${r.section.trim()}|${r.school_roll_number.trim()}`
+      if (rollMap.has(key)) {
+        missing.push(`Row ${i + 1}: Roll No ${r.school_roll_number} duplicated with Row ${rollMap.get(key)! + 1} in Grade ${r.grade} Section ${r.section}`)
+        dupFound = true
+      } else {
+        rollMap.set(key, i)
+      }
+    }
+    if (dupFound) { setError(missing.join(' · ')); return }
 
     // Combine last_name + first_name → full name sent to API
     const students = valid.map(({ last_name, first_name, ...rest }) => ({
       ...rest, name: `${last_name} ${first_name}`.trim(),
+      school_roll_number: parseInt(rest.school_roll_number.trim()),
     }))
 
-    setSubmitting(true); setError(''); setResult(null); setCsvWarn('')
+    setSubmitting(true); setError(''); setResult(null); setCsvWarn(''); setDupRollError('')
     try {
       const res = await fetch('/api/students/bulk', {
         method: 'POST',
@@ -139,6 +158,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
         body: JSON.stringify({ school_id: schoolId, students }),
       })
       const data = await res.json()
+      if (res.status === 409) { setDupRollError(data.error || 'Duplicate roll number'); return }
       if (!res.ok) throw new Error(data.error)
       setResult(data)
       setRows([{ ...EMPTY_ROW }])
@@ -173,7 +193,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
           )}
         </div>
         <div className="flex gap-2">
-          <input ref={fileRef} type="file" accept=".csv,.txt" onChange={handleFileImport} className="hidden" />
+          <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx" onChange={handleFileImport} className="hidden" />
           <button onClick={downloadTemplate}
             title="Download CSV template"
             className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
@@ -210,6 +230,28 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
         </div>
       )}
 
+      {dupRollError && (
+        <div className="mb-4 fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl border border-red-200 max-w-md w-full mx-4 p-6">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-semibold text-gray-900 text-base">Duplicate Roll Number</h3>
+                <p className="text-sm text-red-700 mt-1">{dupRollError}</p>
+              </div>
+            </div>
+            <button onClick={() => setDupRollError('')}
+              className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
+              OK, fix it
+            </button>
+          </div>
+        </div>
+      )}
+
       {result && (
         <div className="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
           <div className="flex items-start justify-between gap-3">
@@ -235,7 +277,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       {mode === 'csv' ? (
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="mb-3">
-            <p className="text-sm font-medium text-gray-700 mb-1">CSV Format</p>
+            <p className="text-sm font-medium text-gray-700 mb-1">CSV Format <span className="text-xs font-normal text-amber-600">(roll_no = class roll number, unique per grade+section)</span></p>
             <code className="block bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs text-gray-600 font-mono">{CSV_HEADER}</code>
           </div>
           <div className="mb-3">
@@ -276,6 +318,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-8">#</th>
+                    <th className="text-left px-3 py-2.5 font-medium text-amber-700 min-w-[80px] bg-amber-50">Roll No <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Last Name <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">First Name <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[140px]">Student Email</th>
@@ -292,6 +335,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                   {rows.map((row, i) => (
                     <tr key={i} className="hover:bg-gray-50">
                       <td className="px-3 py-2 text-gray-400">{i + 1}</td>
+                      <td className="px-3 py-2 bg-amber-50/50"><input className={`${inputCls} ${!row.school_roll_number.trim() ? 'border-amber-300' : ''}`} placeholder="1" type="number" min="1" value={row.school_roll_number} onChange={e => updateRow(i, 'school_roll_number', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="Last name" value={row.last_name} onChange={e => updateRow(i, 'last_name', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="First name" value={row.first_name} onChange={e => updateRow(i, 'first_name', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={`${inputCls} ${!row.email.trim() ? 'border-amber-300' : ''}`} placeholder="Email *" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
@@ -309,8 +353,9 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 </tbody>
               </table>
             </div>
-            <div className="px-4 py-2 bg-orange-50/30 border-t border-orange-100">
+            <div className="px-4 py-2 bg-orange-50/30 border-t border-orange-100 flex items-center gap-4">
               <p className="text-xs text-orange-500">Parent Email (orange) auto-creates linked parent account</p>
+              <p className="text-xs text-amber-600">Roll No must be unique within same Grade + Section</p>
             </div>
             <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
               <button onClick={addRow} className="text-sm text-green-600 hover:text-green-800 font-medium">+ Add Row</button>
