@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
       const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
       const result = await pool.query(
-        `SELECT * FROM students ${where} ORDER BY (NULLIF(regexp_replace(grade,'[^0-9]','','g'),''))::int NULLS LAST, section, name`,
+        `SELECT * FROM students ${where} ORDER BY (NULLIF(regexp_replace(grade,'[^0-9]','','g'),''))::int NULLS LAST, section, school_roll_number NULLS LAST, name`,
         values
       )
       return NextResponse.json(result.rows)
@@ -45,8 +45,18 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email, roll_number } = body
+    const { school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email, roll_number, school_roll_number } = body
     if (!school_id || !name) return NextResponse.json({ error: 'school_id and name are required' }, { status: 400 })
+
+    if (school_roll_number != null && grade && section) {
+      const dupRoll = await pool.query(
+        `SELECT id FROM students WHERE school_id = $1 AND grade = $2 AND section = $3 AND school_roll_number = $4`,
+        [school_id, grade, section, school_roll_number]
+      )
+      if (dupRoll.rows.length > 0) {
+        return NextResponse.json({ error: `Roll number ${school_roll_number} already exists in Grade ${grade} Section ${section}` }, { status: 409 })
+      }
+    }
 
     // Auto-create class if it doesn't exist
     if (grade && section) {
@@ -63,11 +73,11 @@ export async function POST(req: NextRequest) {
     const result = await pool.query(
       `INSERT INTO students
          (school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email,
-          roll_number, status, password_hash, password_changed)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'active',$11,FALSE)
+          roll_number, school_roll_number, status, password_hash, password_changed)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',$12,FALSE)
        RETURNING *`,
       [school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email,
-       roll_number, passwordHash]
+       roll_number, school_roll_number ?? null, passwordHash]
     )
 
     const student = result.rows[0]

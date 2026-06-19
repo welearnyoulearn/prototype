@@ -71,14 +71,21 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Ledger entry not found' }, { status: 404 })
       }
 
-      // Calculate waiver amount
+      // Calculate waiver amount — always on remaining balance, not full amount_due
+      const remaining = parseFloat(ledger.amount_due) - parseFloat(ledger.amount_paid)
       let waiver_amount = 0
       if (waiver_type === 'full') {
-        waiver_amount = ledger.amount_due - ledger.amount_paid
+        waiver_amount = remaining
       } else if (waiver_type === 'percentage') {
-        waiver_amount = Math.round((ledger.amount_due * (waiver_value || 0)) / 100)
+        // BUG 7 fix: apply percentage to remaining balance, not full amount_due
+        waiver_amount = Math.round((remaining * (waiver_value || 0)) / 100)
       } else if (waiver_type === 'fixed_amount') {
-        waiver_amount = waiver_value || 0
+        // BUG 8 fix: cap fixed waiver at remaining balance
+        waiver_amount = Math.min(waiver_value || 0, remaining)
+      }
+      if (waiver_amount <= 0) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Nothing to waive — ledger entry is already fully paid' }, { status: 400 })
       }
 
       // Insert waiver
