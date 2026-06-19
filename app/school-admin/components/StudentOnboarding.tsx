@@ -117,8 +117,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     valid.forEach((r, i) => {
       if (!r.last_name.trim())    missing.push(`Row ${i + 1}: Last Name is required`)
       if (!r.first_name.trim())   missing.push(`Row ${i + 1}: First Name is required`)
-      if (!r.email.trim())        missing.push(`Row ${i + 1}: Student Email is required — login credentials will be sent here`)
-      if (r.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email.trim())) missing.push(`Row ${i + 1}: Invalid email`)
+      if (r.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email.trim())) missing.push(`Row ${i + 1}: Invalid student email`)
       if (!r.grade.trim())        missing.push(`Row ${i + 1}: Grade is required`)
       // Section is optional
       if (!r.parent_name.trim())  missing.push(`Row ${i + 1}: Parent Name is required`)
@@ -338,7 +337,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                       <td className="px-3 py-2 bg-amber-50/50"><input className={`${inputCls} ${!row.school_roll_number.trim() ? 'border-amber-300' : ''}`} placeholder="1" type="number" min="1" value={row.school_roll_number} onChange={e => updateRow(i, 'school_roll_number', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="Last name" value={row.last_name} onChange={e => updateRow(i, 'last_name', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="First name" value={row.first_name} onChange={e => updateRow(i, 'first_name', e.target.value)} /></td>
-                      <td className="px-3 py-2"><input className={`${inputCls} ${!row.email.trim() ? 'border-amber-300' : ''}`} placeholder="Email *" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input className={inputCls} placeholder="Email (optional)" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="10" value={row.grade} onChange={e => updateRow(i, 'grade', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="A" value={row.section} onChange={e => updateRow(i, 'section', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="Parent name" value={row.parent_name} onChange={e => updateRow(i, 'parent_name', e.target.value)} /></td>
