@@ -234,14 +234,16 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 import dynamic from 'next/dynamic'
+const WhatsAppTab = dynamic(() => import('./WhatsAppTab'), { ssr: false })
 
 export default function FeeManagement({
-  schoolId, adminName
+  schoolId, adminName, whatsappEnabled = false
 }: {
   schoolId: number
   adminName?: string
+  whatsappEnabled?: boolean
 }) {
-  type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'pending' | 'students' | 'reports' | 'yearend'
+  type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'pending' | 'students' | 'reports' | 'yearend' | 'whatsapp'
   const [activeTab, setActiveTab] = useState<Tab>('overview')
 
   // Shared
@@ -353,6 +355,9 @@ export default function FeeManagement({
   const [showWaiver, setShowWaiver]         = useState(false)
   const [waiverForm, setWaiverForm]         = useState({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' })
   const [waiverLoading, setWaiverLoading]   = useState(false)
+  const [waSendEntry, setWaSendEntry] = useState<LedgerEntry | null>(null)
+  const [waSending, setWaSending]     = useState(false)
+  const [waResult, setWaResult]       = useState<string | null>(null)
 
 
   // WhatsApp reminder state
@@ -1786,6 +1791,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           { key: 'students',         label: 'Student Passbook' },
           { key: 'reports',          label: 'Reports' },
           { key: 'yearend',          label: 'Year-End' },
+          ...(whatsappEnabled ? [{ key: 'whatsapp', label: '💬 WhatsApp' }] : []),
         ] as const).map(t => (
           <button
             key={t.key}
@@ -4353,7 +4359,58 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
         </div>
       )}
 
+      {/* ═══ WHATSAPP ════════════════════════════════════════════════════════════ */}
+      {activeTab === 'whatsapp' && whatsappEnabled && (
+        <WhatsAppTab schoolId={schoolId} />
+      )}
 
+      {/* ── WhatsApp Reminder Confirm Modal ── */}
+      {waSendEntry && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="bg-green-600 px-6 py-5">
+              <h3 className="text-white font-bold text-base">Send WhatsApp Reminder</h3>
+              <p className="text-green-200 text-xs mt-0.5">{waSendEntry.student_name} — {waSendEntry.category_name}</p>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <p className="text-sm text-gray-600">
+                Send a fee reminder to parent for <b>₹{Number(waSendEntry.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</b> due on {waSendEntry.period_label}.
+              </p>
+              {waResult && <p className={`text-sm ${waResult.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{waResult}</p>}
+              <div className="flex gap-2">
+                <button onClick={() => { setWaSendEntry(null); setWaResult(null) }}
+                  className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
+                <button disabled={waSending} onClick={async () => {
+                  setWaSending(true); setWaResult(null)
+                  try {
+                    const res = await fetch('/api/whatsapp/send', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        school_id: schoolId,
+                        recipient_phone: waSendEntry.student_id,
+                        recipient_name: waSendEntry.student_name,
+                        message_type: 'fee_reminder',
+                        student_name: waSendEntry.student_name,
+                        amount: waSendEntry.balance,
+                        period_label: waSendEntry.period_label,
+                        category_name: waSendEntry.category_name,
+                      }),
+                    })
+                    const data = await res.json()
+                    if (res.ok) { setWaResult('✓ Reminder sent successfully'); setTimeout(() => { setWaSendEntry(null); setWaResult(null) }, 2000) }
+                    else setWaResult('✗ ' + (data.error || 'Failed to send'))
+                  } catch { setWaResult('✗ Network error') }
+                  finally { setWaSending(false) }
+                }}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-xl text-sm font-medium disabled:opacity-50">
+                  {waSending ? 'Sending…' : '💬 Send'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   )

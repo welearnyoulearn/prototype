@@ -162,12 +162,21 @@
       "Bash(npx eslint *)",
       "Bash(echo \"exit: $?\")",
       "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")",
-      "Bash(npm list *)"
+      "Bash(npm list *)",
+      "Bash(rm -rf .next/dev/)",
+      "Bash(nohup npm run dev -- --port 3001)",
+      "Bash(echo \"Started PID $!\")",
+      "Bash(git cherry-pick *)",
+      "Bash(gh pr create --base dev --head merge/wlylV1-to-dev --title 'merge: wlylV1 → dev \\(roll number, fee fixes, no payments/WhatsApp\\)' --body ' *)",
+      "Bash(git fetch *)",
+      "Bash(git branch *)",
+      "Bash(cd d:/wlyl/prototype && git show 210d9f7:app/school-admin/components/FeeManagement.tsx > /tmp/FeeManagement_wlylV1.tsx && wc -l /tmp/FeeManagement_wlylV1.tsx)"
     ],
     "additionalDirectories": [
       "d:\\wlyl\\prototype\\app\\api\\fees\\ledger",
       "D:\\wlyl\\prototype\\.next\\dev",
-      "d:\\wlyl\\prototype-admin"
+      "d:\\wlyl\\prototype-admin",
+      "\\tmp"
     ]
   }
 }
