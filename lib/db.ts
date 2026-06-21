@@ -1502,6 +1502,13 @@ async function runIncrementalMigrations() {
     )
   `)
 
+  // ── School roll number (class roll number assigned by school) ─────────────────
+  await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS school_roll_number INTEGER`)
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_students_school_roll_unique
+      ON students(school_id, grade, section, school_roll_number)
+      WHERE school_roll_number IS NOT NULL
+  `)
   // Drop UNIQUE constraint on fee_payments.receipt_number to allow multi-entry receipts
   await pool.query(`
     DO $$ BEGIN

@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # Prototype Project — WLYL School
 
 ## Coding Standards
@@ -52,3 +56,81 @@ The `wiki/` folder is the living documentation of this project. Read it to under
 - Zustand for client state
 - Zod for all input validation
 - pnpm as package manager
+
+## Commands
+
+```bash
+npm run dev          # Start dev server (webpack mode, not turbopack)
+npm run build        # Production build
+npm run lint         # ESLint
+npm run test:e2e     # Playwright e2e tests
+npm run test:e2e:ui  # Playwright with UI
+```
+
+## Architecture
+
+### Multi-portal Next.js App Router
+Five portals in one Next.js app, separated by route prefix and JWT cookie:
+
+| Portal | Route | Cookie | Role |
+|--------|-------|--------|------|
+| Platform Admin | `/platform-admin` | `wlyl_admin_token` | `platform_admin` |
+| School Admin | `/school-admin` | `wlyl_admin_token` | `school_admin` |
+| Teacher | `/teacher` | `wlyl_teacher_token` | `teacher` |
+| Student | `/student` | `wlyl_student_token` | `student` |
+| Parent | `/parent` | `wlyl_parent_token` | `parent` |
+
+Platform Admin is served on `admin.welearnyoulearn.com` subdomain only — blocked on main domain via `middleware.ts`.
+
+### Auth
+- `lib/auth.ts` — JWT sign/verify, cookie set/clear, session helpers per role, `requireFeeAccess()`, `schoolHasFeature()`
+- **Never import `lib/auth.ts` or `lib/db.ts` in `middleware.ts`** — Edge runtime only supports `jose`, not `jsonwebtoken` or `pg`
+- `middleware.ts` uses `jose`'s `jwtVerify` with cookie names hardcoded inline
+
+### Database
+- `lib/db.ts` — single `pg.Pool`, auto-runs migrations via `initDB()` / `ensureDB()` on cold start
+- All migrations are idempotent (`IF NOT EXISTS`, `IF NOT EXISTS` indexes, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`)
+- Add new migrations at the **bottom** of the `migrations[]` array in `lib/db.ts`
+- Supabase PgBouncer in session mode — pool `max: 1` on Vercel, `max: 10` locally
+
+### Feature Flags (two-layer)
+- `plan_features` table — feature enabled/disabled per tier (basic/standard/premium)
+- `school_feature_overrides` table — per-school override takes precedence
+- `schoolHasFeature(schoolId, featureKey)` in `lib/auth.ts` — checks override first, then tier, returns `false` by default
+- Feature keys in `lib/features.ts` — `OVERRIDABLE_FEATURE_KEYS = ['online-payments', 'whatsapp']`
+
+### Fee Management
+- `app/school-admin/components/FeeManagement.tsx` — large single component (~4000 lines), tabs: overview/setup/ledger/collect/students/reports/yearend + optional online-payments/whatsapp
+- `requireFeeAccess(school_id)` — tenant isolation guard used in all fee API routes
+- Ledger sorted by `grade, section, school_roll_number NULLS LAST, name`
+
+### Student Roll Number
+- `school_roll_number INTEGER` — class roll number assigned by school, unique per `(school_id, grade, section)`
+- Separate from `roll_number VARCHAR` which is the internal system ID (`wlyl-stu-{slug}-{num}`)
+- Excel template served from `/api/students/template` via ExcelJS
+
+### Encryption
+- `lib/encryption.ts` — AES-256-GCM, key from `ENCRYPTION_KEY` env var (64-char hex = 32 bytes)
+- Used for Cashfree secret key and WhatsApp access token at rest
+
+### Branch Strategy
+- `wlylV1` — dev/testing branch (Vercel preview)
+- `wlylV1_main` — production branch (welearnyoulearn.com), requires PR to merge
+- `dev` — separate feature branch
+- **Never commit online payments / WhatsApp code to `wlylV1_main` without explicit approval**
+- Never auto-push — commit locally, push only when told
+
+### Email
+- `lib/email.ts` — Resend API, `EMAIL_FROM` env var
+- Welcome emails sent fire-and-forget (`.catch(console.error)`) — never block the response
+
+### Key Env Vars
+```
+DATABASE_URL          # Supabase connection string
+JWT_SECRET            # JWT signing secret
+ENCRYPTION_KEY        # 64-char hex for AES-256-GCM
+RESEND_API_KEY        # Transactional email
+APP_URL               # Base URL for email links
+WHATSAPP_VERIFY_TOKEN # Meta webhook verification
+WHATSAPP_APP_SECRET   # Meta webhook HMAC secret
+```

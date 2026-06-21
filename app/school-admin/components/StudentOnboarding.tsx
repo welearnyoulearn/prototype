@@ -10,12 +10,27 @@ type StudentRow = {
   parent_name: string; parent_phone: string; parent_email: string; phone: string; school_roll_number: string
 }
 
+type StudentCredential = {
+  name: string; grade: string; section: string; school_roll_number: number | null
+  login: string; temp_password: string
+}
+
+type ParentCredential = {
+  name: string; phone: string; login: string; temp_password: string; is_new: boolean
+}
+
+type OnboardingResult = {
+  inserted: number
+  students: { id: number; roll_number: string; name: string }[]
+  errors: { row: number; message: string }[]
+  credentials: { students: StudentCredential[]; parents: ParentCredential[] }
+}
+
 const EMPTY_ROW: StudentRow = { last_name: '', first_name: '', email: '', grade: '', section: '', parent_name: '', parent_phone: '', parent_email: '', phone: '', school_roll_number: '' }
 const CSV_HEADER = 'roll_no,last_name,first_name,email,grade,section,parent_name,parent_phone,parent_email,phone'
 const CSV_EXAMPLE = `1,Mehta,Arjun,arjun@student.com,10,A,Suresh Mehta,9876543210,suresh@parent.com,
-2,Patel,Priya,priya@student.com,10,A,Ramesh Patel,9876543211,ramesh@parent.com,`
+2,Patel,Priya,,10,A,Ramesh Patel,9876543211,,`
 
-// Staff CSV markers — if uploaded to student form by mistake
 const STAFF_CSV_MARKERS = ['department', 'qualification', 'staff_type', 'subject', 'employee_id', 'teaches_grades']
 
 function downloadTemplate() {
@@ -25,26 +40,41 @@ function downloadTemplate() {
   a.click()
 }
 
+function copyAllCredentials(creds: OnboardingResult['credentials']) {
+  const lines: string[] = ['=== STUDENT CREDENTIALS ===']
+  creds.students.forEach(s => {
+    lines.push(`${s.name} | Grade ${s.grade}${s.section ? '-' + s.section : ''} | Roll ${s.school_roll_number ?? '-'} | Login: ${s.login} | Password: ${s.temp_password}`)
+  })
+  if (creds.parents.length > 0) {
+    lines.push('', '=== PARENT CREDENTIALS (NEW ACCOUNTS) ===')
+    creds.parents.forEach(p => {
+      lines.push(`${p.name} | Login: ${p.login} | Password: ${p.temp_password}`)
+    })
+  }
+  navigator.clipboard.writeText(lines.join('\n')).catch(console.error)
+}
+
 export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
   const [rows, setRows] = useState<StudentRow[]>([{ ...EMPTY_ROW }])
   const [mode, setMode] = useState<'manual' | 'csv'>('manual')
   const [filterGrade, setFilterGrade] = useState('')
   const [filterSection, setFilterSection] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [result, setResult] = useState<{ inserted: number; students: { roll_number: string }[]; errors: { row: number; message: string }[] } | null>(null)
+  const [result, setResult] = useState<OnboardingResult | null>(null)
+  const [showCredentials, setShowCredentials] = useState(false)
   const [dupRollError, setDupRollError] = useState('')
   const [error, setError] = useState('')
   const [csvWarn, setCsvWarn] = useState('')
   const [studentCount, setStudentCount] = useState<number | null>(null)
+  const [copiedAll, setCopiedAll] = useState(false)
+  const [resetingId, setResetingId] = useState<number | null>(null)
+  const [resetResults, setResetResults] = useState<Record<number, { password: string; error?: string }>>({})
   const fileRef = useRef<HTMLInputElement>(null)
 
   const fetchStudentCount = useCallback(async () => {
     try {
       const res = await fetch(`/api/admin/overview?school_id=${schoolId}&features=`)
-      if (res.ok) {
-        const d = await res.json()
-        setStudentCount(d.core?.students ?? null)
-      }
+      if (res.ok) { const d = await res.json(); setStudentCount(d.core?.students ?? null) }
     } catch { /* non-critical */ }
   }, [schoolId])
 
@@ -61,23 +91,21 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     setRows(prev => prev.filter((_, i) => i !== index))
   }
 
+  function applyClassToAll() {
+    if (!filterGrade && !filterSection) return
+    setRows(prev => prev.map(r => ({ ...r, grade: filterGrade || r.grade, section: filterSection || r.section })))
+  }
+
   function parseText(text: string) {
     setCsvWarn('')
     const allRows = parseCSV(text.trim())
     if (allRows.length === 0) return
-
     const firstRowLower = allRows[0].map(c => c.toLowerCase().trim())
     const hasHeader = firstRowLower.some(c => ['last_name', 'first_name', 'name', 'email', 'grade', 'student'].includes(c))
-
-    // Conflict detection: check if this looks like a staff CSV
     if (hasHeader) {
       const isStaffCsv = STAFF_CSV_MARKERS.some(m => firstRowLower.includes(m))
-      if (isStaffCsv) {
-        setCsvWarn('This looks like a Staff CSV (contains staff-specific columns like department, qualification, etc.). Please use this form only for student data.')
-        return
-      }
+      if (isStaffCsv) { setCsvWarn('This looks like a Staff CSV. Please use this form only for student data.'); return }
     }
-
     const dataRows = hasHeader ? allRows.slice(1) : allRows
     const parsed: StudentRow[] = dataRows.map(cols => ({
       school_roll_number: cols[0] ?? '',
@@ -103,24 +131,17 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     e.target.value = ''
   }
 
-  function applyClassToAll() {
-    if (!filterGrade && !filterSection) return
-    setRows(prev => prev.map(r => ({ ...r, grade: filterGrade || r.grade, section: filterSection || r.section })))
-  }
-
   async function handleSubmit() {
     const valid = rows.filter(r => r.last_name.trim() || r.first_name.trim())
     if (valid.length === 0) { setError('At least one student name is required'); return }
 
-    // Validate required fields
     const missing: string[] = []
     valid.forEach((r, i) => {
       if (!r.last_name.trim())    missing.push(`Row ${i + 1}: Last Name is required`)
       if (!r.first_name.trim())   missing.push(`Row ${i + 1}: First Name is required`)
-      if (!r.email.trim())        missing.push(`Row ${i + 1}: Student Email is required — login credentials will be sent here`)
-      if (r.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email.trim())) missing.push(`Row ${i + 1}: Invalid email`)
+      if (r.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email.trim())) missing.push(`Row ${i + 1}: Invalid student email`)
+      if (r.parent_email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.parent_email.trim())) missing.push(`Row ${i + 1}: Invalid parent email`)
       if (!r.grade.trim())        missing.push(`Row ${i + 1}: Grade is required`)
-      // Section is optional
       if (!r.parent_name.trim())  missing.push(`Row ${i + 1}: Parent Name is required`)
       if (!r.parent_phone.trim()) missing.push(`Row ${i + 1}: Parent Phone is required`)
       if (!r.school_roll_number.trim()) missing.push(`Row ${i + 1}: Roll No is required`)
@@ -129,7 +150,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     })
     if (missing.length > 0) { setError(missing.join(' · ')); return }
 
-    // Duplicate roll number check within this batch (same grade+section)
+    // Duplicate roll check within batch
     const rollMap = new Map<string, number>()
     let dupFound = false
     for (let i = 0; i < valid.length; i++) {
@@ -138,13 +159,10 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       if (rollMap.has(key)) {
         missing.push(`Row ${i + 1}: Roll No ${r.school_roll_number} duplicated with Row ${rollMap.get(key)! + 1} in Grade ${r.grade} Section ${r.section}`)
         dupFound = true
-      } else {
-        rollMap.set(key, i)
-      }
+      } else { rollMap.set(key, i) }
     }
     if (dupFound) { setError(missing.join(' · ')); return }
 
-    // Combine last_name + first_name → full name sent to API
     const students = valid.map(({ last_name, first_name, ...rest }) => ({
       ...rest, name: `${last_name} ${first_name}`.trim(),
       school_roll_number: parseInt(rest.school_roll_number.trim()),
@@ -161,9 +179,10 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       if (res.status === 409) { setDupRollError(data.error || 'Duplicate roll number'); return }
       if (!res.ok) throw new Error(data.error)
       setResult(data)
+      setShowCredentials(true)
       setRows([{ ...EMPTY_ROW }])
+      setResetResults({})
       fetchStudentCount()
-      onRefresh?.()
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to enroll students')
@@ -172,7 +191,30 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     }
   }
 
+  async function handleResetCredentials(studentId: number, studentName: string) {
+    setResetingId(studentId)
+    try {
+      const res = await fetch(`/api/students/${studentId}/reset-credentials`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Reset failed')
+      setResetResults(prev => ({ ...prev, [studentId]: { password: data.temp_password } }))
+    } catch (err: unknown) {
+      setResetResults(prev => ({ ...prev, [studentId]: { password: '', error: err instanceof Error ? err.message : 'Reset failed' } }))
+    } finally {
+      setResetingId(null)
+    }
+  }
+
+  function handleCopyAll() {
+    if (!result) return
+    copyAllCredentials(result.credentials)
+    setCopiedAll(true)
+    setTimeout(() => setCopiedAll(false), 2000)
+  }
+
   const inputCls = 'w-full border border-gray-200 rounded px-2 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-green-300'
+
+  const hasCredentials = result && (result.credentials.students.length > 0 || result.credentials.parents.length > 0)
 
   return (
     <div>
@@ -180,7 +222,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
         <div className="flex items-center gap-4">
           <div>
             <h2 className="text-xl font-bold text-gray-900">Student Onboarding</h2>
-            <p className="text-sm text-gray-500 mt-0.5">Bulk enroll students — parent email auto-creates parent account</p>
+            <p className="text-sm text-gray-500 mt-0.5">Bulk enroll students — parent phone required, emails optional</p>
           </div>
           {studentCount !== null && (
             <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-xl px-4 py-2">
@@ -193,9 +235,18 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
           )}
         </div>
         <div className="flex gap-2">
+          {hasCredentials && (
+            <button onClick={() => setShowCredentials(true)}
+              data-testid="view-credentials-btn"
+              className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+              </svg>
+              View Credentials
+            </button>
+          )}
           <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx" onChange={handleFileImport} className="hidden" />
-          <button onClick={downloadTemplate}
-            title="Download CSV template"
+          <button onClick={downloadTemplate} title="Download Excel template"
             className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -231,7 +282,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       )}
 
       {dupRollError && (
-        <div className="mb-4 fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl shadow-xl border border-red-200 max-w-md w-full mx-4 p-6">
             <div className="flex items-start gap-3 mb-4">
               <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
@@ -252,24 +303,167 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
         </div>
       )}
 
-      {result && (
+      {/* Success banner (compact — credentials are in modal) */}
+      {result && !showCredentials && (
         <div className="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center justify-between gap-3">
             <div>
               <p className="font-medium">✓ {result.inserted} student{result.inserted !== 1 ? 's' : ''} enrolled</p>
-              {result.students[0]?.roll_number && (
-                <p className="text-xs text-green-500 mt-0.5">First roll no: {result.students[0].roll_number}</p>
-              )}
               {result.errors.length > 0 && (
-                <div className="mt-2 space-y-0.5">
+                <div className="mt-1 space-y-0.5">
                   {result.errors.map((e, i) => <p key={i} className="text-orange-600 text-xs">Row {e.row}: {e.message}</p>)}
                 </div>
               )}
             </div>
-            <button onClick={() => setResult(null)}
-              className="text-green-400 hover:text-green-600 text-xs border border-green-200 px-2 py-1 rounded flex-shrink-0">
-              Dismiss
-            </button>
+            <div className="flex gap-2 flex-shrink-0">
+              {hasCredentials && (
+                <button onClick={() => setShowCredentials(true)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium">
+                  View Credentials
+                </button>
+              )}
+              <button onClick={() => setResult(null)}
+                className="text-green-400 hover:text-green-600 text-xs border border-green-200 px-2 py-1 rounded">
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credentials modal */}
+      {showCredentials && result && (
+        <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 overflow-y-auto py-8 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Enrollment Complete — Credentials</h3>
+                <p className="text-xs text-amber-600 mt-0.5">Save these now — passwords are shown once and cannot be recovered</p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={handleCopyAll} data-testid="copy-all-credentials-btn"
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${copiedAll ? 'bg-green-100 text-green-700' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                  {copiedAll ? '✓ Copied!' : 'Copy All'}
+                </button>
+                <button onClick={() => { setShowCredentials(false); onRefresh?.() }} className="text-gray-400 hover:text-gray-600 text-2xl leading-none px-1">×</button>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 space-y-6">
+              {/* Student credentials */}
+              <div>
+                <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs flex items-center justify-center font-bold">S</span>
+                  Student Credentials
+                </h4>
+                <div className="overflow-x-auto rounded-xl border border-gray-200">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="text-left px-3 py-2 font-medium text-gray-600">Student</th>
+                        <th className="text-left px-3 py-2 font-medium text-gray-600">Grade / Roll</th>
+                        <th className="text-left px-3 py-2 font-medium text-gray-600">Login (Email)</th>
+                        <th className="text-left px-3 py-2 font-medium text-gray-600">Temp Password</th>
+                        <th className="text-left px-3 py-2 font-medium text-gray-600">Reset</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {result.credentials.students.map((s, idx) => {
+                        const stu = result.students[idx]
+                        const resetResult = stu ? resetResults[stu.id] : undefined
+                        return (
+                          <tr key={idx} className="hover:bg-gray-50">
+                            <td className="px-3 py-2.5 font-medium text-gray-900">{s.name}</td>
+                            <td className="px-3 py-2.5 text-gray-600">
+                              {s.grade}{s.section ? `-${s.section}` : ''} {s.school_roll_number != null ? `· Roll ${s.school_roll_number}` : ''}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              {s.login.startsWith('(') ? (
+                                <span className="text-gray-400 italic">{s.login}</span>
+                              ) : (
+                                <span className="font-mono text-gray-700">{s.login}</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              {resetResult ? (
+                                resetResult.error ? (
+                                  <span className="text-red-500 text-xs">{resetResult.error}</span>
+                                ) : (
+                                  <span className="font-mono bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200">{resetResult.password}</span>
+                                )
+                              ) : (
+                                <span className="font-mono bg-amber-50 text-amber-800 px-2 py-0.5 rounded border border-amber-200">{s.temp_password}</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              {stu && (
+                                <button
+                                  data-testid={`reset-student-${stu.id}`}
+                                  onClick={() => handleResetCredentials(stu.id, s.name)}
+                                  disabled={resetingId === stu.id}
+                                  className="text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50">
+                                  {resetingId === stu.id ? 'Resetting…' : 'Reset'}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Parent credentials */}
+              {result.credentials.parents.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-teal-100 text-teal-600 text-xs flex items-center justify-center font-bold">P</span>
+                    Parent Credentials <span className="font-normal text-gray-400">(new accounts only)</span>
+                  </h4>
+                  <div className="overflow-x-auto rounded-xl border border-gray-200">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium text-gray-600">Parent Name</th>
+                          <th className="text-left px-3 py-2 font-medium text-gray-600">Phone</th>
+                          <th className="text-left px-3 py-2 font-medium text-gray-600">Login (Email / Phone)</th>
+                          <th className="text-left px-3 py-2 font-medium text-gray-600">Temp Password</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {result.credentials.parents.map((p, idx) => (
+                          <tr key={idx} className="hover:bg-gray-50">
+                            <td className="px-3 py-2.5 font-medium text-gray-900">{p.name}</td>
+                            <td className="px-3 py-2.5 text-gray-600">{p.phone || '—'}</td>
+                            <td className="px-3 py-2.5 font-mono text-gray-700">{p.login}</td>
+                            <td className="px-3 py-2.5">
+                              <span className="font-mono bg-teal-50 text-teal-800 px-2 py-0.5 rounded border border-teal-200">{p.temp_password}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs text-amber-700">
+                <strong>Note:</strong> These credentials are shown once only. After closing this panel, you can reset individual student passwords using the &quot;View Credentials&quot; button above.
+                {' '}When WhatsApp is configured for your school, credentials will be sent automatically to parent phones.
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+              <button onClick={handleCopyAll}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${copiedAll ? 'bg-green-100 text-green-700' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                {copiedAll ? '✓ Copied!' : 'Copy All'}
+              </button>
+              <button onClick={() => { setShowCredentials(false); onRefresh?.() }}
+                className="bg-gray-900 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -281,15 +475,13 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
             <code className="block bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs text-gray-600 font-mono">{CSV_HEADER}</code>
           </div>
           <div className="mb-3">
-            <p className="text-xs text-gray-400 mb-1">Example:</p>
+            <p className="text-xs text-gray-400 mb-1">Example (email columns optional):</p>
             <code className="block bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs text-gray-500 font-mono whitespace-pre">{CSV_EXAMPLE}</code>
           </div>
           <textarea
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300 font-mono resize-none"
             rows={8} placeholder="Paste CSV data here..."
-            onChange={e => {
-              if (e.target.value.trim()) { parseText(e.target.value); e.target.value = '' }
-            }}
+            onChange={e => { if (e.target.value.trim()) { parseText(e.target.value); e.target.value = '' } }}
           />
           <p className="text-xs text-gray-400 mt-2">Paste triggers auto-parse — or use &quot;Import CSV&quot; button above</p>
         </div>
@@ -314,19 +506,19 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
 
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full text-xs" data-testid="onboarding-table">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-8">#</th>
                     <th className="text-left px-3 py-2.5 font-medium text-amber-700 min-w-[80px] bg-amber-50">Roll No <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Last Name <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">First Name <span className="text-red-400">*</span></th>
-                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[140px]">Student Email</th>
+                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[140px]">Student Email <span className="text-gray-400 font-normal text-[10px]">(optional)</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Grade <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Section</th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[120px]">Parent Name <span className="text-red-400">*</span></th>
-                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Parent Phone <span className="text-red-400">*</span></th>
-                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[150px] bg-orange-50">Parent Email</th>
+                    <th className="text-left px-3 py-2.5 font-medium text-gray-700 min-w-[110px] bg-blue-50">Parent Phone <span className="text-red-400">*</span></th>
+                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[150px]">Parent Email <span className="text-gray-400 font-normal text-[10px]">(optional)</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[100px]">Student Phone</th>
                     <th className="px-3 py-2.5 w-8"></th>
                   </tr>
@@ -335,15 +527,22 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                   {rows.map((row, i) => (
                     <tr key={i} className="hover:bg-gray-50">
                       <td className="px-3 py-2 text-gray-400">{i + 1}</td>
-                      <td className="px-3 py-2 bg-amber-50/50"><input className={`${inputCls} ${!row.school_roll_number.trim() ? 'border-amber-300' : ''}`} placeholder="1" type="number" min="1" value={row.school_roll_number} onChange={e => updateRow(i, 'school_roll_number', e.target.value)} /></td>
+                      <td className="px-3 py-2 bg-amber-50/50">
+                        <input className={`${inputCls} ${!row.school_roll_number.trim() ? 'border-amber-300' : ''}`}
+                          placeholder="1" type="number" min="1" value={row.school_roll_number}
+                          onChange={e => updateRow(i, 'school_roll_number', e.target.value)} />
+                      </td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="Last name" value={row.last_name} onChange={e => updateRow(i, 'last_name', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="First name" value={row.first_name} onChange={e => updateRow(i, 'first_name', e.target.value)} /></td>
-                      <td className="px-3 py-2"><input className={`${inputCls} ${!row.email.trim() ? 'border-amber-300' : ''}`} placeholder="Email *" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input className={inputCls} placeholder="Email (optional)" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="10" value={row.grade} onChange={e => updateRow(i, 'grade', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="A" value={row.section} onChange={e => updateRow(i, 'section', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="Parent name" value={row.parent_name} onChange={e => updateRow(i, 'parent_name', e.target.value)} /></td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="Phone" value={row.parent_phone} onChange={e => updateRow(i, 'parent_phone', e.target.value)} /></td>
-                      <td className="px-3 py-2 bg-orange-50/40"><input className={inputCls} placeholder="parent@email.com" type="email" value={row.parent_email} onChange={e => updateRow(i, 'parent_email', e.target.value)} /></td>
+                      <td className="px-3 py-2 bg-blue-50/40">
+                        <input className={`${inputCls} ${!row.parent_phone.trim() ? 'border-blue-300' : ''}`}
+                          placeholder="Phone *" value={row.parent_phone} onChange={e => updateRow(i, 'parent_phone', e.target.value)} />
+                      </td>
+                      <td className="px-3 py-2"><input className={inputCls} placeholder="parent@email.com (optional)" type="email" value={row.parent_email} onChange={e => updateRow(i, 'parent_email', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="Phone" value={row.phone} onChange={e => updateRow(i, 'phone', e.target.value)} /></td>
                       <td className="px-3 py-2">
                         <button onClick={() => removeRow(i)} className="text-red-400 hover:text-red-600 text-base leading-none">×</button>
@@ -353,15 +552,17 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 </tbody>
               </table>
             </div>
-            <div className="px-4 py-2 bg-orange-50/30 border-t border-orange-100 flex items-center gap-4">
-              <p className="text-xs text-orange-500">Parent Email (orange) auto-creates linked parent account</p>
-              <p className="text-xs text-amber-600">Roll No must be unique within same Grade + Section</p>
+            <div className="px-4 py-2 bg-blue-50/30 border-t border-blue-100 flex items-center gap-4">
+              <p className="text-xs text-blue-600 font-medium">Parent Phone (blue) is required for credential delivery</p>
+              <p className="text-xs text-gray-400">Student/Parent Email optional — credentials sent by email if provided, else share manually</p>
+              <p className="text-xs text-amber-600">Roll No unique within Grade + Section</p>
             </div>
             <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
               <button onClick={addRow} className="text-sm text-green-600 hover:text-green-800 font-medium">+ Add Row</button>
               <div className="flex items-center gap-3">
                 <span className="text-xs text-gray-400">{rows.filter(r => r.last_name.trim() || r.first_name.trim()).length} of {rows.length} rows ready</span>
                 <button onClick={handleSubmit} disabled={submitting || rows.every(r => !r.last_name.trim() && !r.first_name.trim())}
+                  data-testid="enroll-students-btn"
                   className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
                   {submitting ? 'Enrolling...' : 'Enroll Students'}
                 </button>
