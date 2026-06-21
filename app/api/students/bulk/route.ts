@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { invalidateCache } from '@/lib/responseCache'
-import { hashPassword, generateTempPassword } from '@/lib/auth'
+import { hashPassword, generateTempPassword, getAnySession } from '@/lib/auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail } from '@/lib/email'
 
 function generateStudentId(schoolName: string): string {
@@ -11,6 +11,9 @@ function generateStudentId(schoolName: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  await ensureDB()
+  const session = await getAnySession()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const { school_id, students } = await req.json()
     if (!school_id || !Array.isArray(students) || students.length === 0) {
@@ -192,6 +195,7 @@ export async function POST(req: NextRequest) {
 
       await client.query('COMMIT')
       invalidateCache(`classes:${school_id}`)
+      console.log('[bulk] parentCredentials:', JSON.stringify(parentCredentials))
       return NextResponse.json({
         inserted: inserted.length,
         students: inserted,
@@ -205,7 +209,8 @@ export async function POST(req: NextRequest) {
       client.release()
     }
   } catch (error) {
-    console.error(error)
-    return NextResponse.json({ error: 'Bulk insert failed' }, { status: 500 })
+    console.error('[bulk]', error)
+    const msg = error instanceof Error ? error.message : String(error)
+    return NextResponse.json({ error: 'Bulk insert failed', detail: msg }, { status: 500 })
   }
 }

@@ -183,7 +183,6 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       setRows([{ ...EMPTY_ROW }])
       setResetResults({})
       fetchStudentCount()
-      onRefresh?.()
       window.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to enroll students')
@@ -346,7 +345,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${copiedAll ? 'bg-green-100 text-green-700' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                   {copiedAll ? '✓ Copied!' : 'Copy All'}
                 </button>
-                <button onClick={() => setShowCredentials(false)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none px-1">×</button>
+                <button onClick={() => { setShowCredentials(false); onRefresh?.() }} className="text-gray-400 hover:text-gray-600 text-2xl leading-none px-1">×</button>
               </div>
             </div>
 
@@ -460,7 +459,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${copiedAll ? 'bg-green-100 text-green-700' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                 {copiedAll ? '✓ Copied!' : 'Copy All'}
               </button>
-              <button onClick={() => setShowCredentials(false)}
+              <button onClick={() => { setShowCredentials(false); onRefresh?.() }}
                 className="bg-gray-900 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
                 Done
               </button>
@@ -507,7 +506,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
 
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-xs">
+              <table className="w-full text-xs" data-testid="onboarding-table">
                 <thead className="bg-gray-50 border-b border-gray-200">
                   <tr>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-8">#</th>
