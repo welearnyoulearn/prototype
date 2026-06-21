@@ -1509,4 +1509,11 @@ async function runIncrementalMigrations() {
       ON students(school_id, grade, section, school_roll_number)
       WHERE school_roll_number IS NOT NULL
   `)
+  // Drop UNIQUE constraint on fee_payments.receipt_number to allow multi-entry receipts
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE fee_payments DROP CONSTRAINT IF EXISTS fee_payments_receipt_number_key;
+    EXCEPTION WHEN others THEN NULL;
+    END $$
+  `)
 }
