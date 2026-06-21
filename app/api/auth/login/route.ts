@@ -6,6 +6,7 @@ import { cookies } from 'next/headers'
 export async function POST(req: NextRequest) {
 
   try {
+    await ensureDB()
     const { identifier, password } = await req.json()
     // identifier = email (platform admin) OR school_code (school admin)
     if (!identifier || !password) {
