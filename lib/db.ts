@@ -1501,4 +1501,12 @@ async function runIncrementalMigrations() {
       UNIQUE(student_id, activity_type, completed_date)
     )
   `)
+
+  // ── School roll number (class roll number assigned by school) ─────────────────
+  await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS school_roll_number INTEGER`)
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_students_school_roll_unique
+      ON students(school_id, grade, section, school_roll_number)
+      WHERE school_roll_number IS NOT NULL
+  `)
 }
