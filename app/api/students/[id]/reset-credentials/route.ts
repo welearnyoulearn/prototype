@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requireSchoolAdmin, generateTempPassword, hashPassword } from '@/lib/auth'
 import { sendStudentWelcomeEmail } from '@/lib/email'
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  await ensureDB()
   const admin = await requireSchoolAdmin()
   if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 

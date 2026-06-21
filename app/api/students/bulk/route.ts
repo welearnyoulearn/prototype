@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { invalidateCache } from '@/lib/responseCache'
-import { hashPassword, generateTempPassword, getAnySession } from '@/lib/auth'
+import { hashPassword, generateTempPassword, requireSchoolAdmin } from '@/lib/auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail } from '@/lib/email'
 
 function generateStudentId(schoolName: string): string {
@@ -12,12 +12,15 @@ function generateStudentId(schoolName: string): string {
 
 export async function POST(req: NextRequest) {
   await ensureDB()
-  const session = await getAnySession()
-  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const admin = await requireSchoolAdmin()
+  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const { school_id, students } = await req.json()
     if (!school_id || !Array.isArray(students) || students.length === 0) {
       return NextResponse.json({ error: 'school_id and students array required' }, { status: 400 })
+    }
+    if (admin.schoolId !== school_id) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const schoolRes = await pool.query('SELECT name FROM schools WHERE id = $1', [school_id])
@@ -136,7 +139,10 @@ export async function POST(req: NextRequest) {
         let parentTempPass = ''
 
         if (parentEmail) {
-          const existing = await client.query('SELECT id FROM parents WHERE LOWER(email) = LOWER($1)', [parentEmail])
+          const existing = await client.query(
+            'SELECT id FROM parents WHERE school_id = $1 AND LOWER(email) = LOWER($2)',
+            [school_id, parentEmail]
+          )
           if (existing.rows.length > 0) {
             parentId = existing.rows[0].id
           }
@@ -195,7 +201,6 @@ export async function POST(req: NextRequest) {
 
       await client.query('COMMIT')
       invalidateCache(`classes:${school_id}`)
-      console.log('[bulk] parentCredentials:', JSON.stringify(parentCredentials))
       return NextResponse.json({
         inserted: inserted.length,
         students: inserted,
