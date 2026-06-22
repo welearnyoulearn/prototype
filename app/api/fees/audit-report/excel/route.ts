@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
       const s5 = wb.addWorksheet('Student-wise')
       s5.columns = [{ width: 26 }, { width: 14 }, { width: 12 }, { width: 22 }, { width: 16 }, { width: 18 }, { width: 14 }, { width: 14 }, { width: 16 }, { width: 14 }, { width: 14 }]
       metaBlock(s5, rep.meta, 'STUDENT-WISE FEE DETAILS (by fee type)')
-      headerRow(s5, ['Student', 'Roll No', 'Class', 'Parent Name', 'Parent Phone', 'Fee Type', 'Billed', 'Waived', 'Net Demand', 'Paid', 'Balance'])
+      headerRow(s5, ['Student', 'School Roll No', 'Class', 'Parent Name', 'Parent Phone', 'Fee Type', 'Billed', 'Waived', 'Net Demand', 'Paid', 'Balance'])
       for (const st of rep.by_student) {
         const label = st.is_subtotal ? 'SUBTOTAL' : st.fee_type
         const r = s5.addRow([st.student, st.roll_number, st.class, st.parent_name || '', st.parent_phone || '', label, st.billed, st.waived, st.net_demand, st.paid, st.balance])
