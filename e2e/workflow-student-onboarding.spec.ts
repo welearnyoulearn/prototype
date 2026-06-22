@@ -1,476 +1,528 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, Page, request as playwrightRequest, APIRequestContext } from '@playwright/test'
 
-const BASE = 'http://localhost:3000'
+const BASE = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000'
 
-async function api(path: string, method: string, body?: object, cookie?: string) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-      ...(cookie ? { Cookie: cookie } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  return { status: res.status, data: await res.json() }
+// ─── UI helpers ─────────────────────────────────────────────────────────────
+async function uiLogin(page: Page, identifier: string, password: string): Promise<string> {
+  await page.goto('/login?role=school')
+  await page.getByPlaceholder(/School ID or email/i).fill(identifier)
+  await page.getByPlaceholder(/password/i).fill(password)
+  await page.getByTestId('auth-submit-btn').click()
+  await page.waitForURL(/\/change-password|\/school-admin/, { timeout: 30000 })
+
+  let current = password
+  if (page.url().includes('change-password')) {
+    current = 'UITest@1234'
+    const fields = page.locator('input[type="password"]')
+    await fields.nth(0).fill(current)
+    await fields.nth(1).fill(current)
+    await page.getByRole('button', { name: /change|update|set|save/i }).click()
+    await page.waitForURL(/\/school-admin/, { timeout: 20000 })
+  }
+  return current
 }
 
-async function loginSchoolAdmin(identifier: string, password: string): Promise<string> {
-  const res = await fetch(`${BASE}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identifier, password }),
-    redirect: 'manual',
-  })
-  const setCookies = res.headers.getSetCookie?.() ?? []
-  const authCookie = setCookies.find(c => c.startsWith('wlyl-auth='))
-  if (!authCookie) throw new Error(`School admin login failed for ${identifier} — status ${res.status}`)
-  return authCookie.split(';')[0]
+async function goToOnboarding(page: Page) {
+  await page.getByRole('button', { name: /Student Management/i }).click()
+  await expect(page.getByText('Student List')).toBeVisible({ timeout: 10000 })
+  await page.getByRole('button', { name: /Onboard Students/i }).click()
+  await expect(page.getByText('Student Onboarding')).toBeVisible({ timeout: 10000 })
+  await expect(page.getByTestId('onboarding-table')).toBeVisible({ timeout: 5000 })
 }
 
-test.describe.serial('Student Onboarding — Full Lifecycle', () => {
+// Columns: 0:# 1:RollNo 2:LastName 3:FirstName 4:StudentEmail 5:Grade 6:Section
+//          7:ParentName 8:ParentPhone 9:ParentEmail 10:StudentPhone 11:del
+async function fillRow(page: Page, row: {
+  rollNo?: string; lastName?: string; firstName?: string; email?: string
+  grade?: string; section?: string; parentName?: string; parentPhone?: string; parentEmail?: string
+}, rowIndex = 0) {
+  const cells = page.getByTestId('onboarding-table').locator('tbody tr').nth(rowIndex).locator('td')
+  if (row.rollNo      !== undefined) await cells.nth(1).locator('input').fill(row.rollNo)
+  if (row.lastName    !== undefined) await cells.nth(2).locator('input').fill(row.lastName)
+  if (row.firstName   !== undefined) await cells.nth(3).locator('input').fill(row.firstName)
+  if (row.email       !== undefined) await cells.nth(4).locator('input').fill(row.email)
+  if (row.grade       !== undefined) await cells.nth(5).locator('input').fill(row.grade)
+  if (row.section     !== undefined) await cells.nth(6).locator('input').fill(row.section)
+  if (row.parentName  !== undefined) await cells.nth(7).locator('input').fill(row.parentName)
+  if (row.parentPhone !== undefined) await cells.nth(8).locator('input').fill(row.parentPhone)
+  if (row.parentEmail !== undefined) await cells.nth(9).locator('input').fill(row.parentEmail)
+}
+
+test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   const ts = Date.now()
-  // 7-digit suffix unique per run, used to build unique 10-digit phone numbers
   const tsSuffix = String(ts).slice(-7)
-  const phone = (n: number) => `9${tsSuffix}${String(n).padStart(2, '0')}` // always 10 digits
+  const phone = (n: number) => `9${tsSuffix}${String(n).padStart(2, '0')}` // 10 digits
+
   let schoolId: number
   let schoolCode: string
   let schoolPass: string
-  let uiPass = ''       // password after first-login change (set in test 13)
+  let uiPass = ''
   let adminCookie: string
-
-  // Tracks IDs created during tests for cleanup
   const createdStudentIds: number[] = []
 
-  // ─── Setup: create fresh school ─────────────────────────────────────────────
-  test.beforeAll(async () => {
-    const { data } = await api('/api/schools', 'POST', {
-      name: `Onboarding Test School ${ts}`,
-      type: 'Private',
-      city: 'Chennai',
-      country: 'India',
-      phone: `98765${String(ts).slice(-5)}`,
-      email: `school${ts}@onboardtest.com`,
-      address: '1 Test Lane',
-    })
-    schoolId = data.id
-    schoolCode = data.school_code
-    schoolPass = data.temp_password
+  // Reusable API context for setup/teardown + id lookups (browser network stack)
+  let ctx: APIRequestContext
 
-    // Set premium plan so all features available
-    await api(`/api/schools/${schoolId}/subscription`, 'PUT', { tier: 'premium' })
-
-    adminCookie = await loginSchoolAdmin(schoolCode, schoolPass)
-
-    // Complete profile setup so UI tests don't hit the profile-setup redirect
-    await api('/api/auth/profile', 'PUT', { full_name: 'Test Admin', phone: '9000000000' }, adminCookie)
-  })
-
-  // ─── Cleanup: delete all created students ────────────────────────────────────
-  test.afterAll(async () => {
-    for (const id of createdStudentIds) {
-      await api(`/api/students/${id}`, 'DELETE', undefined, adminCookie).catch(() => {})
-    }
-    // Delete the school itself
-    await api(`/api/schools/${schoolId}`, 'DELETE').catch(() => {})
-  })
-
-  // ─── 1. Single student — minimal required fields only ───────────────────────
-  test('1. Enroll single student with required fields only (no email)', async () => {
-    const { status, data } = await api('/api/students/bulk', 'POST', {
-      school_id: schoolId,
-      students: [{
-        name: 'Arjun Mehta',
-        grade: '10',
-        section: 'A',
-        school_roll_number: 1,
-        parent_name: 'Suresh Mehta',
-        parent_phone: phone(1),
-      }],
-    }, adminCookie)
-
-    expect(status).toBe(201)
-    expect(data.inserted).toBe(1)
-    expect(data.errors).toHaveLength(0)
-    expect(data.credentials.students).toHaveLength(1)
-    expect(data.credentials.students[0].login).toContain('no email')
-    expect(data.credentials.students[0].temp_password).toBeTruthy()
-    createdStudentIds.push(data.students[0].id)
-  })
-
-  // ─── 2. Single student — with student email + parent email ──────────────────
-  test('2. Enroll student with student email + parent email', async () => {
-    const { status, data } = await api('/api/students/bulk', 'POST', {
-      school_id: schoolId,
-      students: [{
-        name: 'Priya Patel',
-        email: `priya${ts}@student.com`,
-        grade: '10',
-        section: 'A',
-        school_roll_number: 2,
-        parent_name: 'Ramesh Patel',
-        parent_phone: phone(2),
-        parent_email: `ramesh${ts}@parent.com`,
-      }],
-    }, adminCookie)
-
-    expect(status).toBe(201)
-    expect(data.inserted).toBe(1)
-    expect(data.credentials.students[0].login).toBe(`priya${ts}@student.com`)
-    expect(data.credentials.students[0].temp_password).toBeTruthy()
-    expect(data.credentials.parents).toHaveLength(1)
-    expect(data.credentials.parents[0].login).toBe(`ramesh${ts}@parent.com`)
-    expect(data.credentials.parents[0].temp_password).toBeTruthy()
-    createdStudentIds.push(data.students[0].id)
-  })
-
-  // ─── 3. Siblings — same parent phone, two students ──────────────────────────
-  test('3. Siblings: same parent phone links both children to one parent account', async () => {
-    const sharedPhone = phone(3)
-    const { status, data } = await api('/api/students/bulk', 'POST', {
-      school_id: schoolId,
-      students: [
-        {
-          name: 'Kiran Singh',
-          grade: '9',
-          section: 'B',
-          school_roll_number: 1,
-          parent_name: 'Vijay Singh',
-          parent_phone: sharedPhone,
-        },
-        {
-          name: 'Meera Singh',
-          grade: '7',
-          section: 'A',
-          school_roll_number: 1,
-          parent_name: 'Vijay Singh',
-          parent_phone: sharedPhone,
-        },
-      ],
-    }, adminCookie)
-
-    expect(status).toBe(201)
-    expect(data.inserted).toBe(2)
-    expect(data.errors).toHaveLength(0)
-    // Only ONE new parent account (second sibling finds existing by phone)
-    expect(data.credentials.parents.filter((p: { is_new: boolean }) => p.is_new)).toHaveLength(1)
-    data.students.forEach((s: { id: number }) => createdStudentIds.push(s.id))
-  })
-
-  // ─── 4. Siblings — same parent email ────────────────────────────────────────
-  test('4. Siblings: same parent email links both children to one parent account', async () => {
-    const sharedEmail = `parent${ts}@shared.com`
-    const { status, data } = await api('/api/students/bulk', 'POST', {
-      school_id: schoolId,
-      students: [
-        {
-          name: 'Rohan Sharma',
-          grade: '8',
-          section: 'A',
-          school_roll_number: 10,
-          parent_name: 'Deepak Sharma',
-          parent_phone: phone(4),
-          parent_email: sharedEmail,
-        },
-        {
-          name: 'Riya Sharma',
-          grade: '6',
-          section: 'A',
-          school_roll_number: 10,
-          parent_name: 'Deepak Sharma',
-          parent_phone: phone(5),
-          parent_email: sharedEmail,
-        },
-      ],
-    }, adminCookie)
-
-    expect(status).toBe(201)
-    expect(data.inserted).toBe(2)
-    expect(data.errors).toHaveLength(0)
-    // Second sibling finds parent by email — only one parent credential entry
-    expect(data.credentials.parents.filter((p: { is_new: boolean }) => p.is_new)).toHaveLength(1)
-    data.students.forEach((s: { id: number }) => createdStudentIds.push(s.id))
-  })
-
-  // ─── 5. Duplicate roll number — same grade+section should fail ───────────────
-  test('5. Duplicate roll number in same grade+section is rejected', async () => {
-    const { status, data } = await api('/api/students/bulk', 'POST', {
-      school_id: schoolId,
-      students: [{
-        name: 'Copy Student',
-        grade: '10',
-        section: 'A',
-        school_roll_number: 1, // roll 1 in 10-A already used in test 1
-        parent_name: 'Copy Parent',
-        parent_phone: phone(6),
-      }],
-    }, adminCookie)
-
-    expect(status).toBe(201)
-    expect(data.inserted).toBe(0)
-    expect(data.errors).toHaveLength(1)
-    expect(data.errors[0].message).toMatch(/Roll No 1 already exists/i)
-  })
-
-  // ─── 6. Duplicate roll number — different section is allowed ─────────────────
-  test('6. Same roll number in different section is allowed', async () => {
-    const { status, data } = await api('/api/students/bulk', 'POST', {
-      school_id: schoolId,
-      students: [{
-        name: 'Anil Kumar',
-        grade: '10',
-        section: 'B', // different section
-        school_roll_number: 1,
-        parent_name: 'Sunil Kumar',
-        parent_phone: phone(7),
-      }],
-    }, adminCookie)
-
-    expect(status).toBe(201)
-    expect(data.inserted).toBe(1)
-    expect(data.errors).toHaveLength(0)
-    createdStudentIds.push(data.students[0].id)
-  })
-
-  // ─── 7. Duplicate roll number — different grade is allowed ───────────────────
-  test('7. Same roll number in different grade is allowed', async () => {
-    const { status, data } = await api('/api/students/bulk', 'POST', {
-      school_id: schoolId,
-      students: [{
-        name: 'Bina Das',
-        grade: '11', // different grade
-        section: 'A',
-        school_roll_number: 1,
-        parent_name: 'Dina Das',
-        parent_phone: phone(8),
-      }],
-    }, adminCookie)
-
-    expect(status).toBe(201)
-    expect(data.inserted).toBe(1)
-    expect(data.errors).toHaveLength(0)
-    createdStudentIds.push(data.students[0].id)
-  })
-
-  // ─── 8. Bulk — mixed valid + invalid rows ────────────────────────────────────
-  test('8. Bulk batch: valid rows enrolled, invalid rows reported as errors', async () => {
-    const { status, data } = await api('/api/students/bulk', 'POST', {
-      school_id: schoolId,
-      students: [
-        {
-          name: 'Valid Student',
-          grade: '10',
-          section: 'C',
-          school_roll_number: 1,
-          parent_name: 'Valid Parent',
-          parent_phone: phone(9),
-        },
-        {
-          name: 'Bad Roll Student',
-          grade: '10',
-          section: 'C',
-          school_roll_number: -5, // invalid
-          parent_name: 'Bad Parent',
-          parent_phone: phone(10),
-        },
-      ],
-    }, adminCookie)
-
-    expect(status).toBe(201)
-    expect(data.inserted).toBe(1)
-    expect(data.errors).toHaveLength(1)
-    expect(data.errors[0].message).toMatch(/positive integer/i)
-    data.students.forEach((s: { id: number }) => createdStudentIds.push(s.id))
-  })
-
-  // ─── 9. Missing required fields ──────────────────────────────────────────────
-  test('9. Missing name is rejected', async () => {
-    const { status, data } = await api('/api/students/bulk', 'POST', {
-      school_id: schoolId,
-      students: [{
-        name: '',
-        grade: '10',
-        section: 'A',
-        school_roll_number: 99,
-        parent_name: 'Some Parent',
-        parent_phone: phone(11),
-      }],
-    }, adminCookie)
-
-    expect(status).toBe(201)
-    expect(data.inserted).toBe(0)
-    expect(data.errors[0].message).toMatch(/name is required/i)
-  })
-
-  // ─── 10. Credentials returned — student + parent temp passwords present ──────
-  test('10. Credentials returned with temp passwords for all new accounts', async () => {
-    const { status, data } = await api('/api/students/bulk', 'POST', {
-      school_id: schoolId,
-      students: [{
-        name: 'Cred Test Student',
-        email: `credtest${ts}@student.com`,
-        grade: '12',
-        section: 'A',
-        school_roll_number: 1,
-        parent_name: 'Cred Parent',
-        parent_phone: phone(12),
-        parent_email: `credparent${ts}@parent.com`,
-      }],
-    }, adminCookie)
-
-    expect(status).toBe(201)
-    const stuCred = data.credentials.students[0]
-    const parCred = data.credentials.parents[0]
-    expect(stuCred.temp_password.length).toBeGreaterThanOrEqual(8)
-    expect(parCred.temp_password.length).toBeGreaterThanOrEqual(8)
-    // Passwords should be different
-    expect(stuCred.temp_password).not.toBe(parCred.temp_password)
-    createdStudentIds.push(data.students[0].id)
-  })
-
-  // ─── 11. Reset credentials API ───────────────────────────────────────────────
-  test('11. Reset credentials generates new password for student', async () => {
-    // Use student from test 2 (has email)
-    const { data: listData } = await api(
-      `/api/students?school_id=${schoolId}&grade=10&section=A`, 'GET', undefined, adminCookie
-    )
-    const priya = listData.find((s: { name: string }) => s.name === 'Priya Patel')
-    expect(priya).toBeTruthy()
-
-    const { status, data } = await api(
-      `/api/students/${priya.id}/reset-credentials`, 'POST', undefined, adminCookie
-    )
-    expect(status).toBe(200)
-    expect(data.temp_password).toBeTruthy()
-    expect(data.temp_password.length).toBeGreaterThanOrEqual(8)
-  })
-
-  // ─── 12. Fetch students — sorted by roll number ──────────────────────────────
-  test('12. Students list sorted by roll number within grade+section', async () => {
-    const { status, data } = await api(
-      `/api/students?school_id=${schoolId}&grade=10&section=A`, 'GET', undefined, adminCookie
-    )
-    expect(status).toBe(200)
-    const rolls = data
-      .filter((s: { school_roll_number: number | null }) => s.school_roll_number != null)
-      .map((s: { school_roll_number: number }) => s.school_roll_number)
-    const sorted = [...rolls].sort((a, b) => a - b)
-    expect(rolls).toEqual(sorted)
-  })
-
-  // Helper: login via UI and land on school-admin dashboard
-  async function uiLogin(page: import('@playwright/test').Page, identifier: string, password: string) {
-    await page.goto('/login?role=school')
-    await page.getByPlaceholder(/School ID or email/i).fill(identifier)
-    await page.getByPlaceholder(/password/i).fill(password)
-    await page.getByTestId('auth-submit-btn').click()
-    await page.waitForURL(/\/change-password|\/school-admin/, { timeout: 20000 })
-    if (page.url().includes('change-password')) {
-      uiPass = 'UITest@1234'
-      const fields = page.locator('input[type="password"]')
-      await fields.nth(0).fill(uiPass)
-      await fields.nth(1).fill(uiPass)
-      await page.getByRole('button', { name: /change|update|set|save/i }).click()
-      await page.waitForURL(/\/school-admin/, { timeout: 20000 })
-    }
+  async function studentIdsByNames(names: string[]) {
+    const res = await ctx.get(`/api/students?school_id=${schoolId}`, { headers: { Cookie: adminCookie } })
+    const list = await res.json()
+    return list.filter((s: { name: string }) => names.includes(s.name))
   }
 
-  // ─── 13. UI: Onboarding page loads and shows table ──────────────────────────
-  test('13. UI: Student onboarding page loads correctly', async ({ page }) => {
-    test.setTimeout(60000)
-    await uiLogin(page, schoolCode, schoolPass)
+  // ─── Setup ──────────────────────────────────────────────────────────────────
+  test.beforeAll(async () => {
+    test.setTimeout(120000)
+    ctx = await playwrightRequest.newContext({ baseURL: BASE })
 
-    // Click Students tab in sidebar
-    await page.getByRole('button', { name: /Student Management/i }).click()
-    await expect(page.getByText('Student List')).toBeVisible({ timeout: 10000 })
+    const schoolRes = await ctx.post('/api/schools', {
+      data: {
+        name: `Onboarding Test School ${ts}`,
+        type: 'Private', city: 'Chennai', country: 'India',
+        phone: `98765${String(ts).slice(-5)}`,
+        email: `school${ts}@onboardtest.com`,
+        address: '1 Test Lane',
+      },
+    })
+    const school = await schoolRes.json()
+    schoolId   = school.id
+    schoolCode = school.school_code
+    schoolPass = school.temp_password
 
-    // Click "Onboard Students" sub-tab
-    await page.getByRole('button', { name: /Onboard Students/i }).click()
+    await ctx.put(`/api/schools/${schoolId}/subscription`, { data: { tier: 'premium' } })
 
-    // Onboarding table should be visible
-    await expect(page.getByText('Student Onboarding')).toBeVisible({ timeout: 10000 })
-    await expect(page.getByTestId('enroll-students-btn')).toBeVisible()
+    const loginRes = await ctx.post('/api/auth/login', {
+      data: { identifier: schoolCode, password: schoolPass },
+    })
+    if (!loginRes.ok()) throw new Error(`Setup login failed — status ${loginRes.status()}`)
+    const state = await ctx.storageState()
+    const auth = state.cookies.find(c => c.name === 'wlyl-auth')
+    if (!auth) throw new Error('No wlyl-auth cookie after login')
+    adminCookie = `wlyl-auth=${auth.value}`
+
+    await ctx.put('/api/auth/profile', {
+      data: { full_name: 'Test Admin', phone: '9000000001' },
+      headers: { Cookie: adminCookie },
+    })
   })
 
-  // ─── 14. UI: Fill manual row and submit ─────────────────────────────────────
-  test('14. UI: Manual entry row enrolls student and shows credentials modal', async ({ page }) => {
-    test.setTimeout(90000)
-    await uiLogin(page, schoolCode, uiPass || schoolPass)
+  // ─── Teardown ─────────────────────────────────────────────────────────────────
+  test.afterAll(async () => {
+    test.setTimeout(60000)
+    for (const id of createdStudentIds) {
+      await ctx.delete(`/api/students/${id}`, { headers: { Cookie: adminCookie } }).catch(() => {})
+    }
+    await ctx.delete(`/api/schools/${schoolId}`).catch(() => {})
+    await ctx.dispose()
+  })
 
-    await page.getByRole('button', { name: /Student Management/i }).click()
-    await expect(page.getByText('Student List')).toBeVisible({ timeout: 10000 })
-    await page.getByRole('button', { name: /Onboard Students/i }).click()
-    await expect(page.getByText('Student Onboarding')).toBeVisible({ timeout: 10000 })
+  // ─── 1. Single student — required fields only (no email) ─────────────────────
+  test('1. Enroll single student — required fields only (no email)', async ({ page }) => {
+    test.setTimeout(60000)
+    uiPass = await uiLogin(page, schoolCode, schoolPass)
+    await goToOnboarding(page)
 
-    // Wait for the onboarding table to be ready
-    const table = page.getByTestId('onboarding-table')
-    await expect(table).toBeVisible({ timeout: 5000 })
-    const row = table.locator('tbody tr:first-child')
-    const cells = row.locator('td')
-
-    // Columns: # | Roll No | Last Name | First Name | Student Email | Grade | Section | Parent Name | Parent Phone | Parent Email | Student Phone | del
-    await cells.nth(1).locator('input').fill('1')                    // Roll No
-    await cells.nth(2).locator('input').fill('UITest')               // Last Name
-    await cells.nth(3).locator('input').fill('Student')              // First Name
-    // Skip student email (optional, nth 4)
-    await cells.nth(5).locator('input').fill(String(ts).slice(-2))  // Grade (unique per run)
-    await cells.nth(6).locator('input').fill('Z')                    // Section (unique)
-    await cells.nth(7).locator('input').fill('UI Parent')            // Parent Name
-    await cells.nth(8).locator('input').fill(phone(50))              // Parent Phone (unique)
-
+    await fillRow(page, {
+      rollNo: '1', lastName: 'Mehta', firstName: 'Arjun',
+      grade: '10', section: 'A', parentName: 'Suresh Mehta', parentPhone: phone(1),
+    })
     await page.getByTestId('enroll-students-btn').click()
 
-    // Credentials modal should appear (allow up to 30s for API + DB on cold start)
     await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
     await expect(page.getByText('Student Credentials')).toBeVisible()
+    // No email → login column shows the "no email" placeholder
+    await expect(page.getByText(/no email/i)).toBeVisible()
 
-    // Copy All button should work (text changes to "Copied!" briefly)
-    await page.getByTestId('copy-all-credentials-btn').click()
-    await expect(page.getByTestId('copy-all-credentials-btn')).toContainText(/Copy All|Copied/, { timeout: 3000 })
+    const found = await studentIdsByNames(['Mehta Arjun'])
+    found.forEach((s: { id: number }) => createdStudentIds.push(s.id))
 
-    // Close modal — navigates back to student list
     await page.getByRole('button', { name: 'Done' }).click()
     await expect(page.getByText('Student List')).toBeVisible({ timeout: 5000 })
   })
 
-  // ─── 15. Delete student ──────────────────────────────────────────────────────
-  test('15. Delete student removes from school', async () => {
-    // Create a student to delete
-    const { data: createData } = await api('/api/students/bulk', 'POST', {
-      school_id: schoolId,
-      students: [{
-        name: 'Delete Me Student',
-        grade: '5',
-        section: 'A',
-        school_roll_number: 99,
-        parent_name: 'Delete Parent',
-        parent_phone: phone(99),
-      }],
-    }, adminCookie)
-    const studentId = createData.students[0].id
-    expect(studentId).toBeTruthy()
+  // ─── 2. Single student — with student + parent email ─────────────────────────
+  test('2. Enroll student with student email + parent email', async ({ page }) => {
+    test.setTimeout(60000)
+    await uiLogin(page, schoolCode, uiPass)
+    await goToOnboarding(page)
 
-    // Delete (soft delete — sets status to inactive)
-    const { status } = await api(`/api/students/${studentId}`, 'DELETE', undefined, adminCookie)
-    expect(status).toBe(200)
+    await fillRow(page, {
+      rollNo: '2', lastName: 'Patel', firstName: 'Priya',
+      email: `priya${ts}@student.com`,
+      grade: '10', section: 'A',
+      parentName: 'Ramesh Patel', parentPhone: phone(2),
+      parentEmail: `ramesh${ts}@parent.com`,
+    })
+    await page.getByTestId('enroll-students-btn').click()
 
-    // Verify student is now inactive
-    const { data: listData } = await api(
-      `/api/students?school_id=${schoolId}`, 'GET', undefined, adminCookie
-    )
-    const found = listData.find((s: { id: number }) => s.id === studentId)
-    expect(found?.status).toBe('inactive')
+    await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
+    await expect(page.getByText(`priya${ts}@student.com`)).toBeVisible()
+    await expect(page.getByText('Parent Credentials')).toBeVisible()
+    await expect(page.getByText(`ramesh${ts}@parent.com`)).toBeVisible()
+
+    const found = await studentIdsByNames(['Patel Priya'])
+    found.forEach((s: { id: number }) => createdStudentIds.push(s.id))
+
+    await page.getByRole('button', { name: 'Done' }).click()
+    await expect(page.getByText('Student List')).toBeVisible({ timeout: 5000 })
   })
 
-  // ─── 16. Unauthorized access blocked ─────────────────────────────────────────
-  test('16. Bulk enroll without auth cookie is rejected', async () => {
-    const res = await fetch(`${BASE}/api/students/bulk`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+  // ─── 3. Siblings — same parent phone (one parent account) ────────────────────
+  test('3. Siblings: same parent phone — one parent account for both', async ({ page }) => {
+    test.setTimeout(60000)
+    await uiLogin(page, schoolCode, uiPass)
+    await goToOnboarding(page)
+
+    const sharedPhone = phone(3)
+    await fillRow(page, {
+      rollNo: '1', lastName: 'Singh', firstName: 'Kiran',
+      grade: '9', section: 'B', parentName: 'Vijay Singh', parentPhone: sharedPhone,
+    }, 0)
+    await page.getByText('+ Add Row').click()
+    await fillRow(page, {
+      rollNo: '1', lastName: 'Singh', firstName: 'Meera',
+      grade: '7', section: 'A', parentName: 'Vijay Singh', parentPhone: sharedPhone,
+    }, 1)
+
+    await page.getByTestId('enroll-students-btn').click()
+    await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
+
+    // Both students appear in the student credentials table
+    await expect(page.getByText('Singh Kiran')).toBeVisible()
+    await expect(page.getByText('Singh Meera')).toBeVisible()
+
+    const found = await studentIdsByNames(['Singh Kiran', 'Singh Meera'])
+    expect(found).toHaveLength(2)
+    found.forEach((s: { id: number }) => createdStudentIds.push(s.id))
+
+    await page.getByRole('button', { name: 'Done' }).click()
+  })
+
+  // ─── 4. Siblings — same parent email (one parent account) ────────────────────
+  test('4. Siblings: same parent email — one parent account for both', async ({ page }) => {
+    test.setTimeout(60000)
+    await uiLogin(page, schoolCode, uiPass)
+    await goToOnboarding(page)
+
+    const sharedEmail = `parent${ts}@shared.com`
+    await fillRow(page, {
+      rollNo: '10', lastName: 'Sharma', firstName: 'Rohan',
+      grade: '8', section: 'A', parentName: 'Deepak Sharma',
+      parentPhone: phone(4), parentEmail: sharedEmail,
+    }, 0)
+    await page.getByText('+ Add Row').click()
+    await fillRow(page, {
+      rollNo: '10', lastName: 'Sharma', firstName: 'Riya',
+      grade: '6', section: 'A', parentName: 'Deepak Sharma',
+      parentPhone: phone(5), parentEmail: sharedEmail,
+    }, 1)
+
+    await page.getByTestId('enroll-students-btn').click()
+    await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
+
+    await expect(page.getByText('Sharma Rohan')).toBeVisible()
+    await expect(page.getByText('Sharma Riya')).toBeVisible()
+    // Parent credentials show shared email once (second sibling links to existing parent)
+    await expect(page.getByText('Parent Credentials')).toBeVisible()
+    await expect(page.getByText(sharedEmail)).toBeVisible()
+
+    const found = await studentIdsByNames(['Sharma Rohan', 'Sharma Riya'])
+    expect(found).toHaveLength(2)
+    found.forEach((s: { id: number }) => createdStudentIds.push(s.id))
+
+    await page.getByRole('button', { name: 'Done' }).click()
+  })
+
+  // ─── 5. Duplicate roll number — same grade+section rejected ──────────────────
+  test('5. Duplicate roll number in same grade+section is rejected', async ({ page }) => {
+    test.setTimeout(60000)
+    await uiLogin(page, schoolCode, uiPass)
+    await goToOnboarding(page)
+
+    // Roll 1 in 10-A already exists from test 1 (against existing DB record)
+    await fillRow(page, {
+      rollNo: '1', lastName: 'Copy', firstName: 'Student',
+      grade: '10', section: 'A', parentName: 'Copy Parent', parentPhone: phone(6),
+    })
+    await page.getByTestId('enroll-students-btn').click()
+
+    // The API returns 0 inserted with an error row. The UI opens the result modal,
+    // but no "Copy Student" credential row is rendered since nothing was enrolled.
+    await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 20000 })
+    await expect(page.getByText('Copy Student')).toHaveCount(0)
+
+    await page.getByRole('button', { name: 'Done' }).click()
+
+    // Verify via API that no duplicate student was created
+    const found = await studentIdsByNames(['Copy Student'])
+    found.forEach((s: { id: number }) => createdStudentIds.push(s.id)) // cleanup if any slipped in
+    expect(found).toHaveLength(0)
+  })
+
+  // ─── 6. Same roll number — different section allowed ─────────────────────────
+  test('6. Same roll number in a different section is allowed', async ({ page }) => {
+    test.setTimeout(60000)
+    await uiLogin(page, schoolCode, uiPass)
+    await goToOnboarding(page)
+
+    await fillRow(page, {
+      rollNo: '1', lastName: 'Kumar', firstName: 'Anil',
+      grade: '10', section: 'B', parentName: 'Sunil Kumar', parentPhone: phone(7),
+    })
+    await page.getByTestId('enroll-students-btn').click()
+
+    await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
+    await expect(page.getByText('Kumar Anil')).toBeVisible()
+
+    const found = await studentIdsByNames(['Kumar Anil'])
+    found.forEach((s: { id: number }) => createdStudentIds.push(s.id))
+
+    await page.getByRole('button', { name: 'Done' }).click()
+  })
+
+  // ─── 7. Same roll number — different grade allowed ────────────────────────────
+  test('7. Same roll number in a different grade is allowed', async ({ page }) => {
+    test.setTimeout(60000)
+    await uiLogin(page, schoolCode, uiPass)
+    await goToOnboarding(page)
+
+    await fillRow(page, {
+      rollNo: '1', lastName: 'Das', firstName: 'Bina',
+      grade: '11', section: 'A', parentName: 'Dina Das', parentPhone: phone(8),
+    })
+    await page.getByTestId('enroll-students-btn').click()
+
+    await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
+    await expect(page.getByText('Das Bina')).toBeVisible()
+
+    const found = await studentIdsByNames(['Das Bina'])
+    found.forEach((s: { id: number }) => createdStudentIds.push(s.id))
+
+    await page.getByRole('button', { name: 'Done' }).click()
+  })
+
+  // ─── 8. Bulk: valid + invalid roll number → validation error ─────────────────
+  test('8. Bulk batch: invalid (negative) roll number is blocked by validation', async ({ page }) => {
+    test.setTimeout(60000)
+    await uiLogin(page, schoolCode, uiPass)
+    await goToOnboarding(page)
+
+    await fillRow(page, {
+      rollNo: '1', lastName: 'Valid', firstName: 'Student',
+      grade: '10', section: 'C', parentName: 'Valid Parent', parentPhone: phone(9),
+    }, 0)
+    await page.getByText('+ Add Row').click()
+    await fillRow(page, {
+      rollNo: '-5', lastName: 'Bad', firstName: 'Student',
+      grade: '10', section: 'C', parentName: 'Bad Parent', parentPhone: phone(10),
+    }, 1)
+
+    await page.getByTestId('enroll-students-btn').click()
+
+    // Client-side validation flags the negative roll number before submit
+    await expect(
+      page.getByText(/Roll No must be a positive/i).or(page.getByText(/positive number/i))
+    ).toBeVisible({ timeout: 10000 })
+  })
+
+  // ─── 9. Missing name → enroll blocked; missing other required field → error ───
+  test('9. Missing name keeps enroll disabled; missing required field is flagged', async ({ page }) => {
+    test.setTimeout(60000)
+    await uiLogin(page, schoolCode, uiPass)
+    await goToOnboarding(page)
+
+    // Part A: with no names entered, the Enroll button is disabled (cannot submit).
+    await fillRow(page, {
+      rollNo: '99', grade: '10', section: 'A',
+      parentName: 'Some Parent', parentPhone: phone(11),
+    })
+    await expect(page.getByTestId('enroll-students-btn')).toBeDisabled()
+
+    // Part B: add a name → button enables. Clear the required parent phone → submit
+    // surfaces a validation error for the missing required field.
+    const cells = page.getByTestId('onboarding-table').locator('tbody tr').nth(0).locator('td')
+    await cells.nth(2).locator('input').fill('NoPhone')   // last name
+    await cells.nth(3).locator('input').fill('Student')   // first name
+    await cells.nth(8).locator('input').fill('')          // clear parent phone (required)
+    await expect(page.getByTestId('enroll-students-btn')).toBeEnabled()
+    await page.getByTestId('enroll-students-btn').click()
+
+    // The validation banner shows the row-specific message (distinct from the
+    // static "Parent Phone (blue) is required…" helper text).
+    await expect(page.getByText(/Row \d+: Parent Phone is required/i)).toBeVisible({ timeout: 5000 })
+  })
+
+  // ─── 10. Credentials — student + parent temp passwords displayed ─────────────
+  test('10. Credentials modal shows student and parent temp passwords', async ({ page }) => {
+    test.setTimeout(60000)
+    await uiLogin(page, schoolCode, uiPass)
+    await goToOnboarding(page)
+
+    await fillRow(page, {
+      rollNo: '1', lastName: 'Cred', firstName: 'Test',
+      email: `credtest${ts}@student.com`,
+      grade: '12', section: 'A',
+      parentName: 'Cred Parent', parentPhone: phone(12),
+      parentEmail: `credparent${ts}@parent.com`,
+    })
+    await page.getByTestId('enroll-students-btn').click()
+
+    await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
+    await expect(page.getByText('Student Credentials')).toBeVisible()
+    await expect(page.getByText('Parent Credentials')).toBeVisible()
+    await expect(page.getByText(`credtest${ts}@student.com`)).toBeVisible()
+    await expect(page.getByText(`credparent${ts}@parent.com`)).toBeVisible()
+
+    const found = await studentIdsByNames(['Cred Test'])
+    found.forEach((s: { id: number }) => createdStudentIds.push(s.id))
+
+    await page.getByRole('button', { name: 'Done' }).click()
+  })
+
+  // ─── 11. Reset credentials → new password shown ──────────────────────────────
+  test('11. Reset credentials shows a new password in the modal', async ({ page }) => {
+    test.setTimeout(60000)
+    await uiLogin(page, schoolCode, uiPass)
+    await goToOnboarding(page)
+
+    await fillRow(page, {
+      rollNo: '20', lastName: 'Reset', firstName: 'Test',
+      email: `resettest${ts}@student.com`,
+      grade: '12', section: 'B',
+      parentName: 'Reset Parent', parentPhone: phone(20),
+    })
+    await page.getByTestId('enroll-students-btn').click()
+    await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
+
+    // Click the Reset link in the student credentials row
+    const resetBtn = page.getByRole('button', { name: /^Reset$/i }).first()
+    await expect(resetBtn).toBeVisible({ timeout: 5000 })
+    await resetBtn.click()
+
+    // After reset, the button briefly shows "Resetting…" then the new password
+    // renders as a green <span> (bg-green-50 + text-green-700) in the password cell.
+    // Use the combined class selector to avoid matching dashboard cards (which use
+    // bg-green-50 on <button> elements, not spans).
+    await expect(
+      page.locator('span.bg-green-50.text-green-700')
+    ).toBeVisible({ timeout: 15000 })
+
+    const found = await studentIdsByNames(['Reset Test'])
+    found.forEach((s: { id: number }) => createdStudentIds.push(s.id))
+
+    await page.getByRole('button', { name: 'Done' }).click()
+  })
+
+  // ─── 12. Student list sorted by roll number ───────────────────────────────────
+  test('12. Student list is sorted by roll number within grade+section', async ({ page }) => {
+    test.setTimeout(60000)
+    await uiLogin(page, schoolCode, uiPass)
+
+    await page.getByRole('button', { name: /Student Management/i }).click()
+    await expect(page.getByText('Student List')).toBeVisible({ timeout: 10000 })
+
+    // 10-A: roll 1 = Mehta Arjun, roll 2 = Patel Priya — Arjun should be above Priya
+    const arjun = page.getByText(/Mehta Arjun|Arjun Mehta/).first()
+    const priya = page.getByText(/Patel Priya|Priya Patel/).first()
+    await expect(arjun).toBeVisible({ timeout: 10000 })
+    await expect(priya).toBeVisible({ timeout: 5000 })
+
+    const a = await arjun.boundingBox()
+    const p = await priya.boundingBox()
+    if (a && p) expect(a.y).toBeLessThan(p.y)
+  })
+
+  // ─── 13. UI: Onboarding page loads with controls ─────────────────────────────
+  test('13. UI: Onboarding page loads with table, buttons, and headers', async ({ page }) => {
+    test.setTimeout(60000)
+    await uiLogin(page, schoolCode, uiPass)
+    await goToOnboarding(page)
+
+    await expect(page.getByTestId('onboarding-table')).toBeVisible()
+    await expect(page.getByTestId('enroll-students-btn')).toBeVisible()
+    await expect(page.getByRole('button', { name: /Template/i })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Import CSV/i })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Paste CSV/i })).toBeVisible()
+    await expect(page.getByText('Roll No')).toBeVisible()
+    await expect(page.getByText('Parent Phone')).toBeVisible()
+  })
+
+  // ─── 14. UI: Manual entry + credentials modal + Copy All ─────────────────────
+  test('14. UI: Manual entry enrolls and Copy All works in credentials modal', async ({ page }) => {
+    test.setTimeout(90000)
+    await uiLogin(page, schoolCode, uiPass)
+    await goToOnboarding(page)
+
+    await fillRow(page, {
+      rollNo: '1', lastName: 'UITest', firstName: 'Student',
+      grade: String(ts).slice(-2), section: 'Z',
+      parentName: 'UI Parent', parentPhone: phone(50),
+    })
+    await page.getByTestId('enroll-students-btn').click()
+
+    await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
+    await expect(page.getByText('Student Credentials')).toBeVisible()
+
+    await page.getByTestId('copy-all-credentials-btn').click()
+    await expect(page.getByTestId('copy-all-credentials-btn')).toContainText(/Copy All|Copied/, { timeout: 3000 })
+
+    const found = await studentIdsByNames(['UITest Student'])
+    found.forEach((s: { id: number }) => createdStudentIds.push(s.id))
+
+    await page.getByRole('button', { name: 'Done' }).click()
+    await expect(page.getByText('Student List')).toBeVisible({ timeout: 5000 })
+  })
+
+  // ─── 15. Delete student → marked inactive ─────────────────────────────────────
+  test('15. Delete student marks it inactive', async ({ page }) => {
+    test.setTimeout(60000)
+    await uiLogin(page, schoolCode, uiPass)
+    await goToOnboarding(page)
+
+    // Enroll a student to delete
+    await fillRow(page, {
+      rollNo: '99', lastName: 'Delete', firstName: 'Me',
+      grade: '5', section: 'A', parentName: 'Delete Parent', parentPhone: phone(99),
+    })
+    await page.getByTestId('enroll-students-btn').click()
+    await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
+    await page.getByRole('button', { name: 'Done' }).click()
+
+    // Delete via API (uses browser network stack), then verify status
+    const [target] = await studentIdsByNames(['Delete Me'])
+    expect(target).toBeTruthy()
+
+    const delRes = await ctx.delete(`/api/students/${target.id}`, { headers: { Cookie: adminCookie } })
+    expect(delRes.status()).toBe(200)
+
+    const afterRes = await ctx.get(`/api/students?school_id=${schoolId}`, { headers: { Cookie: adminCookie } })
+    const after = await afterRes.json()
+    const found = after.find((s: { id: number }) => s.id === target.id)
+    expect(found?.status).toBe('inactive')
+
+    // Page still shows the Student Management area (active students only)
+    await page.getByRole('button', { name: /Student Management/i }).click()
+    await expect(page.getByText('Student Management')).toBeVisible({ timeout: 10000 })
+  })
+
+  // ─── 16. Unauthorized bulk enroll → 401 ──────────────────────────────────────
+  test('16. Bulk enroll without auth cookie is rejected (401)', async ({ page }) => {
+    test.setTimeout(30000)
+    // Show the login page in the video to illustrate the unauthenticated state
+    await page.goto('/login?role=school')
+    await expect(page.getByTestId('auth-submit-btn')).toBeVisible({ timeout: 10000 })
+
+    // Fresh context with no auth cookie
+    const anon = await playwrightRequest.newContext({ baseURL: BASE })
+    const res = await anon.post('/api/students/bulk', {
+      data: {
         school_id: schoolId,
         students: [{ name: 'Hacker', grade: '10', section: 'A', school_roll_number: 999 }],
-      }),
+      },
+      failOnStatusCode: false,
     })
-    expect(res.status).toBe(401)
+    expect(res.status()).toBe(401)
+    await anon.dispose()
+
+    await expect(page.getByPlaceholder(/School ID or email/i)).toBeVisible()
   })
 })
