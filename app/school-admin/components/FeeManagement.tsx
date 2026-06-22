@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, Fragment } from 'react'
+import { useEffect, useState, useCallback, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,6 +33,8 @@ type Amendment = {
 type LedgerEntry = {
   id: number; student_id: number; student_name: string
   roll_number: string; school_roll_number: number | null; grade: string; section: string
+  email: string | null; phone: string | null
+  parent_name: string | null; parent_phone: string | null; parent_email: string | null
   category_name: string; period_label: string
   amount_due: number; amount_paid: number; balance: number; waiver_amount: number
   due_date: string; status: 'pending' | 'paid' | 'partial' | 'overdue' | 'waived'
@@ -155,6 +157,27 @@ function fmtDate(d: string) {
   return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
+// ─── Money input sanitization ──────────────────────────────────────────────────
+// Keeps only digits and a single decimal point (max 2 dp), strips letters,
+// scientific notation, signs, and bad pastes. type="number" alone allows
+// "e", "+", "-" and pasted text — this closes those gaps.
+function sanitizeMoney(raw: string): string {
+  let v = raw.replace(/[^\d.]/g, '')      // drop everything except digits and dot
+  const firstDot = v.indexOf('.')
+  if (firstDot !== -1) {
+    // keep only the first dot; remove any subsequent dots
+    v = v.slice(0, firstDot + 1) + v.slice(firstDot + 1).replace(/\./g, '')
+    const [int, dec] = v.split('.')
+    v = int + '.' + (dec ?? '').slice(0, 2) // max 2 decimal places
+  }
+  return v
+}
+
+// Block keystrokes that type="number" otherwise permits (e/E/+/-).
+function blockNonNumericKeys(e: ReactKeyboardEvent<HTMLInputElement>) {
+  if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault()
+}
+
 // ─── Fee Audit Report → print-HTML (used for "Save as PDF") ────────────────────
 const RUPEE = (n: number) => `₹${Number(n || 0).toLocaleString('en-IN')}`
 function buildAuditPdfHtml(rep: Record<string, unknown>): string {
@@ -224,7 +247,7 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
     <table><thead><tr><th>Class</th><th>Fee Type</th><th class="r">Billed</th><th class="r">Waived</th><th class="r">Net Demand</th><th class="r">Paid</th><th class="r">Balance</th></tr></thead>
     <tbody>${byClass.map(c => `<tr><td>${c.class}</td><td>${c.fee_type}</td>${mrow(c)}</tr>`).join('')}</tbody></table>
     <h3>5. Student-wise Fee Details <span style="font-weight:normal;color:#888">(by fee type)</span></h3>
-    <table><thead><tr><th>Student</th><th>Roll</th><th>Class</th><th>Fee Type</th><th class="r">Billed</th><th class="r">Waived</th><th class="r">Net Demand</th><th class="r">Paid</th><th class="r">Balance</th></tr></thead>
+    <table><thead><tr><th>Student</th><th>School Roll</th><th>Class</th><th>Fee Type</th><th class="r">Billed</th><th class="r">Waived</th><th class="r">Net Demand</th><th class="r">Paid</th><th class="r">Balance</th></tr></thead>
     <tbody>${byStudent.map(s => s.is_subtotal
       ? `<tr class="tot"><td colspan="3">${s.student}</td><td>SUBTOTAL</td>${mrow(s)}</tr>`
       : `<tr><td>${s.student}</td><td>${s.roll_number}</td><td>${s.class}</td><td>${s.fee_type}</td>${mrow(s)}</tr>`).join('')}</tbody></table>
@@ -833,12 +856,15 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     if (win) { win.document.write(html); win.document.close(); win.print() }
   }
 
-  const filteredLedger = ledger.filter(e =>
-    !ledgerSearch ||
-    e.student_name.toLowerCase().includes(ledgerSearch.toLowerCase()) ||
-    e.roll_number.toLowerCase().includes(ledgerSearch.toLowerCase()) ||
-    (e.school_roll_number != null && String(e.school_roll_number).includes(ledgerSearch))
-  )
+  const filteredLedger = ledger.filter(e => {
+    const q = ledgerSearch.trim().toLowerCase()
+    return !q || [
+      e.student_name, e.roll_number,
+      e.school_roll_number != null ? String(e.school_roll_number) : '',
+      e.grade, e.section, e.email, e.phone,
+      e.parent_name, e.parent_phone, e.parent_email,
+    ].some(v => (v || '').toLowerCase().includes(q))
+  })
 
   // ── Collect: search students ─────────────────────────────────────────────────
   async function searchStudent(q: string) {
@@ -847,11 +873,15 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     const r = await fetch(`/api/fees/ledger?school_id=${schoolId}&academic_year=${academicYear}`)
     if (r.ok) {
       const all: LedgerEntry[] = await r.json()
+      const ql = q.trim().toLowerCase()
       setCollectEntries(
         all.filter(e =>
-          (e.student_name.toLowerCase().includes(q.toLowerCase()) ||
-           e.roll_number.toLowerCase().includes(q.toLowerCase()) ||
-           (e.school_roll_number != null && String(e.school_roll_number).includes(q)))
+          [
+            e.student_name, e.roll_number,
+            e.school_roll_number != null ? String(e.school_roll_number) : '',
+            e.grade, e.section, e.email, e.phone,
+            e.parent_name, e.parent_phone, e.parent_email,
+          ].some(v => (v || '').toLowerCase().includes(ql))
           && e.status !== 'paid' && e.status !== 'waived'
         )
       )
@@ -1407,6 +1437,8 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   type StudentRow = {
     student_id: number; student_name: string; roll_number: string; school_roll_number: number | null
     grade: string; section: string
+    email: string | null; phone: string | null
+    parent_name: string | null; parent_phone: string | null; parent_email: string | null
     total_billed: number; total_paid: number; outstanding: number
     open_entries: LedgerEntry[]   // pending/partial/overdue
     all_entries: LedgerEntry[]
@@ -1421,6 +1453,8 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
           student_id: e.student_id, student_name: e.student_name, roll_number: e.roll_number,
           school_roll_number: e.school_roll_number ?? null,
           grade: e.grade, section: e.section,
+          email: e.email ?? null, phone: e.phone ?? null,
+          parent_name: e.parent_name ?? null, parent_phone: e.parent_phone ?? null, parent_email: e.parent_email ?? null,
           total_billed: 0, total_paid: 0, outstanding: 0,
           open_entries: [], all_entries: [], has_overdue: false, never_paid: true,
         }
@@ -1440,9 +1474,14 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   const collectionFiltered = studentRows.filter(r => {
     if (ledgerGrade && r.grade !== ledgerGrade) return false
     if (ledgerSearch) {
-      const q = ledgerSearch.toLowerCase()
-      const matchRoll = r.school_roll_number != null && String(r.school_roll_number).includes(q)
-      if (!r.student_name.toLowerCase().includes(q) && !r.roll_number.toLowerCase().includes(q) && !matchRoll) return false
+      const q = ledgerSearch.trim().toLowerCase()
+      const matches = [
+        r.student_name, r.roll_number,
+        r.school_roll_number != null ? String(r.school_roll_number) : '',
+        r.grade, r.section, r.email, r.phone,
+        r.parent_name, r.parent_phone, r.parent_email,
+      ].some(v => (v || '').toLowerCase().includes(q))
+      if (!matches) return false
     }
     if (ledgerStatus === 'overdue') return r.has_overdue
     if (ledgerStatus === 'partial') return r.total_paid > 0 && r.outstanding > 0
@@ -2442,7 +2481,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                         <span className="absolute left-2 text-gray-400 text-xs pointer-events-none">₹</span>
                                         <input type="number" min="0" placeholder="—"
                                           value={vgAmounts[key] || ''}
-                                          onChange={e => setVgAmounts(p => ({ ...p, [key]: e.target.value }))}
+                                          onKeyDown={blockNonNumericKeys}
+                                          onChange={e => setVgAmounts(p => ({ ...p, [key]: sanitizeMoney(e.target.value) }))}
                                           className={`w-24 pl-5 pr-1 py-1 text-right border rounded text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 ${changed ? 'border-amber-400 bg-amber-50' : 'border-gray-200'}`} />
                                       </div>
                                     </td>
@@ -2651,7 +2691,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                             <td className="px-3 py-1.5 text-center">
                                               <input type="number" min="0" placeholder="—"
                                                 value={applAmounts[key] || ''}
-                                                onChange={e => setApplAmounts(p => ({ ...p, [key]: e.target.value }))}
+                                                onKeyDown={blockNonNumericKeys}
+                                                onChange={e => setApplAmounts(p => ({ ...p, [key]: sanitizeMoney(e.target.value) }))}
                                                 className="w-24 text-center border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-blue-400" />
                                             </td>
                                           </tr>
@@ -2693,7 +2734,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                     <span className="absolute left-2 top-1.5 text-gray-400 text-xs">₹</span>
                                     <input type="number" min="0" placeholder="0"
                                       value={groupAmounts[grp.key] || ''}
-                                      onChange={e => setGroupAmounts(p => ({ ...p, [grp.key]: e.target.value }))}
+                                      onKeyDown={blockNonNumericKeys}
+                                      onChange={e => setGroupAmounts(p => ({ ...p, [grp.key]: sanitizeMoney(e.target.value) }))}
                                       className="w-24 pl-5 pr-1 py-1 text-xs border border-gray-200 rounded" />
                                   </div>
                                   <button onClick={() => applyGroupAmount(cat.id, grp.grades, groupAmounts[grp.key] || '')}
@@ -2713,7 +2755,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                     <span className="text-[10px] text-gray-400 w-8">Gr.{g}</span>
                                     <input type="number" min="0" placeholder="0"
                                       value={editAmounts[`${cat.id}_${g}`] || ''}
-                                      onChange={e => setEditAmounts(p => ({ ...p, [`${cat.id}_${g}`]: e.target.value }))}
+                                      onKeyDown={blockNonNumericKeys}
+                                      onChange={e => setEditAmounts(p => ({ ...p, [`${cat.id}_${g}`]: sanitizeMoney(e.target.value) }))}
                                       className="w-full text-center border border-gray-200 rounded px-1 py-1 text-xs" />
                                   </div>
                                 ))}
@@ -2943,7 +2986,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             <div className="space-y-4">
               {/* Filters */}
               <div className="flex items-center gap-3">
-                <input type="text" placeholder="Search student name or roll number…" value={ledgerSearch}
+                <input type="text" placeholder="Search name, roll, grade, phone, parent…" value={ledgerSearch}
                   onChange={e => setLedgerSearch(e.target.value)}
                   className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 <select value={ledgerGrade} onChange={e => setLedgerGrade(e.target.value)}
@@ -3084,8 +3127,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                   <div className="relative mt-1">
                                     <span className="absolute left-3 top-2.5 text-gray-400 text-sm">₹</span>
                                     <input
-                                      type="number" min="0" step="0.01" value={payAmount}
-                                      onChange={e => setPayAmount(e.target.value)}
+                                      type="number" min="0" step="0.01" inputMode="decimal" value={payAmount}
+                                      onKeyDown={blockNonNumericKeys}
+                                      onChange={e => setPayAmount(sanitizeMoney(e.target.value))}
                                       className="w-full pl-7 pr-3 py-2 border border-gray-200 rounded-lg text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     />
                                   </div>
@@ -3236,7 +3280,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                                       : <>⚠ Cancels {p.receipt_number} ({fmt(p.amount)}) and issues a new receipt for <strong>{correctAmount ? fmt(parseFloat(correctAmount) || 0) : '₹0'}</strong>. Net change: {fmt((parseFloat(correctAmount) || 0) - Number(p.amount))}.</>}
                                                   </div>
                                                   {cancelMode === 'correct' && (
-                                                    <input type="number" min="0" value={correctAmount} onChange={e => setCorrectAmount(e.target.value)}
+                                                    <input type="number" min="0" inputMode="decimal" value={correctAmount}
+                                                      onKeyDown={blockNonNumericKeys}
+                                                      onChange={e => setCorrectAmount(sanitizeMoney(e.target.value))}
                                                       placeholder="Correct amount" className="w-40 border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
                                                   )}
                                                   <input type="text" placeholder="Reason (required — recorded in audit log)"
@@ -3745,8 +3791,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                       {cancelMode === 'correct' && (
                                         <div>
                                           <label className="text-xs font-medium text-gray-600">Corrected amount (₹)</label>
-                                          <input type="number" min="0" value={correctAmount}
-                                            onChange={e => setCorrectAmount(e.target.value)}
+                                          <input type="number" min="0" inputMode="decimal" value={correctAmount}
+                                            onKeyDown={blockNonNumericKeys}
+                                            onChange={e => setCorrectAmount(sanitizeMoney(e.target.value))}
                                             className="mt-1 w-40 border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
                                         </div>
                                       )}
