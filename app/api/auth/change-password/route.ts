@@ -47,7 +47,9 @@ export async function POST(req: NextRequest) {
         path: '/',
       })
 
-      return NextResponse.json({ success: true })
+      const profileRes = await pool.query('SELECT profile_completed FROM users WHERE id = $1', [session.userId])
+      const profileCompleted = profileRes.rows[0]?.profile_completed ?? false
+      return NextResponse.json({ success: true, profileCompleted })
     } catch (error) {
       console.error('[auth/change-password]', error)
       return NextResponse.json({ error: 'Failed to change password' }, { status: 500 })

@@ -49,16 +49,17 @@ export async function GET(req: NextRequest) {
 // POST /api/fees/waivers — grant a waiver and update ledger
 export async function POST(req: NextRequest) {
   try {
+    // Validate before acquiring pool connection
+    const { school_id, student_id, ledger_id, waiver_type, waiver_value, reason, granted_by_name: clientActor } = await req.json()
+    const access = await requireFeeAccess(school_id)
+    if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const granted_by_name = clientActor || access.actor
+    if (!school_id || !student_id || !ledger_id || !waiver_type || !reason) {
+      return NextResponse.json({ error: 'school_id, student_id, ledger_id, waiver_type, reason required' }, { status: 400 })
+    }
+
     const client = await pool.connect()
     try {
-      const { school_id, student_id, ledger_id, waiver_type, waiver_value, reason, granted_by_name: clientActor } = await req.json()
-      const access = await requireFeeAccess(school_id)
-      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
-      const granted_by_name = clientActor || access.actor
-      if (!school_id || !student_id || !ledger_id || !waiver_type || !reason) {
-        return NextResponse.json({ error: 'school_id, student_id, ledger_id, waiver_type, reason required' }, { status: 400 })
-      }
-
       await client.query('BEGIN')
 
       // Get ledger entry
@@ -136,9 +137,9 @@ export async function DELETE(req: NextRequest) {
     const client = await pool.connect()
     try {
       const { rows: [w0] } = await client.query(`SELECT school_id FROM fee_waivers WHERE id = $1`, [id])
-      if (!w0) { client.release(); return NextResponse.json({ error: 'Waiver not found' }, { status: 404 }) }
+      if (!w0) return NextResponse.json({ error: 'Waiver not found' }, { status: 404 })
       const access = await requireFeeAccess(w0.school_id)
-      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const revoked_by = access.actor
 
       await client.query('BEGIN')

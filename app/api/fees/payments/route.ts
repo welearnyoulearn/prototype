@@ -50,47 +50,52 @@ export async function GET(req: NextRequest) {
 //
 export async function POST(req: NextRequest) {
   try {
+    // ── Parse and validate BEFORE acquiring a pool connection ──────────────────
+    const body = await req.json()
+    const {
+      school_id, student_id,
+      ledger_id,               // single-entry mode
+      ledger_ids,              // multi-entry mode (array)
+      amount,                  // single-entry
+      total_amount,            // multi-entry total
+      payment_mode, transaction_ref,
+      collected_by_name: clientCollector, notes, paid_date,
+      payment_status = 'completed',
+    } = body
+
+    const access = await requireFeeAccess(school_id)
+    if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const collected_by_name = clientCollector || access.actor
+
+    if (!school_id || !student_id || !payment_mode) {
+      return NextResponse.json({ error: 'school_id, student_id, payment_mode required' }, { status: 400 })
+    }
+
+    if (paid_date !== undefined && paid_date !== null) {
+      const dateRe = /^\d{4}-\d{2}-\d{2}$/
+      if (!dateRe.test(paid_date)) {
+        return NextResponse.json({ error: 'paid_date must be YYYY-MM-DD' }, { status: 400 })
+      }
+      const d = new Date(paid_date)
+      const now = new Date()
+      const minDate = new Date('2000-01-01')
+      if (isNaN(d.getTime()) || d > now || d < minDate) {
+        return NextResponse.json({ error: 'paid_date must be a valid past date' }, { status: 400 })
+      }
+    }
+
+    const isMulti = Array.isArray(ledger_ids) && ledger_ids.length > 0
+
+    if (!isMulti && (!ledger_id || !amount)) {
+      return NextResponse.json({ error: 'Single mode: ledger_id and amount required' }, { status: 400 })
+    }
+    if (isMulti && !total_amount) {
+      return NextResponse.json({ error: 'Multi mode: total_amount required' }, { status: 400 })
+    }
+
+    // ── Acquire connection only after validation passes ─────────────────────────
     const client = await pool.connect()
     try {
-      const body = await req.json()
-      const {
-        school_id, student_id,
-        ledger_id,               // single-entry mode
-        ledger_ids,              // multi-entry mode (array)
-        amount,                  // single-entry
-        total_amount,            // multi-entry total
-        payment_mode, transaction_ref,
-        collected_by_name: clientCollector, notes, paid_date,
-        payment_status = 'completed',
-      } = body
-
-      const access = await requireFeeAccess(school_id)
-      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
-      // Trust the session for the collector identity (fall back to provided name only as display)
-      const collected_by_name = clientCollector || access.actor
-
-      if (!school_id || !student_id || !payment_mode) {
-        return NextResponse.json({ error: 'school_id, student_id, payment_mode required' }, { status: 400 })
-      }
-
-      // BUG 5: Validate paid_date format and range
-      if (paid_date !== undefined && paid_date !== null) {
-        const dateRe = /^\d{4}-\d{2}-\d{2}$/
-        if (!dateRe.test(paid_date)) {
-          client.release()
-          return NextResponse.json({ error: 'paid_date must be YYYY-MM-DD' }, { status: 400 })
-        }
-        const d = new Date(paid_date)
-        const now = new Date()
-        const minDate = new Date('2000-01-01')
-        if (isNaN(d.getTime()) || d > now || d < minDate) {
-          client.release()
-          return NextResponse.json({ error: 'paid_date must be a valid past date' }, { status: 400 })
-        }
-      }
-
-      const isMulti = Array.isArray(ledger_ids) && ledger_ids.length > 0
-
       // Guard: block payments against a closed academic year
       const guardIds = isMulti ? ledger_ids : (ledger_id ? [ledger_id] : [])
       if (guardIds.length > 0) {
@@ -102,16 +107,8 @@ export async function POST(req: NextRequest) {
           [guardIds]
         ).catch(() => ({ rows: [] }))
         if (locked) {
-          client.release()
           return NextResponse.json({ error: 'This academic year is closed. Reopen it to record payments.' }, { status: 409 })
         }
-      }
-
-      if (!isMulti && (!ledger_id || !amount)) {
-        return NextResponse.json({ error: 'Single mode: ledger_id and amount required' }, { status: 400 })
-      }
-      if (isMulti && !total_amount) {
-        return NextResponse.json({ error: 'Multi mode: total_amount required' }, { status: 400 })
       }
 
       await client.query('BEGIN')
@@ -134,13 +131,11 @@ export async function POST(req: NextRequest) {
         )
         if (!ledgerRow) {
           await client.query('ROLLBACK')
-          client.release()
           return NextResponse.json({ error: 'Ledger entry not found' }, { status: 404 })
         }
         const balance = parseFloat(ledgerRow.amount_due) - parseFloat(ledgerRow.amount_paid)
         if (parseFloat(String(amount)) > balance + 0.001) {
           await client.query('ROLLBACK')
-          client.release()
           return NextResponse.json({ error: `Amount exceeds balance due (₹${balance.toFixed(2)})` }, { status: 400 })
         }
 
@@ -229,7 +224,7 @@ export async function POST(req: NextRequest) {
       await client.query('COMMIT')
 
       // Return enriched response for receipt display
-      const { rows: [full] } = await pool.query(
+      const { rows: [full] } = await client.query(
         `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section, s.parent_name,
                 fc.name AS category_name, l.period_label, l.amount_due,
                 sc.name AS school_name
