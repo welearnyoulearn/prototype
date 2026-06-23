@@ -1075,6 +1075,12 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   function anyBillsGenerated(): boolean {
     return categories.some(c => feeBillsGenerated(c))
   }
+  // All active fixed fee heads that have amounts set must also have bills generated
+  function allReadyHeadsBilled(): boolean {
+    const ready = fixedFeeHeads().filter(c => feeHasAmounts(c.id, c.category_type))
+    if (ready.length === 0) return false
+    return ready.every(c => feeBillsGenerated(c))
+  }
 
   async function lockStructure() {
     if (!anyBillsGenerated()) { setStructureMsg('⚠ Generate bills before locking the plan.'); return }
@@ -2185,11 +2191,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           {(() => {
             const hasHeads = categories.length > 0
             const allAmountsSet = fixedAmountsComplete()   // fixed fees only — variable are optional
-            const anyGenerated = anyBillsGenerated()
             const steps = [
               { n: 1, label: 'Add Fee Heads',     done: hasHeads },
               { n: 2, label: 'Set Fixed Amounts', done: allAmountsSet },
-              { n: 3, label: 'Generate Bills',    done: anyGenerated },
+              { n: 3, label: 'Generate Bills',    done: allReadyHeadsBilled() },
               { n: 4, label: 'Lock Plan',         done: !!structureLock },
             ]
             const doneCount = steps.filter(s => s.done).length
