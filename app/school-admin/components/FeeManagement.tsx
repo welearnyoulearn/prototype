@@ -4612,8 +4612,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                   <p className="text-xs text-gray-400 mt-0.5">{new Date((t as { date?: string }).date || '').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
                                 </div>
                                 <div className="text-right flex-shrink-0">
-                                  {(t as { credit?: number }).credit > 0 && <p className="text-sm font-semibold text-green-600">{fmt((t as { credit?: number }).credit || 0)}</p>}
-                                  {(t as { debit?: number }).debit > 0 && <p className="text-sm font-semibold text-red-600">{fmt((t as { debit?: number }).debit || 0)}</p>}
+                                  {((t as { credit?: number }).credit ?? 0) > 0 && <p className="text-sm font-semibold text-green-600">{fmt((t as { credit?: number }).credit ?? 0)}</p>}
+                                  {((t as { debit?: number }).debit ?? 0) > 0 && <p className="text-sm font-semibold text-red-600">{fmt((t as { debit?: number }).debit ?? 0)}</p>}
                                 </div>
                               </div>
                             ))}
