@@ -3149,6 +3149,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                                     Review & Confirm
                                   </button>
+                                  <button
+                                    onClick={() => { setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setShowWaiver(true) }}
+                                    className="px-3 py-2.5 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium whitespace-nowrap">
+                                    Grant Waiver
+                                  </button>
                                   <button onClick={() => setShowCollectForm(false)}
                                     className="text-sm text-gray-500 px-4 py-2.5 hover:text-gray-700">Cancel</button>
                                 </div>
@@ -3179,81 +3184,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                           Collect All ({fmt(row.outstanding)})
                                         </button>
                                         <button
-                                          onClick={() => { setSelectedEntry(row.open_entries[0]); setShowWaiver(v => !v); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }) }}
+                                          onClick={() => { setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setShowWaiver(true) }}
                                           className="px-3 py-2 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium">
                                           Grant Waiver
                                         </button>
                                       </div>
-
-                                      {/* Waiver form */}
-                                      {showWaiver && selectedEntry?.student_id === row.student_id && (
-                                        <div className="mt-2 p-3 bg-purple-50 border border-purple-200 rounded-lg space-y-2">
-                                          <p className="text-xs font-semibold text-purple-800">Grant Fee Waiver</p>
-                                          <div className="grid grid-cols-2 gap-2">
-                                            <div>
-                                              <label className="text-xs font-medium text-gray-600">Waiver Type</label>
-                                              <select value={waiverForm.waiver_type}
-                                                onChange={e => setWaiverForm(f => ({ ...f, waiver_type: e.target.value }))}
-                                                className="w-full mt-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm">
-                                                <option value="percentage">Percentage (%)</option>
-                                                <option value="fixed">Fixed Amount (₹)</option>
-                                                <option value="full">Full Waiver</option>
-                                              </select>
-                                            </div>
-                                            {waiverForm.waiver_type !== 'full' && (
-                                              <div>
-                                                <label className="text-xs font-medium text-gray-600">
-                                                  {waiverForm.waiver_type === 'percentage' ? 'Percentage' : 'Amount (₹)'}
-                                                </label>
-                                                <input type="number" min="0"
-                                                  value={waiverForm.waiver_value}
-                                                  onChange={e => setWaiverForm(f => ({ ...f, waiver_value: e.target.value }))}
-                                                  placeholder={waiverForm.waiver_type === 'percentage' ? 'e.g. 50' : 'e.g. 500'}
-                                                  className="w-full mt-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
-                                              </div>
-                                            )}
-                                          </div>
-                                          <div>
-                                            <label className="text-xs font-medium text-gray-600">Fee Entry</label>
-                                            <select
-                                              value={selectedEntry?.id ?? ''}
-                                              onChange={e => {
-                                                const entry = row.open_entries.find(x => String(x.id) === e.target.value)
-                                                if (entry) setSelectedEntry(entry)
-                                              }}
-                                              className="w-full mt-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm">
-                                              {row.open_entries.map(e => (
-                                                <option key={e.id} value={e.id}>{e.category_name} · {e.period_label} · {fmt(e.balance)}</option>
-                                              ))}
-                                            </select>
-                                          </div>
-                                          <div>
-                                            <label className="text-xs font-medium text-gray-600">Reason (required)</label>
-                                            <input type="text"
-                                              value={waiverForm.reason}
-                                              onChange={e => setWaiverForm(f => ({ ...f, reason: e.target.value }))}
-                                              placeholder="e.g. Financial hardship · Merit waiver · Staff ward"
-                                              className="w-full mt-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
-                                          </div>
-                                          <div>
-                                            <label className="text-xs font-medium text-gray-600">Granted By</label>
-                                            <input type="text"
-                                              value={waiverForm.granted_by_name}
-                                              onChange={e => setWaiverForm(f => ({ ...f, granted_by_name: e.target.value }))}
-                                              className="w-full mt-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
-                                          </div>
-                                          <div className="flex gap-2 pt-1">
-                                            <button
-                                              onClick={submitWaiver}
-                                              disabled={waiverLoading || !waiverForm.reason.trim() || (waiverForm.waiver_type !== 'full' && !waiverForm.waiver_value)}
-                                              className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-50">
-                                              {waiverLoading ? 'Saving…' : 'Confirm Waiver'}
-                                            </button>
-                                            <button onClick={() => setShowWaiver(false)}
-                                              className="text-sm text-gray-500 px-3 py-2 hover:text-gray-700">Cancel</button>
-                                          </div>
-                                        </div>
-                                      )}
                                     </>
                                   )}
                                 </div>
@@ -4770,6 +4705,162 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   : <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>Confirm & Record</>
                 }
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Grant Waiver Modal ══════════════════════════════════════════════════ */}
+      {showWaiver && selectedEntry && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={() => setShowWaiver(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden"
+            onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
+            <div className="bg-gradient-to-r from-purple-600 to-purple-700 px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-white font-bold text-base">Grant Fee Waiver</h3>
+                  <p className="text-purple-200 text-xs mt-0.5">{selectedEntry.student_name} · {selectedEntry.grade}{selectedEntry.section}</p>
+                </div>
+                <button onClick={() => setShowWaiver(false)} className="text-purple-200 hover:text-white">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Fee entry selector */}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Fee Entry to Waive</label>
+                <select
+                  value={selectedEntry.id}
+                  onChange={e => {
+                    const allEntries = studentRows.find(r => r.student_id === selectedEntry.student_id)?.open_entries ?? []
+                    const entry = allEntries.find(x => String(x.id) === e.target.value)
+                    if (entry) setSelectedEntry(entry)
+                  }}
+                  className="w-full mt-1.5 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400">
+                  {(studentRows.find(r => r.student_id === selectedEntry.student_id)?.open_entries ?? [selectedEntry]).map(e => (
+                    <option key={e.id} value={e.id}>{e.category_name} · {e.period_label} · {fmt(e.balance)}</option>
+                  ))}
+                </select>
+                <div className="mt-2 flex items-center gap-3 bg-purple-50 rounded-lg px-3 py-2">
+                  <span className="text-xs text-purple-600 font-medium">Outstanding on this entry</span>
+                  <span className="ml-auto text-sm font-bold text-purple-800">{fmt(selectedEntry.balance)}</span>
+                </div>
+              </div>
+
+              {/* Waiver type */}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Waiver Type</label>
+                <div className="grid grid-cols-3 gap-2 mt-1.5">
+                  {[
+                    { value: 'percentage', label: 'Percentage', icon: '%' },
+                    { value: 'fixed',      label: 'Fixed ₹',    icon: '₹' },
+                    { value: 'full',       label: 'Full Waiver', icon: '✓' },
+                  ].map(opt => (
+                    <button key={opt.value}
+                      onClick={() => setWaiverForm(f => ({ ...f, waiver_type: opt.value, waiver_value: '' }))}
+                      className={`flex flex-col items-center gap-1 py-2.5 rounded-xl border-2 text-sm font-medium transition-all ${
+                        waiverForm.waiver_type === opt.value
+                          ? 'border-purple-500 bg-purple-50 text-purple-700'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      }`}>
+                      <span className="text-base font-bold">{opt.icon}</span>
+                      <span className="text-xs">{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Value input */}
+              {waiverForm.waiver_type !== 'full' && (
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                    {waiverForm.waiver_type === 'percentage' ? 'Percentage to Waive' : 'Amount to Waive (₹)'}
+                  </label>
+                  <div className="relative mt-1.5">
+                    <span className="absolute left-3 top-2.5 text-gray-400 text-sm font-medium">
+                      {waiverForm.waiver_type === 'percentage' ? '%' : '₹'}
+                    </span>
+                    <input type="number" min="0"
+                      max={waiverForm.waiver_type === 'percentage' ? 100 : undefined}
+                      value={waiverForm.waiver_value}
+                      onChange={e => setWaiverForm(f => ({ ...f, waiver_value: e.target.value }))}
+                      placeholder={waiverForm.waiver_type === 'percentage' ? '50' : String(selectedEntry.balance)}
+                      className="w-full pl-8 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                  </div>
+                  {/* Preview */}
+                  {waiverForm.waiver_value && (
+                    <div className="mt-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs text-green-700">
+                      Waiver amount:{' '}
+                      <strong>
+                        {fmt(
+                          waiverForm.waiver_type === 'percentage'
+                            ? (Number(selectedEntry.balance) * (parseFloat(waiverForm.waiver_value) || 0)) / 100
+                            : parseFloat(waiverForm.waiver_value) || 0
+                        )}
+                      </strong>
+                      {' · '}Remaining balance:{' '}
+                      <strong>
+                        {fmt(Math.max(0,
+                          waiverForm.waiver_type === 'percentage'
+                            ? Number(selectedEntry.balance) * (1 - (parseFloat(waiverForm.waiver_value) || 0) / 100)
+                            : Number(selectedEntry.balance) - (parseFloat(waiverForm.waiver_value) || 0)
+                        ))}
+                      </strong>
+                    </div>
+                  )}
+                  {waiverForm.waiver_type === 'full' && (
+                    <div className="mt-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs text-green-700">
+                      Full balance of <strong>{fmt(selectedEntry.balance)}</strong> will be waived.
+                    </div>
+                  )}
+                </div>
+              )}
+              {waiverForm.waiver_type === 'full' && (
+                <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs text-green-700">
+                  Full balance of <strong>{fmt(selectedEntry.balance)}</strong> will be waived.
+                </div>
+              )}
+
+              {/* Reason */}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Reason <span className="text-red-500">*</span></label>
+                <input type="text"
+                  value={waiverForm.reason}
+                  onChange={e => setWaiverForm(f => ({ ...f, reason: e.target.value }))}
+                  placeholder="e.g. Financial hardship · Merit waiver · Staff ward"
+                  className="w-full mt-1.5 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+              </div>
+
+              {/* Granted by */}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Granted By</label>
+                <input type="text"
+                  value={waiverForm.granted_by_name}
+                  onChange={e => setWaiverForm(f => ({ ...f, granted_by_name: e.target.value }))}
+                  className="w-full mt-1.5 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-1">
+                <button onClick={() => setShowWaiver(false)}
+                  className="flex-1 border border-gray-200 text-gray-600 py-3 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-colors">
+                  Cancel
+                </button>
+                <button
+                  onClick={submitWaiver}
+                  disabled={waiverLoading || !waiverForm.reason.trim() || (waiverForm.waiver_type !== 'full' && !waiverForm.waiver_value)}
+                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-purple-200">
+                  {waiverLoading
+                    ? <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Saving…</>
+                    : <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>Confirm Waiver</>
+                  }
+                </button>
+              </div>
             </div>
           </div>
         </div>
