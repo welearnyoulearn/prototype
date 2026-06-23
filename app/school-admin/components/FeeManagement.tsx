@@ -973,7 +973,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     const d = await r.json()
     setStructureMsg(r.ok ? `✓ Generated ${d.created} entries (${d.skipped} skipped)` : d.error || 'Failed')
     setGeneratingLedger(false)
-    loadStats()
+    loadStats(); loadSetup()
   }
 
   // Generate bills only for students who have no ledger rows yet (safe after lock)
@@ -990,7 +990,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
         : '✓ All active students already billed — no new entries needed'
       : d.error || 'Failed')
     setGeneratingLedger(false)
-    loadStats()
+    loadStats(); loadSetup()
   }
 
   // ── Fee Plan helpers ──────────────────────────────────────────────────────────
