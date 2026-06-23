@@ -9,7 +9,7 @@ import { ALL_FEATURES, CATEGORY_ORDER } from '@/lib/features'
 type SchoolData = {
   id: number; name: string; type: string; city: string; country: string
   phone: string; email: string; address: string; logo_url: string
-  school_code: string; grading_scheme: GradeRow[]; board?: string; upi_id?: string
+  school_code: string; grading_scheme: GradeRow[]; board?: string
 }
 
 type GradeRow = { grade: string; min: number; max: number }
@@ -91,7 +91,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const [error, setError]     = useState('')
   const [profile, setProfile] = useState({
     name: '', type: '', city: '', country: '', phone: '', email: '',
-    address: '', logo_url: '', board: '', upi_id: '',
+    address: '', logo_url: '', board: '',
   })
   const [scheme, setScheme] = useState<GradeRow[]>(DEFAULT_GRADING)
 
@@ -146,7 +146,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
         name: d.name ?? '', type: d.type ?? '', city: d.city ?? '',
         country: d.country ?? '', phone: d.phone ?? '', email: d.email ?? '',
         address: d.address ?? '', logo_url: d.logo_url ?? '',
-        board: d.board ?? '', upi_id: d.upi_id ?? '',
+        board: d.board ?? '',
       })
       if (d.grading_scheme?.length) setScheme(d.grading_scheme)
     } finally { setLoading(false) }
@@ -199,7 +199,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     try {
       const r = await fetch(`/api/schools/${schoolId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...profile, board: profile.board || null, upi_id: profile.upi_id || null }),
+        body: JSON.stringify({ ...profile, board: profile.board || null }),
       })
       if (!r.ok) throw new Error((await r.json()).error)
       setSaved(true); setTimeout(() => setSaved(false), 3000)
@@ -511,19 +511,6 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                   <option value="">— Select Board —</option>
                   {BOARDS.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
                 </select>
-              </div>
-            </div>
-
-            {/* UPI */}
-            <div className="border-t border-gray-100 pt-5 space-y-3">
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700">Fee Payment — UPI ID</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Parents scan a QR code to pay fees online</p>
-              </div>
-              <div className="max-w-sm">
-                <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
-                  placeholder="schoolname@upi" value={profile.upi_id}
-                  onChange={e => setProfile(f => ({ ...f, upi_id: e.target.value.trim() }))} />
               </div>
             </div>
 
