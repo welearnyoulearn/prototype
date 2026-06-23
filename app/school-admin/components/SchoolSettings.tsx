@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { getBoardLabels } from '@/lib/board-syllabus/data'
 import { ALL_FEATURES, CATEGORY_ORDER } from '@/lib/features'
+import { useFeature } from '@/app/school-admin/features-context'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -392,6 +393,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     { key: 'danger',         label: 'Danger Zone',      icon: '⚠️' },
   ]
 
+  const hasExamSchedule = useFeature('exam-schedule')
+
   if (loading) return <div className="text-center py-12 text-gray-400 text-sm">Loading settings…</div>
 
   return (
@@ -514,47 +517,49 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               </div>
             </div>
 
-            {/* Grading scheme */}
-            <div className="border-t border-gray-100 pt-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700">Grading Scheme</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Used for exam results and report cards</p>
+            {/* Grading scheme — only when exam-schedule feature is enabled */}
+            {hasExamSchedule && (
+              <div className="border-t border-gray-100 pt-5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-700">Grading Scheme</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">Used for exam results and report cards</p>
+                  </div>
+                  <button type="button" onClick={() => setScheme(DEFAULT_GRADING)}
+                    className="text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-3 py-1.5 rounded-lg">
+                    Reset to Default
+                  </button>
                 </div>
-                <button type="button" onClick={() => setScheme(DEFAULT_GRADING)}
-                  className="text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-3 py-1.5 rounded-lg">
-                  Reset to Default
+                <div className="border border-gray-100 rounded-xl overflow-hidden">
+                  <div className="grid grid-cols-4 bg-gray-50 border-b border-gray-100">
+                    {['Grade Label','Min %','Max %',''].map(h => (
+                      <div key={h} className="px-4 py-2.5 text-xs font-semibold text-gray-500">{h}</div>
+                    ))}
+                  </div>
+                  <div className="divide-y divide-gray-50">
+                    {scheme.map((row, idx) => (
+                      <div key={idx} className="grid grid-cols-4 items-center px-4 py-2 gap-2">
+                        <input className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-20"
+                          value={row.grade} maxLength={4} placeholder="A+"
+                          onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, grade: e.target.value } : r))} />
+                        <input type="number" min={0} max={100}
+                          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-24"
+                          value={row.min} onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, min: Number(e.target.value) } : r))} />
+                        <input type="number" min={0} max={100}
+                          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-24"
+                          value={row.max} onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, max: Number(e.target.value) } : r))} />
+                        <button type="button" onClick={() => setScheme(prev => prev.filter((_, i) => i !== idx))}
+                          className="text-red-400 hover:text-red-600 text-xs justify-self-start">Remove</button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <button type="button" onClick={() => setScheme(prev => [...prev, { grade: '', min: 0, max: 0 }])}
+                  className="text-sm text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-4 py-2 rounded-lg">
+                  + Add Grade
                 </button>
               </div>
-              <div className="border border-gray-100 rounded-xl overflow-hidden">
-                <div className="grid grid-cols-4 bg-gray-50 border-b border-gray-100">
-                  {['Grade Label','Min %','Max %',''].map(h => (
-                    <div key={h} className="px-4 py-2.5 text-xs font-semibold text-gray-500">{h}</div>
-                  ))}
-                </div>
-                <div className="divide-y divide-gray-50">
-                  {scheme.map((row, idx) => (
-                    <div key={idx} className="grid grid-cols-4 items-center px-4 py-2 gap-2">
-                      <input className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-20"
-                        value={row.grade} maxLength={4} placeholder="A+"
-                        onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, grade: e.target.value } : r))} />
-                      <input type="number" min={0} max={100}
-                        className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-24"
-                        value={row.min} onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, min: Number(e.target.value) } : r))} />
-                      <input type="number" min={0} max={100}
-                        className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-24"
-                        value={row.max} onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, max: Number(e.target.value) } : r))} />
-                      <button type="button" onClick={() => setScheme(prev => prev.filter((_, i) => i !== idx))}
-                        className="text-red-400 hover:text-red-600 text-xs justify-self-start">Remove</button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <button type="button" onClick={() => setScheme(prev => [...prev, { grade: '', min: 0, max: 0 }])}
-                className="text-sm text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-4 py-2 rounded-lg">
-                + Add Grade
-              </button>
-            </div>
+            )}
 
             {data?.school_code && (
               <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
