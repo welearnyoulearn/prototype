@@ -30,7 +30,14 @@ export async function POST(req: NextRequest) {
       [session.userId, session.schoolId]
     )
 
-    const supportEmail = process.env.SUPPORT_EMAIL || 'support@welearnyoulearn.com'
+    // Send to all active platform admins, fallback to env var
+    const { rows: platformAdmins } = await pool.query(
+      `SELECT email FROM users WHERE role = 'platform_admin' AND status = 'active'`
+    )
+    const recipients: string[] = platformAdmins.length > 0
+      ? platformAdmins.map((r: { email: string }) => r.email)
+      : [process.env.SUPPORT_EMAIL || 'support@welearnyoulearn.com']
+
     const subject = type === 'export'
       ? `Data Export Request — ${school?.name ?? 'Unknown School'}`
       : `Account Closure Request — ${school?.name ?? 'Unknown School'}`
@@ -59,7 +66,7 @@ export async function POST(req: NextRequest) {
           <p style="color:#dc2626">⚠ Review this request carefully before deactivating the account. Contact the school first.</p>
         </div>`
 
-    await sendMail(supportEmail, subject, body)
+    await Promise.all(recipients.map(email => sendMail(email, subject, body)))
 
     return NextResponse.json({ success: true })
   } catch (err: unknown) {

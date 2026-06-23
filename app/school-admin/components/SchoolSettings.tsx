@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { getBoardLabels } from '@/lib/board-syllabus/data'
 import { ALL_FEATURES, CATEGORY_ORDER } from '@/lib/features'
 import { useFeature } from '@/app/school-admin/features-context'
@@ -9,7 +10,7 @@ import { useFeature } from '@/app/school-admin/features-context'
 
 type SchoolData = {
   id: number; name: string; type: string; city: string; country: string
-  phone: string; email: string; address: string; logo_url: string
+  phone: string; email: string; address: string
   school_code: string; grading_scheme: GradeRow[]; board?: string
 }
 
@@ -82,6 +83,7 @@ function suggestNextYear(years: AcademicYear[]): { label: string; start_date: st
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function SchoolSettings({ schoolId }: { schoolId: number }) {
+  const router = useRouter()
   const [tab, setTab] = useState<SettingsTab>('profile')
 
   // ── School profile ─────────────────────────────────────────────────────────
@@ -92,7 +94,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const [error, setError]     = useState('')
   const [profile, setProfile] = useState({
     name: '', type: '', city: '', country: '', phone: '', email: '',
-    address: '', logo_url: '', board: '',
+    address: '', board: '',
   })
   const [scheme, setScheme] = useState<GradeRow[]>(DEFAULT_GRADING)
 
@@ -146,7 +148,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       setProfile({
         name: d.name ?? '', type: d.type ?? '', city: d.city ?? '',
         country: d.country ?? '', phone: d.phone ?? '', email: d.email ?? '',
-        address: d.address ?? '', logo_url: d.logo_url ?? '',
+        address: d.address ?? '',
         board: d.board ?? '',
       })
       if (d.grading_scheme?.length) setScheme(d.grading_scheme)
@@ -332,8 +334,11 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       })
       const d = await r.json()
       if (r.ok) {
-        setPwdMsg({ text: '✓ Password changed successfully', ok: true })
-        setCurPwd(''); setNewPwd(''); setConfirmPwd('')
+        setPwdMsg({ text: '✓ Password changed — logging you out…', ok: true })
+        setTimeout(async () => {
+          await fetch('/api/auth/logout', { method: 'POST' })
+          router.push('/login')
+        }, 1500)
       } else {
         setPwdMsg({ text: d.error || 'Failed to change password', ok: false })
       }
@@ -430,25 +435,6 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       {tab === 'profile' && (
         <div className="space-y-4">
           <form onSubmit={saveProfile} className="bg-white border border-gray-100 rounded-xl shadow-sm p-6 space-y-5">
-
-            {profile.logo_url && (
-              <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl border border-gray-100">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={profile.logo_url} alt="Logo" className="h-14 w-14 object-contain rounded-lg border border-gray-200 bg-white p-1" />
-                <div>
-                  <p className="text-xs font-semibold text-gray-600">Current Logo</p>
-                  <p className="text-xs text-gray-400 mt-0.5 break-all max-w-xs">{profile.logo_url}</p>
-                </div>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Logo URL</label>
-              <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="https://… (Cloudinary or any public image URL)"
-                value={profile.logo_url} onChange={e => setProfile(f => ({ ...f, logo_url: e.target.value }))} />
-              <p className="text-xs text-gray-400 mt-1">Upload via Cloudinary and paste the URL here</p>
-            </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
