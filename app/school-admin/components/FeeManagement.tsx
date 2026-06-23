@@ -380,6 +380,7 @@ export default function FeeManagement({
   const [counterPayments, setCounterPayments]   = useState<PaymentRecord[]>([])
   const [counterPmtLoading, setCounterPmtLoading] = useState(false)
   const [showCounterHistory, setShowCounterHistory] = useState(false)
+  const [showPassbookModal, setShowPassbookModal] = useState(false)
   // Day close
   type DayCloseData = {
     date: string
@@ -3183,9 +3184,13 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                 {/* Recent payments — view / cancel / correct */}
                                 <div className="border-t border-gray-100 pt-3">
                                   {!showCounterHistory ? (
-                                    <button onClick={() => loadCounterPayments(row.student_id)}
-                                      className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
-                                      View payments &amp; corrections →
+                                    <button
+                                      onClick={() => { loadPassbook(row.student_id); setShowPassbookModal(true); setPbSection('payments') }}
+                                      className="w-full flex items-center justify-center gap-2 text-sm font-medium text-indigo-600 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 rounded-lg px-4 py-2.5 transition-colors">
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                                      </svg>
+                                      View Payments &amp; Corrections
                                     </button>
                                   ) : (
                                     <div className="space-y-2">
@@ -4356,6 +4361,244 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       )}
 
 
+
+      {/* ══ Passbook Modal ══════════════════════════════════════════════════════ */}
+      {showPassbookModal && (
+        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4"
+          onClick={() => { setShowPassbookModal(false); setPbData(null); setCancelPmtId(null) }}>
+          <div className="bg-white w-full sm:rounded-2xl sm:max-w-2xl max-h-[92vh] flex flex-col shadow-2xl"
+            onClick={e => e.stopPropagation()}>
+
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
+              <div>
+                {pbData ? (
+                  <>
+                    <p className="text-base font-bold text-gray-900">{pbData.student.name}</p>
+                    <p className="text-xs text-gray-400">
+                      Gr.{pbData.student.grade}{pbData.student.section}
+                      {pbData.student.roll_number ? ` · Roll #${pbData.student.roll_number}` : ''}
+                      {pbData.student.parent_name ? ` · Parent: ${pbData.student.parent_name}` : ''}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-base font-bold text-gray-900">Payment History</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {pbData && (
+                  <button onClick={printPassbookStatement}
+                    className="text-xs border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">
+                    🖨 Statement
+                  </button>
+                )}
+                <button onClick={() => { setShowPassbookModal(false); setPbData(null); setCancelPmtId(null) }}
+                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+              </div>
+            </div>
+
+            {/* Summary bar */}
+            {pbData && (
+              <div className="grid grid-cols-4 gap-3 px-5 py-3 bg-gray-50 border-b border-gray-100 flex-shrink-0">
+                {[
+                  { l: 'Total Billed', v: pbData.summary.total_billed, c: 'text-gray-800' },
+                  { l: 'Paid',         v: pbData.summary.total_paid,    c: 'text-green-700' },
+                  { l: 'Waived',       v: pbData.summary.total_waived,  c: 'text-purple-700' },
+                  { l: 'Outstanding',  v: pbData.summary.outstanding,   c: 'text-red-600' },
+                ].map(s => (
+                  <div key={s.l} className="text-center">
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">{s.l}</p>
+                    <p className={`text-base font-bold mt-0.5 ${s.c}`}>{fmt(s.v)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Section tabs */}
+            {pbData && (
+              <div className="flex gap-1 px-5 py-2 border-b border-gray-100 bg-white flex-shrink-0">
+                {([
+                  { key: 'bills',    label: `Bills (${pbData.ledger.length})` },
+                  { key: 'payments', label: `Payments (${pbData.payments.length})` },
+                  { key: 'waivers',  label: `Waivers (${pbData.waivers.length})` },
+                  { key: 'timeline', label: 'Timeline' },
+                ] as const).map(v => (
+                  <button key={v.key} onClick={() => setPbSection(v.key)}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                      pbSection === v.key ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-100'
+                    }`}>
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Scrollable body */}
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+              {pbLoading ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3">
+                  <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-sm text-gray-400">Loading payment history…</p>
+                </div>
+              ) : pbErr ? (
+                <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-600">{pbErr}</div>
+              ) : pbData ? (
+                <>
+                  {/* Bills */}
+                  {pbSection === 'bills' && (
+                    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                      {pbData.ledger.length === 0
+                        ? <p className="text-sm text-gray-400 p-8 text-center">No bills for {academicYear}.</p>
+                        : (
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50 border-b border-gray-100">
+                              <tr>
+                                <th className="text-left px-4 py-2 font-semibold text-gray-500 text-xs">Fee</th>
+                                <th className="text-right px-4 py-2 font-semibold text-gray-500 text-xs">Billed</th>
+                                <th className="text-right px-4 py-2 font-semibold text-gray-500 text-xs">Paid</th>
+                                <th className="text-left px-4 py-2 font-semibold text-gray-500 text-xs">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {pbData.ledger.map(e => (
+                                <tr key={e.id} className="hover:bg-gray-50">
+                                  <td className="px-4 py-2.5 text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></td>
+                                  <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
+                                  <td className="px-4 py-2.5 text-right text-green-600">{fmt(e.amount_paid)}</td>
+                                  <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full capitalize font-medium ${STATUS_COLORS[e.status as keyof typeof STATUS_COLORS] || ''}`}>{e.status}</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                    </div>
+                  )}
+
+                  {/* Payments */}
+                  {pbSection === 'payments' && (
+                    <div className="space-y-3">
+                      {pbData.payments.length === 0
+                        ? <p className="text-sm text-gray-400 text-center py-8">No payments recorded.</p>
+                        : pbData.payments.map(p => {
+                          const isCancelled = p.payment_status === 'cancelled'
+                          return (
+                            <Fragment key={p.id}>
+                              <div className={`rounded-xl border px-4 py-3 ${isCancelled ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-gray-100'}`}>
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-mono text-xs font-semibold text-indigo-600">{p.receipt_number}</span>
+                                      {isCancelled && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Cancelled</span>}
+                                    </div>
+                                    <p className={`text-lg font-bold mt-0.5 ${isCancelled ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{fmt(p.amount)}</p>
+                                    <p className="text-xs text-gray-400 mt-0.5">
+                                      {fmtDate(p.paid_date)} · <span className="capitalize">{p.payment_mode}</span>
+                                      {p.collected_by_name ? ` · ${p.collected_by_name}` : ''}
+                                      {p.transaction_ref ? ` · Ref: ${p.transaction_ref}` : ''}
+                                    </p>
+                                    {p.notes && <p className="text-xs text-gray-400 mt-0.5 italic">{p.notes}</p>}
+                                  </div>
+                                  {!isCancelled && p.payment_status === 'completed' && (
+                                    <div className="flex gap-2 flex-shrink-0">
+                                      <button onClick={() => printPassbookReceipt(p)}
+                                        className="text-xs border border-gray-200 text-gray-500 px-2.5 py-1 rounded-lg hover:bg-gray-50">🖨</button>
+                                      {cancelPmtId === p.id
+                                        ? <button onClick={() => setCancelPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600 px-2">Close</button>
+                                        : <button onClick={() => openCancel(p.id)}
+                                            className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
+                                      }
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Inline cancel/correct form */}
+                                {cancelPmtId === p.id && (
+                                  <div className="mt-3 pt-3 border-t border-amber-100 bg-amber-50 -mx-4 -mb-3 px-4 pb-3 rounded-b-xl space-y-2">
+                                    <div className="flex gap-2">
+                                      <button onClick={() => setCancelMode('cancel')}
+                                        className={`flex-1 text-xs py-1.5 rounded-lg border transition-colors font-medium ${cancelMode === 'cancel' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200'}`}>Cancel Payment</button>
+                                      <button onClick={() => setCancelMode('correct')}
+                                        className={`flex-1 text-xs py-1.5 rounded-lg border transition-colors font-medium ${cancelMode === 'correct' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>Correct Amount</button>
+                                    </div>
+                                    <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                                      {cancelMode === 'cancel'
+                                        ? <>⚠ Reverses <strong>{fmt(p.amount)}</strong> from the ledger. Receipt stays on record marked cancelled.</>
+                                        : <>⚠ Cancels {p.receipt_number} and records a new payment with the corrected amount.</>}
+                                    </div>
+                                    {cancelMode === 'correct' && (
+                                      <input type="number" min="0" value={correctAmount} onChange={e => setCorrectAmount(e.target.value)}
+                                        placeholder="Corrected amount (₹)"
+                                        className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                    )}
+                                    <input type="text" value={cancelReason} onChange={e => setCancelReason(e.target.value)}
+                                      placeholder="Reason (required)" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                    {cancelMsg && <p className={`text-xs font-medium ${cancelMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{cancelMsg}</p>}
+                                    <div className="flex gap-2">
+                                      <button onClick={() => submitCancelCorrect('passbook')} disabled={cancelBusy || !cancelReason.trim()}
+                                        className={`text-sm text-white px-4 py-1.5 rounded-lg font-medium disabled:opacity-50 ${cancelMode === 'cancel' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                                        {cancelBusy ? 'Working…' : cancelMode === 'cancel' ? `Confirm Cancel` : 'Confirm Correction'}
+                                      </button>
+                                      <button onClick={() => setCancelPmtId(null)} className="text-sm text-gray-500 px-3 py-1.5">Close</button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </Fragment>
+                          )
+                        })
+                      }
+                    </div>
+                  )}
+
+                  {/* Waivers */}
+                  {pbSection === 'waivers' && (
+                    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                      {pbData.waivers.length === 0
+                        ? <p className="text-sm text-gray-400 p-8 text-center">No waivers granted.</p>
+                        : <div className="divide-y divide-gray-50">
+                            {pbData.waivers.map(w => (
+                              <div key={w.id} className="px-4 py-3 flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm font-medium text-gray-800">{(w as { fee_head_name?: string }).fee_head_name || 'Fee'} · {(w as { period_label?: string }).period_label || ''}</p>
+                                  <p className="text-xs text-gray-400">{(w as { reason?: string }).reason || '—'} · {(w as { granted_by_name?: string }).granted_by_name || ''}</p>
+                                </div>
+                                <p className="text-sm font-bold text-purple-700">{fmt((w as { waiver_amount?: number }).waiver_amount || 0)}</p>
+                              </div>
+                            ))}
+                          </div>
+                      }
+                    </div>
+                  )}
+
+                  {/* Timeline */}
+                  {pbSection === 'timeline' && (
+                    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                      {pbData.timeline.length === 0
+                        ? <p className="text-sm text-gray-400 p-8 text-center">No activity recorded.</p>
+                        : <div className="divide-y divide-gray-50">
+                            {pbData.timeline.map((t, i) => (
+                              <div key={i} className="px-4 py-3 flex items-start gap-3">
+                                <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${(t as { type?: string }).type === 'payment' ? 'bg-green-500' : (t as { type?: string }).type === 'waiver' ? 'bg-purple-500' : 'bg-gray-300'}`} />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm text-gray-700">{(t as { description?: string }).description || '—'}</p>
+                                  <p className="text-xs text-gray-400 mt-0.5">{new Date((t as { date?: string }).date || '').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                                </div>
+                                <div className="text-right flex-shrink-0">
+                                  {(t as { credit?: number }).credit > 0 && <p className="text-sm font-semibold text-green-600">{fmt((t as { credit?: number }).credit || 0)}</p>}
+                                  {(t as { debit?: number }).debit > 0 && <p className="text-sm font-semibold text-red-600">{fmt((t as { debit?: number }).debit || 0)}</p>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                      }
+                    </div>
+                  )}
+                </>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ══ Payment Confirmation Modal ══════════════════════════════════════════ */}
       {showPayConfirm && openStudent && (
