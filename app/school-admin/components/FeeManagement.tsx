@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useFeature } from '../features-context'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -266,6 +267,8 @@ export default function FeeManagement({
 }) {
   type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'pending' | 'students' | 'reports' | 'yearend'
   const [activeTab, setActiveTab] = useState<Tab>('overview')
+
+  const hasOnlinePayments = useFeature('online-payments')
 
   // Shared
   const [academicYear, setAcademicYear]   = useState('')
@@ -2273,28 +2276,30 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             )
           })()}
 
-          {/* ── UPI ID for online payments ── */}
-          <div className="bg-white rounded-xl border border-gray-100 p-4">
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-sm font-semibold text-gray-700">School UPI ID — for online fee payments</p>
-              {upiId && <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">Configured</span>}
-            </div>
-            <p className="text-xs text-gray-400 mb-3">
-              Parents pay to this UPI ID via the QR code in their portal. Without it, online payment is disabled.
-            </p>
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative flex-1 min-w-56">
-                <input type="text" value={upiId} onChange={e => { setUpiId(e.target.value); setUpiMsg('') }}
-                  placeholder="e.g. school@okhdfcbank"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          {/* ── UPI ID — only when online-payments feature is enabled ── */}
+          {hasOnlinePayments && (
+            <div className="bg-white rounded-xl border border-gray-100 p-4">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-sm font-semibold text-gray-700">School UPI ID — for online fee payments</p>
+                {upiId && <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">Configured</span>}
               </div>
-              <button onClick={saveUpiId} disabled={upiSaving}
-                className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
-                {upiSaving ? 'Saving…' : 'Save UPI ID'}
-              </button>
-              {upiMsg && <span className={`text-sm ${upiMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{upiMsg}</span>}
+              <p className="text-xs text-gray-400 mb-3">
+                Parents pay to this UPI ID via the QR code in their portal. Without it, online payment is disabled.
+              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="relative flex-1 min-w-56">
+                  <input type="text" value={upiId} onChange={e => { setUpiId(e.target.value); setUpiMsg('') }}
+                    placeholder="e.g. school@okhdfcbank"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <button onClick={saveUpiId} disabled={upiSaving}
+                  className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
+                  {upiSaving ? 'Saving…' : 'Save UPI ID'}
+                </button>
+                {upiMsg && <span className={`text-sm ${upiMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{upiMsg}</span>}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* ── Lock banner ── */}
           {structureLock ? (
@@ -2952,8 +2957,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       {activeTab === 'collect' && (
         <div className="space-y-4">
 
-          {/* Online payments alert banner */}
-          {pendingPayments.length > 0 && collectionView !== 'online' && (
+          {/* Online payments alert banner — only when feature enabled */}
+          {hasOnlinePayments && pendingPayments.length > 0 && collectionView !== 'online' && (
             <button onClick={() => setCollectionView('online')}
               className="w-full flex items-center justify-between bg-red-50 border border-red-200 rounded-xl px-4 py-3 hover:bg-red-100 transition-colors">
               <span className="flex items-center gap-2 text-sm font-medium text-red-700">
@@ -2967,11 +2972,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           {/* Sub-view switcher */}
           <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
             {([
-              { key: 'counter',    label: 'Daily Counter' },
-              { key: 'online',     label: pendingPayments.length > 0 ? `Online (${pendingPayments.length})` : 'Online' },
-              { key: 'defaulters', label: 'Defaulters' },
-              { key: 'dayclose',   label: 'Day Close' },
-            ] as const).map(v => (
+              { key: 'counter',    label: 'Daily Counter', show: true },
+              { key: 'online',     label: pendingPayments.length > 0 ? `Online (${pendingPayments.length})` : 'Online', show: hasOnlinePayments },
+              { key: 'defaulters', label: 'Defaulters',    show: true },
+              { key: 'dayclose',   label: 'Day Close',     show: true },
+            ] as const).filter(v => v.show).map(v => (
               <button key={v.key} onClick={() => setCollectionView(v.key)}
                 className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
                   collectionView === v.key ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
@@ -3318,7 +3323,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           )}
 
           {/* ─── ONLINE PAYMENTS ─── */}
-          {collectionView === 'online' && (
+          {hasOnlinePayments && collectionView === 'online' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
