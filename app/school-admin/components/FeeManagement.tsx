@@ -353,6 +353,7 @@ export default function FeeManagement({
   const [showWaiver, setShowWaiver]         = useState(false)
   const [waiverForm, setWaiverForm]         = useState({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' })
   const [waiverLoading, setWaiverLoading]   = useState(false)
+  const [waiverError, setWaiverError]       = useState('')
   const [showPayConfirm, setShowPayConfirm] = useState(false)
 
   // WhatsApp reminder state
@@ -903,22 +904,28 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
   async function submitWaiver() {
     if (!selectedEntry) return
-    setWaiverLoading(true)
-    const r = await fetch('/api/fees/waivers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        school_id: schoolId, student_id: selectedEntry.student_id,
-        ledger_id: selectedEntry.id, waiver_type: waiverForm.waiver_type,
-        waiver_value: parseFloat(waiverForm.waiver_value) || null,
-        reason: waiverForm.reason, granted_by_name: waiverForm.granted_by_name || null,
-      }),
-    })
-    if (r.ok) {
-      setShowWaiver(false); setSelectedEntry(null)
-      setCollectSearch(''); setCollectEntries([])
-      loadStats()
-      if (activeTab === 'ledger') loadLedger()
+    setWaiverLoading(true); setWaiverError('')
+    try {
+      const r = await fetch('/api/fees/waivers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId, student_id: selectedEntry.student_id,
+          ledger_id: selectedEntry.id, waiver_type: waiverForm.waiver_type,
+          waiver_value: parseFloat(waiverForm.waiver_value) || null,
+          reason: waiverForm.reason, granted_by_name: waiverForm.granted_by_name || null,
+        }),
+      })
+      if (r.ok) {
+        setShowWaiver(false); setSelectedEntry(null)
+        setCollectSearch(''); setCollectEntries([])
+        loadStats(); loadLedger()
+      } else {
+        const d = await r.json()
+        setWaiverError(d.error || 'Failed to grant waiver')
+      }
+    } catch {
+      setWaiverError('Network error — please try again')
     }
     setWaiverLoading(false)
   }
@@ -3150,7 +3157,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                     Review & Confirm
                                   </button>
                                   <button
-                                    onClick={() => { setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setShowWaiver(true) }}
+                                    onClick={() => { setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
                                     className="px-3 py-2.5 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium whitespace-nowrap">
                                     Grant Waiver
                                   </button>
@@ -3184,7 +3191,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                           Collect All ({fmt(row.outstanding)})
                                         </button>
                                         <button
-                                          onClick={() => { setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setShowWaiver(true) }}
+                                          onClick={() => { setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
                                           className="px-3 py-2 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium">
                                           Grant Waiver
                                         </button>
@@ -4758,7 +4765,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <div className="grid grid-cols-3 gap-2 mt-1.5">
                   {[
                     { value: 'percentage', label: 'Percentage', icon: '%' },
-                    { value: 'fixed',      label: 'Fixed ₹',    icon: '₹' },
+                    { value: 'fixed_amount', label: 'Fixed ₹',  icon: '₹' },
                     { value: 'full',       label: 'Full Waiver', icon: '✓' },
                   ].map(opt => (
                     <button key={opt.value}
@@ -4844,6 +4851,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   onChange={e => setWaiverForm(f => ({ ...f, granted_by_name: e.target.value }))}
                   className="w-full mt-1.5 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
               </div>
+
+              {/* Error */}
+              {waiverError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl">{waiverError}</div>
+              )}
 
               {/* Actions */}
               <div className="flex gap-3 pt-1">
