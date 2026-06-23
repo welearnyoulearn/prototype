@@ -1,11 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, Suspense } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { FeaturesProvider } from './features-context'
 import NotificationBell from '../components/NotificationBell'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 // Always-loaded (small, needed immediately)
 import Overview from './components/Overview'
@@ -212,28 +212,34 @@ const NAV_ITEMS: NavItem[] = [
 ]
 
 
-export default function SchoolAdmin() {
+function SchoolAdmin() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [selectedSchool, setSelectedSchool] = useState<School | null>(null)
   const [tier, setTier] = useState<Tier>('none')
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
-  const [activeNav, setActiveNav] = useState('overview')
-  const [visited, setVisited] = useState<Set<string>>(new Set(['overview']))
+  const initialTab = searchParams.get('tab') || 'overview'
+  const [activeNav, setActiveNav] = useState(initialTab)
+  const [visited, setVisited] = useState<Set<string>>(new Set([initialTab]))
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  function navigateTo(key: string) {
-    setActiveNav(key)
-    setVisited(prev => new Set([...prev, key]))
-    setSidebarOpen(false)
-    if (key === 'staff') setStaffSubTab('directory')
-    if (key === 'students') setStudentsSubTab('list')
-  }
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [staffSubTab, setStaffSubTab] = useState<'directory' | 'onboard'>('directory')
   const [studentsSubTab, setStudentsSubTab] = useState<'list' | 'onboard'>('list')
   const [staffRefreshKey, setStaffRefreshKey] = useState(0)
   const [studentRefreshKey, setStudentRefreshKey] = useState(0)
+
+  const navigateTo = useCallback((key: string) => {
+    setActiveNav(key)
+    setVisited(prev => new Set([...prev, key]))
+    setSidebarOpen(false)
+    if (key === 'staff') setStaffSubTab('directory')
+    if (key === 'students') setStudentsSubTab('list')
+    const params = new URLSearchParams(window.location.search)
+    params.set('tab', key)
+    router.replace(`/school-admin?${params.toString()}`, { scroll: false })
+  }, [router])
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -572,5 +578,13 @@ export default function SchoolAdmin() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function SchoolAdminPage() {
+  return (
+    <Suspense>
+      <SchoolAdmin />
+    </Suspense>
   )
 }
