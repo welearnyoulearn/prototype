@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { getBoardLabels } from '@/lib/board-syllabus/data'
+import { useFeature } from '@/app/school-admin/features-context'
 
 type SchoolData = {
   id: number
@@ -43,7 +44,16 @@ const ROLE_LABELS: Record<string, string> = { school_admin: 'School Admin', prin
 const ROLE_COLORS: Record<string, string> = { school_admin: 'bg-blue-100 text-blue-700', principal: 'bg-purple-100 text-purple-700', vice_principal: 'bg-indigo-100 text-indigo-700' }
 
 export default function SchoolSettings({ schoolId }: { schoolId: number }) {
-  const [tab, setTab]         = useState<'profile' | 'grading' | 'subjects' | 'staff'>('profile')
+  const hasClassMgmt  = useFeature('class-management')
+  const hasTimetable  = useFeature('timetable')
+  const hasExams      = useFeature('exam-schedule')
+
+  // Subjects tab needs class-management OR timetable; Grading needs exams
+  const showSubjects  = hasClassMgmt || hasTimetable
+  const showGrading   = hasExams
+
+  type SettingsTab = 'profile' | 'grading' | 'subjects' | 'staff'
+  const [tab, setTab] = useState<SettingsTab>('profile')
   const [data, setData]       = useState<SchoolData | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
@@ -226,12 +236,27 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit flex-wrap">
-        {([['profile', 'School Profile'], ['grading', 'Grading Scheme'], ['subjects', 'Default Subjects'], ['staff', 'Staff Accounts']] as const).map(([key, label]) => (
-          <button key={key} onClick={() => { setTab(key); setError(''); setStaffError(''); setStaffSuccess('') }}
-            className={`px-5 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === key ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-            {label}
-          </button>
-        ))}
+        {([
+          { key: 'profile',  label: 'School Profile',  enabled: true },
+          { key: 'grading',  label: 'Grading Scheme',  enabled: showGrading },
+          { key: 'subjects', label: 'Default Subjects', enabled: showSubjects },
+          { key: 'staff',    label: 'Staff Accounts',  enabled: true },
+        ] as { key: SettingsTab; label: string; enabled: boolean }[]).map(({ key, label, enabled }) =>
+          enabled ? (
+            <button key={key} onClick={() => { setTab(key); setError(''); setStaffError(''); setStaffSuccess('') }}
+              className={`px-5 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === key ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              {label}
+            </button>
+          ) : (
+            <div key={key} title={`Not available on your current plan`}
+              className="px-5 py-1.5 rounded-md text-sm font-medium text-gray-300 cursor-not-allowed flex items-center gap-1.5 select-none">
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              {label}
+            </div>
+          )
+        )}
       </div>
 
       {(saved || error) && (
@@ -402,7 +427,16 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       )}
 
       {/* ── GRADING SCHEME TAB ─────────────────────────────────────── */}
-      {tab === 'grading' && (
+      {tab === 'grading' && !showGrading && (
+        <div className="bg-gray-50 border border-dashed border-gray-200 rounded-xl py-12 text-center">
+          <svg className="w-8 h-8 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+          <p className="text-gray-500 font-medium">Grading Scheme requires Exam Schedule</p>
+          <p className="text-gray-400 text-sm mt-1">Enable the Exam Schedule feature in your plan to configure grading.</p>
+        </div>
+      )}
+      {tab === 'grading' && showGrading && (
         <form onSubmit={saveGrading} className="bg-white border border-gray-100 rounded-xl shadow-sm p-6 space-y-5">
           <div className="flex items-center justify-between">
             <div>
@@ -477,7 +511,16 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       )}
 
       {/* ── DEFAULT SUBJECTS TAB ───────────────────────────────────── */}
-      {tab === 'subjects' && (
+      {tab === 'subjects' && !showSubjects && (
+        <div className="bg-gray-50 border border-dashed border-gray-200 rounded-xl py-12 text-center">
+          <svg className="w-8 h-8 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+          <p className="text-gray-500 font-medium">Default Subjects requires Class Management or Timetable</p>
+          <p className="text-gray-400 text-sm mt-1">Enable Class Management or Timetable in your plan to configure default subjects.</p>
+        </div>
+      )}
+      {tab === 'subjects' && showSubjects && (
         <div className="space-y-4">
           <div className="flex items-start justify-between gap-4">
             <div>
