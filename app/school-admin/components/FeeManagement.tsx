@@ -3173,10 +3173,87 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                           </div>
                                         </div>
                                       ))}
-                                      <button onClick={() => startCollect(row)}
-                                        className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-semibold mt-1">
-                                        Collect All ({fmt(row.outstanding)})
-                                      </button>
+                                      <div className="flex gap-2 mt-1">
+                                        <button onClick={() => startCollect(row)}
+                                          className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-semibold">
+                                          Collect All ({fmt(row.outstanding)})
+                                        </button>
+                                        <button
+                                          onClick={() => { setSelectedEntry(row.open_entries[0]); setShowWaiver(v => !v); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }) }}
+                                          className="px-3 py-2 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium">
+                                          Grant Waiver
+                                        </button>
+                                      </div>
+
+                                      {/* Waiver form */}
+                                      {showWaiver && selectedEntry?.student_id === row.student_id && (
+                                        <div className="mt-2 p-3 bg-purple-50 border border-purple-200 rounded-lg space-y-2">
+                                          <p className="text-xs font-semibold text-purple-800">Grant Fee Waiver</p>
+                                          <div className="grid grid-cols-2 gap-2">
+                                            <div>
+                                              <label className="text-xs font-medium text-gray-600">Waiver Type</label>
+                                              <select value={waiverForm.waiver_type}
+                                                onChange={e => setWaiverForm(f => ({ ...f, waiver_type: e.target.value }))}
+                                                className="w-full mt-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm">
+                                                <option value="percentage">Percentage (%)</option>
+                                                <option value="fixed">Fixed Amount (₹)</option>
+                                                <option value="full">Full Waiver</option>
+                                              </select>
+                                            </div>
+                                            {waiverForm.waiver_type !== 'full' && (
+                                              <div>
+                                                <label className="text-xs font-medium text-gray-600">
+                                                  {waiverForm.waiver_type === 'percentage' ? 'Percentage' : 'Amount (₹)'}
+                                                </label>
+                                                <input type="number" min="0"
+                                                  value={waiverForm.waiver_value}
+                                                  onChange={e => setWaiverForm(f => ({ ...f, waiver_value: e.target.value }))}
+                                                  placeholder={waiverForm.waiver_type === 'percentage' ? 'e.g. 50' : 'e.g. 500'}
+                                                  className="w-full mt-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+                                              </div>
+                                            )}
+                                          </div>
+                                          <div>
+                                            <label className="text-xs font-medium text-gray-600">Fee Entry</label>
+                                            <select
+                                              value={selectedEntry?.id ?? ''}
+                                              onChange={e => {
+                                                const entry = row.open_entries.find(x => String(x.id) === e.target.value)
+                                                if (entry) setSelectedEntry(entry)
+                                              }}
+                                              className="w-full mt-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm">
+                                              {row.open_entries.map(e => (
+                                                <option key={e.id} value={e.id}>{e.category_name} · {e.period_label} · {fmt(e.balance)}</option>
+                                              ))}
+                                            </select>
+                                          </div>
+                                          <div>
+                                            <label className="text-xs font-medium text-gray-600">Reason (required)</label>
+                                            <input type="text"
+                                              value={waiverForm.reason}
+                                              onChange={e => setWaiverForm(f => ({ ...f, reason: e.target.value }))}
+                                              placeholder="e.g. Financial hardship · Merit waiver · Staff ward"
+                                              className="w-full mt-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+                                          </div>
+                                          <div>
+                                            <label className="text-xs font-medium text-gray-600">Granted By</label>
+                                            <input type="text"
+                                              value={waiverForm.granted_by_name}
+                                              onChange={e => setWaiverForm(f => ({ ...f, granted_by_name: e.target.value }))}
+                                              className="w-full mt-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+                                          </div>
+                                          <div className="flex gap-2 pt-1">
+                                            <button
+                                              onClick={submitWaiver}
+                                              disabled={waiverLoading || !waiverForm.reason.trim() || (waiverForm.waiver_type !== 'full' && !waiverForm.waiver_value)}
+                                              className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-50">
+                                              {waiverLoading ? 'Saving…' : 'Confirm Waiver'}
+                                            </button>
+                                            <button onClick={() => setShowWaiver(false)}
+                                              className="text-sm text-gray-500 px-3 py-2 hover:text-gray-700">Cancel</button>
+                                          </div>
+                                        </div>
+                                      )}
                                     </>
                                   )}
                                 </div>
