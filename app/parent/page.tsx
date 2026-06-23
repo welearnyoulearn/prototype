@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import AppLoader from '../components/AppLoader'
 import Link from 'next/link'
 import { TRANSLATIONS, type Lang } from './translations'
 
@@ -400,14 +401,7 @@ export default function ParentDashboard() {
   }
 
   // ── Loading / child picker screens ───────────────────────────────────────────
-  if (loading) return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50 flex items-center justify-center">
-      <div className="flex flex-col items-center gap-3">
-        <div className="w-10 h-10 border-4 border-pink-400 border-t-transparent rounded-full animate-spin" />
-        <p className="text-gray-400 text-sm">Loading your dashboard...</p>
-      </div>
-    </div>
-  )
+  if (loading) return <AppLoader message="Loading parent dashboard" sub="Fetching your child's progress…" />
 
   if (showChildPicker && parentInfo) return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50 flex items-center justify-center p-4">
