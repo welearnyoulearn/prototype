@@ -353,7 +353,7 @@ export default function FeeManagement({
   const [showWaiver, setShowWaiver]         = useState(false)
   const [waiverForm, setWaiverForm]         = useState({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' })
   const [waiverLoading, setWaiverLoading]   = useState(false)
-
+  const [showPayConfirm, setShowPayConfirm] = useState(false)
 
   // WhatsApp reminder state
 
@@ -3141,10 +3141,12 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                 </div>
                                 {payError && <p className="text-sm text-red-600">{payError}</p>}
                                 <div className="flex gap-2">
-                                  <button onClick={submitCounterPayment}
+                                  <button
+                                    onClick={() => setShowPayConfirm(true)}
                                     disabled={collectLoading || !(parseFloat(payAmount) > 0) || parseFloat(payAmount) > checkedTotal + 0.01}
-                                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50">
-                                    {collectLoading ? 'Recording…' : `Record ${payAmount ? fmt(parseFloat(payAmount) || 0) : '₹0'} & Print`}
+                                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                    Review & Confirm
                                   </button>
                                   <button onClick={() => setShowCollectForm(false)}
                                     className="text-sm text-gray-500 px-4 py-2.5 hover:text-gray-700">Cancel</button>
@@ -4354,6 +4356,104 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       )}
 
 
+
+      {/* ══ Payment Confirmation Modal ══════════════════════════════════════════ */}
+      {showPayConfirm && openStudent && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={() => setShowPayConfirm(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden"
+            onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 pt-6 pb-8 text-white">
+              <p className="text-xs font-semibold uppercase tracking-widest text-blue-200 mb-1">Confirm Payment</p>
+              <p className="text-2xl font-black tracking-tight">{openStudent.student_name}</p>
+              <p className="text-sm text-blue-200 mt-0.5">
+                Gr.{openStudent.grade}{openStudent.section}
+                {openStudent.school_roll_number != null ? ` · Roll ${openStudent.school_roll_number}` : ''}
+              </p>
+
+              {/* Big amount */}
+              <div className="mt-5 bg-white/15 rounded-xl px-5 py-4 text-center">
+                <p className="text-xs text-blue-200 uppercase tracking-widest mb-1">Amount Being Collected</p>
+                <p className="text-5xl font-black text-white tracking-tight">
+                  {fmt(parseFloat(payAmount) || 0)}
+                </p>
+                {parseFloat(payAmount) < checkedTotal - 0.01 && (
+                  <p className="text-xs text-blue-200 mt-1.5">
+                    Partial — {fmt(checkedTotal - (parseFloat(payAmount) || 0))} will remain due
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Details */}
+            <div className="px-6 py-5 space-y-3">
+              {/* Fee lines */}
+              <div className="space-y-1.5">
+                {openStudent.open_entries
+                  .filter(e => collectChecked.has(e.id))
+                  .map(e => (
+                    <div key={e.id} className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600">{e.category_name} · {e.period_label}</span>
+                      <span className="font-semibold text-gray-800">{fmt(e.balance)}</span>
+                    </div>
+                  ))}
+              </div>
+
+              <div className="border-t border-gray-100 pt-3 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Mode</span>
+                  <span className="font-medium text-gray-800 capitalize">{payMode}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Date</span>
+                  <span className="font-medium text-gray-800">
+                    {payDate ? new Date(payDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                  </span>
+                </div>
+                {payCollectedBy && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Collected by</span>
+                    <span className="font-medium text-gray-800">{payCollectedBy}</span>
+                  </div>
+                )}
+                {payRef && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Reference</span>
+                    <span className="font-medium text-gray-800">{payRef}</span>
+                  </div>
+                )}
+                {payNotes && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500 flex-shrink-0">Remarks</span>
+                    <span className="font-medium text-gray-800 text-right">{payNotes}</span>
+                  </div>
+                )}
+              </div>
+
+              {payError && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{payError}</p>}
+            </div>
+
+            {/* Actions */}
+            <div className="px-6 pb-6 flex gap-3">
+              <button onClick={() => setShowPayConfirm(false)}
+                className="flex-1 border border-gray-200 text-gray-600 py-3 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
+                ← Edit
+              </button>
+              <button
+                onClick={() => { setShowPayConfirm(false); submitCounterPayment() }}
+                disabled={collectLoading}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-blue-200">
+                {collectLoading
+                  ? <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Recording…</>
+                  : <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>Confirm & Record</>
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   )
