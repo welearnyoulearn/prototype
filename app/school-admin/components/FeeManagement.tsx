@@ -979,7 +979,11 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear }),
     })
     const d = await r.json()
-    setStructureMsg(r.ok ? `✓ Generated ${d.created} entries (${d.skipped} skipped)` : d.error || 'Failed')
+    setStructureMsg(r.ok
+      ? d.created > 0
+        ? `✓ Generated ${d.created} new bill${d.created !== 1 ? 's' : ''}${d.skipped > 0 ? ` · ${d.skipped} already existed (not duplicated)` : ''}`
+        : `✓ All bills already exist — nothing new to generate (${d.skipped} existing)`
+      : d.error || 'Failed')
     setGeneratingLedger(false)
     loadStats(); loadSetup()
   }
@@ -994,7 +998,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     const d = await r.json()
     setStructureMsg(r.ok
       ? d.created > 0
-        ? `✓ Billed ${d.created} new entries (${d.skipped} existing skipped)`
+        ? `✓ Billed ${d.created} new student${d.created !== 1 ? 's' : ''}${d.skipped > 0 ? ` · ${d.skipped} already billed (not duplicated)` : ''}`
         : '✓ All active students already billed — no new entries needed'
       : d.error || 'Failed')
     setGeneratingLedger(false)
