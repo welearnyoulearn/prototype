@@ -379,7 +379,8 @@ export default function FeeManagement({
   const [showWaiver, setShowWaiver]         = useState(false)
   const [waiverForm, setWaiverForm]         = useState({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' })
   const [waiverLoading, setWaiverLoading]   = useState(false)
-
+  const [waiverError, setWaiverError]       = useState('')
+  const [showPayConfirm, setShowPayConfirm] = useState(false)
 
   // WhatsApp reminder state
 
@@ -406,6 +407,7 @@ export default function FeeManagement({
   const [counterPayments, setCounterPayments]   = useState<PaymentRecord[]>([])
   const [counterPmtLoading, setCounterPmtLoading] = useState(false)
   const [showCounterHistory, setShowCounterHistory] = useState(false)
+  const [showPassbookModal, setShowPassbookModal] = useState(false)
   // Day close
   type DayCloseData = {
     date: string
@@ -935,22 +937,28 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
   async function submitWaiver() {
     if (!selectedEntry) return
-    setWaiverLoading(true)
-    const r = await fetch('/api/fees/waivers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        school_id: schoolId, student_id: selectedEntry.student_id,
-        ledger_id: selectedEntry.id, waiver_type: waiverForm.waiver_type,
-        waiver_value: parseFloat(waiverForm.waiver_value) || null,
-        reason: waiverForm.reason, granted_by_name: waiverForm.granted_by_name || null,
-      }),
-    })
-    if (r.ok) {
-      setShowWaiver(false); setSelectedEntry(null)
-      setCollectSearch(''); setCollectEntries([])
-      loadStats()
-      if (activeTab === 'ledger') loadLedger()
+    setWaiverLoading(true); setWaiverError('')
+    try {
+      const r = await fetch('/api/fees/waivers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId, student_id: selectedEntry.student_id,
+          ledger_id: selectedEntry.id, waiver_type: waiverForm.waiver_type,
+          waiver_value: parseFloat(waiverForm.waiver_value) || null,
+          reason: waiverForm.reason, granted_by_name: waiverForm.granted_by_name || null,
+        }),
+      })
+      if (r.ok) {
+        setShowWaiver(false); setSelectedEntry(null)
+        setCollectSearch(''); setCollectEntries([])
+        loadStats(); loadLedger()
+      } else {
+        const d = await r.json()
+        setWaiverError(d.error || 'Failed to grant waiver')
+      }
+    } catch {
+      setWaiverError('Network error — please try again')
     }
     setWaiverLoading(false)
   }
@@ -1004,9 +1012,13 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear }),
     })
     const d = await r.json()
-    setStructureMsg(r.ok ? `✓ Generated ${d.created} entries (${d.skipped} skipped)` : d.error || 'Failed')
+    setStructureMsg(r.ok
+      ? d.created > 0
+        ? `✓ Generated ${d.created} new bill${d.created !== 1 ? 's' : ''}${d.skipped > 0 ? ` · ${d.skipped} already existed (not duplicated)` : ''}`
+        : `✓ All bills already exist — nothing new to generate (${d.skipped} existing)`
+      : d.error || 'Failed')
     setGeneratingLedger(false)
-    loadStats()
+    loadStats(); loadSetup()
   }
 
   // Generate bills only for students who have no ledger rows yet (safe after lock)
@@ -1019,11 +1031,11 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     const d = await r.json()
     setStructureMsg(r.ok
       ? d.created > 0
-        ? `✓ Billed ${d.created} new entries (${d.skipped} existing skipped)`
+        ? `✓ Billed ${d.created} new student${d.created !== 1 ? 's' : ''}${d.skipped > 0 ? ` · ${d.skipped} already billed (not duplicated)` : ''}`
         : '✓ All active students already billed — no new entries needed'
       : d.error || 'Failed')
     setGeneratingLedger(false)
-    loadStats()
+    loadStats(); loadSetup()
   }
 
   // ── Fee Plan helpers ──────────────────────────────────────────────────────────
@@ -1099,6 +1111,12 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   // Any bills generated at all (gate for Lock)
   function anyBillsGenerated(): boolean {
     return categories.some(c => feeBillsGenerated(c))
+  }
+  // All active fixed fee heads that have amounts set must also have bills generated
+  function allReadyHeadsBilled(): boolean {
+    const ready = fixedFeeHeads().filter(c => feeHasAmounts(c.id, c.category_type))
+    if (ready.length === 0) return false
+    return ready.every(c => feeBillsGenerated(c))
   }
 
   async function lockStructure() {
@@ -2219,11 +2237,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           {(() => {
             const hasHeads = categories.length > 0
             const allAmountsSet = fixedAmountsComplete()   // fixed fees only — variable are optional
-            const anyGenerated = anyBillsGenerated()
             const steps = [
               { n: 1, label: 'Add Fee Heads',     done: hasHeads },
               { n: 2, label: 'Set Fixed Amounts', done: allAmountsSet },
-              { n: 3, label: 'Generate Bills',    done: anyGenerated },
+              { n: 3, label: 'Generate Bills',    done: allReadyHeadsBilled() },
               { n: 4, label: 'Lock Plan',         done: !!structureLock },
             ]
             const doneCount = steps.filter(s => s.done).length
@@ -3190,10 +3207,17 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                 </div>
                                 {payError && <p className="text-sm text-red-600">{payError}</p>}
                                 <div className="flex gap-2">
-                                  <button onClick={submitCounterPayment}
+                                  <button
+                                    onClick={() => setShowPayConfirm(true)}
                                     disabled={collectLoading || !(parseFloat(payAmount) > 0) || parseFloat(payAmount) > checkedTotal + 0.01}
-                                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50">
-                                    {collectLoading ? 'Recording…' : `Record ${payAmount ? fmt(parseFloat(payAmount) || 0) : '₹0'} & Print`}
+                                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                    Review & Confirm
+                                  </button>
+                                  <button
+                                    onClick={() => { setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
+                                    className="px-3 py-2.5 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium whitespace-nowrap">
+                                    Grant Waiver
                                   </button>
                                   <button onClick={() => setShowCollectForm(false)}
                                     className="text-sm text-gray-500 px-4 py-2.5 hover:text-gray-700">Cancel</button>
@@ -3219,10 +3243,17 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                           </div>
                                         </div>
                                       ))}
-                                      <button onClick={() => startCollect(row)}
-                                        className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-semibold mt-1">
-                                        Collect All ({fmt(row.outstanding)})
-                                      </button>
+                                      <div className="flex gap-2 mt-1">
+                                        <button onClick={() => startCollect(row)}
+                                          className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-semibold">
+                                          Collect All ({fmt(row.outstanding)})
+                                        </button>
+                                        <button
+                                          onClick={() => { setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
+                                          className="px-3 py-2 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium">
+                                          Grant Waiver
+                                        </button>
+                                      </div>
                                     </>
                                   )}
                                 </div>
@@ -3230,9 +3261,13 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                 {/* Recent payments — view / cancel / correct */}
                                 <div className="border-t border-gray-100 pt-3">
                                   {!showCounterHistory ? (
-                                    <button onClick={() => loadCounterPayments(row.student_id)}
-                                      className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
-                                      View payments &amp; corrections →
+                                    <button
+                                      onClick={() => { loadPassbook(row.student_id); setShowPassbookModal(true); setPbSection('payments') }}
+                                      className="w-full flex items-center justify-center gap-2 text-sm font-medium text-indigo-600 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 rounded-lg px-4 py-2.5 transition-colors">
+                                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                                      </svg>
+                                      View Payments &amp; Corrections
                                     </button>
                                   ) : (
                                     <div className="space-y-2">
@@ -4406,6 +4441,503 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       )}
 
 
+
+      {/* ══ Passbook Modal ══════════════════════════════════════════════════════ */}
+      {showPassbookModal && (
+        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4"
+          onClick={() => { setShowPassbookModal(false); setPbData(null); setCancelPmtId(null) }}>
+          <div className="bg-white w-full sm:rounded-2xl sm:max-w-2xl max-h-[92vh] flex flex-col shadow-2xl"
+            onClick={e => e.stopPropagation()}>
+
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 flex-shrink-0">
+              <div>
+                {pbData ? (
+                  <>
+                    <p className="text-base font-bold text-gray-900">{pbData.student.name}</p>
+                    <p className="text-xs text-gray-400">
+                      Gr.{pbData.student.grade}{pbData.student.section}
+                      {pbData.student.roll_number ? ` · Roll #${pbData.student.roll_number}` : ''}
+                      {pbData.student.parent_name ? ` · Parent: ${pbData.student.parent_name}` : ''}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-base font-bold text-gray-900">Payment History</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {pbData && (
+                  <button onClick={printPassbookStatement}
+                    className="text-xs border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">
+                    🖨 Statement
+                  </button>
+                )}
+                <button onClick={() => { setShowPassbookModal(false); setPbData(null); setCancelPmtId(null) }}
+                  className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+              </div>
+            </div>
+
+            {/* Summary bar */}
+            {pbData && (
+              <div className="grid grid-cols-4 gap-3 px-5 py-3 bg-gray-50 border-b border-gray-100 flex-shrink-0">
+                {[
+                  { l: 'Total Billed', v: pbData.summary.total_billed, c: 'text-gray-800' },
+                  { l: 'Paid',         v: pbData.summary.total_paid,    c: 'text-green-700' },
+                  { l: 'Waived',       v: pbData.summary.total_waived,  c: 'text-purple-700' },
+                  { l: 'Outstanding',  v: pbData.summary.outstanding,   c: 'text-red-600' },
+                ].map(s => (
+                  <div key={s.l} className="text-center">
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">{s.l}</p>
+                    <p className={`text-base font-bold mt-0.5 ${s.c}`}>{fmt(s.v)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Section tabs */}
+            {pbData && (
+              <div className="flex gap-1 px-5 py-2 border-b border-gray-100 bg-white flex-shrink-0">
+                {([
+                  { key: 'bills',    label: `Bills (${pbData.ledger.length})` },
+                  { key: 'payments', label: `Payments (${pbData.payments.length})` },
+                  { key: 'waivers',  label: `Waivers (${pbData.waivers.length})` },
+                  { key: 'timeline', label: 'Timeline' },
+                ] as const).map(v => (
+                  <button key={v.key} onClick={() => setPbSection(v.key)}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                      pbSection === v.key ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:bg-gray-100'
+                    }`}>
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Scrollable body */}
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+              {pbLoading ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3">
+                  <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-sm text-gray-400">Loading payment history…</p>
+                </div>
+              ) : pbErr ? (
+                <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-600">{pbErr}</div>
+              ) : pbData ? (
+                <>
+                  {/* Bills */}
+                  {pbSection === 'bills' && (
+                    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                      {pbData.ledger.length === 0
+                        ? <p className="text-sm text-gray-400 p-8 text-center">No bills for {academicYear}.</p>
+                        : (
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50 border-b border-gray-100">
+                              <tr>
+                                <th className="text-left px-4 py-2 font-semibold text-gray-500 text-xs">Fee</th>
+                                <th className="text-right px-4 py-2 font-semibold text-gray-500 text-xs">Billed</th>
+                                <th className="text-right px-4 py-2 font-semibold text-gray-500 text-xs">Paid</th>
+                                <th className="text-left px-4 py-2 font-semibold text-gray-500 text-xs">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {pbData.ledger.map(e => (
+                                <tr key={e.id} className="hover:bg-gray-50">
+                                  <td className="px-4 py-2.5 text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></td>
+                                  <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
+                                  <td className="px-4 py-2.5 text-right text-green-600">{fmt(e.amount_paid)}</td>
+                                  <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full capitalize font-medium ${STATUS_COLORS[e.status as keyof typeof STATUS_COLORS] || ''}`}>{e.status}</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                    </div>
+                  )}
+
+                  {/* Payments */}
+                  {pbSection === 'payments' && (
+                    <div className="space-y-3">
+                      {pbData.payments.length === 0
+                        ? <p className="text-sm text-gray-400 text-center py-8">No payments recorded.</p>
+                        : pbData.payments.map(p => {
+                          const isCancelled = p.payment_status === 'cancelled'
+                          return (
+                            <Fragment key={p.id}>
+                              <div className={`rounded-xl border px-4 py-3 ${isCancelled ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-gray-100'}`}>
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-mono text-xs font-semibold text-indigo-600">{p.receipt_number}</span>
+                                      {isCancelled && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Cancelled</span>}
+                                    </div>
+                                    <p className={`text-lg font-bold mt-0.5 ${isCancelled ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{fmt(p.amount)}</p>
+                                    <p className="text-xs text-gray-400 mt-0.5">
+                                      {fmtDate(p.paid_date)} · <span className="capitalize">{p.payment_mode}</span>
+                                      {p.collected_by_name ? ` · ${p.collected_by_name}` : ''}
+                                      {p.transaction_ref ? ` · Ref: ${p.transaction_ref}` : ''}
+                                    </p>
+                                    {p.notes && <p className="text-xs text-gray-400 mt-0.5 italic">{p.notes}</p>}
+                                  </div>
+                                  {!isCancelled && p.payment_status === 'completed' && (
+                                    <div className="flex gap-2 flex-shrink-0">
+                                      <button onClick={() => printPassbookReceipt(p)}
+                                        className="text-xs border border-gray-200 text-gray-500 px-2.5 py-1 rounded-lg hover:bg-gray-50">🖨</button>
+                                      {cancelPmtId === p.id
+                                        ? <button onClick={() => setCancelPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600 px-2">Close</button>
+                                        : <button onClick={() => openCancel(p.id)}
+                                            className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
+                                      }
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Inline cancel/correct form */}
+                                {cancelPmtId === p.id && (
+                                  <div className="mt-3 pt-3 border-t border-amber-100 bg-amber-50 -mx-4 -mb-3 px-4 pb-3 rounded-b-xl space-y-2">
+                                    <div className="flex gap-2">
+                                      <button onClick={() => setCancelMode('cancel')}
+                                        className={`flex-1 text-xs py-1.5 rounded-lg border transition-colors font-medium ${cancelMode === 'cancel' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200'}`}>Cancel Payment</button>
+                                      <button onClick={() => setCancelMode('correct')}
+                                        className={`flex-1 text-xs py-1.5 rounded-lg border transition-colors font-medium ${cancelMode === 'correct' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>Correct Amount</button>
+                                    </div>
+                                    <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                                      {cancelMode === 'cancel'
+                                        ? <>⚠ Reverses <strong>{fmt(p.amount)}</strong> from the ledger. Receipt stays on record marked cancelled.</>
+                                        : <>⚠ Cancels {p.receipt_number} and records a new payment with the corrected amount.</>}
+                                    </div>
+                                    {cancelMode === 'correct' && (
+                                      <input type="number" min="0" value={correctAmount} onChange={e => setCorrectAmount(e.target.value)}
+                                        placeholder="Corrected amount (₹)"
+                                        className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                    )}
+                                    <input type="text" value={cancelReason} onChange={e => setCancelReason(e.target.value)}
+                                      placeholder="Reason (required)" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                    {cancelMsg && <p className={`text-xs font-medium ${cancelMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{cancelMsg}</p>}
+                                    <div className="flex gap-2">
+                                      <button onClick={() => submitCancelCorrect('passbook')} disabled={cancelBusy || !cancelReason.trim()}
+                                        className={`text-sm text-white px-4 py-1.5 rounded-lg font-medium disabled:opacity-50 ${cancelMode === 'cancel' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                                        {cancelBusy ? 'Working…' : cancelMode === 'cancel' ? `Confirm Cancel` : 'Confirm Correction'}
+                                      </button>
+                                      <button onClick={() => setCancelPmtId(null)} className="text-sm text-gray-500 px-3 py-1.5">Close</button>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </Fragment>
+                          )
+                        })
+                      }
+                    </div>
+                  )}
+
+                  {/* Waivers */}
+                  {pbSection === 'waivers' && (
+                    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                      {pbData.waivers.length === 0
+                        ? <p className="text-sm text-gray-400 p-8 text-center">No waivers granted.</p>
+                        : <div className="divide-y divide-gray-50">
+                            {pbData.waivers.map(w => (
+                              <div key={w.id} className="px-4 py-3 flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm font-medium text-gray-800">{(w as { fee_head_name?: string }).fee_head_name || 'Fee'} · {(w as { period_label?: string }).period_label || ''}</p>
+                                  <p className="text-xs text-gray-400">{(w as { reason?: string }).reason || '—'} · {(w as { granted_by_name?: string }).granted_by_name || ''}</p>
+                                </div>
+                                <p className="text-sm font-bold text-purple-700">{fmt((w as { waiver_amount?: number }).waiver_amount || 0)}</p>
+                              </div>
+                            ))}
+                          </div>
+                      }
+                    </div>
+                  )}
+
+                  {/* Timeline */}
+                  {pbSection === 'timeline' && (
+                    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                      {pbData.timeline.length === 0
+                        ? <p className="text-sm text-gray-400 p-8 text-center">No activity recorded.</p>
+                        : <div className="divide-y divide-gray-50">
+                            {pbData.timeline.map((t, i) => (
+                              <div key={i} className="px-4 py-3 flex items-start gap-3">
+                                <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${(t as { type?: string }).type === 'payment' ? 'bg-green-500' : (t as { type?: string }).type === 'waiver' ? 'bg-purple-500' : 'bg-gray-300'}`} />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-sm text-gray-700">{(t as { description?: string }).description || '—'}</p>
+                                  <p className="text-xs text-gray-400 mt-0.5">{new Date((t as { date?: string }).date || '').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                                </div>
+                                <div className="text-right flex-shrink-0">
+                                  {((t as { credit?: number }).credit ?? 0) > 0 && <p className="text-sm font-semibold text-green-600">{fmt((t as { credit?: number }).credit ?? 0)}</p>}
+                                  {((t as { debit?: number }).debit ?? 0) > 0 && <p className="text-sm font-semibold text-red-600">{fmt((t as { debit?: number }).debit ?? 0)}</p>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                      }
+                    </div>
+                  )}
+                </>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Payment Confirmation Modal ══════════════════════════════════════════ */}
+      {showPayConfirm && openStudent && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={() => setShowPayConfirm(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden"
+            onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 pt-6 pb-8 text-white">
+              <p className="text-xs font-semibold uppercase tracking-widest text-blue-200 mb-1">Confirm Payment</p>
+              <p className="text-2xl font-black tracking-tight">{openStudent.student_name}</p>
+              <p className="text-sm text-blue-200 mt-0.5">
+                Gr.{openStudent.grade}{openStudent.section}
+                {openStudent.school_roll_number != null ? ` · Roll ${openStudent.school_roll_number}` : ''}
+              </p>
+
+              {/* Big amount */}
+              <div className="mt-5 bg-white/15 rounded-xl px-5 py-4 text-center">
+                <p className="text-xs text-blue-200 uppercase tracking-widest mb-1">Amount Being Collected</p>
+                <p className="text-5xl font-black text-white tracking-tight">
+                  {fmt(parseFloat(payAmount) || 0)}
+                </p>
+                {parseFloat(payAmount) < checkedTotal - 0.01 && (
+                  <p className="text-xs text-blue-200 mt-1.5">
+                    Partial — {fmt(checkedTotal - (parseFloat(payAmount) || 0))} will remain due
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Details */}
+            <div className="px-6 py-5 space-y-3">
+              {/* Fee lines */}
+              <div className="space-y-1.5">
+                {openStudent.open_entries
+                  .filter(e => collectChecked.has(e.id))
+                  .map(e => (
+                    <div key={e.id} className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600">{e.category_name} · {e.period_label}</span>
+                      <span className="font-semibold text-gray-800">{fmt(e.balance)}</span>
+                    </div>
+                  ))}
+              </div>
+
+              <div className="border-t border-gray-100 pt-3 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Mode</span>
+                  <span className="font-medium text-gray-800 capitalize">{payMode}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Date</span>
+                  <span className="font-medium text-gray-800">
+                    {payDate ? new Date(payDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                  </span>
+                </div>
+                {payCollectedBy && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Collected by</span>
+                    <span className="font-medium text-gray-800">{payCollectedBy}</span>
+                  </div>
+                )}
+                {payRef && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Reference</span>
+                    <span className="font-medium text-gray-800">{payRef}</span>
+                  </div>
+                )}
+                {payNotes && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-gray-500 flex-shrink-0">Remarks</span>
+                    <span className="font-medium text-gray-800 text-right">{payNotes}</span>
+                  </div>
+                )}
+              </div>
+
+              {payError && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{payError}</p>}
+            </div>
+
+            {/* Actions */}
+            <div className="px-6 pb-6 flex gap-3">
+              <button onClick={() => setShowPayConfirm(false)}
+                className="flex-1 border border-gray-200 text-gray-600 py-3 rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
+                ← Edit
+              </button>
+              <button
+                onClick={() => { setShowPayConfirm(false); submitCounterPayment() }}
+                disabled={collectLoading}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-blue-200">
+                {collectLoading
+                  ? <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Recording…</>
+                  : <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>Confirm & Record</>
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Grant Waiver Modal ══════════════════════════════════════════════════ */}
+      {showWaiver && selectedEntry && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={() => setShowWaiver(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden"
+            onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
+            <div className="bg-gradient-to-r from-purple-600 to-purple-700 px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-white font-bold text-base">Grant Fee Waiver</h3>
+                  <p className="text-purple-200 text-xs mt-0.5">{selectedEntry.student_name} · {selectedEntry.grade}{selectedEntry.section}</p>
+                </div>
+                <button onClick={() => setShowWaiver(false)} className="text-purple-200 hover:text-white">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Fee entry selector */}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Fee Entry to Waive</label>
+                <select
+                  value={selectedEntry.id}
+                  onChange={e => {
+                    const allEntries = studentRows.find(r => r.student_id === selectedEntry.student_id)?.open_entries ?? []
+                    const entry = allEntries.find(x => String(x.id) === e.target.value)
+                    if (entry) setSelectedEntry(entry)
+                  }}
+                  className="w-full mt-1.5 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400">
+                  {(studentRows.find(r => r.student_id === selectedEntry.student_id)?.open_entries ?? [selectedEntry]).map(e => (
+                    <option key={e.id} value={e.id}>{e.category_name} · {e.period_label} · {fmt(e.balance)}</option>
+                  ))}
+                </select>
+                <div className="mt-2 flex items-center gap-3 bg-purple-50 rounded-lg px-3 py-2">
+                  <span className="text-xs text-purple-600 font-medium">Outstanding on this entry</span>
+                  <span className="ml-auto text-sm font-bold text-purple-800">{fmt(selectedEntry.balance)}</span>
+                </div>
+              </div>
+
+              {/* Waiver type */}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Waiver Type</label>
+                <div className="grid grid-cols-3 gap-2 mt-1.5">
+                  {[
+                    { value: 'percentage', label: 'Percentage', icon: '%' },
+                    { value: 'fixed_amount', label: 'Fixed ₹',  icon: '₹' },
+                    { value: 'full',       label: 'Full Waiver', icon: '✓' },
+                  ].map(opt => (
+                    <button key={opt.value}
+                      onClick={() => setWaiverForm(f => ({ ...f, waiver_type: opt.value, waiver_value: '' }))}
+                      className={`flex flex-col items-center gap-1 py-2.5 rounded-xl border-2 text-sm font-medium transition-all ${
+                        waiverForm.waiver_type === opt.value
+                          ? 'border-purple-500 bg-purple-50 text-purple-700'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      }`}>
+                      <span className="text-base font-bold">{opt.icon}</span>
+                      <span className="text-xs">{opt.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Value input */}
+              {waiverForm.waiver_type !== 'full' && (
+                <div>
+                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                    {waiverForm.waiver_type === 'percentage' ? 'Percentage to Waive' : 'Amount to Waive (₹)'}
+                  </label>
+                  <div className="relative mt-1.5">
+                    <span className="absolute left-3 top-2.5 text-gray-400 text-sm font-medium">
+                      {waiverForm.waiver_type === 'percentage' ? '%' : '₹'}
+                    </span>
+                    <input type="number" min="0"
+                      max={waiverForm.waiver_type === 'percentage' ? 100 : undefined}
+                      value={waiverForm.waiver_value}
+                      onChange={e => setWaiverForm(f => ({ ...f, waiver_value: e.target.value }))}
+                      placeholder={waiverForm.waiver_type === 'percentage' ? '50' : String(selectedEntry.balance)}
+                      className="w-full pl-8 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-purple-400" />
+                  </div>
+                  {/* Preview */}
+                  {waiverForm.waiver_value && (
+                    <div className="mt-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs text-green-700">
+                      Waiver amount:{' '}
+                      <strong>
+                        {fmt(
+                          waiverForm.waiver_type === 'percentage'
+                            ? (Number(selectedEntry.balance) * (parseFloat(waiverForm.waiver_value) || 0)) / 100
+                            : parseFloat(waiverForm.waiver_value) || 0
+                        )}
+                      </strong>
+                      {' · '}Remaining balance:{' '}
+                      <strong>
+                        {fmt(Math.max(0,
+                          waiverForm.waiver_type === 'percentage'
+                            ? Number(selectedEntry.balance) * (1 - (parseFloat(waiverForm.waiver_value) || 0) / 100)
+                            : Number(selectedEntry.balance) - (parseFloat(waiverForm.waiver_value) || 0)
+                        ))}
+                      </strong>
+                    </div>
+                  )}
+                  {waiverForm.waiver_type === 'full' && (
+                    <div className="mt-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs text-green-700">
+                      Full balance of <strong>{fmt(selectedEntry.balance)}</strong> will be waived.
+                    </div>
+                  )}
+                </div>
+              )}
+              {waiverForm.waiver_type === 'full' && (
+                <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs text-green-700">
+                  Full balance of <strong>{fmt(selectedEntry.balance)}</strong> will be waived.
+                </div>
+              )}
+
+              {/* Reason */}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Reason <span className="text-red-500">*</span></label>
+                <input type="text"
+                  value={waiverForm.reason}
+                  onChange={e => setWaiverForm(f => ({ ...f, reason: e.target.value }))}
+                  placeholder="e.g. Financial hardship · Merit waiver · Staff ward"
+                  className="w-full mt-1.5 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+              </div>
+
+              {/* Granted by */}
+              <div>
+                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Granted By</label>
+                <input type="text"
+                  value={waiverForm.granted_by_name}
+                  onChange={e => setWaiverForm(f => ({ ...f, granted_by_name: e.target.value }))}
+                  className="w-full mt-1.5 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400" />
+              </div>
+
+              {/* Error */}
+              {waiverError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl">{waiverError}</div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-1">
+                <button onClick={() => setShowWaiver(false)}
+                  className="flex-1 border border-gray-200 text-gray-600 py-3 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-colors">
+                  Cancel
+                </button>
+                <button
+                  onClick={submitWaiver}
+                  disabled={waiverLoading || !waiverForm.reason.trim() || (waiverForm.waiver_type !== 'full' && !waiverForm.waiver_value)}
+                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-purple-200">
+                  {waiverLoading
+                    ? <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Saving…</>
+                    : <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>Confirm Waiver</>
+                  }
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   )

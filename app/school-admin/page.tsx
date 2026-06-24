@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, Suspense } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { FeaturesProvider } from './features-context'
 import NotificationBell from '../components/NotificationBell'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
+import AppLoader from '../components/AppLoader'
 
 // Always-loaded (small, needed immediately)
 import Overview from './components/Overview'
@@ -212,28 +213,34 @@ const NAV_ITEMS: NavItem[] = [
 ]
 
 
-export default function SchoolAdmin() {
+function SchoolAdmin() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [selectedSchool, setSelectedSchool] = useState<School | null>(null)
   const [tier, setTier] = useState<Tier>('none')
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
-  const [activeNav, setActiveNav] = useState('overview')
-  const [visited, setVisited] = useState<Set<string>>(new Set(['overview']))
+  const initialTab = searchParams.get('tab') || 'overview'
+  const [activeNav, setActiveNav] = useState(initialTab)
+  const [visited, setVisited] = useState<Set<string>>(new Set([initialTab]))
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
-  function navigateTo(key: string) {
-    setActiveNav(key)
-    setVisited(prev => new Set([...prev, key]))
-    setSidebarOpen(false)
-    if (key === 'staff') setStaffSubTab('directory')
-    if (key === 'students') setStudentsSubTab('list')
-  }
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [staffSubTab, setStaffSubTab] = useState<'directory' | 'onboard'>('directory')
   const [studentsSubTab, setStudentsSubTab] = useState<'list' | 'onboard'>('list')
   const [staffRefreshKey, setStaffRefreshKey] = useState(0)
   const [studentRefreshKey, setStudentRefreshKey] = useState(0)
+
+  const navigateTo = useCallback((key: string) => {
+    setActiveNav(key)
+    setVisited(prev => new Set([...prev, key]))
+    setSidebarOpen(false)
+    if (key === 'staff') setStaffSubTab('directory')
+    if (key === 'students') setStudentsSubTab('list')
+    const params = new URLSearchParams(window.location.search)
+    params.set('tab', key)
+    router.replace(`/school-admin?${params.toString()}`, { scroll: false })
+  }, [router])
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -248,11 +255,30 @@ export default function SchoolAdmin() {
         const me = await meRes.json()
         const schoolRoles = ['school_admin', 'principal', 'vice_principal']
         if (!schoolRoles.includes(me.role) || !me.school_id) { router.push('/login?role=school'); return }
+
         const schoolRes = await fetch(`/api/schools/${me.school_id}`)
-        if (schoolRes.ok) {
-          setSelectedSchool(await schoolRes.json())
-        } else {
-          setSelectedSchool({ id: me.school_id, name: me.school_name, type: '', city: '', country: '', status: 'active' })
+        const school = schoolRes.ok
+          ? await schoolRes.json()
+          : { id: me.school_id, name: me.school_name, type: '', city: '', country: '', status: 'active' }
+        setSelectedSchool(school)
+
+        // Load subscription + features before showing UI — prevents "No Plan Assigned" flash
+        try {
+          const subRes = await fetch(`/api/schools/${school.id}/subscription`)
+          const subData = await subRes.json()
+          const t: Tier = subData.tier || 'none'
+          setTier(t)
+          if (t !== 'none') {
+            const featRes = await fetch(`/api/platform/features?tier=${t}`)
+            if (featRes.ok) {
+              const fd = await featRes.json()
+              setEnabledFeatures(new Set(fd.enabled || []))
+            } else {
+              setEnabledFeatures(new Set(NAV_ITEMS.map(n => n.key)))
+            }
+          }
+        } catch {
+          setTier('none')
         }
       } catch {
         setError('Cannot connect to database. Make sure PostgreSQL is running.')
@@ -263,48 +289,12 @@ export default function SchoolAdmin() {
     init()
   }, [router])
 
-  useEffect(() => {
-    if (!selectedSchool) return
-    fetch(`/api/schools/${selectedSchool.id}/subscription`)
-      .then(r => r.json())
-      .then(data => {
-        const t = data.tier || 'none'
-        setTier(t)
-        if (t !== 'none') {
-          // Fetch which features are enabled for this plan from platform config
-          fetch(`/api/platform/features?tier=${t}`)
-            .then(r => r.json())
-            .then(fd => setEnabledFeatures(new Set(fd.enabled || [])))
-            .catch(() => setEnabledFeatures(new Set(NAV_ITEMS.map(n => n.key))))
-        }
-      })
-      .catch(() => setTier('none'))
-  }, [selectedSchool])
-
   // Only show nav items that are enabled in platform feature config for this tier
   const enabledNavItems = NAV_ITEMS.filter(item =>
     tier !== 'none' && enabledFeatures.has(item.key)
   )
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-5">
-        <div className="relative">
-          <div className="w-16 h-16 rounded-full border-4 border-slate-700" />
-          <div className="w-16 h-16 rounded-full border-4 border-indigo-500 border-t-transparent animate-spin absolute inset-0" />
-        </div>
-        <div className="text-center">
-          <p className="text-slate-300 font-medium text-sm">Loading your dashboard</p>
-          <p className="text-slate-500 text-xs mt-1">Please wait…</p>
-        </div>
-        <div className="flex gap-1.5 mt-2">
-          {[0, 1, 2].map(i => (
-            <div key={i} className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
-          ))}
-        </div>
-      </div>
-    )
-  }
+  if (loading) return <AppLoader message="Loading your dashboard" sub="Setting up your school workspace…" />
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-slate-50">
@@ -572,5 +562,13 @@ export default function SchoolAdmin() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function SchoolAdminPage() {
+  return (
+    <Suspense>
+      <SchoolAdmin />
+    </Suspense>
   )
 }

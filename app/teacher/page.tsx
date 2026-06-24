@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import AppLoader from '../components/AppLoader'
 import SmartSnapshot from './components/SmartSnapshot'
 import ClassView from './components/ClassView'
 import FullTimetable from './components/FullTimetable'
@@ -119,16 +120,7 @@ export default function TeacherPortal() {
       .finally(() => setLoading(false))
   }, [router])
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-10 h-10 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-gray-400 text-sm">Loading your portal...</p>
-        </div>
-      </div>
-    )
-  }
+  if (loading) return <AppLoader message="Loading your portal" sub="Getting your classes and schedule ready…" />
 
   if (!teacher) return null
 
