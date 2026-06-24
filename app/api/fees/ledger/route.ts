@@ -45,6 +45,7 @@ export async function GET(req: NextRequest) {
         `SELECT
            l.*,
            s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
+           s.email, s.phone, s.parent_name, s.parent_phone, s.parent_email,
            fc.name AS category_name, fc.frequency,
            COALESCE(
              (SELECT SUM(fp.amount) FROM fee_payments fp WHERE fp.ledger_id = l.id AND fp.payment_status = 'completed'),

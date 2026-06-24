@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useEffect, useCallback } from 'react'
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { parseCSV } from '@/lib/parseCSV'
 
 type Props = { schoolId: number; onRefresh?: () => void }
@@ -32,6 +32,12 @@ const CSV_EXAMPLE = `1,Mehta,Arjun,arjun@student.com,10,A,Suresh Mehta,987654321
 2,Patel,Priya,,10,A,Ramesh Patel,9876543211,,`
 
 const STAFF_CSV_MARKERS = ['department', 'qualification', 'staff_type', 'subject', 'employee_id', 'teaches_grades']
+
+// Normalized key for a (grade, section, roll) combination — roll numbers are
+// unique within a grade+section.
+function rollKey(grade: string, section: string, roll: string): string {
+  return `${grade.trim().toLowerCase()}|${section.trim().toLowerCase()}|${roll.trim()}`
+}
 
 function downloadTemplate() {
   const a = document.createElement('a')
@@ -71,6 +77,10 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
   const [resetResults, setResetResults] = useState<Record<number, { password: string; error?: string }>>({})
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // Existing (grade|section|roll) keys already taken in this school, for live
+  // duplicate detection while typing.
+  const [existingRollKeys, setExistingRollKeys] = useState<Set<string>>(new Set())
+
   const fetchStudentCount = useCallback(async () => {
     try {
       const res = await fetch(`/api/admin/overview?school_id=${schoolId}&features=`)
@@ -78,7 +88,23 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     } catch { /* non-critical */ }
   }, [schoolId])
 
-  useEffect(() => { fetchStudentCount() }, [fetchStudentCount])
+  const fetchExistingRolls = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/students?school_id=${schoolId}`)
+      if (!res.ok) return
+      const list: { grade: string | null; section: string | null; school_roll_number: number | null; status?: string }[] = await res.json()
+      const keys = new Set<string>()
+      for (const s of list) {
+        if (s.status === 'inactive') continue
+        if (s.school_roll_number != null && s.grade) {
+          keys.add(rollKey(s.grade, s.section ?? '', String(s.school_roll_number)))
+        }
+      }
+      setExistingRollKeys(keys)
+    } catch { /* non-critical */ }
+  }, [schoolId])
+
+  useEffect(() => { fetchStudentCount(); fetchExistingRolls() }, [fetchStudentCount, fetchExistingRolls])
 
   function updateRow(index: number, field: keyof StudentRow, value: string) {
     setRows(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r))
@@ -175,15 +201,31 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ school_id: schoolId, students }),
       })
-      const data = await res.json()
+      const data: OnboardingResult & { error?: string } = await res.json()
       if (res.status === 409) { setDupRollError(data.error || 'Duplicate roll number'); return }
       if (!res.ok) throw new Error(data.error)
+
       setResult(data)
-      setShowCredentials(true)
-      setRows([{ ...EMPTY_ROW }])
       setResetResults({})
-      fetchStudentCount()
-      window.scrollTo({ top: 0, behavior: 'smooth' })
+
+      // Only show the credentials modal when at least one student was actually
+      // enrolled. If nothing was inserted (e.g. all rows rejected as duplicate
+      // roll numbers), surface the errors instead — no credentials were created.
+      if (data.inserted > 0) {
+        setShowCredentials(true)
+        setRows([{ ...EMPTY_ROW }])
+        fetchStudentCount()
+        fetchExistingRolls()
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      } else {
+        // Nothing enrolled — show the per-row errors, keep rows intact for editing
+        setShowCredentials(false)
+        const msg = data.errors.length > 0
+          ? data.errors.map(e => `Row ${e.row}: ${e.message}`).join(' · ')
+          : 'No students were enrolled'
+        setError(msg)
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to enroll students')
     } finally {
@@ -213,6 +255,32 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
   }
 
   const inputCls = 'w-full border border-gray-200 rounded px-2 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-green-300'
+
+  // Live duplicate-roll detection while typing. Returns a warning string per row
+  // index (empty = no problem). Flags both rolls that collide with an existing
+  // student in this school and rolls duplicated within the current batch.
+  const rowDupWarnings = useMemo(() => {
+    const warnings: string[] = rows.map(() => '')
+    const batchFirstSeen = new Map<string, number>()
+    rows.forEach((r, i) => {
+      const roll = r.school_roll_number.trim()
+      if (!roll || !r.grade.trim()) return // need at least roll + grade to check
+      if (!/^\d+$/.test(roll) || parseInt(roll) <= 0) return // invalid handled elsewhere
+      const key = rollKey(r.grade, r.section, roll)
+      if (existingRollKeys.has(key)) {
+        warnings[i] = `Roll No ${roll} already exists in Grade ${r.grade}${r.section.trim() ? ` Section ${r.section}` : ''}`
+        return
+      }
+      if (batchFirstSeen.has(key)) {
+        warnings[i] = `Roll No ${roll} duplicated with row ${batchFirstSeen.get(key)! + 1}`
+      } else {
+        batchFirstSeen.set(key, i)
+      }
+    })
+    return warnings
+  }, [rows, existingRollKeys])
+
+  const hasRowDupes = rowDupWarnings.some(w => w !== '')
 
   const hasCredentials = result && (result.credentials.students.length > 0 || result.credentials.parents.length > 0)
 
@@ -527,10 +595,18 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                   {rows.map((row, i) => (
                     <tr key={i} className="hover:bg-gray-50">
                       <td className="px-3 py-2 text-gray-400">{i + 1}</td>
-                      <td className="px-3 py-2 bg-amber-50/50">
-                        <input className={`${inputCls} ${!row.school_roll_number.trim() ? 'border-amber-300' : ''}`}
+                      <td className="px-3 py-2 bg-amber-50/50 align-top">
+                        <input
+                          className={`${inputCls} ${rowDupWarnings[i] ? 'border-red-400 ring-1 ring-red-300' : !row.school_roll_number.trim() ? 'border-amber-300' : ''}`}
                           placeholder="1" type="number" min="1" value={row.school_roll_number}
+                          aria-invalid={!!rowDupWarnings[i]}
+                          data-testid={`roll-input-${i}`}
                           onChange={e => updateRow(i, 'school_roll_number', e.target.value)} />
+                        {rowDupWarnings[i] && (
+                          <p data-testid={`roll-dup-warning-${i}`} className="mt-1 text-[10px] leading-tight text-red-600">
+                            {rowDupWarnings[i]}
+                          </p>
+                        )}
                       </td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="Last name" value={row.last_name} onChange={e => updateRow(i, 'last_name', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="First name" value={row.first_name} onChange={e => updateRow(i, 'first_name', e.target.value)} /></td>
@@ -560,8 +636,11 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
             <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
               <button onClick={addRow} className="text-sm text-green-600 hover:text-green-800 font-medium">+ Add Row</button>
               <div className="flex items-center gap-3">
+                {hasRowDupes && (
+                  <span className="text-xs text-red-600 font-medium">Fix duplicate roll numbers before enrolling</span>
+                )}
                 <span className="text-xs text-gray-400">{rows.filter(r => r.last_name.trim() || r.first_name.trim()).length} of {rows.length} rows ready</span>
-                <button onClick={handleSubmit} disabled={submitting || rows.every(r => !r.last_name.trim() && !r.first_name.trim())}
+                <button onClick={handleSubmit} disabled={submitting || hasRowDupes || rows.every(r => !r.last_name.trim() && !r.first_name.trim())}
                   data-testid="enroll-students-btn"
                   className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
                   {submitting ? 'Enrolling...' : 'Enroll Students'}
