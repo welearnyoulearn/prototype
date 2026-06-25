@@ -72,8 +72,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Ledger entry not found' }, { status: 404 })
       }
 
-      // Calculate waiver amount — always on remaining balance, not full amount_due
-      const remaining = parseFloat(ledger.amount_due) - parseFloat(ledger.amount_paid)
+      // Calculate waiver amount — always on remaining balance (after existing waiver), not full amount_due
+      const remaining = parseFloat(ledger.amount_due) - parseFloat(ledger.waiver_amount || '0') - parseFloat(ledger.amount_paid)
       let waiver_amount = 0
       if (waiver_type === 'full') {
         waiver_amount = remaining
@@ -99,14 +99,13 @@ export async function POST(req: NextRequest) {
       // Self-heal: add waiver_amount column if missing
       await client.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`)
 
-      // Apply waiver — track separately from cash payments
+      // Apply waiver — track separately from cash payments, do NOT inflate amount_paid
       await client.query(
         `UPDATE student_fee_ledger
          SET waiver_amount = COALESCE(waiver_amount, 0) + $1,
-             amount_paid   = LEAST(amount_due, amount_paid + $1),
              status = CASE
-               WHEN LEAST(amount_due, amount_paid + $1) >= amount_due THEN 'waived'
-               WHEN amount_paid + $1 > 0                              THEN 'partial'
+               WHEN (COALESCE(waiver_amount, 0) + $1 + amount_paid) >= amount_due THEN 'waived'
+               WHEN (COALESCE(waiver_amount, 0) + $1 + amount_paid) > 0           THEN 'partial'
                ELSE status
              END
          WHERE id = $2`,
@@ -126,7 +125,70 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// DELETE /api/fees/waivers?id=X&revoked_by=Admin&reason=... — soft-revoke waiver
+// PATCH /api/fees/waivers — correct (edit) an existing waiver: revoke old + create new
+export async function PATCH(req: NextRequest) {
+  try {
+    const { id, new_waiver_amount, reason } = await req.json()
+    const newAmt = parseFloat(new_waiver_amount)
+    if (!id || !reason?.trim() || !(newAmt > 0)) {
+      return NextResponse.json({ error: 'id, new_waiver_amount > 0, reason required' }, { status: 400 })
+    }
+
+    const client = await pool.connect()
+    try {
+      await client.query('BEGIN')
+
+      const { rows: [w0] } = await client.query(
+        `SELECT * FROM fee_waivers WHERE id = $1 AND is_revoked = FALSE`, [id]
+      )
+      if (!w0) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Waiver not found or already revoked' }, { status: 404 })
+      }
+
+      const access = await requireFeeAccess(w0.school_id)
+      if (!access) { await client.query('ROLLBACK'); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+
+      // Soft-revoke old waiver
+      await client.query(
+        `UPDATE fee_waivers SET is_revoked = TRUE, revoked_by = $1, revoked_at = NOW(), revoke_reason = $2 WHERE id = $3`,
+        [access.actor, reason, id]
+      )
+
+      // Create new waiver with corrected amount
+      const { rows: [newWaiver] } = await client.query(
+        `INSERT INTO fee_waivers (school_id, student_id, ledger_id, waiver_type, waiver_value, waiver_amount, reason, granted_by_name)
+         VALUES ($1, $2, $3, 'fixed_amount', $4, $4, $5, $6) RETURNING *`,
+        [w0.school_id, w0.student_id, w0.ledger_id, newAmt, reason, access.actor]
+      )
+
+      // Update ledger: adjust waiver_amount by the difference (new - old)
+      const diff = newAmt - parseFloat(w0.waiver_amount)
+      await client.query(
+        `UPDATE student_fee_ledger
+         SET waiver_amount = GREATEST(0, COALESCE(waiver_amount, 0) + $1),
+             status = CASE
+               WHEN (GREATEST(0, COALESCE(waiver_amount, 0) + $1) + amount_paid) >= amount_due THEN 'waived'
+               WHEN (GREATEST(0, COALESCE(waiver_amount, 0) + $1) + amount_paid) > 0           THEN 'partial'
+               WHEN due_date < CURRENT_DATE                                                    THEN 'overdue'
+               ELSE 'pending'
+             END
+         WHERE id = $2`,
+        [diff, w0.ledger_id]
+      )
+
+      await client.query('COMMIT')
+      return NextResponse.json(newWaiver)
+    } catch (e) {
+      await client.query('ROLLBACK')
+      console.error(e)
+      return NextResponse.json({ error: 'Failed to correct waiver' }, { status: 500 })
+    } finally { client.release() }
+  } catch (err: unknown) {
+    console.error('[API]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
 export async function DELETE(req: NextRequest) {
   try {
     const p          = req.nextUrl.searchParams
@@ -170,7 +232,8 @@ export async function DELETE(req: NextRequest) {
 
       await client.query(
         `UPDATE student_fee_ledger
-         SET amount_paid = $1,
+         SET waiver_amount = GREATEST(0, COALESCE(waiver_amount, 0) - $3),
+             amount_paid = $1,
              status = CASE
                WHEN $1 >= amount_due                    THEN 'paid'
                WHEN $1 > 0 AND $1 < amount_due          THEN 'partial'
@@ -178,7 +241,7 @@ export async function DELETE(req: NextRequest) {
                ELSE 'pending'
              END
          WHERE id = $2`,
-        [newAmountPaid, waiver.ledger_id]
+        [newAmountPaid, waiver.ledger_id, waiver.waiver_amount]
       )
 
       await client.query('COMMIT')
