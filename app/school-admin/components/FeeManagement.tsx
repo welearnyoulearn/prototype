@@ -454,6 +454,13 @@ export default function FeeManagement({
   const [correctAmount, setCorrectAmount]       = useState('')
   const [cancelBusy, setCancelBusy]             = useState(false)
   const [cancelMsg, setCancelMsg]               = useState('')
+  // Waiver revoke / correct
+  const [cancelWaiverId, setCancelWaiverId]     = useState<number | null>(null)
+  const [cancelWaiverMode, setCancelWaiverMode] = useState<'revoke' | 'correct'>('revoke')
+  const [cancelWaiverReason, setCancelWaiverReason] = useState('')
+  const [correctWaiverAmount, setCorrectWaiverAmount] = useState('')
+  const [cancelWaiverBusy, setCancelWaiverBusy] = useState(false)
+  const [cancelWaiverMsg, setCancelWaiverMsg]   = useState('')
 
   // Reports tab
   const [reportData, setReportData]             = useState<ReportData | null>(null)
@@ -1679,7 +1686,7 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
   async function loadPassbook(studentId: number) {
     setPbLoading(true); setPbErr('')
     try {
-      const r = await fetch(`/api/fees/passbook?school_id=${schoolId}&student_id=${studentId}&academic_year=${academicYear}`)
+      const r = await fetch(`/api/fees/passbook?school_id=${schoolId}&student_id=${studentId}`)
       if (r.ok) { setPbData(await r.json()); setPbSection('bills') }
       else { const d = await r.json().catch(() => ({})); setPbErr(d.error || `Could not open passbook (HTTP ${r.status})`) }
     } catch { setPbErr('Network error while opening passbook') }
@@ -1723,6 +1730,36 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
       setCancelMsg(d.error || 'Failed')
     }
     setCancelBusy(false)
+  }
+
+  async function submitRevokeCorrectWaiver() {
+    if (!cancelWaiverId) return
+    if (!cancelWaiverReason.trim()) { setCancelWaiverMsg('Reason is required.'); return }
+    if (cancelWaiverMode === 'correct' && !(parseFloat(correctWaiverAmount) > 0)) {
+      setCancelWaiverMsg('Enter a valid corrected amount.'); return
+    }
+    setCancelWaiverBusy(true); setCancelWaiverMsg('')
+    try {
+      let r: Response
+      if (cancelWaiverMode === 'revoke') {
+        r = await fetch(`/api/fees/waivers?id=${cancelWaiverId}&reason=${encodeURIComponent(cancelWaiverReason)}`, { method: 'DELETE' })
+      } else {
+        r = await fetch('/api/fees/waivers', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: cancelWaiverId, new_waiver_amount: parseFloat(correctWaiverAmount), reason: cancelWaiverReason }),
+        })
+      }
+      const d = await r.json()
+      if (r.ok) {
+        setCancelWaiverMsg(cancelWaiverMode === 'correct' ? '✓ Waiver corrected' : '✓ Waiver revoked')
+        setCancelWaiverId(null)
+        if (pbData) loadPassbook(pbData.student.id)
+      } else {
+        setCancelWaiverMsg(d.error || 'Failed')
+      }
+    } catch { setCancelWaiverMsg('Network error') }
+    setCancelWaiverBusy(false)
   }
 
   // Print a receipt for any single completed payment from the passbook
@@ -3711,7 +3748,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               {pbSection === 'bills' && (
                 <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                   {pbData.ledger.length === 0 ? (
-                    <p className="text-sm text-gray-400 p-8 text-center">No bills for {academicYear}.</p>
+                    <p className="text-sm text-gray-400 p-8 text-center">No bills recorded.</p>
                   ) : (
                     <table className="w-full text-sm">
                       <thead>
@@ -3872,15 +3909,54 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   ) : (
                     <div className="divide-y divide-gray-50">
                       {pbData.waivers.map(w => (
-                        <div key={w.id} className="px-4 py-3 flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-medium text-gray-800">{w.fee_head_name} · {w.period_label}</p>
-                            <p className="text-xs text-gray-400">{w.reason}{w.granted_by_name ? ` · by ${w.granted_by_name}` : ''} · {fmtDate(w.created_at)}</p>
+                        <div key={w.id} className="px-4 py-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-gray-800">{w.fee_head_name} · {w.period_label}</p>
+                              <p className="text-xs text-gray-400">{w.reason}{w.granted_by_name ? ` · by ${w.granted_by_name}` : ''} · {fmtDate(w.created_at)}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-right">
+                                <p className="text-sm font-bold text-purple-700">−{fmt(w.waiver_amount)}</p>
+                                <p className="text-[10px] text-purple-400 capitalize">{w.waiver_type.replace('_', ' ')}</p>
+                              </div>
+                              {cancelWaiverId === w.id
+                                ? <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
+                                : <button onClick={() => { setCancelWaiverId(w.id); setCancelWaiverMode('revoke'); setCancelWaiverReason(''); setCorrectWaiverAmount(String(w.waiver_amount)); setCancelWaiverMsg('') }}
+                                    className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
+                              }
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className="text-sm font-bold text-purple-700">−{fmt(w.waiver_amount)}</p>
-                            <p className="text-[10px] text-purple-400 capitalize">{w.waiver_type.replace('_', ' ')}</p>
-                          </div>
+                          {cancelWaiverId === w.id && (
+                            <div className="mt-3 pt-3 border-t border-amber-100 bg-amber-50 -mx-4 -mb-3 px-4 pb-3 rounded-b-xl space-y-2">
+                              <div className="flex gap-2">
+                                <button onClick={() => setCancelWaiverMode('revoke')}
+                                  className={`flex-1 text-xs py-1.5 rounded-lg border font-medium ${cancelWaiverMode === 'revoke' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200'}`}>Revoke Waiver</button>
+                                <button onClick={() => setCancelWaiverMode('correct')}
+                                  className={`flex-1 text-xs py-1.5 rounded-lg border font-medium ${cancelWaiverMode === 'correct' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>Correct Amount</button>
+                              </div>
+                              <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                                {cancelWaiverMode === 'revoke'
+                                  ? <>Revokes waiver of <strong>{fmt(w.waiver_amount)}</strong>. Balance will increase accordingly.</>
+                                  : <>Revokes current waiver and records a new one with the corrected amount.</>}
+                              </div>
+                              {cancelWaiverMode === 'correct' && (
+                                <input type="number" min="0" value={correctWaiverAmount} onChange={e => setCorrectWaiverAmount(e.target.value)}
+                                  placeholder="Corrected waiver amount (₹)"
+                                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                              )}
+                              <input type="text" value={cancelWaiverReason} onChange={e => setCancelWaiverReason(e.target.value)}
+                                placeholder="Reason (required)" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                              {cancelWaiverMsg && <p className={`text-xs font-medium ${cancelWaiverMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{cancelWaiverMsg}</p>}
+                              <div className="flex gap-2">
+                                <button onClick={submitRevokeCorrectWaiver} disabled={cancelWaiverBusy || !cancelWaiverReason.trim()}
+                                  className={`text-sm text-white px-4 py-1.5 rounded-lg font-medium disabled:opacity-50 ${cancelWaiverMode === 'revoke' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                                  {cancelWaiverBusy ? 'Working…' : cancelWaiverMode === 'revoke' ? 'Confirm Revoke' : 'Confirm Correction'}
+                                </button>
+                                <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-sm text-gray-500 px-3 py-1.5">Close</button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -4528,7 +4604,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   {pbSection === 'bills' && (
                     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                       {pbData.ledger.length === 0
-                        ? <p className="text-sm text-gray-400 p-8 text-center">No bills for {academicYear}.</p>
+                        ? <p className="text-sm text-gray-400 p-8 text-center">No bills recorded.</p>
                         : (
                           <table className="w-full text-sm">
                             <thead className="bg-gray-50 border-b border-gray-100">
@@ -4637,12 +4713,51 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         ? <p className="text-sm text-gray-400 p-8 text-center">No waivers granted.</p>
                         : <div className="divide-y divide-gray-50">
                             {pbData.waivers.map(w => (
-                              <div key={w.id} className="px-4 py-3 flex items-center justify-between">
-                                <div>
-                                  <p className="text-sm font-medium text-gray-800">{(w as { fee_head_name?: string }).fee_head_name || 'Fee'} · {(w as { period_label?: string }).period_label || ''}</p>
-                                  <p className="text-xs text-gray-400">{(w as { reason?: string }).reason || '—'} · {(w as { granted_by_name?: string }).granted_by_name || ''}</p>
+                              <div key={w.id} className="px-4 py-3">
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <p className="text-sm font-medium text-gray-800">{(w as { fee_head_name?: string }).fee_head_name || 'Fee'} · {(w as { period_label?: string }).period_label || ''}</p>
+                                    <p className="text-xs text-gray-400">{(w as { reason?: string }).reason || '—'} · {(w as { granted_by_name?: string }).granted_by_name || ''}</p>
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                    <p className="text-sm font-bold text-purple-700">{fmt((w as { waiver_amount?: number }).waiver_amount || 0)}</p>
+                                    {cancelWaiverId === w.id
+                                      ? <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
+                                      : <button onClick={() => { setCancelWaiverId(w.id); setCancelWaiverMode('revoke'); setCancelWaiverReason(''); setCorrectWaiverAmount(String((w as { waiver_amount?: number }).waiver_amount || 0)); setCancelWaiverMsg('') }}
+                                          className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
+                                    }
+                                  </div>
                                 </div>
-                                <p className="text-sm font-bold text-purple-700">{fmt((w as { waiver_amount?: number }).waiver_amount || 0)}</p>
+                                {cancelWaiverId === w.id && (
+                                  <div className="mt-3 pt-3 border-t border-amber-100 bg-amber-50 -mx-4 -mb-3 px-4 pb-3 rounded-b-xl space-y-2">
+                                    <div className="flex gap-2">
+                                      <button onClick={() => setCancelWaiverMode('revoke')}
+                                        className={`flex-1 text-xs py-1.5 rounded-lg border font-medium ${cancelWaiverMode === 'revoke' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200'}`}>Revoke Waiver</button>
+                                      <button onClick={() => setCancelWaiverMode('correct')}
+                                        className={`flex-1 text-xs py-1.5 rounded-lg border font-medium ${cancelWaiverMode === 'correct' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>Correct Amount</button>
+                                    </div>
+                                    <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                                      {cancelWaiverMode === 'revoke'
+                                        ? <>Revokes waiver of <strong>{fmt((w as { waiver_amount?: number }).waiver_amount || 0)}</strong>. Balance will increase accordingly.</>
+                                        : <>Revokes current waiver and records a new one with the corrected amount.</>}
+                                    </div>
+                                    {cancelWaiverMode === 'correct' && (
+                                      <input type="number" min="0" value={correctWaiverAmount} onChange={e => setCorrectWaiverAmount(e.target.value)}
+                                        placeholder="Corrected waiver amount (₹)"
+                                        className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                    )}
+                                    <input type="text" value={cancelWaiverReason} onChange={e => setCancelWaiverReason(e.target.value)}
+                                      placeholder="Reason (required)" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                    {cancelWaiverMsg && <p className={`text-xs font-medium ${cancelWaiverMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{cancelWaiverMsg}</p>}
+                                    <div className="flex gap-2">
+                                      <button onClick={submitRevokeCorrectWaiver} disabled={cancelWaiverBusy || !cancelWaiverReason.trim()}
+                                        className={`text-sm text-white px-4 py-1.5 rounded-lg font-medium disabled:opacity-50 ${cancelWaiverMode === 'revoke' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                                        {cancelWaiverBusy ? 'Working…' : cancelWaiverMode === 'revoke' ? 'Confirm Revoke' : 'Confirm Correction'}
+                                      </button>
+                                      <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-sm text-gray-500 px-3 py-1.5">Close</button>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>
