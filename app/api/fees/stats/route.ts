@@ -27,7 +27,7 @@ export async function GET(req: NextRequest) {
            COUNT(DISTINCT l.student_id)                                              AS total_students,
            COALESCE(SUM(l.amount_due), 0)                                            AS total_due,
            COALESCE(SUM(l.amount_paid), 0)                                           AS total_collected,
-           COALESCE(SUM(l.amount_due - l.amount_paid), 0)                            AS total_outstanding,
+           COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)), 0)                            AS total_outstanding,
            COUNT(*) FILTER (WHERE l.status = 'paid')                                 AS paid_count,
            COUNT(*) FILTER (WHERE l.status = 'partial')                              AS partial_count,
            COUNT(*) FILTER (WHERE l.status = 'pending')                              AS pending_count,
@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
       // Top defaulters
       const { rows: top_defaulters } = await pool.query(
         `SELECT s.id AS student_id, s.name AS student_name, s.grade, s.section, s.roll_number,
-                SUM(l.amount_due - l.amount_paid) AS outstanding,
+                 SUM(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid) AS outstanding,
                 COUNT(*) AS overdue_entries
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
@@ -99,7 +99,7 @@ export async function GET(req: NextRequest) {
            SELECT s.grade, COALESCE(s.section, '') AS section, l.student_id,
                   SUM(l.amount_due)  AS s_due,
                   SUM(l.amount_paid) AS s_paid,
-                  SUM(GREATEST(l.amount_due - l.amount_paid, 0)) AS s_out
+                   SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS s_out
            FROM student_fee_ledger l
            JOIN students s ON s.id = l.student_id
            WHERE l.school_id = $1 AND l.academic_year = $2
