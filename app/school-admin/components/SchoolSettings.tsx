@@ -70,12 +70,10 @@ const STAFF_LIMITS: Record<string, number | null> = { basic: 2, standard: 5, pre
 function suggestNextYear(years: AcademicYear[]): { label: string; start_date: string; end_date: string } {
   const pad = (n: number) => String(n).padStart(2, '0')
   if (years.length === 0) {
-    // Default: today → April 24 of next year
-    const now = new Date()
-    const sy = now.getFullYear()
+    // Default: June 12 → April 24 of next year
+    const sy = new Date().getFullYear()
     const ey = sy + 1
-    const start = `${sy}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-    return { label: `${sy}-${String(ey).slice(2)}`, start_date: start, end_date: `${ey}-04-24` }
+    return { label: `${sy}-${String(ey).slice(2)}`, start_date: `${sy}-06-12`, end_date: `${ey}-04-24` }
   }
   // Suggest next year after the latest existing one
   const latest = years.reduce((a, b) => (a.end_date > b.end_date ? a : b))
