@@ -39,12 +39,11 @@ export async function GET(req: NextRequest) {
     const ledgerRes = await pool.query(
       `SELECT l.id, l.school_id, l.student_id, l.fee_category_id, l.fee_structure_id,
               l.academic_year, l.period_label, l.amount_due, l.amount_paid,
-              (l.amount_due - l.amount_paid) AS balance,
-               l.due_date, l.status, l.created_at,
               COALESCE(l.waiver_amount, 0) AS waiver_amount,
+              GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS balance,
+              l.due_date, l.status, l.created_at,
               fc.name AS fee_head_name, fc.name AS category_name, fc.frequency,
-              (CURRENT_DATE - l.due_date) AS days_overdue,
-              GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS balance
+              (CURRENT_DATE - l.due_date) AS days_overdue
        FROM student_fee_ledger l
        JOIN fee_categories fc ON fc.id = l.fee_category_id
        WHERE l.school_id = $1 AND l.student_id = $2 ${yearFilter}
@@ -55,12 +54,11 @@ export async function GET(req: NextRequest) {
       return pool.query(
         `SELECT l.id, l.school_id, l.student_id, l.fee_category_id, l.fee_structure_id,
                 l.academic_year, l.period_label, l.amount_due, l.amount_paid,
-                (l.amount_due - l.amount_paid) AS balance,
-                 l.due_date, l.status, l.created_at,
-                 0 AS waiver_amount,
-                 fc.name AS fee_head_name, fc.name AS category_name, fc.frequency,
-                 (CURRENT_DATE - l.due_date) AS days_overdue,
-                 GREATEST(l.amount_due - l.amount_paid, 0) AS balance
+                0 AS waiver_amount,
+                GREATEST(l.amount_due - l.amount_paid, 0) AS balance,
+                l.due_date, l.status, l.created_at,
+                fc.name AS fee_head_name, fc.name AS category_name, fc.frequency,
+                (CURRENT_DATE - l.due_date) AS days_overdue
          FROM student_fee_ledger l
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE l.school_id = $1 AND l.student_id = $2 ${yearFilter}

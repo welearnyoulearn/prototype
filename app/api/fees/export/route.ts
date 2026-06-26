@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
                   fc.name AS category_name, l.period_label, l.amount_due,
                   l.amount_paid,
                   COALESCE(l.waiver_amount, 0) AS waiver_amount,
-                   (l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid) AS balance,
+                  GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS balance,
                   l.due_date, l.status
            FROM student_fee_ledger l
            JOIN students s ON s.id = l.student_id

@@ -170,7 +170,7 @@ export async function PATCH(req: NextRequest) {
              status = CASE
                WHEN (GREATEST(0, COALESCE(waiver_amount, 0) + $1) + amount_paid) >= amount_due THEN 'waived'
                WHEN (GREATEST(0, COALESCE(waiver_amount, 0) + $1) + amount_paid) > 0           THEN 'partial'
-               WHEN due_date < CURRENT_DATE                                                    THEN 'overdue'
+               WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                ELSE 'pending'
              END
          WHERE id = $2`,
@@ -237,7 +237,7 @@ export async function DELETE(req: NextRequest) {
              status = CASE
                WHEN $1 >= amount_due                    THEN 'paid'
                WHEN $1 > 0 AND $1 < amount_due          THEN 'partial'
-               WHEN due_date < CURRENT_DATE             THEN 'overdue'
+               WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                ELSE 'pending'
              END
          WHERE id = $2`,

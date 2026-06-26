@@ -153,10 +153,10 @@ export async function POST(req: NextRequest) {
         if (payment_status === 'completed') {
           await client.query(
             `UPDATE student_fee_ledger
-             SET amount_paid = LEAST(amount_due, amount_paid + $1),
+             SET amount_paid = LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1),
                  status = CASE
-                   WHEN LEAST(amount_due, amount_paid + $1) >= amount_due THEN 'paid'
-                   WHEN amount_paid + $1 > 0                              THEN 'partial'
+                   WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
+                   WHEN amount_paid + $1 > 0 THEN 'partial'
                    ELSE status
                  END
              WHERE id = $2`,
@@ -206,10 +206,10 @@ export async function POST(req: NextRequest) {
           if (payment_status === 'completed') {
             await client.query(
               `UPDATE student_fee_ledger
-               SET amount_paid = LEAST(amount_due, amount_paid + $1),
+               SET amount_paid = LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1),
                    status = CASE
-                     WHEN LEAST(amount_due, amount_paid + $1) >= amount_due THEN 'paid'
-                     WHEN amount_paid + $1 > 0                              THEN 'partial'
+                     WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
+                     WHEN amount_paid + $1 > 0 THEN 'partial'
                      ELSE status
                    END
                WHERE id = $2`,

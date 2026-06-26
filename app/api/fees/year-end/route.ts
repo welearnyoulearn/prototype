@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
          COALESCE(SUM(l.amount_due), 0)                              AS total_billed,
          COALESCE(SUM(l.amount_paid), 0)                             AS total_collected,
          COALESCE(SUM(COALESCE(l.waiver_amount, 0)), 0)             AS total_waived,
-         COALESCE(SUM(GREATEST(l.amount_due - l.amount_paid, 0)), 0) AS total_unpaid
+         COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)), 0) AS total_unpaid
        FROM student_fee_ledger l
        WHERE l.school_id = $1 AND l.academic_year = $2`,
       [school_id, academic_year]
@@ -72,7 +72,8 @@ export async function GET(req: NextRequest) {
     // Unpaid bills grouped by student, with leaver detection
     const { rows: bills } = await pool.query(
       `SELECT l.id, l.student_id, l.fee_category_id, l.period_label,
-              l.amount_due, l.amount_paid, (l.amount_due - l.amount_paid) AS balance,
+              l.amount_due, l.amount_paid, l.waiver_amount,
+              GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) AS balance,
               l.due_date, l.status,
               fc.name AS category_name,
               s.name AS student_name, s.roll_number, s.grade, s.section,
@@ -82,7 +83,7 @@ export async function GET(req: NextRequest) {
        JOIN fee_categories fc ON fc.id = l.fee_category_id
        WHERE l.school_id = $1 AND l.academic_year = $2
          AND l.status IN ('pending', 'overdue', 'partial')
-         AND l.amount_paid < l.amount_due
+         AND GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) > 0
        ORDER BY s.grade::int NULLS LAST, s.section, s.name, l.due_date`,
       [school_id, academic_year]
     )
@@ -244,12 +245,14 @@ export async function POST(req: NextRequest) {
           // Fetch this student's unpaid bills in from_year (with leaver status)
           const { rows: studentBills } = await client.query(
             `SELECT l.id, l.fee_category_id, l.period_label, l.amount_due, l.amount_paid,
-                    (l.amount_due - l.amount_paid) AS balance,
+                    COALESCE(l.waiver_amount,0) AS waiver_amount,
+                    GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) AS balance,
                     s.grade, COALESCE(s.status,'active') AS student_status
              FROM student_fee_ledger l
              JOIN students s ON s.id = l.student_id
              WHERE l.school_id = $1 AND l.academic_year = $2 AND l.student_id = $3
-               AND l.status IN ('pending','overdue','partial') AND l.amount_paid < l.amount_due`,
+               AND l.status IN ('pending','overdue','partial')
+               AND GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) > 0`,
             [school_id, from_year, d.student_id]
           )
           if (studentBills.length === 0) continue
@@ -290,7 +293,7 @@ export async function POST(req: NextRequest) {
             for (const b of studentBills) {
               await client.query(
                 `UPDATE student_fee_ledger
-                 SET status = 'waived', amount_paid = amount_due,
+                 SET status = 'waived',
                      waiver_amount = COALESCE(waiver_amount,0) + $1
                  WHERE id = $2`,
                 [parseFloat(b.balance), b.id]
@@ -309,7 +312,7 @@ export async function POST(req: NextRequest) {
             for (const b of studentBills) {
               await client.query(
                 `UPDATE student_fee_ledger
-                 SET status = 'waived', amount_paid = amount_due,
+                 SET status = 'waived',
                      waiver_amount = COALESCE(waiver_amount,0) + $1
                  WHERE id = $2`,
                 [parseFloat(b.balance), b.id]
@@ -339,10 +342,11 @@ export async function POST(req: NextRequest) {
         // Snapshot remaining-open totals
         const { rows: [openAgg] } = await client.query(
           `SELECT COUNT(DISTINCT student_id) AS cnt,
-                  COALESCE(SUM(amount_due - amount_paid),0) AS total
+                  COALESCE(SUM(GREATEST(amount_due - COALESCE(waiver_amount,0) - amount_paid, 0)),0) AS total
            FROM student_fee_ledger
            WHERE school_id = $1 AND academic_year = $2
-             AND status IN ('pending','overdue','partial') AND amount_paid < amount_due`,
+             AND status IN ('pending','overdue','partial')
+             AND GREATEST(amount_due - COALESCE(waiver_amount,0) - amount_paid, 0) > 0`,
           [school_id, from_year]
         )
         await client.query(

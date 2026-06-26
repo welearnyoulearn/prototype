@@ -93,12 +93,13 @@ export async function POST(req: NextRequest) {
 
       // BUG 13 fix: check for pending dues and require explicit confirmation before rolling over
       const { rows: [pendingSummary] } = await client.query(
-        `SELECT COUNT(*) AS count, COALESCE(SUM(amount_due - amount_paid), 0) AS total
+        `SELECT COUNT(*) AS count,
+                COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)), 0) AS total
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
          WHERE l.school_id = $1 AND l.academic_year = $2
            AND l.status IN ('pending','overdue','partial')
-           AND l.amount_paid < l.amount_due
+           AND GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) > 0
            AND s.status = 'active'`,
         [school_id, from_year]
       )
@@ -149,14 +150,14 @@ export async function POST(req: NextRequest) {
       // ── STEP 3: Carry forward all unpaid dues ────────────────────────────────
       const { rows: unpaidStudents } = await client.query(
         `SELECT l.student_id,
-                SUM(GREATEST(l.amount_due - l.amount_paid, 0)) AS balance,
+                SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)) AS balance,
                 array_agg(l.id) AS ledger_ids,
-                array_agg(l.amount_due - l.amount_paid) AS balances
+                array_agg(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)) AS balances
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
          WHERE l.school_id = $1 AND l.academic_year = $2
            AND l.status IN ('pending','overdue','partial')
-           AND l.amount_paid < l.amount_due
+           AND GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) > 0
            AND s.status = 'active'
          GROUP BY l.student_id`,
         [school_id, from_year]
@@ -189,7 +190,7 @@ export async function POST(req: NextRequest) {
           if (bals[i] <= 0) continue
           await client.query(
             `UPDATE student_fee_ledger
-             SET status = 'waived', amount_paid = amount_due,
+             SET status = 'waived',
                  waiver_amount = COALESCE(waiver_amount, 0) + $1
              WHERE id = $2`,
             [bals[i], ids[i]]

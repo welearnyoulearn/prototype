@@ -533,13 +533,12 @@ export default function FeeManagement({
       fetch(`/api/fees/year-rollover?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
     ]).then(([current, all, closed]) => {
       const labels: string[] = Array.isArray(all) ? all.map((y: { label: string }) => y.label) : []
-      const cur: string = current?.label ?? labels[0] ?? '2025-26'
-      if (!labels.length) labels.push(cur)
+      const cur: string = current?.label ?? labels[0] ?? ''
       setAcademicYears(labels)
       setAcademicYear(cur)
       const closedSet = new Set<string>(Array.isArray(closed) ? closed.map((c: { academic_year: string }) => c.academic_year) : [])
       setClosedYears(closedSet)
-    }).catch(() => { setAcademicYears(['2025-26']); setAcademicYear('2025-26') })
+    }).catch(() => { setAcademicYears([]); setAcademicYear('') })
   }, [schoolId])
 
   useEffect(() => { loadAcademicYears() }, [loadAcademicYears])
@@ -760,7 +759,7 @@ export default function FeeManagement({
     const d = await r.json()
     if (r.ok) {
       setLedger(prev => prev.map(e => e.id === entry.id
-        ? { ...e, amount_due: d.amount_due, balance: d.amount_due - d.amount_paid, status: d.status, has_edits: true }
+        ? { ...e, amount_due: d.amount_due, balance: Math.max(0, d.amount_due - (d.waiver_amount ?? e.waiver_amount ?? 0) - d.amount_paid), status: d.status, has_edits: true }
         : e
       ))
       setEditHistories(p => { const next = { ...p }; delete next[entry.id]; return next })
@@ -1504,6 +1503,9 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     return Array.from(map.values())
   })()
 
+  // Grade-only filtered rows — used for chip counts so they reflect grade selection but not search/status
+  const gradeFilteredRows = ledgerGrade ? studentRows.filter(r => r.grade === ledgerGrade) : studentRows
+
   const collectionFiltered = studentRows.filter(r => {
     if (ledgerGrade && r.grade !== ledgerGrade) return false
     if (ledgerSearch) {
@@ -1691,7 +1693,7 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
   async function loadPassbook(studentId: number) {
     setPbLoading(true); setPbErr('')
     try {
-      const r = await fetch(`/api/fees/passbook?school_id=${schoolId}&student_id=${studentId}`)
+      const r = await fetch(`/api/fees/passbook?school_id=${schoolId}&student_id=${studentId}&academic_year=${academicYear}`)
       if (r.ok) { setPbData(await r.json()); setPbSection('bills') }
       else { const d = await r.json().catch(() => ({})); setPbErr(d.error || `Could not open passbook (HTTP ${r.status})`) }
     } catch { setPbErr('Network error while opening passbook') }
@@ -3058,11 +3060,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               {/* Quick filter chips */}
               <div className="flex gap-2 flex-wrap">
                 {([
-                  { key: '',        label: `All Students (${collectionFiltered.length})` },
-                  { key: 'overdue', label: `Overdue (${studentRows.filter(r => r.has_overdue && r.outstanding > 0).length})` },
-                  { key: 'partial', label: `Partially Paid (${studentRows.filter(r => r.total_paid > 0 && r.outstanding > 0).length})` },
-                  { key: 'never',   label: `Never Paid (${studentRows.filter(r => r.never_paid && r.outstanding > 0).length})` },
-                  { key: 'clear',   label: `Fully Cleared (${studentRows.filter(r => r.outstanding <= 0).length})` },
+                  { key: '',        label: `All Students (${gradeFilteredRows.length})` },
+                  { key: 'overdue', label: `Overdue (${gradeFilteredRows.filter(r => r.has_overdue && r.outstanding > 0).length})` },
+                  { key: 'partial', label: `Partially Paid (${gradeFilteredRows.filter(r => r.total_paid > 0 && r.outstanding > 0).length})` },
+                  { key: 'never',   label: `Never Paid (${gradeFilteredRows.filter(r => r.never_paid && r.outstanding > 0).length})` },
+                  { key: 'clear',   label: `Fully Cleared (${gradeFilteredRows.filter(r => r.outstanding <= 0).length})` },
                 ] as const).map(f => (
                   <button key={f.key} onClick={() => setLedgerStatus(f.key)}
                     className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
