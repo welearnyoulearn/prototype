@@ -74,7 +74,7 @@ type ReportData = {
   balance: { total_billed: number; total_collected: number; total_outstanding: number; total_waived: number; paid_entries: number; partial_entries: number; unpaid_entries: number; waived_entries: number; total_students: number }
   monthly: Array<{ month: string; collected: number; payment_count: number; students_paid: number }>
   monthlyDue: Array<{ month: string; billed: number }>
-  byGrade: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
+  byGrade: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; total_waived: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
   byCategory: Array<{ category_name: string; frequency: string; students: number; total_due: number; total_collected: number; total_waived: number; outstanding: number; paid_count: number; unpaid_count: number }>
   byMode: Array<{ payment_mode: string; count: number; total: number }>
   defaulters: Array<{ student_name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; outstanding: number; overdue_entries: number; unpaid_entries: number }>
@@ -288,7 +288,7 @@ export default function FeeManagement({
   }
   const [recentPayments, setRecentPayments] = useState<RecentPayment[]>([])
 
-  type GradeStat = { grade: string; section?: string; students: number; total_due: number; total_collected: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }
+  type GradeStat = { grade: string; section?: string; students: number; total_due: number; total_collected: number; total_waived?: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }
   const [gradeStats, setGradeStats] = useState<GradeStat[]>([])
 
   // Setup
@@ -504,6 +504,7 @@ export default function FeeManagement({
 
   // Amendment impact preview
   const [amendImpact, setAmendImpact]           = useState<number | null>(null)
+  const [amendPartialCount, setAmendPartialCount] = useState<number | null>(null)
   const [amendImpactLoading, setAmendImpactLoading] = useState(false)
 
   // Assignment history panel (Applicability tab)
@@ -1417,9 +1418,9 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
   async function fetchAmendImpact(catId: number, grade: string) {
     if (!catId || !grade || !academicYear) return
-    setAmendImpactLoading(true); setAmendImpact(null)
+    setAmendImpactLoading(true); setAmendImpact(null); setAmendPartialCount(null)
     const r = await fetch(`/api/fees/structures/amend?school_id=${schoolId}&academic_year=${academicYear}&preview=1&fee_category_id=${catId}&grade=${grade}`)
-    if (r.ok) { const d = await r.json(); setAmendImpact(d.count) }
+    if (r.ok) { const d = await r.json(); setAmendImpact(d.count); setAmendPartialCount(d.partial_count ?? 0) }
     setAmendImpactLoading(false)
   }
 
@@ -3469,7 +3470,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-base font-semibold text-gray-800">Defaulters — Outstanding Dues</h3>
-                <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&status=overdue`} download
+                <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&outstanding=1`} download
                   className="text-sm border border-red-200 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50">Export Defaulters</a>
               </div>
               {(() => {
@@ -3617,7 +3618,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <p className={`text-sm font-medium ${dayCloseMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{dayCloseMsg}</p>
                   )}
                   <div className="flex justify-end gap-2">
-                    <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=payments`} download
+                    <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=payments&date=${new Date().toISOString().slice(0,10)}`} download
                       className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">Export Day Report</a>
                     <button onClick={submitDayClose} disabled={dayCloseSubmitting || dayCloseData.receipts.count === 0}
                       className="text-sm bg-blue-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
@@ -4114,7 +4115,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <h3 className="text-sm font-semibold text-gray-700 mb-4">Class-wise Collection</h3>
                   <div className="space-y-3">
                     {reportData.byGrade.map(g => {
-                      const pct = g.total_due > 0 ? Math.round((Number(g.total_collected) / Number(g.total_due)) * 100) : 0
+                      const netDemand = Number(g.total_due) - Number(g.total_waived ?? 0)
+                      const pct = netDemand > 0 ? Math.round((Number(g.total_collected) / netDemand) * 100) : 0
                       const cls = g.section ? `${g.grade}-${g.section}` : `Grade ${g.grade}`
                       return (
                         <div key={cls}>
@@ -4193,7 +4195,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                   <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                     <p className="text-sm font-semibold text-gray-700">Fee Defaulters — {reportData.defaulters.length} students</p>
-                    <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&status=overdue`} download
+                    <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&outstanding=1`} download
                       className="text-xs text-red-600 border border-red-200 px-2.5 py-1 rounded-lg hover:bg-red-50">
                       Export Defaulters
                     </a>

@@ -22,6 +22,8 @@ export async function GET(req: NextRequest) {
     const type         = p.get('type') || 'ledger'
     const grade        = p.get('grade')
     const status       = p.get('status')
+    const outstanding  = p.get('outstanding') === '1'
+    const date         = p.get('date') // optional YYYY-MM-DD for payments export
 
     if (!school_id || !academic_year) {
       return NextResponse.json({ error: 'school_id and academic_year required' }, { status: 400 })
@@ -33,7 +35,11 @@ export async function GET(req: NextRequest) {
         const conditions = ['l.school_id = $1', 'l.academic_year = $2']
         const values: unknown[] = [school_id, academic_year]
         if (grade)  { values.push(grade);  conditions.push(`s.grade = $${values.length}`) }
-        if (status) { values.push(status); conditions.push(`l.status = $${values.length}`) }
+        if (outstanding) {
+          conditions.push(`GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) > 0`)
+        } else if (status) {
+          values.push(status); conditions.push(`l.status = $${values.length}`)
+        }
 
         const { rows } = await pool.query(
           `SELECT s.name AS student_name, s.roll_number, s.grade, s.section,
@@ -69,7 +75,9 @@ export async function GET(req: NextRequest) {
         ]
 
         const csv = toCSV(rows as Record<string, unknown>[], cols)
-        const filename = `ledger_${academic_year}_${grade || 'all'}_${status || 'all'}.csv`
+        const filename = outstanding
+          ? `defaulters_${academic_year}_${grade || 'all'}.csv`
+          : `ledger_${academic_year}_${grade || 'all'}_${status || 'all'}.csv`
         return new NextResponse(csv, {
           headers: {
             'Content-Type': 'text/csv; charset=utf-8',
@@ -79,6 +87,8 @@ export async function GET(req: NextRequest) {
       }
 
       if (type === 'payments') {
+        const pmtValues: unknown[] = [school_id, academic_year]
+        const pmtCond = date ? (pmtValues.push(date), `AND fp.paid_date = $${pmtValues.length}`) : ''
         const { rows } = await pool.query(
           `SELECT s.name AS student_name, s.roll_number, s.grade, s.section,
                   s.parent_name, s.parent_phone,
@@ -90,9 +100,9 @@ export async function GET(req: NextRequest) {
            JOIN student_fee_ledger l ON l.id = fp.ledger_id
            JOIN fee_categories fc ON fc.id = l.fee_category_id
            WHERE fp.school_id = $1 AND l.academic_year = $2
-             AND fp.payment_status = 'completed'
+             AND fp.payment_status = 'completed' ${pmtCond}
            ORDER BY fp.paid_date DESC, fp.created_at DESC`,
-          [school_id, academic_year]
+          pmtValues
         )
 
         const cols = [
@@ -117,7 +127,7 @@ export async function GET(req: NextRequest) {
         return new NextResponse(csv, {
           headers: {
             'Content-Type': 'text/csv; charset=utf-8',
-            'Content-Disposition': `attachment; filename="payments_${academic_year}.csv"`,
+            'Content-Disposition': `attachment; filename="${date ? `day_collection_${date}` : `payments_${academic_year}`}.csv"`,
           },
         })
       }

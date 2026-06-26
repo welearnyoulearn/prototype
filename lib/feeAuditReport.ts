@@ -64,7 +64,7 @@ export async function buildFeeAuditReport(opts: {
     const { rows: bills } = await pool.query(
       `SELECT fc.name AS fee_type, l.period_label, l.amount_due AS billed,
               COALESCE(l.waiver_amount,0) AS waived, l.amount_paid AS paid,
-              (l.amount_due - l.amount_paid) AS balance, l.due_date, l.status
+              GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) AS balance, l.due_date, l.status
        FROM student_fee_ledger l JOIN fee_categories fc ON fc.id = l.fee_category_id
        JOIN students s ON s.id = l.student_id
        WHERE ${WHERE} ORDER BY fc.name, l.due_date`, vals
@@ -175,7 +175,7 @@ export async function buildFeeAuditReport(opts: {
   type LogRow = { type: string; detail: string; user: string; at: string; amount: number | null }
   const log: LogRow[] = []
   const gParams = (extra: unknown[] = []) => grade ? [school_id, academic_year, grade, ...extra] : [school_id, academic_year, ...extra]
-  const gClause = grade ? 'AND s.grade = $3' : ''
+  const gClause = grade ? 'AND st.grade = $3' : ''
 
   async function tableExists(t: string) { return (await pool.query(`SELECT to_regclass($1) AS t`, [t])).rows[0].t != null }
 
@@ -197,7 +197,6 @@ export async function buildFeeAuditReport(opts: {
       `SELECT e.old_amount, e.new_amount, e.reason, e.changed_by, e.changed_at, st.name AS student_name, fc.name AS fee_type
        FROM student_fee_ledger_edits e JOIN student_fee_ledger l ON l.id = e.ledger_id
        JOIN students st ON st.id = e.student_id JOIN fee_categories fc ON fc.id = l.fee_category_id
-       JOIN students s ON s.id = e.student_id
        WHERE e.school_id = $1 AND l.academic_year = $2 ${gClause} ORDER BY e.changed_at`, gParams()
     ).catch(() => ({ rows: [] }))
     for (const r of rows) log.push({
@@ -211,7 +210,6 @@ export async function buildFeeAuditReport(opts: {
               w.revoked_by, w.revoked_at, w.revoke_reason, st.name AS student_name, fc.name AS fee_type
        FROM fee_waivers w JOIN student_fee_ledger l ON l.id = w.ledger_id
        JOIN students st ON st.id = w.student_id JOIN fee_categories fc ON fc.id = l.fee_category_id
-       JOIN students s ON s.id = w.student_id
        WHERE w.school_id = $1 AND l.academic_year = $2 ${gClause} ORDER BY w.created_at`, gParams()
     ).catch(() => ({ rows: [] }))
     for (const r of rows) {
@@ -225,7 +223,6 @@ export async function buildFeeAuditReport(opts: {
               fp.cancelled_by, fp.cancel_reason, fp.created_at, fp.cancelled_at, st.name AS student_name, fc.name AS fee_type
        FROM fee_payments fp JOIN student_fee_ledger l ON l.id = fp.ledger_id
        JOIN students st ON st.id = fp.student_id JOIN fee_categories fc ON fc.id = l.fee_category_id
-       JOIN students s ON s.id = fp.student_id
        WHERE fp.school_id = $1 AND l.academic_year = $2 AND fp.payment_status IN ('completed','cancelled') ${gClause}
        ORDER BY fp.created_at`, gParams()
     ).catch(() => ({ rows: [] }))

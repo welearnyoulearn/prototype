@@ -202,7 +202,8 @@ export async function GET(req: NextRequest) {
     // Sort timeline chronologically
     timeline.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
-    // Compute running balance
+    // Compute running balance — accumulate without clamping so credits before debits
+    // (same-second timestamps) don't corrupt subsequent entries; clamp only for display
     let runningBalance = 0
     const timelineWithBalance = timeline.map(entry => {
       runningBalance = runningBalance + entry.debit - entry.credit
