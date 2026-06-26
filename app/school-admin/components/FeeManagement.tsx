@@ -2607,7 +2607,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             </div>
           ) : (
             /* ── Fee head cards ── */
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-gray-50 rounded-xl p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
               {categories.map(cat => {
                 const amountsSet = feeHasAmounts(cat.id, cat.category_type)
                 const generated = feeBillsGenerated(cat)
@@ -2616,7 +2616,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 const due = catStat ? Number(catStat.total_due) : 0
                 const collPct = pct(collected, due)
                 return (
-                  <div key={cat.id} className={`bg-white rounded-xl border p-5 ${!cat.is_active ? 'border-gray-100 opacity-60' : 'border-gray-100'}`}>
+                  <div key={cat.id} className={`bg-white rounded-xl border p-5 shadow-sm ${!cat.is_active ? 'border-gray-200 opacity-60' : 'border-gray-200'}`}>
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-lg bg-gray-50 flex items-center justify-center text-xl">{feeIcon(cat.name)}</div>
