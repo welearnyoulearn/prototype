@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
              (SELECT SUM(fp.amount) FROM fee_payments fp WHERE fp.ledger_id = l.id AND fp.payment_status = 'completed'),
              0
            ) AS total_paid_confirmed,
-           (l.amount_due - l.amount_paid) AS balance,
+           GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS balance,
            (CURRENT_DATE - l.due_date) AS days_overdue,
            ${hasEditsCol}
          FROM student_fee_ledger l

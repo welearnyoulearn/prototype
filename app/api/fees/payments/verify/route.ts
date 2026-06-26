@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
       const { rows } = await pool.query(
         `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section,
                 fc.name AS category_name, l.period_label, l.amount_due, l.amount_paid,
-                (l.amount_due - l.amount_paid) AS ledger_balance
+                GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS ledger_balance
          FROM fee_payments fp
          JOIN students s ON s.id = fp.student_id
          JOIN student_fee_ledger l ON l.id = fp.ledger_id

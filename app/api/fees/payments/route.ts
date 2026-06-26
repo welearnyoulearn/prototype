@@ -126,14 +126,14 @@ export async function POST(req: NextRequest) {
 
         // BUG 6: Guard against overpayment
         const { rows: [ledgerRow] } = await client.query(
-          `SELECT amount_due, amount_paid FROM student_fee_ledger WHERE id = $1 AND school_id = $2`,
+          `SELECT amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount FROM student_fee_ledger WHERE id = $1 AND school_id = $2`,
           [ledger_id, school_id]
         )
         if (!ledgerRow) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: 'Ledger entry not found' }, { status: 404 })
         }
-        const balance = parseFloat(ledgerRow.amount_due) - parseFloat(ledgerRow.amount_paid)
+        const balance = parseFloat(ledgerRow.amount_due) - parseFloat(ledgerRow.waiver_amount) - parseFloat(ledgerRow.amount_paid)
         if (parseFloat(String(amount)) > balance + 0.001) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: `Amount exceeds balance due (₹${balance.toFixed(2)})` }, { status: 400 })
@@ -169,8 +169,8 @@ export async function POST(req: NextRequest) {
         // ── Multi-entry FIFO mode ─────────────────────────────────────────────────
         // Fetch ledger entries in FIFO order (oldest due_date first)
         const { rows: entries } = await client.query(
-          `SELECT id, amount_due, amount_paid, status,
-                  (amount_due - amount_paid) AS balance
+          `SELECT id, amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount, status,
+                  GREATEST(amount_due - COALESCE(waiver_amount, 0) - amount_paid, 0) AS balance
            FROM student_fee_ledger
            WHERE id = ANY($1) AND school_id = $2
              AND status NOT IN ('paid', 'waived')
