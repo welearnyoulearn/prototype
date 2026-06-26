@@ -69,8 +69,10 @@ export async function GET(req: NextRequest) {
       // Collection by category
       const { rows: by_category } = await pool.query(
         `SELECT fc.name AS category_name, fc.frequency,
-                COALESCE(SUM(l.amount_due), 0)  AS total_due,
-                COALESCE(SUM(l.amount_paid), 0) AS total_collected,
+                COALESCE(SUM(l.amount_due), 0)                                                             AS total_due,
+                COALESCE(SUM(l.amount_paid), 0)                                                            AS total_collected,
+                COALESCE(SUM(COALESCE(l.waiver_amount, 0)), 0)                                             AS total_waived,
+                COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)), 0)  AS total_outstanding,
                 COUNT(*) FILTER (WHERE l.status = 'overdue') AS overdue_count
          FROM student_fee_ledger l
          JOIN fee_categories fc ON fc.id = l.fee_category_id
@@ -97,12 +99,13 @@ export async function GET(req: NextRequest) {
       // Top defaulters
       const { rows: top_defaulters } = await pool.query(
         `SELECT s.id AS student_id, s.name AS student_name, s.grade, s.section, s.roll_number,
-                 SUM(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid) AS outstanding,
-                COUNT(*) AS overdue_entries
+                SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS outstanding,
+                COUNT(*) FILTER (WHERE l.status = 'overdue') AS overdue_entries
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
          WHERE l.school_id = $1 AND l.academic_year = $2
-           AND l.status IN ('overdue','pending') AND l.amount_paid < l.amount_due
+           AND l.status IN ('overdue','pending')
+           AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0
          GROUP BY s.id, s.name, s.grade, s.section, s.roll_number
          ORDER BY outstanding DESC
          LIMIT 10`,

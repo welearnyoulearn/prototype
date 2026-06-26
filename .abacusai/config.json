@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Bash(mkdir *))",
+      "Bash(Bash(1 *))",
+      "Bash(1 *)",
+      "Bash(if *)",
+      "Bash(type *)"
+    ]
+  }
+}

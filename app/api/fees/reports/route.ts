@@ -129,13 +129,14 @@ export async function GET(req: NextRequest) {
       const { rows: defaulters } = await pool.query(
         `SELECT s.name AS student_name, s.roll_number, s.grade, s.section,
                 s.parent_name, s.parent_phone,
-                 SUM(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid) AS outstanding,
+                SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS outstanding,
                 COUNT(*) FILTER (WHERE l.status = 'overdue') AS overdue_entries,
                 COUNT(*) FILTER (WHERE l.status IN ('pending','overdue')) AS unpaid_entries
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
          WHERE l.school_id = $1 AND l.academic_year = $2
-           AND l.status IN ('pending','overdue') AND l.amount_paid < l.amount_due
+           AND l.status IN ('pending','overdue')
+           AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0
          GROUP BY s.id, s.name, s.roll_number, s.grade, s.section, s.parent_name, s.parent_phone
          ORDER BY outstanding DESC`,
         [school_id, academic_year]
