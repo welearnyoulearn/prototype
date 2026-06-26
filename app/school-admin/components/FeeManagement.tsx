@@ -711,13 +711,14 @@ export default function FeeManagement({
   const loadLedger = useCallback(async () => {
     if (!academicYear) return
     setLedgerLoading(true)
+    // Never pass ledgerStatus to API — always load all entries and filter client-side
+    // so chip counts stay accurate regardless of which tab is active
     const params = new URLSearchParams({ school_id: String(schoolId), academic_year: academicYear })
-    if (ledgerGrade)  params.set('grade', ledgerGrade)
-    if (ledgerStatus) params.set('status', ledgerStatus)
+    if (ledgerGrade) params.set('grade', ledgerGrade)
     const r = await fetch(`/api/fees/ledger?${params}`)
     if (r.ok) setLedger(await r.json())
     setLedgerLoading(false)
-  }, [schoolId, academicYear, ledgerGrade, ledgerStatus])
+  }, [schoolId, academicYear, ledgerGrade])
 
   useEffect(() => { if (activeTab === 'ledger') loadLedger() }, [activeTab, loadLedger])
 
