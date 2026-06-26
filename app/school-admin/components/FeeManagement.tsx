@@ -959,6 +959,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       if (r.ok) {
         setShowWaiver(false); setSelectedEntry(null)
         setCollectSearch(''); setCollectEntries([])
+        setOpenStudentId(null); setShowCollectForm(false); setCollectChecked(new Set())
         loadStats(); loadLedger()
       } else {
         const d = await r.json()
