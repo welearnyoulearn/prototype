@@ -70,9 +70,10 @@ export async function GET(req: NextRequest) {
       const { rows: byGrade } = await pool.query(
         `WITH per_student AS (
            SELECT s.grade, COALESCE(s.section, '') AS section, l.student_id,
-                  SUM(l.amount_due)  AS s_due,
-                  SUM(l.amount_paid) AS s_paid,
-                   SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS s_out
+                  SUM(l.amount_due)                                                        AS s_due,
+                  SUM(l.amount_paid)                                                       AS s_paid,
+                  SUM(COALESCE(l.waiver_amount, 0))                                        AS s_waived,
+                  SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS s_out
            FROM student_fee_ledger l
            JOIN students s ON s.id = l.student_id
            WHERE l.school_id = $1 AND l.academic_year = $2
@@ -84,6 +85,7 @@ export async function GET(req: NextRequest) {
            COUNT(*)                                       AS students,
            COALESCE(SUM(s_due), 0)                        AS total_due,
            COALESCE(SUM(s_paid), 0)                       AS total_collected,
+           COALESCE(SUM(s_waived), 0)                     AS total_waived,
            COALESCE(SUM(s_out), 0)                        AS outstanding,
            COUNT(*) FILTER (WHERE s_out <= 0)             AS fully_paid_students,
            COUNT(*) FILTER (WHERE s_out > 0)              AS defaulter_students

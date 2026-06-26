@@ -281,7 +281,7 @@ export async function POST(req: NextRequest) {
                   period_label, amount_due, due_date, status, notes)
                VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, 'pending', $8)
                ON CONFLICT (student_id, fee_category_id, academic_year, period_label) DO UPDATE
-                 SET amount_due = student_fee_ledger.amount_due + EXCLUDED.amount_due`,
+                 SET amount_due = EXCLUDED.amount_due, notes = EXCLUDED.notes`,
               [school_id, d.student_id, prevDuesCatId, to_year, periodLabel,
                studentBalance, `${startYearOf(to_year)}-04-30`,
                `Carried from ${from_year}: ${note}`]
