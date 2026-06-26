@@ -22,20 +22,42 @@ export async function GET(req: NextRequest) {
         [school_id, academic_year]
       )
 
+      // Per-student rollup first, then aggregate — so paid/partial/zero-payer counts
+      // are per STUDENT not per ledger entry, and zero-payer = no cash paid at all this year
       const { rows: [summary] } = await pool.query(
-        `SELECT
-           COUNT(DISTINCT l.student_id)                                              AS total_students,
-           COALESCE(SUM(l.amount_due), 0)                                            AS total_due,
-           COALESCE(SUM(l.amount_paid), 0)                                           AS total_collected,
-           COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)), 0)                            AS total_outstanding,
-           COUNT(*) FILTER (WHERE l.status = 'paid')                                 AS paid_count,
-           COUNT(*) FILTER (WHERE l.status = 'partial')                              AS partial_count,
-           COUNT(*) FILTER (WHERE l.status = 'pending')                              AS pending_count,
-           COUNT(*) FILTER (WHERE l.status = 'overdue')                              AS overdue_count,
-           COUNT(*) FILTER (WHERE l.status = 'waived')                               AS waived_count,
-           COUNT(DISTINCT l.student_id) FILTER (WHERE l.status IN ('overdue','pending') AND l.amount_paid = 0) AS defaulters_count
-         FROM student_fee_ledger l
-         WHERE l.school_id = $1 AND l.academic_year = $2`,
+        `WITH per_student AS (
+           SELECT
+             l.student_id,
+             SUM(l.amount_due)                                                        AS s_due,
+             SUM(l.amount_paid)                                                       AS s_cash,
+             SUM(COALESCE(l.waiver_amount, 0))                                        AS s_waived,
+             SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS s_out,
+             COUNT(*) FILTER (WHERE l.status = 'overdue')                            AS overdue_entries,
+             COUNT(*) FILTER (WHERE l.status = 'pending')                            AS pending_entries,
+             COUNT(*) FILTER (WHERE l.status IN ('paid','waived'))                   AS paid_entries
+           FROM student_fee_ledger l
+           WHERE l.school_id = $1 AND l.academic_year = $2
+           GROUP BY l.student_id
+         )
+         SELECT
+           COUNT(*)                                                                   AS total_students,
+           COALESCE(SUM(s_due), 0)                                                   AS total_due,
+           COALESCE(SUM(s_cash), 0)                                                  AS total_collected,
+           COALESCE(SUM(s_waived), 0)                                                AS total_waived,
+           COALESCE(SUM(s_out), 0)                                                   AS total_outstanding,
+           -- entry-level counts for the progress legend
+           (SELECT COUNT(*) FROM student_fee_ledger WHERE school_id = $1 AND academic_year = $2 AND status = 'paid')    AS paid_count,
+           (SELECT COUNT(*) FROM student_fee_ledger WHERE school_id = $1 AND academic_year = $2 AND status = 'partial') AS partial_count,
+           (SELECT COUNT(*) FROM student_fee_ledger WHERE school_id = $1 AND academic_year = $2 AND status = 'pending') AS pending_count,
+           (SELECT COUNT(*) FROM student_fee_ledger WHERE school_id = $1 AND academic_year = $2 AND status = 'overdue') AS overdue_count,
+           (SELECT COUNT(*) FROM student_fee_ledger WHERE school_id = $1 AND academic_year = $2 AND status = 'waived')  AS waived_count,
+           -- zero payers = students who have made ZERO cash payment AND zero waiver this year
+           COUNT(*) FILTER (WHERE s_cash = 0 AND s_waived = 0)                       AS defaulters_count,
+           -- student-level paid/partial for progress bar legend
+           COUNT(*) FILTER (WHERE s_out <= 0)                                        AS students_fully_paid,
+           COUNT(*) FILTER (WHERE s_cash > 0 AND s_out > 0)                          AS students_partial,
+           COUNT(*) FILTER (WHERE s_cash = 0 AND s_waived = 0 AND overdue_entries > 0) AS students_overdue_zero
+         FROM per_student`,
         [school_id, academic_year]
       )
 

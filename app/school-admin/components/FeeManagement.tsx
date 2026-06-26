@@ -44,9 +44,10 @@ type LedgerEntry = {
 
 type FeeStats = {
   summary: {
-    total_students: number; total_due: number; total_collected: number
+    total_students: number; total_due: number; total_collected: number; total_waived: number
     total_outstanding: number; paid_count: number; partial_count: number
-    pending_count: number; overdue_count: number; defaulters_count: number
+    pending_count: number; overdue_count: number; waived_count: number; defaulters_count: number
+    students_fully_paid: number; students_partial: number; students_overdue_zero: number
   }
   by_category: Array<{ category_name: string; frequency: string; total_due: number; total_collected: number; overdue_count: number }>
   monthly_trend: Array<{ month: string; collected: number }>
@@ -1953,9 +1954,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 {[
                   { label: 'Total Billed',  value: stats.summary.total_due,         sub: `${stats.summary.total_students} students`,           border: 'border-gray-100',   text: 'text-gray-900',  sub_color: 'text-gray-400' },
-                  { label: 'Collected',     value: stats.summary.total_collected,    sub: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due))}% of total`, border: 'border-green-100',  text: 'text-green-700', sub_color: 'text-green-500' },
+                  { label: 'Collected',     value: stats.summary.total_collected,    sub: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}% of net demand`, border: 'border-green-100',  text: 'text-green-700', sub_color: 'text-green-500' },
                   { label: 'Outstanding',   value: stats.summary.total_outstanding,  sub: `${stats.summary.overdue_count} overdue entries`,     border: 'border-red-100',    text: 'text-red-600',   sub_color: 'text-red-400' },
-                  { label: 'Zero Payers',   value: stats.summary.defaulters_count,   sub: 'students with no payment',                           border: 'border-orange-100', text: 'text-orange-600',sub_color: 'text-orange-400', isCount: true },
+                  { label: 'Zero Payers',   value: stats.summary.defaulters_count,   sub: 'students with no payment or waiver',                 border: 'border-orange-100', text: 'text-orange-600',sub_color: 'text-orange-400', isCount: true },
                 ].map(card => (
                   <div key={card.label} className={`bg-white rounded-xl border ${card.border} p-5`}>
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{card.label}</p>
@@ -1971,20 +1972,19 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               <div className="bg-white rounded-xl border border-gray-100 p-5">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-semibold text-gray-700">Overall Collection Progress — {academicYear}</h3>
-                  <span className="text-sm font-bold text-blue-600">{pct(Number(stats.summary.total_collected), Number(stats.summary.total_due))}%</span>
+                  <span className="text-sm font-bold text-blue-600">{pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}%</span>
                 </div>
                 <div className="h-3 bg-gray-100 rounded-full overflow-hidden mb-3">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-blue-500 to-green-500 transition-all duration-700"
-                    style={{ width: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due))}%` }}
+                    style={{ width: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}%` }}
                   />
                 </div>
                 <div className="flex gap-5 flex-wrap">
                   {[
-                    { label: 'Paid',    count: stats.summary.paid_count,    dot: 'bg-green-500' },
-                    { label: 'Partial', count: stats.summary.partial_count, dot: 'bg-yellow-400' },
-                    { label: 'Pending', count: stats.summary.pending_count, dot: 'bg-gray-300' },
-                    { label: 'Overdue', count: stats.summary.overdue_count, dot: 'bg-red-500' },
+                    { label: 'Fully Paid', count: stats.summary.students_fully_paid, dot: 'bg-green-500' },
+                    { label: 'Partial',    count: stats.summary.students_partial,     dot: 'bg-yellow-400' },
+                    { label: 'Not Paid',   count: stats.summary.students_overdue_zero,dot: 'bg-red-500' },
                   ].map(s => (
                     <div key={s.label} className="flex items-center gap-2">
                       <div className={`w-2.5 h-2.5 rounded-full ${s.dot}`} />
