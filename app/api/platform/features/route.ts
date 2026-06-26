@@ -32,10 +32,10 @@ export async function GET(req: NextRequest) {
         result.rows.map((r: { feature_key: string; enabled: boolean }) => [r.feature_key, r.enabled])
       )
 
-      // Features NOT in plan_features at all = newly added feature, enabled by default
+      // Features NOT in plan_features = not yet configured, treat as disabled
       // Features in plan_features = use the saved value
       const enabled = ALL_FEATURES
-        .filter(f => !configured.has(f.key) || configured.get(f.key) === true)
+        .filter(f => configured.get(f.key) === true)
         .map(f => f.key)
 
       return NextResponse.json({ enabled })
@@ -45,9 +45,9 @@ export async function GET(req: NextRequest) {
     const result = await pool.query(`SELECT feature_key, tier, enabled FROM plan_features`)
     const matrix: Record<string, Record<string, boolean>> = {}
 
-    // Default ALL features to enabled=true for all tiers (new features auto-visible until explicitly disabled)
+    // Default all features to disabled — only explicitly saved values are enabled
     for (const f of ALL_FEATURES) {
-      matrix[f.key] = { basic: true, standard: true, premium: true }
+      matrix[f.key] = { basic: false, standard: false, premium: false }
     }
     // Override only what's been explicitly configured in DB
     for (const row of result.rows) {

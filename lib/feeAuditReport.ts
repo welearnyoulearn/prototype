@@ -135,7 +135,8 @@ export async function buildFeeAuditReport(opts: {
 
   // Student-wise, broken down per fee type, with a subtotal row per student.
   const { rows: byStudent } = await pool.query(
-    `SELECT s.id AS sid, s.name AS student, s.grade, COALESCE(s.section,'') AS section, s.roll_number,
+    `SELECT s.id AS sid, s.name AS student, s.grade, COALESCE(s.section,'') AS section,
+            COALESCE(s.school_roll_number::text, '') AS roll_number,
             s.parent_name, s.parent_phone,
             fc.name AS fee_type,
             COALESCE(SUM(l.amount_due),0) AS billed, COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived,
@@ -144,7 +145,7 @@ export async function buildFeeAuditReport(opts: {
      JOIN students s ON s.id = l.student_id
      JOIN fee_categories fc ON fc.id = l.fee_category_id
      WHERE ${WHERE}
-     GROUP BY s.id, s.name, s.grade, s.section, s.roll_number, s.parent_name, s.parent_phone, fc.name
+     GROUP BY s.id, s.name, s.grade, s.section, s.school_roll_number, s.parent_name, s.parent_phone, fc.name
      ORDER BY s.grade::int NULLS LAST, s.section, s.name, fc.name`, vals
   )
   const by_student: BulkReport['by_student'] = []
