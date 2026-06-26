@@ -15,15 +15,17 @@ export async function GET(req: NextRequest) {
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     try {
-      // Auto-mark overdue: entries become overdue only after the academic year's end date passes
+      // Mark overdue only after academic year ends; reset stale overdue if year is still active
       await pool.query(
         `UPDATE student_fee_ledger l SET status = 'overdue'
          WHERE l.school_id = $1 AND l.academic_year = $2 AND l.status = 'pending'
-           AND EXISTS (
-             SELECT 1 FROM academic_years ay
-             WHERE ay.school_id = l.school_id AND ay.label = l.academic_year
-               AND ay.end_date < CURRENT_DATE
-           )`,
+           AND EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = l.school_id AND ay.label = l.academic_year AND ay.end_date < CURRENT_DATE)`,
+        [school_id, academic_year]
+      )
+      await pool.query(
+        `UPDATE student_fee_ledger l SET status = 'pending'
+         WHERE l.school_id = $1 AND l.academic_year = $2 AND l.status = 'overdue'
+           AND EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = l.school_id AND ay.label = l.academic_year AND ay.end_date >= CURRENT_DATE)`,
         [school_id, academic_year]
       )
 
