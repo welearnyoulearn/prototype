@@ -68,27 +68,25 @@ const STAFF_LIMITS: Record<string, number | null> = { basic: 2, standard: 5, pre
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function suggestNextYear(years: AcademicYear[]): { label: string; start_date: string; end_date: string } {
+  const pad = (n: number) => String(n).padStart(2, '0')
   if (years.length === 0) {
-    // Default: June 1 of current year → March 31 of next year
+    // Default: today → April 24 of next year
     const now = new Date()
-    const s = now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1
-    return { label: `${s}-${String(s + 1).slice(2)}`, start_date: `${s}-06-01`, end_date: `${s + 1}-03-31` }
+    const sy = now.getFullYear()
+    const ey = sy + 1
+    const start = `${sy}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+    return { label: `${sy}-${String(ey).slice(2)}`, start_date: start, end_date: `${ey}-04-24` }
   }
   // Suggest next year after the latest existing one
   const latest = years.reduce((a, b) => (a.end_date > b.end_date ? a : b))
-  // Parse as local date to avoid UTC midnight timezone shift
   const [ey, em, ed] = latest.end_date.split('-').map(Number)
-  const endDate = new Date(ey, em - 1, ed)
-  // Start 1 day after the previous year ends
-  const nextStart = new Date(endDate.getTime() + 86400000)
+  const nextStart = new Date(ey, em - 1, ed + 1)
   const sy = nextStart.getFullYear()
-  const sm = String(nextStart.getMonth() + 1).padStart(2, '0')
-  const sd = String(nextStart.getDate()).padStart(2, '0')
   const ey2 = sy + 1
   return {
     label: `${sy}-${String(ey2).slice(2)}`,
-    start_date: `${sy}-${sm}-${sd}`,
-    end_date: `${ey2}-03-31`,
+    start_date: `${sy}-${pad(nextStart.getMonth() + 1)}-${pad(nextStart.getDate())}`,
+    end_date: `${ey2}-04-24`,
   }
 }
 
