@@ -125,12 +125,15 @@ export async function POST(req: NextRequest) {
       } catch (e) { await client.query('ROLLBACK'); throw e }
       finally { client.release() }
 
-      // Mark overdue entries
+      // Mark overdue: entries become overdue only after the academic year's end date passes
       await pool.query(
-        `UPDATE student_fee_ledger
-         SET status = 'overdue'
-         WHERE school_id = $1 AND academic_year = $2
-           AND status = 'pending' AND due_date < CURRENT_DATE`,
+        `UPDATE student_fee_ledger l SET status = 'overdue'
+         WHERE l.school_id = $1 AND l.academic_year = $2 AND l.status = 'pending'
+           AND EXISTS (
+             SELECT 1 FROM academic_years ay
+             WHERE ay.school_id = l.school_id AND ay.label = l.academic_year
+               AND ay.end_date < CURRENT_DATE
+           )`,
         [school_id, academic_year]
       )
 
