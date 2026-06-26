@@ -1491,12 +1491,13 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
         map.set(e.student_id, row)
       }
       row.total_billed += Number(e.amount_due)
-      row.total_paid += Number(e.amount_paid)
+      row.total_paid += Number(e.amount_paid) + Number(e.waiver_amount ?? 0)
       row.outstanding += Number(e.balance)
       row.all_entries.push(e)
       if (['pending', 'partial', 'overdue'].includes(e.status)) row.open_entries.push(e)
       if (e.status === 'overdue') row.has_overdue = true
-      if (Number(e.amount_paid) > 0) row.never_paid = false
+      // never_paid = zero cash AND zero waiver across all entries
+      if (Number(e.amount_paid) > 0 || Number(e.waiver_amount ?? 0) > 0) row.never_paid = false
     }
     return Array.from(map.values())
   })()
@@ -1513,10 +1514,10 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       ].some(v => (v || '').toLowerCase().includes(q))
       if (!matches) return false
     }
-    if (ledgerStatus === 'overdue') return r.has_overdue
+    if (ledgerStatus === 'overdue') return r.has_overdue && r.outstanding > 0
     if (ledgerStatus === 'partial') return r.total_paid > 0 && r.outstanding > 0
     if (ledgerStatus === 'never') return r.never_paid && r.outstanding > 0
-    if (ledgerStatus === 'clear') return r.outstanding === 0
+    if (ledgerStatus === 'clear') return r.outstanding <= 0
     return true
   })
 
@@ -3055,11 +3056,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               {/* Quick filter chips */}
               <div className="flex gap-2 flex-wrap">
                 {([
-                  { key: '',        label: `All Students (${studentRows.length})` },
-                  { key: 'overdue', label: `Overdue (${studentRows.filter(r => r.has_overdue).length})` },
+                  { key: '',        label: `All Students (${collectionFiltered.length})` },
+                  { key: 'overdue', label: `Overdue (${studentRows.filter(r => r.has_overdue && r.outstanding > 0).length})` },
                   { key: 'partial', label: `Partially Paid (${studentRows.filter(r => r.total_paid > 0 && r.outstanding > 0).length})` },
                   { key: 'never',   label: `Never Paid (${studentRows.filter(r => r.never_paid && r.outstanding > 0).length})` },
-                  { key: 'clear',   label: `Fully Cleared (${studentRows.filter(r => r.outstanding === 0).length})` },
+                  { key: 'clear',   label: `Fully Cleared (${studentRows.filter(r => r.outstanding <= 0).length})` },
                 ] as const).map(f => (
                   <button key={f.key} onClick={() => setLedgerStatus(f.key)}
                     className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
