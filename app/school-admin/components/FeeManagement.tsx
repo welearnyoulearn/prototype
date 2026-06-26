@@ -2273,20 +2273,22 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
 
           {/* ── Setup progress strip ── */}
           {(() => {
-            const hasHeads = categories.length > 0
-            const allAmountsSet = fixedAmountsComplete()   // fixed fees only — variable are optional
+            const hasYear    = academicYears.length > 0
+            const hasHeads   = categories.length > 0
+            const allAmountsSet = fixedAmountsComplete()
             const steps = [
-              { n: 1, label: 'Add Fee Heads',     done: hasHeads },
-              { n: 2, label: 'Set Fixed Amounts', done: allAmountsSet },
-              { n: 3, label: 'Generate Bills',    done: allReadyHeadsBilled() },
-              { n: 4, label: 'Lock Plan',         done: !!structureLock },
+              { n: 1, label: 'Create Academic Year', done: hasYear },
+              { n: 2, label: 'Add Fee Heads',         done: hasHeads },
+              { n: 3, label: 'Set Fixed Amounts',     done: allAmountsSet },
+              { n: 4, label: 'Generate Bills',        done: allReadyHeadsBilled() },
+              { n: 5, label: 'Lock Plan',             done: !!structureLock },
             ]
             const doneCount = steps.filter(s => s.done).length
             return (
               <div className="bg-white rounded-xl border border-gray-100 p-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-semibold text-gray-700">Fee Plan Setup — {academicYear}</h3>
-                  <span className="text-xs text-gray-400">{doneCount} of 4 steps done</span>
+                  <span className="text-xs text-gray-400">{doneCount} of 5 steps done</span>
                 </div>
                 <div className="flex items-center gap-2">
                   {steps.map((s, i) => (
@@ -2306,7 +2308,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           })()}
 
           {/* ── Mandated order hint ── */}
-          {!structureLock && categories.length > 0 && (() => {
+          {!academicYears.length ? (
+            <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-800">
+              <strong>First — create an academic year.</strong> Go to <strong>School Settings → Academic Years</strong> to set up the current year before configuring fees.
+            </div>
+          ) : !structureLock && categories.length > 0 && (() => {
             const missing = fixedFeesMissingAmounts()
             const generated = anyBillsGenerated()
             if (missing.length > 0) {
@@ -2634,22 +2640,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       <span className={generated ? 'text-green-600' : 'text-gray-400'}>
                         {generated ? '✅ Bills generated' : '◌ Bills not generated'}
                       </span>
-                      {/* Due day — always visible, inline editable */}
-                      <span className="flex items-center gap-1 ml-auto">
-                        <span className="text-gray-400">Due on</span>
-                        {structureLock ? (
-                          <span className="font-semibold text-gray-700">{dueDays[cat.id] || '10'}</span>
-                        ) : (
-                          <input
-                            type="number" min="1" max="28"
-                            value={dueDays[cat.id] || ''}
-                            placeholder="10"
-                            onChange={e => setDueDays(p => ({ ...p, [cat.id]: e.target.value }))}
-                            onBlur={() => { if (feeHasAmounts(cat.id, cat.category_type)) saveFeeAmounts(cat) }}
-                            className="w-10 text-center border border-gray-300 rounded px-1 py-0.5 text-xs font-semibold text-gray-700 focus:ring-1 focus:ring-blue-400 focus:outline-none"
-                          />
-                        )}
-                        <span className="text-gray-400">of month</span>
+                      {/* Overdue date = academic year end */}
+                      <span className="flex items-center gap-1 ml-auto text-gray-400">
+                        Overdue after academic year ends
                       </span>
                     </div>
 

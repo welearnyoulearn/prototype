@@ -24,11 +24,16 @@ export async function GET(req: NextRequest) {
     if (student_id)    { values.push(student_id);      conditions.push(`l.student_id = $${values.length}`) }
 
     try {
-      // Auto-update overdue status first
+      // Auto-update overdue: entries become overdue only after the academic year's end date passes
       if (academic_year) {
         await pool.query(
-          `UPDATE student_fee_ledger SET status = 'overdue'
-           WHERE school_id = $1 AND academic_year = $2 AND status = 'pending' AND due_date < CURRENT_DATE`,
+          `UPDATE student_fee_ledger l SET status = 'overdue'
+           WHERE l.school_id = $1 AND l.academic_year = $2 AND l.status = 'pending'
+             AND EXISTS (
+               SELECT 1 FROM academic_years ay
+               WHERE ay.school_id = l.school_id AND ay.label = l.academic_year
+                 AND ay.end_date < CURRENT_DATE
+             )`,
           [school_id, academic_year]
         )
       }
