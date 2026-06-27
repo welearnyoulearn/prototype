@@ -61,27 +61,29 @@ export async function POST(req: NextRequest) {
       const schoolId = school_id || session.schoolId
       if (!schoolId) return NextResponse.json({ error: 'School ID required' }, { status: 400 })
 
-      // Check staff limit from plan_pricing for this school's subscription tier
-      const { rows: [sub] } = await pool.query(
-        `SELECT ss.tier, pp.staff_limit
-         FROM school_subscriptions ss
-         LEFT JOIN plan_pricing pp ON pp.tier = ss.tier
-         WHERE ss.school_id = $1`,
-        [schoolId]
-      )
-      const staffLimit: number | null = sub?.staff_limit ?? null
-      if (staffLimit !== null) {
-        const { rows: [{ cnt }] } = await pool.query(
-          `SELECT COUNT(*) AS cnt FROM users WHERE school_id = $1 AND role = ANY($2) AND status = 'active'`,
-          [schoolId, SCHOOL_ROLES]
+      // Check staff limit — skip silently if staff_limit column not yet migrated
+      try {
+        const { rows: [sub] } = await pool.query(
+          `SELECT ss.tier, pp.staff_limit
+           FROM school_subscriptions ss
+           LEFT JOIN plan_pricing pp ON pp.tier = ss.tier
+           WHERE ss.school_id = $1`,
+          [schoolId]
         )
-        if (parseInt(cnt) >= staffLimit) {
-          return NextResponse.json(
-            { error: `Staff account limit reached (${staffLimit} accounts allowed on your plan). Upgrade your plan to add more.` },
-            { status: 403 }
+        const staffLimit: number | null = sub?.staff_limit ?? null
+        if (staffLimit !== null) {
+          const { rows: [{ cnt }] } = await pool.query(
+            `SELECT COUNT(*) AS cnt FROM users WHERE school_id = $1 AND role = ANY($2) AND status = 'active'`,
+            [schoolId, SCHOOL_ROLES]
           )
+          if (parseInt(cnt) >= staffLimit) {
+            return NextResponse.json(
+              { error: `Staff account limit reached (${staffLimit} accounts allowed on your plan). Upgrade your plan to add more.` },
+              { status: 403 }
+            )
+          }
         }
-      }
+      } catch { /* column not yet migrated — allow creation */ }
 
       const existing = await pool.query(
         `SELECT id FROM users WHERE LOWER(email) = LOWER($1)`, [email.trim()]
