@@ -427,16 +427,24 @@ export default function FeeManagement({
   type PassbookTimeline = {
     date: string; type: 'bill' | 'payment' | 'waiver' | 'amendment'
     description: string; debit: number; credit: number; balance: number
-    by: string; reference: string | null
+    by: string; reference: string | null; academic_year?: string
+  }
+  type PassbookYearGroup = {
+    academic_year: string; is_current: boolean
+    total_billed: number; total_paid: number; total_waived: number; outstanding: number
+    entries: LedgerEntry[]
   }
   type PassbookData = {
     student: { id: number; name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; parent_email: string | null }
+    current_year: string | null
     summary: { total_billed: number; total_paid: number; total_waived: number; outstanding: number }
     timeline: PassbookTimeline[]
     ledger: LedgerEntry[]
+    ledger_by_year: PassbookYearGroup[]
     payments: PaymentRecord[]
     pending_payments: PaymentRecord[]
-    waivers: Array<{ id: number; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; fee_head_name: string; period_label: string }>
+    waivers: Array<{ id: number; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; fee_head_name: string; period_label: string; bill_year?: string }>
+    prior_unresolved: PassbookYearGroup[]
   }
   type PassbookSearchResult = { id: number; name: string; roll_number: string; grade: string; section: string }
   const [pbSearch, setPbSearch]                 = useState('')
@@ -1701,6 +1709,7 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
   async function loadPassbook(studentId: number) {
     setPbLoading(true); setPbErr('')
     try {
+      // Pass academic_year as context (marks current year), not as a filter — passbook shows all years
       const r = await fetch(`/api/fees/passbook?school_id=${schoolId}&student_id=${studentId}&academic_year=${academicYear}`)
       if (r.ok) { setPbData(await r.json()); setPbSection('bills') }
       else { const d = await r.json().catch(() => ({})); setPbErr(d.error || `Could not open passbook (HTTP ${r.status})`) }
@@ -1880,7 +1889,12 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
         </div>
         <select
           value={academicYear}
-          onChange={e => setAcademicYear(e.target.value)}
+          onChange={e => {
+            setAcademicYear(e.target.value)
+            // Reset view state that is year-scoped
+            setPbData(null); setPbErr('')
+            setOpenStudentId(null); setCollectEntries([]); setCollectSearch('')
+          }}
           className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           {academicYears.map(y => (
@@ -1921,13 +1935,19 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
 
           {/* ── Action Required ── */}
           {(() => {
-            const actions = []
+            const actions: Array<{ msg: string; tab: Tab; color: string }> = []
             if (pendingPayments.length > 0)
               actions.push({ msg: `${pendingPayments.length} online payment${pendingPayments.length > 1 ? 's' : ''} waiting for your verification`, tab: 'pending' as const, color: 'text-red-700 bg-red-50 border-red-200' })
             if (stats && stats.summary.overdue_count > 20)
               actions.push({ msg: `${stats.summary.overdue_count} overdue entries — follow up with parents`, tab: 'ledger' as const, color: 'text-orange-700 bg-orange-50 border-orange-200' })
             if (stats && stats.summary.defaulters_count > 0)
               actions.push({ msg: `${stats.summary.defaulters_count} students have made zero payment this year`, tab: 'ledger' as const, color: 'text-amber-700 bg-amber-50 border-amber-200' })
+            // Warn if the current year has unresolved prior-year dues (Year-End not done)
+            if (closedYears.size > 0 === false && academicYears.length > 1) {
+              const prevYear = academicYears[academicYears.indexOf(academicYear) - 1]
+              if (prevYear && !closedYears.has(prevYear))
+                actions.push({ msg: `${prevYear} has not been closed — go to Year-End tab to carry forward or write off outstanding dues before generating new bills`, tab: 'yearend' as const, color: 'text-purple-700 bg-purple-50 border-purple-200' })
+            }
             if (actions.length === 0) return null
             return (
               <div className="rounded-xl border border-red-100 overflow-hidden">
@@ -3745,7 +3765,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               {/* Section switcher */}
               <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
                 {([
-                  { key: 'bills',    label: `Current Bills (${pbData.ledger.length})` },
+                  { key: 'bills',    label: `Bills (${pbData.ledger.length})` },
                   { key: 'payments', label: `Payments (${pbData.payments.length})` },
                   { key: 'waivers',  label: `Waivers (${pbData.waivers.length})` },
                   { key: 'timeline', label: 'Full Timeline' },
@@ -3757,39 +3777,79 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 ))}
               </div>
 
-              {/* Bills */}
+              {/* Bills — grouped by academic year */}
               {pbSection === 'bills' && (
-                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                  {pbData.ledger.length === 0 ? (
-                    <p className="text-sm text-gray-400 p-8 text-center">No bills recorded.</p>
-                  ) : (
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
-                          <th className="text-left px-4 py-2 font-semibold">Fee Head · Period</th>
-                          <th className="text-right px-4 py-2 font-semibold">Billed</th>
-                          <th className="text-right px-4 py-2 font-semibold">Paid</th>
-                          <th className="text-right px-4 py-2 font-semibold">Waived</th>
-                          <th className="text-right px-4 py-2 font-semibold">Balance</th>
-                          <th className="text-left px-4 py-2 font-semibold">Due Date</th>
-                          <th className="text-left px-4 py-2 font-semibold">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pbData.ledger.map(e => (
-                          <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
-                            <td className="px-4 py-2.5 text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></td>
-                            <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
-                            <td className="px-4 py-2.5 text-right text-green-600">{fmt(e.amount_paid)}</td>
-                            <td className="px-4 py-2.5 text-right text-purple-600">{Number(e.waiver_amount) > 0 ? fmt(e.waiver_amount) : '—'}</td>
-                            <td className="px-4 py-2.5 text-right font-bold text-red-600">{fmt(e.balance)}</td>
-                            <td className="px-4 py-2.5 text-gray-500 text-xs">{e.due_date}</td>
-                            <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full capitalize ${STATUS_COLORS[e.status]}`}>{e.status}</span></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                <div className="space-y-3">
+                  {/* Prior year unresolved dues banner */}
+                  {pbData.prior_unresolved.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-3">
+                      <svg className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                      <div>
+                        <p className="text-sm font-semibold text-amber-700">Prior Year Dues Unresolved</p>
+                        <p className="text-xs text-amber-600 mt-0.5">
+                          {pbData.prior_unresolved.map(y => `${y.academic_year}: ${fmt(y.outstanding)} outstanding`).join(' · ')}
+                          {' '}— Go to Year-End tab to carry forward or write off.
+                        </p>
+                      </div>
+                    </div>
                   )}
+
+                  {pbData.ledger_by_year.length === 0 ? (
+                    <div className="bg-white rounded-xl border border-gray-100 p-8 text-center text-sm text-gray-400">No bills recorded.</div>
+                  ) : pbData.ledger_by_year.map(yearGroup => (
+                    <div key={yearGroup.academic_year} className={`bg-white rounded-xl border overflow-hidden ${yearGroup.is_current ? 'border-blue-200' : 'border-gray-100'}`}>
+                      {/* Year header */}
+                      <div className={`px-4 py-2.5 flex items-center justify-between ${yearGroup.is_current ? 'bg-blue-50 border-b border-blue-100' : 'bg-gray-50 border-b border-gray-100'}`}>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-sm font-bold ${yearGroup.is_current ? 'text-blue-700' : 'text-gray-600'}`}>
+                            {yearGroup.academic_year}
+                          </span>
+                          {yearGroup.is_current && (
+                            <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full font-medium">Current Year</span>
+                          )}
+                          {!yearGroup.is_current && yearGroup.outstanding > 0 && (
+                            <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Unresolved</span>
+                          )}
+                          {!yearGroup.is_current && yearGroup.outstanding <= 0 && (
+                            <span className="text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full font-medium">Closed</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-4 text-xs text-gray-500">
+                          <span>Billed <span className="font-semibold text-gray-700">{fmt(yearGroup.total_billed)}</span></span>
+                          <span>Paid <span className="font-semibold text-green-700">{fmt(yearGroup.total_paid)}</span></span>
+                          {yearGroup.total_waived > 0 && <span>Waived <span className="font-semibold text-purple-700">{fmt(yearGroup.total_waived)}</span></span>}
+                          <span>Outstanding <span className={`font-bold ${yearGroup.outstanding > 0 ? 'text-red-600' : 'text-green-600'}`}>{fmt(yearGroup.outstanding)}</span></span>
+                        </div>
+                      </div>
+                      {/* Entries table */}
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-xs text-gray-400 border-b border-gray-50">
+                            <th className="text-left px-4 py-2 font-medium">Fee Head · Period</th>
+                            <th className="text-right px-4 py-2 font-medium">Billed</th>
+                            <th className="text-right px-4 py-2 font-medium">Paid</th>
+                            <th className="text-right px-4 py-2 font-medium">Waived</th>
+                            <th className="text-right px-4 py-2 font-medium">Balance</th>
+                            <th className="text-left px-4 py-2 font-medium">Due Date</th>
+                            <th className="text-left px-4 py-2 font-medium">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {yearGroup.entries.map(e => (
+                            <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
+                              <td className="px-4 py-2.5 text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></td>
+                              <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
+                              <td className="px-4 py-2.5 text-right text-green-600">{fmt(e.amount_paid)}</td>
+                              <td className="px-4 py-2.5 text-right text-purple-600">{Number(e.waiver_amount) > 0 ? fmt(e.waiver_amount) : '—'}</td>
+                              <td className="px-4 py-2.5 text-right font-bold text-red-600">{Number(e.balance) > 0 ? fmt(e.balance) : <span className="text-green-600">{fmt(0)}</span>}</td>
+                              <td className="px-4 py-2.5 text-gray-500 text-xs">{e.due_date}</td>
+                              <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full capitalize ${STATUS_COLORS[e.status]}`}>{e.status}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
                 </div>
               )}
 
