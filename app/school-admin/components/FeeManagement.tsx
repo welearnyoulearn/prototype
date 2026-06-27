@@ -44,9 +44,10 @@ type LedgerEntry = {
 
 type FeeStats = {
   summary: {
-    total_students: number; total_due: number; total_collected: number
+    total_students: number; total_due: number; total_collected: number; total_waived: number
     total_outstanding: number; paid_count: number; partial_count: number
-    pending_count: number; overdue_count: number; defaulters_count: number
+    pending_count: number; overdue_count: number; waived_count: number; defaulters_count: number
+    students_fully_paid: number; students_partial: number; students_overdue_zero: number
   }
   by_category: Array<{ category_name: string; frequency: string; total_due: number; total_collected: number; overdue_count: number }>
   monthly_trend: Array<{ month: string; collected: number }>
@@ -73,7 +74,7 @@ type ReportData = {
   balance: { total_billed: number; total_collected: number; total_outstanding: number; total_waived: number; paid_entries: number; partial_entries: number; unpaid_entries: number; waived_entries: number; total_students: number }
   monthly: Array<{ month: string; collected: number; payment_count: number; students_paid: number }>
   monthlyDue: Array<{ month: string; billed: number }>
-  byGrade: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
+  byGrade: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; total_waived: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
   byCategory: Array<{ category_name: string; frequency: string; students: number; total_due: number; total_collected: number; total_waived: number; outstanding: number; paid_count: number; unpaid_count: number }>
   byMode: Array<{ payment_mode: string; count: number; total: number }>
   defaulters: Array<{ student_name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; outstanding: number; overdue_entries: number; unpaid_entries: number }>
@@ -287,7 +288,7 @@ export default function FeeManagement({
   }
   const [recentPayments, setRecentPayments] = useState<RecentPayment[]>([])
 
-  type GradeStat = { grade: string; section?: string; students: number; total_due: number; total_collected: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }
+  type GradeStat = { grade: string; section?: string; students: number; total_due: number; total_collected: number; total_waived?: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }
   const [gradeStats, setGradeStats] = useState<GradeStat[]>([])
 
   // Setup
@@ -454,6 +455,13 @@ export default function FeeManagement({
   const [correctAmount, setCorrectAmount]       = useState('')
   const [cancelBusy, setCancelBusy]             = useState(false)
   const [cancelMsg, setCancelMsg]               = useState('')
+  // Waiver revoke / correct
+  const [cancelWaiverId, setCancelWaiverId]     = useState<number | null>(null)
+  const [cancelWaiverMode, setCancelWaiverMode] = useState<'revoke' | 'correct'>('revoke')
+  const [cancelWaiverReason, setCancelWaiverReason] = useState('')
+  const [correctWaiverAmount, setCorrectWaiverAmount] = useState('')
+  const [cancelWaiverBusy, setCancelWaiverBusy] = useState(false)
+  const [cancelWaiverMsg, setCancelWaiverMsg]   = useState('')
 
   // Reports tab
   const [reportData, setReportData]             = useState<ReportData | null>(null)
@@ -496,6 +504,7 @@ export default function FeeManagement({
 
   // Amendment impact preview
   const [amendImpact, setAmendImpact]           = useState<number | null>(null)
+  const [amendPartialCount, setAmendPartialCount] = useState<number | null>(null)
   const [amendImpactLoading, setAmendImpactLoading] = useState(false)
 
   // Assignment history panel (Applicability tab)
@@ -524,13 +533,12 @@ export default function FeeManagement({
       fetch(`/api/fees/year-rollover?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
     ]).then(([current, all, closed]) => {
       const labels: string[] = Array.isArray(all) ? all.map((y: { label: string }) => y.label) : []
-      const cur: string = current?.label ?? labels[0] ?? '2025-26'
-      if (!labels.length) labels.push(cur)
+      const cur: string = current?.label ?? labels[0] ?? ''
       setAcademicYears(labels)
       setAcademicYear(cur)
       const closedSet = new Set<string>(Array.isArray(closed) ? closed.map((c: { academic_year: string }) => c.academic_year) : [])
       setClosedYears(closedSet)
-    }).catch(() => { setAcademicYears(['2025-26']); setAcademicYear('2025-26') })
+    }).catch(() => { setAcademicYears([]); setAcademicYear('') })
   }, [schoolId])
 
   useEffect(() => { loadAcademicYears() }, [loadAcademicYears])
@@ -703,13 +711,14 @@ export default function FeeManagement({
   const loadLedger = useCallback(async () => {
     if (!academicYear) return
     setLedgerLoading(true)
+    // Never pass ledgerStatus to API — always load all entries and filter client-side
+    // so chip counts stay accurate regardless of which tab is active
     const params = new URLSearchParams({ school_id: String(schoolId), academic_year: academicYear })
-    if (ledgerGrade)  params.set('grade', ledgerGrade)
-    if (ledgerStatus) params.set('status', ledgerStatus)
+    if (ledgerGrade) params.set('grade', ledgerGrade)
     const r = await fetch(`/api/fees/ledger?${params}`)
     if (r.ok) setLedger(await r.json())
     setLedgerLoading(false)
-  }, [schoolId, academicYear, ledgerGrade, ledgerStatus])
+  }, [schoolId, academicYear, ledgerGrade])
 
   useEffect(() => { if (activeTab === 'ledger') loadLedger() }, [activeTab, loadLedger])
 
@@ -750,7 +759,7 @@ export default function FeeManagement({
     const d = await r.json()
     if (r.ok) {
       setLedger(prev => prev.map(e => e.id === entry.id
-        ? { ...e, amount_due: d.amount_due, balance: d.amount_due - d.amount_paid, status: d.status, has_edits: true }
+        ? { ...e, amount_due: d.amount_due, balance: Math.max(0, d.amount_due - (d.waiver_amount ?? e.waiver_amount ?? 0) - d.amount_paid), status: d.status, has_edits: true }
         : e
       ))
       setEditHistories(p => { const next = { ...p }; delete next[entry.id]; return next })
@@ -952,6 +961,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       if (r.ok) {
         setShowWaiver(false); setSelectedEntry(null)
         setCollectSearch(''); setCollectEntries([])
+        setOpenStudentId(null); setShowCollectForm(false); setCollectChecked(new Set())
         loadStats(); loadLedger()
       } else {
         const d = await r.json()
@@ -1408,9 +1418,9 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
   async function fetchAmendImpact(catId: number, grade: string) {
     if (!catId || !grade || !academicYear) return
-    setAmendImpactLoading(true); setAmendImpact(null)
+    setAmendImpactLoading(true); setAmendImpact(null); setAmendPartialCount(null)
     const r = await fetch(`/api/fees/structures/amend?school_id=${schoolId}&academic_year=${academicYear}&preview=1&fee_category_id=${catId}&grade=${grade}`)
-    if (r.ok) { const d = await r.json(); setAmendImpact(d.count) }
+    if (r.ok) { const d = await r.json(); setAmendImpact(d.count); setAmendPartialCount(d.partial_count ?? 0) }
     setAmendImpactLoading(false)
   }
 
@@ -1482,15 +1492,19 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
         map.set(e.student_id, row)
       }
       row.total_billed += Number(e.amount_due)
-      row.total_paid += Number(e.amount_paid)
+      row.total_paid += Number(e.amount_paid) + Number(e.waiver_amount ?? 0)
       row.outstanding += Number(e.balance)
       row.all_entries.push(e)
       if (['pending', 'partial', 'overdue'].includes(e.status)) row.open_entries.push(e)
       if (e.status === 'overdue') row.has_overdue = true
-      if (Number(e.amount_paid) > 0) row.never_paid = false
+      // never_paid = zero cash AND zero waiver across all entries
+      if (Number(e.amount_paid) > 0 || Number(e.waiver_amount ?? 0) > 0) row.never_paid = false
     }
     return Array.from(map.values())
   })()
+
+  // Grade-only filtered rows — used for chip counts so they reflect grade selection but not search/status
+  const gradeFilteredRows = ledgerGrade ? studentRows.filter(r => r.grade === ledgerGrade) : studentRows
 
   const collectionFiltered = studentRows.filter(r => {
     if (ledgerGrade && r.grade !== ledgerGrade) return false
@@ -1504,10 +1518,10 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       ].some(v => (v || '').toLowerCase().includes(q))
       if (!matches) return false
     }
-    if (ledgerStatus === 'overdue') return r.has_overdue
+    if (ledgerStatus === 'overdue') return r.has_overdue && r.outstanding > 0
     if (ledgerStatus === 'partial') return r.total_paid > 0 && r.outstanding > 0
     if (ledgerStatus === 'never') return r.never_paid && r.outstanding > 0
-    if (ledgerStatus === 'clear') return r.outstanding === 0
+    if (ledgerStatus === 'clear') return r.outstanding <= 0
     return true
   })
 
@@ -1725,6 +1739,36 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
     setCancelBusy(false)
   }
 
+  async function submitRevokeCorrectWaiver() {
+    if (!cancelWaiverId) return
+    if (!cancelWaiverReason.trim()) { setCancelWaiverMsg('Reason is required.'); return }
+    if (cancelWaiverMode === 'correct' && !(parseFloat(correctWaiverAmount) > 0)) {
+      setCancelWaiverMsg('Enter a valid corrected amount.'); return
+    }
+    setCancelWaiverBusy(true); setCancelWaiverMsg('')
+    try {
+      let r: Response
+      if (cancelWaiverMode === 'revoke') {
+        r = await fetch(`/api/fees/waivers?id=${cancelWaiverId}&reason=${encodeURIComponent(cancelWaiverReason)}`, { method: 'DELETE' })
+      } else {
+        r = await fetch('/api/fees/waivers', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: cancelWaiverId, new_waiver_amount: parseFloat(correctWaiverAmount), reason: cancelWaiverReason }),
+        })
+      }
+      const d = await r.json()
+      if (r.ok) {
+        setCancelWaiverMsg(cancelWaiverMode === 'correct' ? '✓ Waiver corrected' : '✓ Waiver revoked')
+        setCancelWaiverId(null)
+        if (pbData) loadPassbook(pbData.student.id)
+      } else {
+        setCancelWaiverMsg(d.error || 'Failed')
+      }
+    } catch { setCancelWaiverMsg('Network error') }
+    setCancelWaiverBusy(false)
+  }
+
   // Print a receipt for any single completed payment from the passbook
   function printPassbookReceipt(p: PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }) {
     if (!pbData) return
@@ -1915,9 +1959,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 {[
                   { label: 'Total Billed',  value: stats.summary.total_due,         sub: `${stats.summary.total_students} students`,           border: 'border-gray-100',   text: 'text-gray-900',  sub_color: 'text-gray-400' },
-                  { label: 'Collected',     value: stats.summary.total_collected,    sub: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due))}% of total`, border: 'border-green-100',  text: 'text-green-700', sub_color: 'text-green-500' },
+                  { label: 'Collected',     value: stats.summary.total_collected,    sub: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}% of net demand`, border: 'border-green-100',  text: 'text-green-700', sub_color: 'text-green-500' },
                   { label: 'Outstanding',   value: stats.summary.total_outstanding,  sub: `${stats.summary.overdue_count} overdue entries`,     border: 'border-red-100',    text: 'text-red-600',   sub_color: 'text-red-400' },
-                  { label: 'Zero Payers',   value: stats.summary.defaulters_count,   sub: 'students with no payment',                           border: 'border-orange-100', text: 'text-orange-600',sub_color: 'text-orange-400', isCount: true },
+                  { label: 'Zero Payers',   value: stats.summary.defaulters_count,   sub: 'students with no payment or waiver',                 border: 'border-orange-100', text: 'text-orange-600',sub_color: 'text-orange-400', isCount: true },
                 ].map(card => (
                   <div key={card.label} className={`bg-white rounded-xl border ${card.border} p-5`}>
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{card.label}</p>
@@ -1933,20 +1977,19 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               <div className="bg-white rounded-xl border border-gray-100 p-5">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-semibold text-gray-700">Overall Collection Progress — {academicYear}</h3>
-                  <span className="text-sm font-bold text-blue-600">{pct(Number(stats.summary.total_collected), Number(stats.summary.total_due))}%</span>
+                  <span className="text-sm font-bold text-blue-600">{pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}%</span>
                 </div>
                 <div className="h-3 bg-gray-100 rounded-full overflow-hidden mb-3">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-blue-500 to-green-500 transition-all duration-700"
-                    style={{ width: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due))}%` }}
+                    style={{ width: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}%` }}
                   />
                 </div>
                 <div className="flex gap-5 flex-wrap">
                   {[
-                    { label: 'Paid',    count: stats.summary.paid_count,    dot: 'bg-green-500' },
-                    { label: 'Partial', count: stats.summary.partial_count, dot: 'bg-yellow-400' },
-                    { label: 'Pending', count: stats.summary.pending_count, dot: 'bg-gray-300' },
-                    { label: 'Overdue', count: stats.summary.overdue_count, dot: 'bg-red-500' },
+                    { label: 'Fully Paid', count: stats.summary.students_fully_paid, dot: 'bg-green-500' },
+                    { label: 'Partial',    count: stats.summary.students_partial,     dot: 'bg-yellow-400' },
+                    { label: 'Not Paid',   count: stats.summary.students_overdue_zero,dot: 'bg-red-500' },
                   ].map(s => (
                     <div key={s.label} className="flex items-center gap-2">
                       <div className={`w-2.5 h-2.5 rounded-full ${s.dot}`} />
@@ -2235,20 +2278,22 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
 
           {/* ── Setup progress strip ── */}
           {(() => {
-            const hasHeads = categories.length > 0
-            const allAmountsSet = fixedAmountsComplete()   // fixed fees only — variable are optional
+            const hasYear    = academicYears.length > 0
+            const hasHeads   = categories.length > 0
+            const allAmountsSet = fixedAmountsComplete()
             const steps = [
-              { n: 1, label: 'Add Fee Heads',     done: hasHeads },
-              { n: 2, label: 'Set Fixed Amounts', done: allAmountsSet },
-              { n: 3, label: 'Generate Bills',    done: allReadyHeadsBilled() },
-              { n: 4, label: 'Lock Plan',         done: !!structureLock },
+              { n: 1, label: 'Create Academic Year', done: hasYear },
+              { n: 2, label: 'Add Fee Heads',         done: hasHeads },
+              { n: 3, label: 'Set Fixed Amounts',     done: allAmountsSet },
+              { n: 4, label: 'Generate Bills',        done: allReadyHeadsBilled() },
+              { n: 5, label: 'Lock Plan',             done: !!structureLock },
             ]
             const doneCount = steps.filter(s => s.done).length
             return (
               <div className="bg-white rounded-xl border border-gray-100 p-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-sm font-semibold text-gray-700">Fee Plan Setup — {academicYear}</h3>
-                  <span className="text-xs text-gray-400">{doneCount} of 4 steps done</span>
+                  <span className="text-xs text-gray-400">{doneCount} of 5 steps done</span>
                 </div>
                 <div className="flex items-center gap-2">
                   {steps.map((s, i) => (
@@ -2268,7 +2313,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           })()}
 
           {/* ── Mandated order hint ── */}
-          {!structureLock && categories.length > 0 && (() => {
+          {!academicYears.length ? (
+            <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-800">
+              <strong>First — create an academic year.</strong> Go to <strong>School Settings → Academic Years</strong> to set up the current year before configuring fees.
+            </div>
+          ) : !structureLock && categories.length > 0 && (() => {
             const missing = fixedFeesMissingAmounts()
             const generated = anyBillsGenerated()
             if (missing.length > 0) {
@@ -2563,7 +2612,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             </div>
           ) : (
             /* ── Fee head cards ── */
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-gray-50 rounded-xl p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
               {categories.map(cat => {
                 const amountsSet = feeHasAmounts(cat.id, cat.category_type)
                 const generated = feeBillsGenerated(cat)
@@ -2572,7 +2621,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 const due = catStat ? Number(catStat.total_due) : 0
                 const collPct = pct(collected, due)
                 return (
-                  <div key={cat.id} className={`bg-white rounded-xl border p-5 ${!cat.is_active ? 'border-gray-100 opacity-60' : 'border-gray-100'}`}>
+                  <div key={cat.id} className={`bg-white rounded-xl border p-5 shadow-sm ${!cat.is_active ? 'border-gray-200 opacity-60' : 'border-gray-200'}`}>
                     <div className="flex items-start justify-between">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-lg bg-gray-50 flex items-center justify-center text-xl">{feeIcon(cat.name)}</div>
@@ -2596,22 +2645,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       <span className={generated ? 'text-green-600' : 'text-gray-400'}>
                         {generated ? '✅ Bills generated' : '◌ Bills not generated'}
                       </span>
-                      {/* Due day — always visible, inline editable */}
-                      <span className="flex items-center gap-1 ml-auto">
-                        <span className="text-gray-400">Due on</span>
-                        {structureLock ? (
-                          <span className="font-semibold text-gray-700">{dueDays[cat.id] || '10'}</span>
-                        ) : (
-                          <input
-                            type="number" min="1" max="28"
-                            value={dueDays[cat.id] || ''}
-                            placeholder="10"
-                            onChange={e => setDueDays(p => ({ ...p, [cat.id]: e.target.value }))}
-                            onBlur={() => { if (feeHasAmounts(cat.id, cat.category_type)) saveFeeAmounts(cat) }}
-                            className="w-10 text-center border border-gray-300 rounded px-1 py-0.5 text-xs font-semibold text-gray-700 focus:ring-1 focus:ring-blue-400 focus:outline-none"
-                          />
-                        )}
-                        <span className="text-gray-400">of month</span>
+                      {/* Overdue date = academic year end */}
+                      <span className="flex items-center gap-1 ml-auto text-gray-400">
+                        Overdue after academic year ends
                       </span>
                     </div>
 
@@ -3024,11 +3060,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               {/* Quick filter chips */}
               <div className="flex gap-2 flex-wrap">
                 {([
-                  { key: '',        label: `All Students (${studentRows.length})` },
-                  { key: 'overdue', label: `Overdue (${studentRows.filter(r => r.has_overdue).length})` },
-                  { key: 'partial', label: `Partially Paid (${studentRows.filter(r => r.total_paid > 0 && r.outstanding > 0).length})` },
-                  { key: 'never',   label: `Never Paid (${studentRows.filter(r => r.never_paid && r.outstanding > 0).length})` },
-                  { key: 'clear',   label: `Fully Cleared (${studentRows.filter(r => r.outstanding === 0).length})` },
+                  { key: '',        label: `All Students (${gradeFilteredRows.length})` },
+                  { key: 'overdue', label: `Overdue (${gradeFilteredRows.filter(r => r.has_overdue && r.outstanding > 0).length})` },
+                  { key: 'partial', label: `Partially Paid (${gradeFilteredRows.filter(r => r.total_paid > 0 && r.outstanding > 0).length})` },
+                  { key: 'never',   label: `Never Paid (${gradeFilteredRows.filter(r => r.never_paid && r.outstanding > 0).length})` },
+                  { key: 'clear',   label: `Fully Cleared (${gradeFilteredRows.filter(r => r.outstanding <= 0).length})` },
                 ] as const).map(f => (
                   <button key={f.key} onClick={() => setLedgerStatus(f.key)}
                     className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
@@ -3434,7 +3470,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-base font-semibold text-gray-800">Defaulters — Outstanding Dues</h3>
-                <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&status=overdue`} download
+                <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&outstanding=1`} download
                   className="text-sm border border-red-200 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50">Export Defaulters</a>
               </div>
               {(() => {
@@ -3582,7 +3618,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <p className={`text-sm font-medium ${dayCloseMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{dayCloseMsg}</p>
                   )}
                   <div className="flex justify-end gap-2">
-                    <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=payments`} download
+                    <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=payments&date=${new Date().toISOString().slice(0,10)}`} download
                       className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">Export Day Report</a>
                     <button onClick={submitDayClose} disabled={dayCloseSubmitting || dayCloseData.receipts.count === 0}
                       className="text-sm bg-blue-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
@@ -3711,7 +3747,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               {pbSection === 'bills' && (
                 <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                   {pbData.ledger.length === 0 ? (
-                    <p className="text-sm text-gray-400 p-8 text-center">No bills for {academicYear}.</p>
+                    <p className="text-sm text-gray-400 p-8 text-center">No bills recorded.</p>
                   ) : (
                     <table className="w-full text-sm">
                       <thead>
@@ -3872,15 +3908,54 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   ) : (
                     <div className="divide-y divide-gray-50">
                       {pbData.waivers.map(w => (
-                        <div key={w.id} className="px-4 py-3 flex items-center justify-between">
-                          <div>
-                            <p className="text-sm font-medium text-gray-800">{w.fee_head_name} · {w.period_label}</p>
-                            <p className="text-xs text-gray-400">{w.reason}{w.granted_by_name ? ` · by ${w.granted_by_name}` : ''} · {fmtDate(w.created_at)}</p>
+                        <div key={w.id} className="px-4 py-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-gray-800">{w.fee_head_name} · {w.period_label}</p>
+                              <p className="text-xs text-gray-400">{w.reason}{w.granted_by_name ? ` · by ${w.granted_by_name}` : ''} · {fmtDate(w.created_at)}</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <div className="text-right">
+                                <p className="text-sm font-bold text-purple-700">−{fmt(w.waiver_amount)}</p>
+                                <p className="text-[10px] text-purple-400 capitalize">{w.waiver_type.replace('_', ' ')}</p>
+                              </div>
+                              {cancelWaiverId === w.id
+                                ? <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
+                                : <button onClick={() => { setCancelWaiverId(w.id); setCancelWaiverMode('revoke'); setCancelWaiverReason(''); setCorrectWaiverAmount(String(w.waiver_amount)); setCancelWaiverMsg('') }}
+                                    className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
+                              }
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className="text-sm font-bold text-purple-700">−{fmt(w.waiver_amount)}</p>
-                            <p className="text-[10px] text-purple-400 capitalize">{w.waiver_type.replace('_', ' ')}</p>
-                          </div>
+                          {cancelWaiverId === w.id && (
+                            <div className="mt-3 pt-3 border-t border-amber-100 bg-amber-50 -mx-4 -mb-3 px-4 pb-3 rounded-b-xl space-y-2">
+                              <div className="flex gap-2">
+                                <button onClick={() => setCancelWaiverMode('revoke')}
+                                  className={`flex-1 text-xs py-1.5 rounded-lg border font-medium ${cancelWaiverMode === 'revoke' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200'}`}>Revoke Waiver</button>
+                                <button onClick={() => setCancelWaiverMode('correct')}
+                                  className={`flex-1 text-xs py-1.5 rounded-lg border font-medium ${cancelWaiverMode === 'correct' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>Correct Amount</button>
+                              </div>
+                              <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                                {cancelWaiverMode === 'revoke'
+                                  ? <>Revokes waiver of <strong>{fmt(w.waiver_amount)}</strong>. Balance will increase accordingly.</>
+                                  : <>Revokes current waiver and records a new one with the corrected amount.</>}
+                              </div>
+                              {cancelWaiverMode === 'correct' && (
+                                <input type="number" min="0" value={correctWaiverAmount} onChange={e => setCorrectWaiverAmount(e.target.value)}
+                                  placeholder="Corrected waiver amount (₹)"
+                                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                              )}
+                              <input type="text" value={cancelWaiverReason} onChange={e => setCancelWaiverReason(e.target.value)}
+                                placeholder="Reason (required)" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                              {cancelWaiverMsg && <p className={`text-xs font-medium ${cancelWaiverMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{cancelWaiverMsg}</p>}
+                              <div className="flex gap-2">
+                                <button onClick={submitRevokeCorrectWaiver} disabled={cancelWaiverBusy || !cancelWaiverReason.trim()}
+                                  className={`text-sm text-white px-4 py-1.5 rounded-lg font-medium disabled:opacity-50 ${cancelWaiverMode === 'revoke' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                                  {cancelWaiverBusy ? 'Working…' : cancelWaiverMode === 'revoke' ? 'Confirm Revoke' : 'Confirm Correction'}
+                                </button>
+                                <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-sm text-gray-500 px-3 py-1.5">Close</button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -4040,7 +4115,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <h3 className="text-sm font-semibold text-gray-700 mb-4">Class-wise Collection</h3>
                   <div className="space-y-3">
                     {reportData.byGrade.map(g => {
-                      const pct = g.total_due > 0 ? Math.round((Number(g.total_collected) / Number(g.total_due)) * 100) : 0
+                      const netDemand = Number(g.total_due) - Number(g.total_waived ?? 0)
+                      const pct = netDemand > 0 ? Math.round((Number(g.total_collected) / netDemand) * 100) : 0
                       const cls = g.section ? `${g.grade}-${g.section}` : `Grade ${g.grade}`
                       return (
                         <div key={cls}>
@@ -4119,7 +4195,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                   <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                     <p className="text-sm font-semibold text-gray-700">Fee Defaulters — {reportData.defaulters.length} students</p>
-                    <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&status=overdue`} download
+                    <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&outstanding=1`} download
                       className="text-xs text-red-600 border border-red-200 px-2.5 py-1 rounded-lg hover:bg-red-50">
                       Export Defaulters
                     </a>
@@ -4528,7 +4604,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   {pbSection === 'bills' && (
                     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                       {pbData.ledger.length === 0
-                        ? <p className="text-sm text-gray-400 p-8 text-center">No bills for {academicYear}.</p>
+                        ? <p className="text-sm text-gray-400 p-8 text-center">No bills recorded.</p>
                         : (
                           <table className="w-full text-sm">
                             <thead className="bg-gray-50 border-b border-gray-100">
@@ -4637,12 +4713,51 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         ? <p className="text-sm text-gray-400 p-8 text-center">No waivers granted.</p>
                         : <div className="divide-y divide-gray-50">
                             {pbData.waivers.map(w => (
-                              <div key={w.id} className="px-4 py-3 flex items-center justify-between">
-                                <div>
-                                  <p className="text-sm font-medium text-gray-800">{(w as { fee_head_name?: string }).fee_head_name || 'Fee'} · {(w as { period_label?: string }).period_label || ''}</p>
-                                  <p className="text-xs text-gray-400">{(w as { reason?: string }).reason || '—'} · {(w as { granted_by_name?: string }).granted_by_name || ''}</p>
+                              <div key={w.id} className="px-4 py-3">
+                                <div className="flex items-center justify-between">
+                                  <div>
+                                    <p className="text-sm font-medium text-gray-800">{(w as { fee_head_name?: string }).fee_head_name || 'Fee'} · {(w as { period_label?: string }).period_label || ''}</p>
+                                    <p className="text-xs text-gray-400">{(w as { reason?: string }).reason || '—'} · {(w as { granted_by_name?: string }).granted_by_name || ''}</p>
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                    <p className="text-sm font-bold text-purple-700">{fmt((w as { waiver_amount?: number }).waiver_amount || 0)}</p>
+                                    {cancelWaiverId === w.id
+                                      ? <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
+                                      : <button onClick={() => { setCancelWaiverId(w.id); setCancelWaiverMode('revoke'); setCancelWaiverReason(''); setCorrectWaiverAmount(String((w as { waiver_amount?: number }).waiver_amount || 0)); setCancelWaiverMsg('') }}
+                                          className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
+                                    }
+                                  </div>
                                 </div>
-                                <p className="text-sm font-bold text-purple-700">{fmt((w as { waiver_amount?: number }).waiver_amount || 0)}</p>
+                                {cancelWaiverId === w.id && (
+                                  <div className="mt-3 pt-3 border-t border-amber-100 bg-amber-50 -mx-4 -mb-3 px-4 pb-3 rounded-b-xl space-y-2">
+                                    <div className="flex gap-2">
+                                      <button onClick={() => setCancelWaiverMode('revoke')}
+                                        className={`flex-1 text-xs py-1.5 rounded-lg border font-medium ${cancelWaiverMode === 'revoke' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200'}`}>Revoke Waiver</button>
+                                      <button onClick={() => setCancelWaiverMode('correct')}
+                                        className={`flex-1 text-xs py-1.5 rounded-lg border font-medium ${cancelWaiverMode === 'correct' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>Correct Amount</button>
+                                    </div>
+                                    <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+                                      {cancelWaiverMode === 'revoke'
+                                        ? <>Revokes waiver of <strong>{fmt((w as { waiver_amount?: number }).waiver_amount || 0)}</strong>. Balance will increase accordingly.</>
+                                        : <>Revokes current waiver and records a new one with the corrected amount.</>}
+                                    </div>
+                                    {cancelWaiverMode === 'correct' && (
+                                      <input type="number" min="0" value={correctWaiverAmount} onChange={e => setCorrectWaiverAmount(e.target.value)}
+                                        placeholder="Corrected waiver amount (₹)"
+                                        className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                    )}
+                                    <input type="text" value={cancelWaiverReason} onChange={e => setCancelWaiverReason(e.target.value)}
+                                      placeholder="Reason (required)" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                    {cancelWaiverMsg && <p className={`text-xs font-medium ${cancelWaiverMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{cancelWaiverMsg}</p>}
+                                    <div className="flex gap-2">
+                                      <button onClick={submitRevokeCorrectWaiver} disabled={cancelWaiverBusy || !cancelWaiverReason.trim()}
+                                        className={`text-sm text-white px-4 py-1.5 rounded-lg font-medium disabled:opacity-50 ${cancelWaiverMode === 'revoke' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                                        {cancelWaiverBusy ? 'Working…' : cancelWaiverMode === 'revoke' ? 'Confirm Revoke' : 'Confirm Correction'}
+                                      </button>
+                                      <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-sm text-gray-500 px-3 py-1.5">Close</button>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             ))}
                           </div>

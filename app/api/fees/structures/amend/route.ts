@@ -62,16 +62,23 @@ export async function POST(req: NextRequest) {
         )`)
 
       // Fetch affected ledger entries before updating (for audit)
+      // Includes partial entries — amount_due must reflect the new structure for all unpaid/partial students
       const { rows: affected } = await client.query(
         `SELECT id, student_id, amount_due FROM student_fee_ledger
-         WHERE fee_structure_id = $1 AND status IN ('pending', 'overdue') AND amount_paid = 0`,
+         WHERE fee_structure_id = $1 AND status IN ('pending', 'overdue', 'partial')`,
         [current.id]
       )
 
-      // Update unpaid/pending ledger entries
+      // Update pending/overdue/partial ledger entries; re-check paid status after new amount applies
       const { rowCount } = await client.query(
-        `UPDATE student_fee_ledger SET amount_due = $1
-         WHERE fee_structure_id = $2 AND status IN ('pending', 'overdue') AND amount_paid = 0`,
+        `UPDATE student_fee_ledger
+         SET amount_due = $1,
+             status = CASE
+               WHEN COALESCE(waiver_amount,0) + amount_paid >= $1 THEN 'paid'
+               WHEN amount_paid > 0 THEN 'partial'
+               ELSE status
+             END
+         WHERE fee_structure_id = $2 AND status IN ('pending', 'overdue', 'partial')`,
         [new_amount, current.id]
       )
 
@@ -121,12 +128,14 @@ export async function GET(req: NextRequest) {
           [school_id, fee_category_id, grade, academic_year]
         )
         if (!struct) return NextResponse.json({ count: 0 })
-        const { rows: [{ cnt }] } = await pool.query(
-          `SELECT COUNT(*) AS cnt FROM student_fee_ledger
-           WHERE fee_structure_id=$1 AND status IN ('pending','overdue') AND amount_paid=0`,
+        const { rows: [{ cnt, partial_cnt }] } = await pool.query(
+          `SELECT
+             COUNT(*) FILTER (WHERE status IN ('pending','overdue') AND amount_paid = 0) AS cnt,
+             COUNT(*) FILTER (WHERE status = 'partial') AS partial_cnt
+           FROM student_fee_ledger WHERE fee_structure_id=$1`,
           [struct.id]
         )
-        return NextResponse.json({ count: parseInt(cnt) })
+        return NextResponse.json({ count: parseInt(cnt), partial_count: parseInt(partial_cnt) })
       } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
     }
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
