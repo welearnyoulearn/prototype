@@ -145,7 +145,9 @@ export async function requirePlatformAdmin(): Promise<JWTPayload | null> {
 
 export async function requireSchoolAdmin(): Promise<JWTPayload | null> {
   const session = await getSession()
-  if (!session || session.role !== 'school_admin') return null
+  if (!session) return null
+  const SCHOOL_ROLES = ['school_admin', 'principal', 'vice_principal']
+  if (!SCHOOL_ROLES.includes(session.role)) return null
   return session
 }
 
