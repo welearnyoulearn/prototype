@@ -31,8 +31,8 @@ export default function FeaturePlansPage() {
     try {
       const res = await fetch('/api/platform/features')
       const data = await res.json()
-      setFeatures(data.features)
-      setMatrix(data.matrix)
+      if (Array.isArray(data.features)) setFeatures(data.features)
+      if (data.matrix && typeof data.matrix === 'object') setMatrix(data.matrix)
       if (data.staffLimits) {
         setStaffLimits({
           basic:    data.staffLimits.basic    == null ? '' : String(data.staffLimits.basic),
