@@ -1942,9 +1942,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               actions.push({ msg: `${stats.summary.overdue_count} overdue entries — follow up with parents`, tab: 'ledger' as const, color: 'text-orange-700 bg-orange-50 border-orange-200' })
             if (stats && stats.summary.defaulters_count > 0)
               actions.push({ msg: `${stats.summary.defaulters_count} students have made zero payment this year`, tab: 'ledger' as const, color: 'text-amber-700 bg-amber-50 border-amber-200' })
-            // Warn if the current year has unresolved prior-year dues (Year-End not done)
-            if (closedYears.size > 0 === false && academicYears.length > 1) {
-              const prevYear = academicYears[academicYears.indexOf(academicYear) - 1]
+            // Warn if the immediately preceding year (older, higher index since array is DESC) is not closed
+            if (academicYears.length > 1) {
+              const idx = academicYears.indexOf(academicYear)
+              const prevYear = idx < academicYears.length - 1 ? academicYears[idx + 1] : null
               if (prevYear && !closedYears.has(prevYear))
                 actions.push({ msg: `${prevYear} has not been closed — go to Year-End tab to carry forward or write off outstanding dues before generating new bills`, tab: 'yearend' as const, color: 'text-purple-700 bg-purple-50 border-purple-200' })
             }
