@@ -10,6 +10,7 @@ import AppLoader from '../components/AppLoader'
 
 // Always-loaded (small, needed immediately)
 import Overview from './components/Overview'
+import StaffProfile from './components/StaffProfile'
 
 // Lazy-loaded — only downloaded when first opened
 function ModuleSkeleton() {
@@ -291,9 +292,13 @@ function SchoolAdmin() {
     init()
   }, [router])
 
+  const isStaffAccount = myRole === 'principal' || myRole === 'vice_principal'
+
   // Only show nav items that are enabled in platform feature config for this tier
+  // Staff accounts (principal/vice_principal) don't see Settings — they get a Profile page instead
   const enabledNavItems = NAV_ITEMS.filter(item =>
-    tier !== 'none' && enabledFeatures.has(item.key)
+    tier !== 'none' && enabledFeatures.has(item.key) &&
+    !(isStaffAccount && item.key === 'settings')
   )
 
   if (loading) return <AppLoader message="Loading your dashboard" sub="Setting up your school workspace…" />
@@ -341,7 +346,9 @@ function SchoolAdmin() {
             Search
             <kbd className="text-[10px] bg-gray-100 px-1 rounded font-mono">Ctrl K</kbd>
           </button>
-          <span className="hidden sm:inline-flex bg-blue-100 text-blue-700 text-xs font-medium px-3 py-1 rounded-full">School Admin</span>
+          <span className="hidden sm:inline-flex bg-blue-100 text-blue-700 text-xs font-medium px-3 py-1 rounded-full">
+            {myRole === 'principal' ? 'Principal' : myRole === 'vice_principal' ? 'Vice Principal' : 'School Admin'}
+          </span>
           <button onClick={handleLogout}
             className="text-sm text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition-colors">
             Logout
@@ -479,8 +486,23 @@ function SchoolAdmin() {
             </nav>
 
             {/* Sidebar footer */}
-            <div className="px-4 py-3 border-t border-slate-700/60">
-              <p className="text-[10px] text-slate-600 text-center">WLYL School Management</p>
+            <div className="px-3 py-3 border-t border-slate-700/60 space-y-1">
+              {isStaffAccount && (
+                <button
+                  onClick={() => navigateTo('profile')}
+                  className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-all text-left ${
+                    activeNav === 'profile'
+                      ? 'bg-indigo-600 text-white font-semibold shadow-md'
+                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                  }`}
+                >
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                  </svg>
+                  My Profile
+                </button>
+              )}
+              <p className="text-[10px] text-slate-600 text-center pt-1">WLYL School Management</p>
             </div>
           </aside>
 
@@ -555,7 +577,8 @@ function SchoolAdmin() {
                 {visited.has('exam-schedule')    && <div hidden={activeNav !== 'exam-schedule'}><ExamSchedule schoolId={selectedSchool.id} /></div>}
                 {visited.has('announcements')    && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} /></div>}
                 {visited.has('export')           && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}
-                {visited.has('settings')         && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} viewerRole={myRole} /></div>}
+                {visited.has('settings')         && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} /></div>}
+                {visited.has('profile')          && <div hidden={activeNav !== 'profile'}><StaffProfile /></div>}
                 {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} /></div>}
                 {visited.has('year-rollover')    && <div hidden={activeNav !== 'year-rollover'}><YearRollover schoolId={selectedSchool.id} /></div>}
               </FeaturesProvider>
