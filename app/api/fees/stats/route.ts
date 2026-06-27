@@ -63,7 +63,7 @@ export async function GET(req: NextRequest) {
            -- student-level paid/partial for progress bar legend
            COUNT(*) FILTER (WHERE s_out <= 0)                                        AS students_fully_paid,
            COUNT(*) FILTER (WHERE s_cash > 0 AND s_out > 0)                          AS students_partial,
-           COUNT(*) FILTER (WHERE s_cash = 0 AND s_waived = 0 AND overdue_entries > 0) AS students_overdue_zero
+           COUNT(*) FILTER (WHERE s_cash = 0 AND s_waived = 0 AND s_out > 0)          AS students_not_paid
          FROM per_student`,
         [school_id, academic_year]
       )

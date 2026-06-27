@@ -47,7 +47,7 @@ type FeeStats = {
     total_students: number; total_due: number; total_collected: number; total_waived: number
     total_outstanding: number; paid_count: number; partial_count: number
     pending_count: number; overdue_count: number; waived_count: number; defaulters_count: number
-    students_fully_paid: number; students_partial: number; students_overdue_zero: number
+    students_fully_paid: number; students_partial: number; students_not_paid: number
   }
   by_category: Array<{ category_name: string; frequency: string; total_due: number; total_collected: number; overdue_count: number }>
   monthly_trend: Array<{ month: string; collected: number }>
@@ -1964,12 +1964,13 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             </div>
           ) : stats?.summary ? (
             <>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                 {[
-                  { label: 'Total Billed',  value: stats.summary.total_due,         sub: `${stats.summary.total_students} students`,           border: 'border-gray-100',   text: 'text-gray-900',  sub_color: 'text-gray-400' },
-                  { label: 'Collected',     value: stats.summary.total_collected,    sub: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}% of net demand`, border: 'border-green-100',  text: 'text-green-700', sub_color: 'text-green-500' },
-                  { label: 'Outstanding',   value: stats.summary.total_outstanding,  sub: `${stats.summary.overdue_count} overdue entries`,     border: 'border-red-100',    text: 'text-red-600',   sub_color: 'text-red-400' },
-                  { label: 'Zero Payers',   value: stats.summary.defaulters_count,   sub: 'students with no payment or waiver',                 border: 'border-orange-100', text: 'text-orange-600',sub_color: 'text-orange-400', isCount: true },
+                  { label: 'Total Billed',  value: stats.summary.total_due,                                                                    sub: `${stats.summary.total_students} students`,           border: 'border-gray-100',   text: 'text-gray-900',   sub_color: 'text-gray-400' },
+                  { label: 'Collected',     value: stats.summary.total_collected,    sub: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}% of net demand`, border: 'border-green-100',  text: 'text-green-700',  sub_color: 'text-green-500' },
+                  { label: 'Waived',        value: stats.summary.total_waived,                                                                  sub: `${stats.summary.waived_count} entries waived`,       border: 'border-purple-100', text: 'text-purple-700', sub_color: 'text-purple-400' },
+                  { label: 'Outstanding',   value: stats.summary.total_outstanding,                                                             sub: `${stats.summary.overdue_count} overdue entries`,     border: 'border-red-100',    text: 'text-red-600',    sub_color: 'text-red-400' },
+                  { label: 'Zero Payers',   value: stats.summary.defaulters_count,                                                              sub: 'students with no payment or waiver',                 border: 'border-orange-100', text: 'text-orange-600', sub_color: 'text-orange-400', isCount: true },
                 ].map(card => (
                   <div key={card.label} className={`bg-white rounded-xl border ${card.border} p-5`}>
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{card.label}</p>
@@ -1997,7 +1998,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   {[
                     { label: 'Fully Paid', count: stats.summary.students_fully_paid, dot: 'bg-green-500' },
                     { label: 'Partial',    count: stats.summary.students_partial,     dot: 'bg-yellow-400' },
-                    { label: 'Not Paid',   count: stats.summary.students_overdue_zero,dot: 'bg-red-500' },
+                    { label: 'Not Paid',   count: stats.summary.students_not_paid,    dot: 'bg-red-500' },
                   ].map(s => (
                     <div key={s.label} className="flex items-center gap-2">
                       <div className={`w-2.5 h-2.5 rounded-full ${s.dot}`} />
