@@ -1517,6 +1517,23 @@ async function runIncrementalMigrations() {
     END $$
   `)
 
+  // ── DB-level safety constraints on fee ledger amounts ────────────────────────
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_amount_due_positive    CHECK (amount_due    >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+  `)
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_amount_paid_positive   CHECK (amount_paid   >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+  `)
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_waiver_amount_positive CHECK (waiver_amount >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+  `)
+
   // ── Staff limit per plan tier ─────────────────────────────────────────────────
   await pool.query(`ALTER TABLE plan_pricing ADD COLUMN IF NOT EXISTS staff_limit INTEGER DEFAULT NULL`)
   await pool.query(`

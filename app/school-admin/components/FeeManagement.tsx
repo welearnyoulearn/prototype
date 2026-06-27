@@ -938,6 +938,8 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       setSelectedEntry(null); setCollectSearch(''); setCollectEntries([])
       loadStats()
       if (activeTab === 'ledger') loadLedger()
+      if (reportData !== null) loadReports()
+      if (yearEnd   !== null) loadYearEnd()
     } else {
       setPayError(d.error || 'Payment failed')
     }
@@ -963,6 +965,8 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
         setCollectSearch(''); setCollectEntries([])
         setOpenStudentId(null); setShowCollectForm(false); setCollectChecked(new Set())
         loadStats(); loadLedger()
+        if (reportData !== null) loadReports()
+        if (yearEnd   !== null) loadYearEnd()
       } else {
         const d = await r.json()
         setWaiverError(d.error || 'Failed to grant waiver')
@@ -1446,7 +1450,9 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     if (r.ok) {
       setVerifyMsg(action === 'approve' ? '✓ Payment approved and ledger updated' : '✓ Payment rejected')
       setShowRejectForm(null); setRejectReason('')
-      loadPending(); loadStats()
+      loadPending(); loadStats(); loadLedger()
+      if (reportData !== null) loadReports()
+      if (yearEnd   !== null) loadYearEnd()
     } else {
       const d = await r.json()
       setVerifyMsg(d.error || 'Failed')
@@ -1596,6 +1602,8 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       })
       setShowCollectForm(false)
       loadLedger(); loadStats()
+      if (reportData !== null) loadReports()
+      if (yearEnd   !== null) loadYearEnd()
     } else {
       setPayError(d.error || 'Payment failed')
     }
