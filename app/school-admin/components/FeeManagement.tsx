@@ -36,6 +36,7 @@ type LedgerEntry = {
   roll_number: string; school_roll_number: number | null; grade: string; section: string
   email: string | null; phone: string | null
   parent_name: string | null; parent_phone: string | null; parent_email: string | null
+  student_status: string
   category_name: string; period_label: string
   amount_due: number; amount_paid: number; balance: number; waiver_amount: number
   due_date: string; status: 'pending' | 'paid' | 'partial' | 'overdue' | 'waived'
@@ -292,6 +293,7 @@ export default function FeeManagement({
   const [gradeStats, setGradeStats] = useState<GradeStat[]>([])
 
   // Setup
+  const [setupLoading, setSetupLoading] = useState(false)
   const [categories, setCategories]     = useState<FeeCategory[]>([])
   const [structures, setStructures]     = useState<FeeStructure[]>([])
   const [structureLock, setStructureLock] = useState<StructureLock>(null)
@@ -588,6 +590,7 @@ export default function FeeManagement({
   // ── Setup: categories + structures + lock + amendments ───────────────────────
   const loadSetup = useCallback(async () => {
     if (!academicYear) return
+    setSetupLoading(true)
     const [catRes, strRes, lockRes, amendRes] = await Promise.all([
       fetch(`/api/fees/categories?school_id=${schoolId}`),
       fetch(`/api/fees/structures?school_id=${schoolId}&academic_year=${academicYear}`),
@@ -608,7 +611,7 @@ export default function FeeManagement({
     const initDueDays: Record<number, string> = {}
     strs.forEach(s => { if (!initDueDays[s.fee_category_id]) initDueDays[s.fee_category_id] = String(s.due_day) })
     setDueDays(initDueDays)
-
+    setSetupLoading(false)
   }, [schoolId, academicYear])
 
   useEffect(() => { if (activeTab === 'setup') loadSetup() }, [activeTab, loadSetup])
@@ -1484,6 +1487,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     grade: string; section: string
     email: string | null; phone: string | null
     parent_name: string | null; parent_phone: string | null; parent_email: string | null
+    student_status: string
     total_billed: number; total_paid: number; outstanding: number
     open_entries: LedgerEntry[]   // pending/partial/overdue
     all_entries: LedgerEntry[]
@@ -1500,6 +1504,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
           grade: e.grade, section: e.section,
           email: e.email ?? null, phone: e.phone ?? null,
           parent_name: e.parent_name ?? null, parent_phone: e.parent_phone ?? null, parent_email: e.parent_email ?? null,
+          student_status: e.student_status ?? 'active',
           total_billed: 0, total_paid: 0, outstanding: 0,
           open_entries: [], all_entries: [], has_overdue: false, never_paid: true,
         }
@@ -1548,11 +1553,22 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     : 0
 
   function toggleStudent(id: number) {
-    if (openStudentId === id) { setOpenStudentId(null); setShowCollectForm(false); setShowCounterHistory(false); return }
+    if (openStudentId === id) {
+      setOpenStudentId(null); setShowCollectForm(false); setShowCounterHistory(false)
+      // Scroll the row back into view after collapsing
+      setTimeout(() => {
+        document.getElementById(`student-row-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }, 50)
+      return
+    }
     setOpenStudentId(id); setShowCollectForm(false)
     setShowPaymentsId(null); setShowHistoryId(null)
     setShowCounterHistory(false); setCounterPayments([])
     setCancelPmtId(null); setCancelMsg('')
+    // Scroll to the expanded row
+    setTimeout(() => {
+      document.getElementById(`student-row-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 50)
   }
 
   async function loadCounterPayments(studentId: number) {
@@ -2306,6 +2322,20 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       {activeTab === 'setup' && (
         <div className="space-y-5">
 
+          {setupLoading && (
+            <div className="space-y-4 animate-pulse">
+              <div className="bg-white rounded-xl border border-gray-100 p-4">
+                <div className="h-4 bg-gray-200 rounded w-48 mb-4" />
+                <div className="flex items-center gap-2">
+                  {[1,2,3,4,5].map(i => <div key={i} className="h-8 bg-gray-100 rounded flex-1" />)}
+                </div>
+              </div>
+              {[1,2,3].map(i => <div key={i} className="bg-white rounded-xl border border-gray-100 p-5 h-20" />)}
+            </div>
+          )}
+
+          {!setupLoading && <>
+
           {/* ── Setup progress strip ── */}
           {(() => {
             const hasYear    = academicYears.length > 0
@@ -3033,6 +3063,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               </div>
             </div>
           )}
+
+          </>}
         </div>
       )}
 
@@ -3124,10 +3156,15 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <div className="divide-y divide-gray-50 max-h-[600px] overflow-y-auto">
                     {collectionFiltered.map(row => (
                       <Fragment key={row.student_id}>
-                        <div className={`px-4 py-3 grid grid-cols-12 gap-2 items-center hover:bg-gray-50/60 cursor-pointer ${openStudentId === row.student_id ? 'bg-blue-50/40' : ''}`}
+                        <div id={`student-row-${row.student_id}`} className={`px-4 py-3 grid grid-cols-12 gap-2 items-center hover:bg-gray-50/60 cursor-pointer ${openStudentId === row.student_id ? 'bg-blue-50/40' : ''}`}
                           onClick={() => toggleStudent(row.student_id)}>
                           <div className="col-span-4">
-                            <p className="text-sm font-medium text-gray-800">{row.student_name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium text-gray-800">{row.student_name}</p>
+                              {row.student_status === 'inactive' && (
+                                <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">Inactive</span>
+                              )}
+                            </div>
                             <p className="text-xs text-gray-400">Gr.{row.grade}{row.section}{row.school_roll_number != null ? ` · Roll ${row.school_roll_number}` : ''}</p>
                           </div>
                           <div className="col-span-2 text-right text-sm text-gray-600">{fmt(row.total_billed)}</div>
