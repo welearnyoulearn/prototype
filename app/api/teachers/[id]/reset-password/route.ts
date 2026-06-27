@@ -8,7 +8,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    if (session.role !== 'school_admin' && session.role !== 'platform_admin') {
+    const SCHOOL_ROLES = ['school_admin', 'principal', 'vice_principal']
+    if (!SCHOOL_ROLES.includes(session.role) && session.role !== 'platform_admin') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
@@ -20,8 +21,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     )
     if (!teacher) return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
 
-    // School admin can only reset teachers in their own school
-    if (session.role === 'school_admin' && teacher.school_id !== session.schoolId) {
+    // School staff can only reset teachers in their own school
+    if (SCHOOL_ROLES.includes(session.role) && teacher.school_id !== session.schoolId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 

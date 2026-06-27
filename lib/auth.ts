@@ -227,12 +227,13 @@ export async function requireFeeAccess(requestedSchoolId: string | number | null
     return { schoolId: sid, role: 'platform_admin', userId: session.userId, actor: 'Platform Admin' }
   }
 
-  // School admin: must match their own school
-  if (session.role === 'school_admin' && session.schoolId) {
+  // School staff (admin, principal, vice_principal): must match their own school
+  const SCHOOL_ROLES = ['school_admin', 'principal', 'vice_principal']
+  if (SCHOOL_ROLES.includes(session.role) && session.schoolId) {
     if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(session.schoolId)) {
       return null   // cross-tenant attempt
     }
-    return { schoolId: session.schoolId, role: 'school_admin', userId: session.userId, actor: 'School Admin' }
+    return { schoolId: session.schoolId, role: session.role, userId: session.userId, actor: 'School Admin' }
   }
 
   return null
