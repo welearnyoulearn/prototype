@@ -85,13 +85,18 @@ export async function POST(req: NextRequest) {
         }
       } catch { /* column not yet migrated — allow creation */ }
 
-      // Block only if this email is already used by a different account in THIS school
+      // Check for existing email — within same school or globally (unique constraint on email)
       const existing = await pool.query(
-        `SELECT id FROM users WHERE LOWER(email) = LOWER($1) AND school_id = $2`,
-        [email.trim(), schoolId]
+        `SELECT id, school_id FROM users WHERE LOWER(email) = LOWER($1)`,
+        [email.trim()]
       )
       if (existing.rows.length > 0) {
-        return NextResponse.json({ error: 'This email is already registered for an account in your school.' }, { status: 409 })
+        const sameSchool = existing.rows[0].school_id === schoolId
+        if (sameSchool) {
+          return NextResponse.json({ error: 'This email is already registered for an account in your school.' }, { status: 409 })
+        } else {
+          return NextResponse.json({ error: 'This email is already in use by another school. Please use a different email address.' }, { status: 409 })
+        }
       }
 
       const tempPassword = generateTempPassword(10)
