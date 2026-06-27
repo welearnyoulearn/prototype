@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
         `SELECT id FROM users WHERE LOWER(email) = LOWER($1)`, [email.trim()]
       )
       if (existing.rows.length > 0) {
-        return NextResponse.json({ error: 'An account with this email already exists' }, { status: 409 })
+        return NextResponse.json({ error: 'This email is already registered in the system. Use a different email address for this staff account.' }, { status: 409 })
       }
 
       const tempPassword = generateTempPassword(10)
