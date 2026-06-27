@@ -85,11 +85,19 @@ export async function POST(req: NextRequest) {
         }
       } catch { /* column not yet migrated — allow creation */ }
 
-      const existing = await pool.query(
-        `SELECT id FROM users WHERE LOWER(email) = LOWER($1)`, [email.trim()]
+      // Check if this email belongs to the school's own onboarding account — allow it through
+      const { rows: [school] } = await pool.query(
+        `SELECT email FROM schools WHERE id = $1`, [schoolId]
       )
-      if (existing.rows.length > 0) {
-        return NextResponse.json({ error: 'This email is already registered in the system. Use a different email address for this staff account.' }, { status: 409 })
+      const isSchoolOwnEmail = school?.email && school.email.toLowerCase() === email.trim().toLowerCase()
+
+      if (!isSchoolOwnEmail) {
+        const existing = await pool.query(
+          `SELECT id FROM users WHERE LOWER(email) = LOWER($1)`, [email.trim()]
+        )
+        if (existing.rows.length > 0) {
+          return NextResponse.json({ error: 'This email is already registered in the system. Use a different email address for this staff account.' }, { status: 409 })
+        }
       }
 
       const tempPassword = generateTempPassword(10)
@@ -99,9 +107,13 @@ export async function POST(req: NextRequest) {
       const schoolName = schoolResult.rows[0]?.name || 'Your School'
       const roleLabel = ROLE_LABELS[role] || role
 
+      // If this is the school's own onboarding email, upsert instead of plain insert
       const result = await pool.query(
         `INSERT INTO users (full_name, email, password_hash, role, school_id, first_login, profile_completed, status)
-         VALUES ($1, $2, $3, $4, $5, TRUE, FALSE, 'active') RETURNING id, full_name, email, role, created_at`,
+         VALUES ($1, $2, $3, $4, $5, TRUE, FALSE, 'active')
+         ON CONFLICT (email) DO UPDATE
+           SET full_name = $1, role = $4, school_id = $5, password_hash = $3, first_login = TRUE, status = 'active'
+         RETURNING id, full_name, email, role, created_at`,
         [full_name.trim(), email.trim().toLowerCase(), passwordHash, role, schoolId]
       )
 
