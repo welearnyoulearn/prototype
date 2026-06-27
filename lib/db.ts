@@ -1516,4 +1516,16 @@ async function runIncrementalMigrations() {
     EXCEPTION WHEN others THEN NULL;
     END $$
   `)
+
+  // ── Staff limit per plan tier ─────────────────────────────────────────────────
+  await pool.query(`ALTER TABLE plan_pricing ADD COLUMN IF NOT EXISTS staff_limit INTEGER DEFAULT NULL`)
+  await pool.query(`
+    UPDATE plan_pricing SET staff_limit = CASE
+      WHEN tier = 'none'     THEN 1
+      WHEN tier = 'basic'    THEN 2
+      WHEN tier = 'standard' THEN 5
+      WHEN tier = 'premium'  THEN NULL
+    END
+    WHERE staff_limit IS NULL
+  `)
 }

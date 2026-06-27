@@ -56,7 +56,14 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ features: ALL_FEATURES, matrix })
+    // Staff limits per tier
+    const limitsRes = await pool.query(`SELECT tier, staff_limit FROM plan_pricing WHERE tier IN ('basic','standard','premium','none')`)
+    const staffLimits: Record<string, number | null> = {}
+    for (const row of limitsRes.rows) {
+      staffLimits[row.tier] = row.staff_limit ?? null
+    }
+
+    return NextResponse.json({ features: ALL_FEATURES, matrix, staffLimits })
   } catch (error) {
     console.error('[platform/features GET]', error)
     return NextResponse.json({ error: 'Failed to fetch features' }, { status: 500 })
@@ -64,10 +71,10 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/platform/features
-// Body: { assignments: { feature_key, tier, enabled }[] }
+// Body: { assignments: { feature_key, tier, enabled }[], staffLimits?: { basic, standard, premium, none } }
 export async function POST(req: NextRequest) {
   try {
-    const { assignments } = await req.json()
+    const { assignments, staffLimits } = await req.json()
     if (!Array.isArray(assignments)) {
       return NextResponse.json({ error: 'assignments array required' }, { status: 400 })
     }
@@ -83,6 +90,16 @@ export async function POST(req: NextRequest) {
            ON CONFLICT (feature_key, tier) DO UPDATE SET enabled = $3, updated_at = NOW()`,
           [feature_key, tier, !!enabled]
         )
+      }
+      // Save staff limits if provided
+      if (staffLimits && typeof staffLimits === 'object') {
+        for (const [tier, limit] of Object.entries(staffLimits)) {
+          const limitVal = limit === '' || limit === null || limit === undefined ? null : parseInt(String(limit))
+          await client.query(
+            `UPDATE plan_pricing SET staff_limit = $1, updated_at = NOW() WHERE tier = $2`,
+            [isNaN(limitVal as number) ? null : limitVal, tier]
+          )
+        }
       }
       await client.query('COMMIT')
     } catch (e) {

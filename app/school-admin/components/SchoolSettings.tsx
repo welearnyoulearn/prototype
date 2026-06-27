@@ -28,6 +28,7 @@ type StaffAccount = {
 
 type Subscription = {
   tier: 'basic' | 'standard' | 'premium' | 'none'
+  staff_limit?: number | null
   updated_at?: string
 }
 
@@ -63,7 +64,6 @@ const TIER_COLORS: Record<string, string> = {
   none: 'bg-gray-100 text-gray-500 border-gray-200',
 }
 
-const STAFF_LIMITS: Record<string, number | null> = { basic: 2, standard: 5, premium: null, none: 1 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -796,7 +796,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               <p className="text-sm text-gray-400 mt-0.5">Principal and Vice Principal access — credentials sent by email</p>
             </div>
             {(() => {
-              const limit = STAFF_LIMITS[subscription?.tier ?? 'none']
+              const limit = subscription?.staff_limit ?? null
               const count = staffList.filter(s => s.status === 'active').length
               return (
                 <div className="text-right">
@@ -867,7 +867,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
           {/* Add staff form */}
           {(() => {
-            const limit = STAFF_LIMITS[subscription?.tier ?? 'none']
+            const limit = subscription?.staff_limit ?? null
             const count = staffList.filter(s => s.status === 'active').length
             const atLimit = limit !== null && count >= limit
             return (

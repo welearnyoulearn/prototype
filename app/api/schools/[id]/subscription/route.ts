@@ -6,8 +6,17 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   try {
     const { id } = await params
     try {
-      const result = await pool.query('SELECT * FROM school_subscriptions WHERE school_id = $1', [id])
-      if (result.rows.length === 0) return NextResponse.json({ school_id: parseInt(id), tier: 'none' })
+      const result = await pool.query(
+        `SELECT ss.*, pp.staff_limit
+         FROM school_subscriptions ss
+         LEFT JOIN plan_pricing pp ON pp.tier = ss.tier
+         WHERE ss.school_id = $1`,
+        [id]
+      )
+      if (result.rows.length === 0) {
+        const pp = await pool.query(`SELECT staff_limit FROM plan_pricing WHERE tier = 'none'`)
+        return NextResponse.json({ school_id: parseInt(id), tier: 'none', staff_limit: pp.rows[0]?.staff_limit ?? 1 })
+      }
       return NextResponse.json(result.rows[0])
     } catch (error) {
       console.error(error)
