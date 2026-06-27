@@ -85,7 +85,8 @@ export function proxy(req: NextRequest) {
   if (pathname.startsWith('/school-admin')) {
     const token = req.cookies.get(COOKIE_ADMIN)?.value
     const payload = token ? getTokenPayload(token) : null
-    if (!payload || payload.role !== 'school_admin') {
+    const schoolRoles = ['school_admin', 'principal', 'vice_principal']
+    if (!payload || !schoolRoles.includes(payload.role as string)) {
       return NextResponse.redirect(new URL('/login?role=school', req.url))
     }
     if (payload.firstLogin && pathname !== '/change-password') {

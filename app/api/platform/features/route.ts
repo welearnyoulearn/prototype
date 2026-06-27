@@ -32,10 +32,10 @@ export async function GET(req: NextRequest) {
         result.rows.map((r: { feature_key: string; enabled: boolean }) => [r.feature_key, r.enabled])
       )
 
-      // Features NOT in plan_features at all = newly added feature, enabled by default
+      // Features NOT in plan_features = not yet configured, treat as disabled
       // Features in plan_features = use the saved value
       const enabled = ALL_FEATURES
-        .filter(f => !configured.has(f.key) || configured.get(f.key) === true)
+        .filter(f => configured.get(f.key) === true)
         .map(f => f.key)
 
       return NextResponse.json({ enabled })
@@ -45,9 +45,9 @@ export async function GET(req: NextRequest) {
     const result = await pool.query(`SELECT feature_key, tier, enabled FROM plan_features`)
     const matrix: Record<string, Record<string, boolean>> = {}
 
-    // Default ALL features to enabled=true for all tiers (new features auto-visible until explicitly disabled)
+    // Default all features to disabled — only explicitly saved values are enabled
     for (const f of ALL_FEATURES) {
-      matrix[f.key] = { basic: true, standard: true, premium: true }
+      matrix[f.key] = { basic: false, standard: false, premium: false }
     }
     // Override only what's been explicitly configured in DB
     for (const row of result.rows) {
@@ -56,7 +56,16 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ features: ALL_FEATURES, matrix })
+    // Staff limits per tier — wrapped separately so a missing column doesn't break the whole response
+    let staffLimits: Record<string, number | null> = {}
+    try {
+      const limitsRes = await pool.query(`SELECT tier, staff_limit FROM plan_pricing WHERE tier IN ('basic','standard','premium','none')`)
+      for (const row of limitsRes.rows) {
+        staffLimits[row.tier] = row.staff_limit ?? null
+      }
+    } catch { /* column not yet migrated — return empty, migration will add it on next cold start */ }
+
+    return NextResponse.json({ features: ALL_FEATURES, matrix, staffLimits })
   } catch (error) {
     console.error('[platform/features GET]', error)
     return NextResponse.json({ error: 'Failed to fetch features' }, { status: 500 })
@@ -64,10 +73,10 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/platform/features
-// Body: { assignments: { feature_key, tier, enabled }[] }
+// Body: { assignments: { feature_key, tier, enabled }[], staffLimits?: { basic, standard, premium, none } }
 export async function POST(req: NextRequest) {
   try {
-    const { assignments } = await req.json()
+    const { assignments, staffLimits } = await req.json()
     if (!Array.isArray(assignments)) {
       return NextResponse.json({ error: 'assignments array required' }, { status: 400 })
     }
@@ -90,6 +99,19 @@ export async function POST(req: NextRequest) {
       throw e
     } finally {
       client.release()
+    }
+
+    // Save staff limits outside the main transaction — column may not exist yet
+    if (staffLimits && typeof staffLimits === 'object') {
+      try {
+        for (const [tier, limit] of Object.entries(staffLimits)) {
+          const limitVal = limit === '' || limit === null || limit === undefined ? null : parseInt(String(limit))
+          await pool.query(
+            `UPDATE plan_pricing SET staff_limit = $1, updated_at = NOW() WHERE tier = $2`,
+            [isNaN(limitVal as number) ? null : limitVal, tier]
+          )
+        }
+      } catch { /* column not yet migrated — skip silently, features already saved */ }
     }
 
     return NextResponse.json({ success: true })

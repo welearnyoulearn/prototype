@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import AppLoader from '../components/AppLoader'
 
 export default function SetupPage() {
   const router = useRouter()
@@ -38,11 +39,7 @@ export default function SetupPage() {
     }
   }
 
-  if (exists === null) return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-      <p className="text-slate-400">Checking...</p>
-    </div>
-  )
+  if (exists === null) return <AppLoader message="Checking setup status" sub="Please wait…" />
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900 flex items-center justify-center p-4">

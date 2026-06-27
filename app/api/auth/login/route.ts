@@ -30,6 +30,17 @@ export async function POST(req: NextRequest) {
     }
 
     const user = result.rows[0]
+
+    // This endpoint is for school portal only — reject other roles
+    const SCHOOL_ROLES = ['school_admin', 'principal', 'vice_principal', 'platform_admin']
+    if (!SCHOOL_ROLES.includes(user.role)) {
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
+    }
+
+    if (user.status === 'inactive') {
+      return NextResponse.json({ error: 'This account has been deactivated. Contact your school administrator.' }, { status: 403 })
+    }
+
     const valid = await verifyPassword(password, user.password_hash)
     if (!valid) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })

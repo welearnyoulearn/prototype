@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
       const { rows: ledger } = await pool.query(
         `SELECT l.*, fc.name AS category_name, fc.frequency,
-                (l.amount_due - l.amount_paid) AS balance
+                 (l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid) AS balance
          FROM student_fee_ledger l
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE l.school_id = $1 AND l.student_id = $2 AND l.academic_year = $3
@@ -108,6 +108,19 @@ export async function POST(req: NextRequest) {
       const createdPayments = []
 
       if (!isMulti) {
+        // BUG 11/12 fix: verify ledger_id belongs to this student before inserting
+        const { rows: [ledgerCheck] } = await client.query(
+          `SELECT id FROM student_fee_ledger
+           WHERE id = $1 AND school_id = $2 AND student_id = $3
+             AND status NOT IN ('paid', 'waived')`,
+          [ledger_id, school_id, student_id]
+        )
+        if (!ledgerCheck) {
+          await client.query('ROLLBACK')
+          client.release()
+          return NextResponse.json({ error: 'Ledger entry not found or not payable' }, { status: 404 })
+        }
+
         // Single ledger entry
         const { rows: [payment] } = await client.query(
           `INSERT INTO fee_payments

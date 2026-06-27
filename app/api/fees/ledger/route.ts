@@ -24,11 +24,28 @@ export async function GET(req: NextRequest) {
     if (student_id)    { values.push(student_id);      conditions.push(`l.student_id = $${values.length}`) }
 
     try {
-      // Auto-update overdue status first
+      // Auto-update overdue status based on academic year end date
       if (academic_year) {
+        // Mark overdue: only after the academic year's end date has passed
         await pool.query(
-          `UPDATE student_fee_ledger SET status = 'overdue'
-           WHERE school_id = $1 AND academic_year = $2 AND status = 'pending' AND due_date < CURRENT_DATE`,
+          `UPDATE student_fee_ledger l SET status = 'overdue'
+           WHERE l.school_id = $1 AND l.academic_year = $2 AND l.status = 'pending'
+             AND EXISTS (
+               SELECT 1 FROM academic_years ay
+               WHERE ay.school_id = l.school_id AND ay.label = l.academic_year
+                 AND ay.end_date < CURRENT_DATE
+             )`,
+          [school_id, academic_year]
+        )
+        // Reset stale overdue back to pending if academic year hasn't ended yet
+        await pool.query(
+          `UPDATE student_fee_ledger l SET status = 'pending'
+           WHERE l.school_id = $1 AND l.academic_year = $2 AND l.status = 'overdue'
+             AND EXISTS (
+               SELECT 1 FROM academic_years ay
+               WHERE ay.school_id = l.school_id AND ay.label = l.academic_year
+                 AND ay.end_date >= CURRENT_DATE
+             )`,
           [school_id, academic_year]
         )
       }
@@ -44,20 +61,22 @@ export async function GET(req: NextRequest) {
       const { rows } = await pool.query(
         `SELECT
            l.*,
-           s.name AS student_name, s.roll_number, s.grade, s.section,
+           s.name AS student_name, s.roll_number, s.school_roll_number, s.grade, s.section,
+           s.email, s.phone, s.parent_name, s.parent_phone, s.parent_email,
+           COALESCE(s.status, 'active') AS student_status,
            fc.name AS category_name, fc.frequency,
            COALESCE(
              (SELECT SUM(fp.amount) FROM fee_payments fp WHERE fp.ledger_id = l.id AND fp.payment_status = 'completed'),
              0
            ) AS total_paid_confirmed,
-           (l.amount_due - l.amount_paid) AS balance,
+           GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS balance,
            (CURRENT_DATE - l.due_date) AS days_overdue,
            ${hasEditsCol}
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE ${conditions.join(' AND ')}
-         ORDER BY l.due_date, s.grade, s.section, s.name`,
+         ORDER BY l.due_date, s.grade, s.section, s.school_roll_number NULLS LAST, s.name`,
         values
       )
       return NextResponse.json(rows)
