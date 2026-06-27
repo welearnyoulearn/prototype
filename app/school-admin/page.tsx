@@ -251,7 +251,7 @@ function SchoolAdmin() {
     async function init() {
       try {
         const meRes = await fetch('/api/auth/me')
-        if (meRes.status === 401) { router.push('/login?role=school'); return }
+        if (!meRes.ok) { router.push('/login?role=school'); return }
         const me = await meRes.json()
         const schoolRoles = ['school_admin', 'principal', 'vice_principal']
         if (!schoolRoles.includes(me.role) || !me.school_id) { router.push('/login?role=school'); return }
