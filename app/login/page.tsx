@@ -30,10 +30,15 @@ function LoginForm() {
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Invalid credentials'); return }
 
-      if (data.role === 'platform_admin') window.location.href = '/platform-admin'
-      else if (data.firstLogin) window.location.href = '/change-password?first=1'
-      else if (!data.profileCompleted) window.location.href = '/profile-setup'
-      else window.location.href = '/school-admin'
+      if (data.role === 'platform_admin') {
+        window.location.href = '/platform-admin'
+      } else if (['school_admin', 'principal', 'vice_principal'].includes(data.role)) {
+        if (data.firstLogin) router.push('/change-password?first=1')
+        else if (!data.profileCompleted) router.push('/profile-setup')
+        else router.push('/school-admin')
+      } else {
+        setError('This portal is for school staff only. Please use the correct login page.')
+      }
     } catch {
       setError('Connection error. Please try again.')
     } finally {
