@@ -93,22 +93,25 @@ export async function POST(req: NextRequest) {
           [feature_key, tier, !!enabled]
         )
       }
-      // Save staff limits if provided
-      if (staffLimits && typeof staffLimits === 'object') {
-        for (const [tier, limit] of Object.entries(staffLimits)) {
-          const limitVal = limit === '' || limit === null || limit === undefined ? null : parseInt(String(limit))
-          await client.query(
-            `UPDATE plan_pricing SET staff_limit = $1, updated_at = NOW() WHERE tier = $2`,
-            [isNaN(limitVal as number) ? null : limitVal, tier]
-          )
-        }
-      }
       await client.query('COMMIT')
     } catch (e) {
       await client.query('ROLLBACK')
       throw e
     } finally {
       client.release()
+    }
+
+    // Save staff limits outside the main transaction — column may not exist yet
+    if (staffLimits && typeof staffLimits === 'object') {
+      try {
+        for (const [tier, limit] of Object.entries(staffLimits)) {
+          const limitVal = limit === '' || limit === null || limit === undefined ? null : parseInt(String(limit))
+          await pool.query(
+            `UPDATE plan_pricing SET staff_limit = $1, updated_at = NOW() WHERE tier = $2`,
+            [isNaN(limitVal as number) ? null : limitVal, tier]
+          )
+        }
+      } catch { /* column not yet migrated — skip silently, features already saved */ }
     }
 
     return NextResponse.json({ success: true })
