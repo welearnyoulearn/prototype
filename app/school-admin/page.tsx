@@ -183,7 +183,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     key: 'settings',
-    label: 'School Settings',
+    label: 'School Profile',
     tier: ['basic', 'standard', 'premium'],
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -423,7 +423,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
       {/* Header */}
       <div>
-        <h2 className="text-lg font-bold text-gray-800">School Settings</h2>
+        <h2 className="text-lg font-bold text-gray-800">School Profile</h2>
         <p className="text-sm text-gray-400 mt-0.5">Manage your school profile, academic years, plan and security</p>
       </div>
 

@@ -36,6 +36,7 @@ type LedgerEntry = {
   roll_number: string; school_roll_number: number | null; grade: string; section: string
   email: string | null; phone: string | null
   parent_name: string | null; parent_phone: string | null; parent_email: string | null
+  student_status: string
   category_name: string; period_label: string
   amount_due: number; amount_paid: number; balance: number; waiver_amount: number
   due_date: string; status: 'pending' | 'paid' | 'partial' | 'overdue' | 'waived'
@@ -47,7 +48,7 @@ type FeeStats = {
     total_students: number; total_due: number; total_collected: number; total_waived: number
     total_outstanding: number; paid_count: number; partial_count: number
     pending_count: number; overdue_count: number; waived_count: number; defaulters_count: number
-    students_fully_paid: number; students_partial: number; students_overdue_zero: number
+    students_fully_paid: number; students_partial: number; students_not_paid: number
   }
   by_category: Array<{ category_name: string; frequency: string; total_due: number; total_collected: number; overdue_count: number }>
   monthly_trend: Array<{ month: string; collected: number }>
@@ -292,6 +293,7 @@ export default function FeeManagement({
   const [gradeStats, setGradeStats] = useState<GradeStat[]>([])
 
   // Setup
+  const [setupLoading, setSetupLoading] = useState(false)
   const [categories, setCategories]     = useState<FeeCategory[]>([])
   const [structures, setStructures]     = useState<FeeStructure[]>([])
   const [structureLock, setStructureLock] = useState<StructureLock>(null)
@@ -427,18 +429,26 @@ export default function FeeManagement({
   type PassbookTimeline = {
     date: string; type: 'bill' | 'payment' | 'waiver' | 'amendment'
     description: string; debit: number; credit: number; balance: number
-    by: string; reference: string | null
+    by: string; reference: string | null; academic_year?: string
+  }
+  type PassbookYearGroup = {
+    academic_year: string; is_current: boolean
+    total_billed: number; total_paid: number; total_waived: number; outstanding: number
+    entries: LedgerEntry[]
   }
   type PassbookData = {
     student: { id: number; name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; parent_email: string | null }
+    current_year: string | null
     summary: { total_billed: number; total_paid: number; total_waived: number; outstanding: number }
     timeline: PassbookTimeline[]
     ledger: LedgerEntry[]
+    ledger_by_year: PassbookYearGroup[]
     payments: PaymentRecord[]
     pending_payments: PaymentRecord[]
-    waivers: Array<{ id: number; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; fee_head_name: string; period_label: string }>
+    waivers: Array<{ id: number; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; fee_head_name: string; period_label: string; bill_year?: string }>
+    prior_unresolved: PassbookYearGroup[]
   }
-  type PassbookSearchResult = { id: number; name: string; roll_number: string; grade: string; section: string }
+  type PassbookSearchResult = { id: number; name: string; roll_number: string; grade: string; section: string; status: string }
   const [pbSearch, setPbSearch]                 = useState('')
   const [pbErr, setPbErr]                        = useState('')
   const [pbData, setPbData]                     = useState<PassbookData | null>(null)
@@ -580,6 +590,7 @@ export default function FeeManagement({
   // ── Setup: categories + structures + lock + amendments ───────────────────────
   const loadSetup = useCallback(async () => {
     if (!academicYear) return
+    setSetupLoading(true)
     const [catRes, strRes, lockRes, amendRes] = await Promise.all([
       fetch(`/api/fees/categories?school_id=${schoolId}`),
       fetch(`/api/fees/structures?school_id=${schoolId}&academic_year=${academicYear}`),
@@ -600,7 +611,7 @@ export default function FeeManagement({
     const initDueDays: Record<number, string> = {}
     strs.forEach(s => { if (!initDueDays[s.fee_category_id]) initDueDays[s.fee_category_id] = String(s.due_day) })
     setDueDays(initDueDays)
-
+    setSetupLoading(false)
   }, [schoolId, academicYear])
 
   useEffect(() => { if (activeTab === 'setup') loadSetup() }, [activeTab, loadSetup])
@@ -1476,6 +1487,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     grade: string; section: string
     email: string | null; phone: string | null
     parent_name: string | null; parent_phone: string | null; parent_email: string | null
+    student_status: string
     total_billed: number; total_paid: number; outstanding: number
     open_entries: LedgerEntry[]   // pending/partial/overdue
     all_entries: LedgerEntry[]
@@ -1492,6 +1504,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
           grade: e.grade, section: e.section,
           email: e.email ?? null, phone: e.phone ?? null,
           parent_name: e.parent_name ?? null, parent_phone: e.parent_phone ?? null, parent_email: e.parent_email ?? null,
+          student_status: e.student_status ?? 'active',
           total_billed: 0, total_paid: 0, outstanding: 0,
           open_entries: [], all_entries: [], has_overdue: false, never_paid: true,
         }
@@ -1540,11 +1553,22 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     : 0
 
   function toggleStudent(id: number) {
-    if (openStudentId === id) { setOpenStudentId(null); setShowCollectForm(false); setShowCounterHistory(false); return }
+    if (openStudentId === id) {
+      setOpenStudentId(null); setShowCollectForm(false); setShowCounterHistory(false)
+      // Scroll the row back into view after collapsing
+      setTimeout(() => {
+        document.getElementById(`student-row-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+      }, 50)
+      return
+    }
     setOpenStudentId(id); setShowCollectForm(false)
     setShowPaymentsId(null); setShowHistoryId(null)
     setShowCounterHistory(false); setCounterPayments([])
     setCancelPmtId(null); setCancelMsg('')
+    // Scroll to the expanded row
+    setTimeout(() => {
+      document.getElementById(`student-row-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 50)
   }
 
   async function loadCounterPayments(studentId: number) {
@@ -1686,8 +1710,8 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
       if (r.ok) {
         const data = await r.json()
         const arr = Array.isArray(data) ? data : (data.students || [])
-        setPbAllStudents(arr.map((s: { id: number; name: string; roll_number: string; grade: string; section: string }) => ({
-          id: s.id, name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section,
+        setPbAllStudents(arr.map((s: { id: number; name: string; roll_number: string; grade: string; section: string; status: string }) => ({
+          id: s.id, name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section, status: s.status || 'active',
         })))
       }
     } catch { /* silent */ }
@@ -1701,6 +1725,7 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
   async function loadPassbook(studentId: number) {
     setPbLoading(true); setPbErr('')
     try {
+      // Pass academic_year as context (marks current year), not as a filter — passbook shows all years
       const r = await fetch(`/api/fees/passbook?school_id=${schoolId}&student_id=${studentId}&academic_year=${academicYear}`)
       if (r.ok) { setPbData(await r.json()); setPbSection('bills') }
       else { const d = await r.json().catch(() => ({})); setPbErr(d.error || `Could not open passbook (HTTP ${r.status})`) }
@@ -1880,7 +1905,12 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
         </div>
         <select
           value={academicYear}
-          onChange={e => setAcademicYear(e.target.value)}
+          onChange={e => {
+            setAcademicYear(e.target.value)
+            // Reset view state that is year-scoped
+            setPbData(null); setPbErr('')
+            setOpenStudentId(null); setCollectEntries([]); setCollectSearch('')
+          }}
           className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           {academicYears.map(y => (
@@ -1921,13 +1951,20 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
 
           {/* ── Action Required ── */}
           {(() => {
-            const actions = []
+            const actions: Array<{ msg: string; tab: Tab; color: string }> = []
             if (pendingPayments.length > 0)
               actions.push({ msg: `${pendingPayments.length} online payment${pendingPayments.length > 1 ? 's' : ''} waiting for your verification`, tab: 'pending' as const, color: 'text-red-700 bg-red-50 border-red-200' })
             if (stats && stats.summary.overdue_count > 20)
               actions.push({ msg: `${stats.summary.overdue_count} overdue entries — follow up with parents`, tab: 'ledger' as const, color: 'text-orange-700 bg-orange-50 border-orange-200' })
             if (stats && stats.summary.defaulters_count > 0)
               actions.push({ msg: `${stats.summary.defaulters_count} students have made zero payment this year`, tab: 'ledger' as const, color: 'text-amber-700 bg-amber-50 border-amber-200' })
+            // Warn if the immediately preceding year (older, higher index since array is DESC) is not closed
+            if (academicYears.length > 1) {
+              const idx = academicYears.indexOf(academicYear)
+              const prevYear = idx < academicYears.length - 1 ? academicYears[idx + 1] : null
+              if (prevYear && !closedYears.has(prevYear))
+                actions.push({ msg: `${prevYear} has not been closed — go to Year-End tab to carry forward or write off outstanding dues before generating new bills`, tab: 'yearend' as const, color: 'text-purple-700 bg-purple-50 border-purple-200' })
+            }
             if (actions.length === 0) return null
             return (
               <div className="rounded-xl border border-red-100 overflow-hidden">
@@ -1964,12 +2001,13 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             </div>
           ) : stats?.summary ? (
             <>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
                 {[
-                  { label: 'Total Billed',  value: stats.summary.total_due,         sub: `${stats.summary.total_students} students`,           border: 'border-gray-100',   text: 'text-gray-900',  sub_color: 'text-gray-400' },
-                  { label: 'Collected',     value: stats.summary.total_collected,    sub: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}% of net demand`, border: 'border-green-100',  text: 'text-green-700', sub_color: 'text-green-500' },
-                  { label: 'Outstanding',   value: stats.summary.total_outstanding,  sub: `${stats.summary.overdue_count} overdue entries`,     border: 'border-red-100',    text: 'text-red-600',   sub_color: 'text-red-400' },
-                  { label: 'Zero Payers',   value: stats.summary.defaulters_count,   sub: 'students with no payment or waiver',                 border: 'border-orange-100', text: 'text-orange-600',sub_color: 'text-orange-400', isCount: true },
+                  { label: 'Total Billed',  value: stats.summary.total_due,                                                                    sub: `${stats.summary.total_students} students`,           border: 'border-gray-100',   text: 'text-gray-900',   sub_color: 'text-gray-400' },
+                  { label: 'Collected',     value: stats.summary.total_collected,    sub: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}% of net demand`, border: 'border-green-100',  text: 'text-green-700',  sub_color: 'text-green-500' },
+                  { label: 'Waived',        value: stats.summary.total_waived,                                                                  sub: `${stats.summary.waived_count} entries waived`,       border: 'border-purple-100', text: 'text-purple-700', sub_color: 'text-purple-400' },
+                  { label: 'Outstanding',   value: stats.summary.total_outstanding,                                                             sub: `${stats.summary.overdue_count} overdue entries`,     border: 'border-red-100',    text: 'text-red-600',    sub_color: 'text-red-400' },
+                  { label: 'Zero Payers',   value: stats.summary.defaulters_count,                                                              sub: 'students with no payment or waiver',                 border: 'border-orange-100', text: 'text-orange-600', sub_color: 'text-orange-400', isCount: true },
                 ].map(card => (
                   <div key={card.label} className={`bg-white rounded-xl border ${card.border} p-5`}>
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{card.label}</p>
@@ -1997,7 +2035,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   {[
                     { label: 'Fully Paid', count: stats.summary.students_fully_paid, dot: 'bg-green-500' },
                     { label: 'Partial',    count: stats.summary.students_partial,     dot: 'bg-yellow-400' },
-                    { label: 'Not Paid',   count: stats.summary.students_overdue_zero,dot: 'bg-red-500' },
+                    { label: 'Not Paid',   count: stats.summary.students_not_paid,    dot: 'bg-red-500' },
                   ].map(s => (
                     <div key={s.label} className="flex items-center gap-2">
                       <div className={`w-2.5 h-2.5 rounded-full ${s.dot}`} />
@@ -2283,6 +2321,20 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       {/* ═══ FEE PLAN ════════════════════════════════════════════════════════════ */}
       {activeTab === 'setup' && (
         <div className="space-y-5">
+
+          {setupLoading && (
+            <div className="space-y-4 animate-pulse">
+              <div className="bg-white rounded-xl border border-gray-100 p-4">
+                <div className="h-4 bg-gray-200 rounded w-48 mb-4" />
+                <div className="flex items-center gap-2">
+                  {[1,2,3,4,5].map(i => <div key={i} className="h-8 bg-gray-100 rounded flex-1" />)}
+                </div>
+              </div>
+              {[1,2,3].map(i => <div key={i} className="bg-white rounded-xl border border-gray-100 p-5 h-20" />)}
+            </div>
+          )}
+
+          {!setupLoading && <>
 
           {/* ── Setup progress strip ── */}
           {(() => {
@@ -3011,6 +3063,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               </div>
             </div>
           )}
+
+          </>}
         </div>
       )}
 
@@ -3102,10 +3156,15 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <div className="divide-y divide-gray-50 max-h-[600px] overflow-y-auto">
                     {collectionFiltered.map(row => (
                       <Fragment key={row.student_id}>
-                        <div className={`px-4 py-3 grid grid-cols-12 gap-2 items-center hover:bg-gray-50/60 cursor-pointer ${openStudentId === row.student_id ? 'bg-blue-50/40' : ''}`}
+                        <div id={`student-row-${row.student_id}`} className={`px-4 py-3 grid grid-cols-12 gap-2 items-center hover:bg-gray-50/60 cursor-pointer ${openStudentId === row.student_id ? 'bg-blue-50/40' : ''}`}
                           onClick={() => toggleStudent(row.student_id)}>
                           <div className="col-span-4">
-                            <p className="text-sm font-medium text-gray-800">{row.student_name}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium text-gray-800">{row.student_name}</p>
+                              {row.student_status === 'inactive' && (
+                                <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">Inactive</span>
+                              )}
+                            </div>
                             <p className="text-xs text-gray-400">Gr.{row.grade}{row.section}{row.school_roll_number != null ? ` · Roll ${row.school_roll_number}` : ''}</p>
                           </div>
                           <div className="col-span-2 text-right text-sm text-gray-600">{fmt(row.total_billed)}</div>
@@ -3686,7 +3745,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       {list.map(s => (
                         <button key={s.id} onClick={() => loadPassbook(s.id)}
                           className="w-full text-left px-4 py-2.5 hover:bg-blue-50 flex items-center justify-between group">
-                          <span className="text-sm font-medium text-gray-800">{s.name}</span>
+                          <span className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-800">{s.name}</span>
+                            {s.status === 'inactive' && <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">Inactive</span>}
+                          </span>
                           <span className="flex items-center gap-3">
                             <span className="text-xs text-gray-400">Gr.{s.grade}{s.section} · #{s.roll_number}</span>
                             <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100">Open →</span>
@@ -3744,7 +3806,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               {/* Section switcher */}
               <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
                 {([
-                  { key: 'bills',    label: `Current Bills (${pbData.ledger.length})` },
+                  { key: 'bills',    label: `Bills (${pbData.ledger.length})` },
                   { key: 'payments', label: `Payments (${pbData.payments.length})` },
                   { key: 'waivers',  label: `Waivers (${pbData.waivers.length})` },
                   { key: 'timeline', label: 'Full Timeline' },
@@ -3756,39 +3818,79 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 ))}
               </div>
 
-              {/* Bills */}
+              {/* Bills — grouped by academic year */}
               {pbSection === 'bills' && (
-                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                  {pbData.ledger.length === 0 ? (
-                    <p className="text-sm text-gray-400 p-8 text-center">No bills recorded.</p>
-                  ) : (
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
-                          <th className="text-left px-4 py-2 font-semibold">Fee Head · Period</th>
-                          <th className="text-right px-4 py-2 font-semibold">Billed</th>
-                          <th className="text-right px-4 py-2 font-semibold">Paid</th>
-                          <th className="text-right px-4 py-2 font-semibold">Waived</th>
-                          <th className="text-right px-4 py-2 font-semibold">Balance</th>
-                          <th className="text-left px-4 py-2 font-semibold">Due Date</th>
-                          <th className="text-left px-4 py-2 font-semibold">Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {pbData.ledger.map(e => (
-                          <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
-                            <td className="px-4 py-2.5 text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></td>
-                            <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
-                            <td className="px-4 py-2.5 text-right text-green-600">{fmt(e.amount_paid)}</td>
-                            <td className="px-4 py-2.5 text-right text-purple-600">{Number(e.waiver_amount) > 0 ? fmt(e.waiver_amount) : '—'}</td>
-                            <td className="px-4 py-2.5 text-right font-bold text-red-600">{fmt(e.balance)}</td>
-                            <td className="px-4 py-2.5 text-gray-500 text-xs">{e.due_date}</td>
-                            <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full capitalize ${STATUS_COLORS[e.status]}`}>{e.status}</span></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                <div className="space-y-3">
+                  {/* Prior year unresolved dues banner */}
+                  {pbData.prior_unresolved.length > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-3">
+                      <svg className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                      <div>
+                        <p className="text-sm font-semibold text-amber-700">Prior Year Dues Unresolved</p>
+                        <p className="text-xs text-amber-600 mt-0.5">
+                          {pbData.prior_unresolved.map(y => `${y.academic_year}: ${fmt(y.outstanding)} outstanding`).join(' · ')}
+                          {' '}— Go to Year-End tab to carry forward or write off.
+                        </p>
+                      </div>
+                    </div>
                   )}
+
+                  {pbData.ledger_by_year.length === 0 ? (
+                    <div className="bg-white rounded-xl border border-gray-100 p-8 text-center text-sm text-gray-400">No bills recorded.</div>
+                  ) : pbData.ledger_by_year.map(yearGroup => (
+                    <div key={yearGroup.academic_year} className={`bg-white rounded-xl border overflow-hidden ${yearGroup.is_current ? 'border-blue-200' : 'border-gray-100'}`}>
+                      {/* Year header */}
+                      <div className={`px-4 py-2.5 flex items-center justify-between ${yearGroup.is_current ? 'bg-blue-50 border-b border-blue-100' : 'bg-gray-50 border-b border-gray-100'}`}>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-sm font-bold ${yearGroup.is_current ? 'text-blue-700' : 'text-gray-600'}`}>
+                            {yearGroup.academic_year}
+                          </span>
+                          {yearGroup.is_current && (
+                            <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full font-medium">Current Year</span>
+                          )}
+                          {!yearGroup.is_current && yearGroup.outstanding > 0 && (
+                            <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Unresolved</span>
+                          )}
+                          {!yearGroup.is_current && yearGroup.outstanding <= 0 && (
+                            <span className="text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full font-medium">Closed</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-4 text-xs text-gray-500">
+                          <span>Billed <span className="font-semibold text-gray-700">{fmt(yearGroup.total_billed)}</span></span>
+                          <span>Paid <span className="font-semibold text-green-700">{fmt(yearGroup.total_paid)}</span></span>
+                          {yearGroup.total_waived > 0 && <span>Waived <span className="font-semibold text-purple-700">{fmt(yearGroup.total_waived)}</span></span>}
+                          <span>Outstanding <span className={`font-bold ${yearGroup.outstanding > 0 ? 'text-red-600' : 'text-green-600'}`}>{fmt(yearGroup.outstanding)}</span></span>
+                        </div>
+                      </div>
+                      {/* Entries table */}
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="text-xs text-gray-400 border-b border-gray-50">
+                            <th className="text-left px-4 py-2 font-medium">Fee Head · Period</th>
+                            <th className="text-right px-4 py-2 font-medium">Billed</th>
+                            <th className="text-right px-4 py-2 font-medium">Paid</th>
+                            <th className="text-right px-4 py-2 font-medium">Waived</th>
+                            <th className="text-right px-4 py-2 font-medium">Balance</th>
+                            <th className="text-left px-4 py-2 font-medium">Due Date</th>
+                            <th className="text-left px-4 py-2 font-medium">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {yearGroup.entries.map(e => (
+                            <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
+                              <td className="px-4 py-2.5 text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></td>
+                              <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
+                              <td className="px-4 py-2.5 text-right text-green-600">{fmt(e.amount_paid)}</td>
+                              <td className="px-4 py-2.5 text-right text-purple-600">{Number(e.waiver_amount) > 0 ? fmt(e.waiver_amount) : '—'}</td>
+                              <td className="px-4 py-2.5 text-right font-bold text-red-600">{Number(e.balance) > 0 ? fmt(e.balance) : <span className="text-green-600">{fmt(0)}</span>}</td>
+                              <td className="px-4 py-2.5 text-gray-500 text-xs">{e.due_date}</td>
+                              <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full capitalize ${STATUS_COLORS[e.status]}`}>{e.status}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
                 </div>
               )}
 
