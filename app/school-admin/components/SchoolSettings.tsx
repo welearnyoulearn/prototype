@@ -90,7 +90,8 @@ function suggestNextYear(years: AcademicYear[]): { label: string; start_date: st
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
-export default function SchoolSettings({ schoolId }: { schoolId: number }) {
+export default function SchoolSettings({ schoolId, viewerRole = 'school_admin' }: { schoolId: number; viewerRole?: string }) {
+  const isStaffAccount = viewerRole === 'principal' || viewerRole === 'vice_principal'
   const router = useRouter()
   const [tab, setTab] = useState<SettingsTab>('profile')
 
@@ -405,14 +406,15 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
   // ── Tab config ─────────────────────────────────────────────────────────────
 
-  const TABS: { key: SettingsTab; label: string; icon: string }[] = [
+  const ALL_TABS: { key: SettingsTab; label: string; icon: string; adminOnly?: boolean }[] = [
     { key: 'profile',        label: 'School Profile',   icon: '🏫' },
     { key: 'academic-years', label: 'Academic Years',   icon: '📅' },
-    { key: 'plan',           label: 'Plan & Features',  icon: '⭐' },
+    { key: 'plan',           label: 'Plan & Features',  icon: '⭐', adminOnly: true },
     { key: 'staff',          label: 'Staff Accounts',   icon: '👥' },
-    { key: 'security',       label: 'Security',         icon: '🔒' },
-    { key: 'danger',         label: 'Danger Zone',      icon: '⚠️' },
+    { key: 'security',       label: 'Security',         icon: '🔒', adminOnly: true },
+    { key: 'danger',         label: 'Danger Zone',      icon: '⚠️', adminOnly: true },
   ]
+  const TABS = ALL_TABS.filter(t => !t.adminOnly || !isStaffAccount)
 
   const hasExamSchedule = useFeature('exam-schedule')
 
@@ -451,6 +453,12 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       {tab === 'profile' && (
         <div className="space-y-4">
           <form onSubmit={saveProfile} className="bg-white border border-gray-100 rounded-xl shadow-sm p-6 space-y-5">
+            {isStaffAccount && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-700">
+                View only — only the School Admin can edit school settings.
+              </div>
+            )}
+            <fieldset disabled={isStaffAccount} className="contents">
 
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -571,14 +579,17 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               </div>
             )}
 
-            <div className="flex gap-3 pt-1">
-              <button type="submit" disabled={saving}
-                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60">
-                {saving ? 'Saving…' : 'Save Profile & Settings'}
-              </button>
-              <button type="button" onClick={() => { saveGrading(new Event('submit') as unknown as React.FormEvent) }}
-                className="hidden" />
-            </div>
+            {!isStaffAccount && (
+              <div className="flex gap-3 pt-1">
+                <button type="submit" disabled={saving}
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60">
+                  {saving ? 'Saving…' : 'Save Profile & Settings'}
+                </button>
+                <button type="button" onClick={() => { saveGrading(new Event('submit') as unknown as React.FormEvent) }}
+                  className="hidden" />
+              </div>
+            )}
+            </fieldset>
           </form>
         </div>
       )}
@@ -853,25 +864,27 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                       </div>
                       <p className="text-xs text-gray-400 truncate mt-0.5">{s.email}</p>
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      {s.status === 'active' ? (
-                        <>
-                          <button onClick={() => resendCredentials(s.id)} disabled={resendingId === s.id}
-                            className="text-xs border border-indigo-200 text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
-                            {resendingId === s.id ? 'Sending…' : 'Resend Credentials'}
+                    {!isStaffAccount && (
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {s.status === 'active' ? (
+                          <>
+                            <button onClick={() => resendCredentials(s.id)} disabled={resendingId === s.id}
+                              className="text-xs border border-indigo-200 text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
+                              {resendingId === s.id ? 'Sending…' : 'Resend Credentials'}
+                            </button>
+                            <button onClick={() => deactivateStaff(s.id)}
+                              className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">
+                              Deactivate
+                            </button>
+                          </>
+                        ) : (
+                          <button onClick={() => reactivateStaff(s.id)}
+                            className="text-xs border border-green-200 text-green-600 hover:bg-green-50 px-2.5 py-1.5 rounded-lg transition-colors">
+                            Reactivate
                           </button>
-                          <button onClick={() => deactivateStaff(s.id)}
-                            className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">
-                            Deactivate
-                          </button>
-                        </>
-                      ) : (
-                        <button onClick={() => reactivateStaff(s.id)}
-                          className="text-xs border border-green-200 text-green-600 hover:bg-green-50 px-2.5 py-1.5 rounded-lg transition-colors">
-                          Reactivate
-                        </button>
-                      )}
-                    </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                   {resendMsg?.id === s.id && (
                     <p className={`text-xs mt-2 pl-12 ${resendMsg.ok ? 'text-green-600' : 'text-red-600'}`}>{resendMsg.text}</p>
@@ -881,8 +894,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
             </div>
           )}
 
-          {/* Add staff form */}
-          {(() => {
+          {/* Add staff form — school admin only */}
+          {!isStaffAccount && (() => {
             const limit = subscription?.staff_limit ?? null
             const count = staffList.filter(s => s.status === 'active').length
             const atLimit = limit !== null && count >= limit
@@ -926,6 +939,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       )}
 
       {/* ══ SECURITY TAB ══════════════════════════════════════════════════════ */}
+
       {tab === 'security' && (
         <div className="space-y-4">
           <div className="bg-white border border-gray-100 rounded-xl p-6 space-y-5">

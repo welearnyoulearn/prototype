@@ -224,6 +224,7 @@ function SchoolAdmin() {
   const [visited, setVisited] = useState<Set<string>>(new Set([initialTab]))
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
+  const [myRole, setMyRole] = useState<string>('school_admin')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [staffSubTab, setStaffSubTab] = useState<'directory' | 'onboard'>('directory')
@@ -255,6 +256,7 @@ function SchoolAdmin() {
         const me = await meRes.json()
         const schoolRoles = ['school_admin', 'principal', 'vice_principal']
         if (!schoolRoles.includes(me.role) || !me.school_id) { router.push('/login?role=school'); return }
+        setMyRole(me.role)
 
         const schoolRes = await fetch(`/api/schools/${me.school_id}`)
         const school = schoolRes.ok
@@ -553,7 +555,7 @@ function SchoolAdmin() {
                 {visited.has('exam-schedule')    && <div hidden={activeNav !== 'exam-schedule'}><ExamSchedule schoolId={selectedSchool.id} /></div>}
                 {visited.has('announcements')    && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} /></div>}
                 {visited.has('export')           && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}
-                {visited.has('settings')         && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} /></div>}
+                {visited.has('settings')         && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} viewerRole={myRole} /></div>}
                 {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} /></div>}
                 {visited.has('year-rollover')    && <div hidden={activeNav !== 'year-rollover'}><YearRollover schoolId={selectedSchool.id} /></div>}
               </FeaturesProvider>
