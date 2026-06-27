@@ -62,9 +62,9 @@ export async function POST(req: NextRequest) {
     try {
       await client.query('BEGIN')
 
-      // Get ledger entry
+      // #15/#16 — FOR UPDATE locks the row so a concurrent payment can't race with this waiver
       const { rows: [ledger] } = await client.query(
-        `SELECT * FROM student_fee_ledger WHERE id = $1 AND school_id = $2`,
+        `SELECT * FROM student_fee_ledger WHERE id = $1 AND school_id = $2 FOR UPDATE`,
         [ledger_id, school_id]
       )
       if (!ledger) {
