@@ -448,7 +448,7 @@ export default function FeeManagement({
     waivers: Array<{ id: number; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; fee_head_name: string; period_label: string; bill_year?: string }>
     prior_unresolved: PassbookYearGroup[]
   }
-  type PassbookSearchResult = { id: number; name: string; roll_number: string; grade: string; section: string }
+  type PassbookSearchResult = { id: number; name: string; roll_number: string; grade: string; section: string; status: string }
   const [pbSearch, setPbSearch]                 = useState('')
   const [pbErr, setPbErr]                        = useState('')
   const [pbData, setPbData]                     = useState<PassbookData | null>(null)
@@ -1710,8 +1710,8 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
       if (r.ok) {
         const data = await r.json()
         const arr = Array.isArray(data) ? data : (data.students || [])
-        setPbAllStudents(arr.map((s: { id: number; name: string; roll_number: string; grade: string; section: string }) => ({
-          id: s.id, name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section,
+        setPbAllStudents(arr.map((s: { id: number; name: string; roll_number: string; grade: string; section: string; status: string }) => ({
+          id: s.id, name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section, status: s.status || 'active',
         })))
       }
     } catch { /* silent */ }
@@ -3745,7 +3745,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       {list.map(s => (
                         <button key={s.id} onClick={() => loadPassbook(s.id)}
                           className="w-full text-left px-4 py-2.5 hover:bg-blue-50 flex items-center justify-between group">
-                          <span className="text-sm font-medium text-gray-800">{s.name}</span>
+                          <span className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-gray-800">{s.name}</span>
+                            {s.status === 'inactive' && <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">Inactive</span>}
+                          </span>
                           <span className="flex items-center gap-3">
                             <span className="text-xs text-gray-400">Gr.{s.grade}{s.section} · #{s.roll_number}</span>
                             <span className="text-xs text-blue-600 opacity-0 group-hover:opacity-100">Open →</span>
