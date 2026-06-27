@@ -142,6 +142,30 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// PATCH — reactivate a staff account
+export async function PATCH(req: NextRequest) {
+  try {
+    const session = await getSession()
+    if (!session || session.role !== 'school_admin') {
+      return NextResponse.json({ error: 'Only school admin can reactivate accounts' }, { status: 403 })
+    }
+    try {
+      const { id } = await req.json()
+      await pool.query(
+        `UPDATE users SET status = 'active' WHERE id = $1 AND school_id = $2`,
+        [id, session.schoolId]
+      )
+      return NextResponse.json({ success: true })
+    } catch (error) {
+      console.error('[school-admin/staff-accounts PATCH]', error)
+      return NextResponse.json({ error: 'Failed to reactivate account' }, { status: 500 })
+    }
+  } catch (err: unknown) {
+    console.error('[API]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
 // DELETE — deactivate a staff account
 export async function DELETE(req: NextRequest) {
   try {

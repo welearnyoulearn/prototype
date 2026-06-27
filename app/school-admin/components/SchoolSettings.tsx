@@ -315,6 +315,14 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s))
   }
 
+  async function reactivateStaff(id: number) {
+    await fetch('/api/school-admin/staff-accounts', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
+    setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s))
+  }
+
   async function resendCredentials(id: number) {
     setResendingId(id); setResendMsg(null)
     try {
@@ -841,21 +849,29 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                         {s.status === 'inactive' && (
                           <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Deactivated</span>
                         )}
+
                       </div>
                       <p className="text-xs text-gray-400 truncate mt-0.5">{s.email}</p>
                     </div>
-                    {s.status === 'active' && (
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <button onClick={() => resendCredentials(s.id)} disabled={resendingId === s.id}
-                          className="text-xs border border-indigo-200 text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
-                          {resendingId === s.id ? 'Sending…' : 'Resend Credentials'}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {s.status === 'active' ? (
+                        <>
+                          <button onClick={() => resendCredentials(s.id)} disabled={resendingId === s.id}
+                            className="text-xs border border-indigo-200 text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
+                            {resendingId === s.id ? 'Sending…' : 'Resend Credentials'}
+                          </button>
+                          <button onClick={() => deactivateStaff(s.id)}
+                            className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">
+                            Deactivate
+                          </button>
+                        </>
+                      ) : (
+                        <button onClick={() => reactivateStaff(s.id)}
+                          className="text-xs border border-green-200 text-green-600 hover:bg-green-50 px-2.5 py-1.5 rounded-lg transition-colors">
+                          Reactivate
                         </button>
-                        <button onClick={() => deactivateStaff(s.id)}
-                          className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">
-                          Deactivate
-                        </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                   {resendMsg?.id === s.id && (
                     <p className={`text-xs mt-2 pl-12 ${resendMsg.ok ? 'text-green-600' : 'text-red-600'}`}>{resendMsg.text}</p>

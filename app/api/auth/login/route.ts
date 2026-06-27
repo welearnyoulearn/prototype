@@ -30,6 +30,11 @@ export async function POST(req: NextRequest) {
     }
 
     const user = result.rows[0]
+
+    if (user.status === 'inactive') {
+      return NextResponse.json({ error: 'This account has been deactivated. Contact your school administrator.' }, { status: 403 })
+    }
+
     const valid = await verifyPassword(password, user.password_hash)
     if (!valid) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
