@@ -137,7 +137,7 @@ export async function GET(req: NextRequest) {
       ? pool.query(`
           SELECT
             COUNT(*) FILTER (WHERE status='overdue')::int AS overdue_count,
-            COALESCE(SUM(amount_due - amount_paid) FILTER (WHERE status IN ('pending','overdue','partial')), 0) AS total_outstanding
+            COALESCE(SUM(amount_due - amount_paid - COALESCE(waiver_amount, 0)) FILTER (WHERE status IN ('pending','overdue','partial')), 0) AS total_outstanding
           FROM student_fee_ledger
           WHERE school_id=$1 AND academic_year=$2
         `, [school_id, year])
