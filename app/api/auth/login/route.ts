@@ -30,6 +30,13 @@ export async function POST(req: NextRequest) {
     }
 
     const user = result.rows[0]
+
+    // This endpoint is for school portal only — reject other roles
+    const SCHOOL_ROLES = ['school_admin', 'principal', 'vice_principal', 'platform_admin']
+    if (!SCHOOL_ROLES.includes(user.role)) {
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
+    }
+
     const valid = await verifyPassword(password, user.password_hash)
     if (!valid) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
