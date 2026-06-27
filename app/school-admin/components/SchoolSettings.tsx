@@ -28,6 +28,7 @@ type StaffAccount = {
 
 type Subscription = {
   tier: 'basic' | 'standard' | 'premium' | 'none'
+  staff_limit?: number | null
   updated_at?: string
 }
 
@@ -63,7 +64,6 @@ const TIER_COLORS: Record<string, string> = {
   none: 'bg-gray-100 text-gray-500 border-gray-200',
 }
 
-const STAFF_LIMITS: Record<string, number | null> = { basic: 2, standard: 5, premium: null, none: 1 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -313,6 +313,14 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       body: JSON.stringify({ id }),
     })
     setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s))
+  }
+
+  async function reactivateStaff(id: number) {
+    await fetch('/api/school-admin/staff-accounts', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    })
+    setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s))
   }
 
   async function resendCredentials(id: number) {
@@ -796,7 +804,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               <p className="text-sm text-gray-400 mt-0.5">Principal and Vice Principal access — credentials sent by email</p>
             </div>
             {(() => {
-              const limit = STAFF_LIMITS[subscription?.tier ?? 'none']
+              const limit = subscription?.staff_limit ?? null
               const count = staffList.filter(s => s.status === 'active').length
               return (
                 <div className="text-right">
@@ -841,21 +849,29 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                         {s.status === 'inactive' && (
                           <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Deactivated</span>
                         )}
+
                       </div>
                       <p className="text-xs text-gray-400 truncate mt-0.5">{s.email}</p>
                     </div>
-                    {s.status === 'active' && (
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <button onClick={() => resendCredentials(s.id)} disabled={resendingId === s.id}
-                          className="text-xs border border-indigo-200 text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
-                          {resendingId === s.id ? 'Sending…' : 'Resend Credentials'}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {s.status === 'active' ? (
+                        <>
+                          <button onClick={() => resendCredentials(s.id)} disabled={resendingId === s.id}
+                            className="text-xs border border-indigo-200 text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
+                            {resendingId === s.id ? 'Sending…' : 'Resend Credentials'}
+                          </button>
+                          <button onClick={() => deactivateStaff(s.id)}
+                            className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">
+                            Deactivate
+                          </button>
+                        </>
+                      ) : (
+                        <button onClick={() => reactivateStaff(s.id)}
+                          className="text-xs border border-green-200 text-green-600 hover:bg-green-50 px-2.5 py-1.5 rounded-lg transition-colors">
+                          Reactivate
                         </button>
-                        <button onClick={() => deactivateStaff(s.id)}
-                          className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">
-                          Deactivate
-                        </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                   {resendMsg?.id === s.id && (
                     <p className={`text-xs mt-2 pl-12 ${resendMsg.ok ? 'text-green-600' : 'text-red-600'}`}>{resendMsg.text}</p>
@@ -867,7 +883,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
           {/* Add staff form */}
           {(() => {
-            const limit = STAFF_LIMITS[subscription?.tier ?? 'none']
+            const limit = subscription?.staff_limit ?? null
             const count = staffList.filter(s => s.status === 'active').length
             const atLimit = limit !== null && count >= limit
             return (
@@ -910,6 +926,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       )}
 
       {/* ══ SECURITY TAB ══════════════════════════════════════════════════════ */}
+
       {tab === 'security' && (
         <div className="space-y-4">
           <div className="bg-white border border-gray-100 rounded-xl p-6 space-y-5">

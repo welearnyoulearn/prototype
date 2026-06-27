@@ -1516,4 +1516,60 @@ async function runIncrementalMigrations() {
     EXCEPTION WHEN others THEN NULL;
     END $$
   `)
+
+  // ── DB-level safety constraints on fee ledger amounts ────────────────────────
+  // NOT VALID skips scanning existing rows — only new/updated rows are checked.
+  // This prevents ensureDB from failing if legacy data has edge-case values.
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_amount_due_positive    CHECK (amount_due    >= 0) NOT VALID;
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+  `).catch(() => {})
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_amount_paid_positive   CHECK (amount_paid   >= 0) NOT VALID;
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+  `).catch(() => {})
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_waiver_amount_positive CHECK (waiver_amount >= 0) NOT VALID;
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+  `).catch(() => {})
+
+  // ── Plan pricing table (may not exist on older DBs that skipped migrations array) ──
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS plan_pricing (
+      id SERIAL PRIMARY KEY,
+      tier VARCHAR(20) NOT NULL UNIQUE,
+      display_name VARCHAR(50) NOT NULL,
+      monthly_price NUMERIC(10,2) NOT NULL DEFAULT 0,
+      included_whatsapp_messages INTEGER NOT NULL DEFAULT 0,
+      whatsapp_overage_rate NUMERIC(10,4) NOT NULL DEFAULT 0,
+      online_payments_included BOOLEAN NOT NULL DEFAULT FALSE,
+      whatsapp_included BOOLEAN NOT NULL DEFAULT FALSE,
+      usage_billing_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`
+    INSERT INTO plan_pricing (tier, display_name, monthly_price, included_whatsapp_messages, whatsapp_overage_rate, online_payments_included, whatsapp_included, usage_billing_enabled)
+    VALUES
+      ('none',     'No Plan',  0,    0,    0,    false, false, false),
+      ('basic',    'Basic',    499,  0,    0,    false, false, false),
+      ('standard', 'Standard', 999,  1000, 0.20, true,  true,  true),
+      ('premium',  'Premium',  1999, 5000, 0.20, true,  true,  true)
+    ON CONFLICT (tier) DO NOTHING
+  `).catch(() => {})
+
+  // ── Staff limit per plan tier ─────────────────────────────────────────────────
+  await pool.query(`ALTER TABLE plan_pricing ADD COLUMN IF NOT EXISTS staff_limit INTEGER DEFAULT NULL`).catch(() => {})
+  await pool.query(`
+    UPDATE plan_pricing SET staff_limit = CASE
+      WHEN tier = 'none'     THEN 1
+      WHEN tier = 'basic'    THEN 2
+      WHEN tier = 'standard' THEN 5
+      WHEN tier = 'premium'  THEN NULL
+    END
+    WHERE staff_limit IS NULL
+  `).catch(() => {})
 }

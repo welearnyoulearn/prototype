@@ -93,6 +93,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Multi mode: total_amount required' }, { status: 400 })
     }
 
+    // #13 — Reject zero or negative amounts before touching the DB
+    const amountToCheck = isMulti ? parseFloat(String(total_amount)) : parseFloat(String(amount))
+    if (!(amountToCheck > 0)) {
+      return NextResponse.json({ error: 'Amount must be greater than 0' }, { status: 400 })
+    }
+
     // ── Acquire connection only after validation passes ─────────────────────────
     const client = await pool.connect()
     try {
@@ -124,9 +130,9 @@ export async function POST(req: NextRequest) {
       if (!isMulti) {
         // ── Single-entry mode (offline admin collection) ──────────────────────────
 
-        // BUG 6: Guard against overpayment
+        // #15 — FOR UPDATE locks the row so concurrent cashiers queue instead of double-paying
         const { rows: [ledgerRow] } = await client.query(
-          `SELECT amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount FROM student_fee_ledger WHERE id = $1 AND school_id = $2`,
+          `SELECT amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount FROM student_fee_ledger WHERE id = $1 AND school_id = $2 FOR UPDATE`,
           [ledger_id, school_id]
         )
         if (!ledgerRow) {
@@ -136,7 +142,10 @@ export async function POST(req: NextRequest) {
         const balance = parseFloat(ledgerRow.amount_due) - parseFloat(ledgerRow.waiver_amount) - parseFloat(ledgerRow.amount_paid)
         if (parseFloat(String(amount)) > balance + 0.001) {
           await client.query('ROLLBACK')
-          return NextResponse.json({ error: `Amount exceeds balance due (₹${balance.toFixed(2)})` }, { status: 400 })
+          const msg = balance <= 0
+            ? 'This fee has already been paid by another user. Please refresh and try again.'
+            : `Amount exceeds balance due (₹${balance.toFixed(2)}). Another payment may have been recorded simultaneously — please refresh.`
+          return NextResponse.json({ error: msg }, { status: 400 })
         }
 
         const { rows: [payment] } = await client.query(
@@ -168,13 +177,15 @@ export async function POST(req: NextRequest) {
       } else {
         // ── Multi-entry FIFO mode ─────────────────────────────────────────────────
         // Fetch ledger entries in FIFO order (oldest due_date first)
+        // #15 — FOR UPDATE locks all selected rows so concurrent cashiers queue
         const { rows: entries } = await client.query(
           `SELECT id, amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount, status,
                   GREATEST(amount_due - COALESCE(waiver_amount, 0) - amount_paid, 0) AS balance
            FROM student_fee_ledger
            WHERE id = ANY($1) AND school_id = $2
              AND status NOT IN ('paid', 'waived')
-           ORDER BY due_date ASC`,
+           ORDER BY due_date ASC
+           FOR UPDATE`,
           [ledger_ids, school_id]
         )
 
@@ -218,6 +229,11 @@ export async function POST(req: NextRequest) {
           }
 
           createdPayments.push(payment)
+        }
+
+        if (createdPayments.length === 0) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'This fee has already been paid by another user. Please refresh and try again.' }, { status: 400 })
         }
       }
 
