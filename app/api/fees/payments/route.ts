@@ -142,7 +142,10 @@ export async function POST(req: NextRequest) {
         const balance = parseFloat(ledgerRow.amount_due) - parseFloat(ledgerRow.waiver_amount) - parseFloat(ledgerRow.amount_paid)
         if (parseFloat(String(amount)) > balance + 0.001) {
           await client.query('ROLLBACK')
-          return NextResponse.json({ error: `Amount exceeds balance due (₹${balance.toFixed(2)})` }, { status: 400 })
+          const msg = balance <= 0
+            ? 'This fee has already been paid by another user. Please refresh and try again.'
+            : `Amount exceeds balance due (₹${balance.toFixed(2)}). Another payment may have been recorded simultaneously — please refresh.`
+          return NextResponse.json({ error: msg }, { status: 400 })
         }
 
         const { rows: [payment] } = await client.query(
@@ -226,6 +229,11 @@ export async function POST(req: NextRequest) {
           }
 
           createdPayments.push(payment)
+        }
+
+        if (createdPayments.length === 0) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'This fee has already been paid by another user. Please refresh and try again.' }, { status: 400 })
         }
       }
 
