@@ -125,12 +125,15 @@ export async function POST(req: NextRequest) {
       } catch (e) { await client.query('ROLLBACK'); throw e }
       finally { client.release() }
 
-      // Mark overdue entries
+      // Mark overdue: entries become overdue only after the academic year's end date passes
       await pool.query(
-        `UPDATE student_fee_ledger
-         SET status = 'overdue'
-         WHERE school_id = $1 AND academic_year = $2
-           AND status = 'pending' AND due_date < CURRENT_DATE`,
+        `UPDATE student_fee_ledger l SET status = 'overdue'
+         WHERE l.school_id = $1 AND l.academic_year = $2 AND l.status = 'pending'
+           AND EXISTS (
+             SELECT 1 FROM academic_years ay
+             WHERE ay.school_id = l.school_id AND ay.label = l.academic_year
+               AND ay.end_date < CURRENT_DATE
+           )`,
         [school_id, academic_year]
       )
 
@@ -156,26 +159,30 @@ function buildPeriods(frequency: string, academicYear: string, dueDay: number): 
 
   const MONTH_NAMES = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
+  // Clamp dueDay to the last valid day of a given month to prevent invalid dates (e.g. Feb 31)
+  const safeDay = (y: number, m: number) => Math.min(dueDay, new Date(y, m, 0).getDate())
+  const d = (y: number, m: number) => String(safeDay(y, m)).padStart(2, '0')
+
   if (frequency === 'monthly') {
     return months.map(({ m, y }) => ({
       label: `${MONTH_NAMES[m]} ${y}`,
-      due_date: `${y}-${String(m).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`,
+      due_date: `${y}-${String(m).padStart(2, '0')}-${d(y, m)}`,
     }))
   }
   if (frequency === 'quarterly') {
     return [
-      { label: `Q1 ${academicYear}`, due_date: `${startYear}-04-${String(dueDay).padStart(2, '0')}` },
-      { label: `Q2 ${academicYear}`, due_date: `${startYear}-07-${String(dueDay).padStart(2, '0')}` },
-      { label: `Q3 ${academicYear}`, due_date: `${startYear}-10-${String(dueDay).padStart(2, '0')}` },
-      { label: `Q4 ${academicYear}`, due_date: `${endYear}-01-${String(dueDay).padStart(2, '0')}` },
+      { label: `Q1 ${academicYear}`, due_date: `${startYear}-04-${d(startYear, 4)}` },
+      { label: `Q2 ${academicYear}`, due_date: `${startYear}-07-${d(startYear, 7)}` },
+      { label: `Q3 ${academicYear}`, due_date: `${startYear}-10-${d(startYear, 10)}` },
+      { label: `Q4 ${academicYear}`, due_date: `${endYear}-01-${d(endYear, 1)}` },
     ]
   }
   if (frequency === 'half_yearly') {
     return [
-      { label: `H1 ${academicYear}`, due_date: `${startYear}-04-${String(dueDay).padStart(2, '0')}` },
-      { label: `H2 ${academicYear}`, due_date: `${startYear}-10-${String(dueDay).padStart(2, '0')}` },
+      { label: `H1 ${academicYear}`, due_date: `${startYear}-04-${d(startYear, 4)}` },
+      { label: `H2 ${academicYear}`, due_date: `${startYear}-10-${d(startYear, 10)}` },
     ]
   }
   // annual or one_time
-  return [{ label: academicYear, due_date: `${startYear}-04-${String(dueDay).padStart(2, '0')}` }]
+  return [{ label: academicYear, due_date: `${startYear}-04-${d(startYear, 4)}` }]
 }

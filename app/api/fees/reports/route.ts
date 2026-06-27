@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
         `SELECT
            COALESCE(SUM(l.amount_due), 0)                                          AS total_billed,
            COALESCE(SUM(l.amount_paid), 0)                                         AS total_collected,
-           COALESCE(SUM(GREATEST(l.amount_due - l.amount_paid, 0)), 0)             AS total_outstanding,
+           COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)), 0)             AS total_outstanding,
            COALESCE(SUM(COALESCE(l.waiver_amount, 0)), 0)                          AS total_waived,
            COUNT(*) FILTER (WHERE l.status = 'paid')                               AS paid_entries,
            COUNT(*) FILTER (WHERE l.status = 'partial')                            AS partial_entries,
@@ -70,9 +70,10 @@ export async function GET(req: NextRequest) {
       const { rows: byGrade } = await pool.query(
         `WITH per_student AS (
            SELECT s.grade, COALESCE(s.section, '') AS section, l.student_id,
-                  SUM(l.amount_due)  AS s_due,
-                  SUM(l.amount_paid) AS s_paid,
-                  SUM(GREATEST(l.amount_due - l.amount_paid, 0)) AS s_out
+                  SUM(l.amount_due)                                                        AS s_due,
+                  SUM(l.amount_paid)                                                       AS s_paid,
+                  SUM(COALESCE(l.waiver_amount, 0))                                        AS s_waived,
+                  SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS s_out
            FROM student_fee_ledger l
            JOIN students s ON s.id = l.student_id
            WHERE l.school_id = $1 AND l.academic_year = $2
@@ -84,6 +85,7 @@ export async function GET(req: NextRequest) {
            COUNT(*)                                       AS students,
            COALESCE(SUM(s_due), 0)                        AS total_due,
            COALESCE(SUM(s_paid), 0)                       AS total_collected,
+           COALESCE(SUM(s_waived), 0)                     AS total_waived,
            COALESCE(SUM(s_out), 0)                        AS outstanding,
            COUNT(*) FILTER (WHERE s_out <= 0)             AS fully_paid_students,
            COUNT(*) FILTER (WHERE s_out > 0)              AS defaulter_students
@@ -101,7 +103,7 @@ export async function GET(req: NextRequest) {
            COALESCE(SUM(l.amount_due), 0)                           AS total_due,
            COALESCE(SUM(l.amount_paid), 0)                          AS total_collected,
            COALESCE(SUM(COALESCE(l.waiver_amount, 0)), 0)           AS total_waived,
-           COALESCE(SUM(GREATEST(l.amount_due - l.amount_paid, 0)), 0) AS outstanding,
+            COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)), 0) AS outstanding,
            COUNT(*) FILTER (WHERE l.status = 'paid')                AS paid_count,
            COUNT(*) FILTER (WHERE l.status IN ('pending','overdue')) AS unpaid_count
          FROM student_fee_ledger l
@@ -129,13 +131,14 @@ export async function GET(req: NextRequest) {
       const { rows: defaulters } = await pool.query(
         `SELECT s.name AS student_name, s.roll_number, s.grade, s.section,
                 s.parent_name, s.parent_phone,
-                SUM(l.amount_due - l.amount_paid) AS outstanding,
+                SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS outstanding,
                 COUNT(*) FILTER (WHERE l.status = 'overdue') AS overdue_entries,
                 COUNT(*) FILTER (WHERE l.status IN ('pending','overdue')) AS unpaid_entries
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
          WHERE l.school_id = $1 AND l.academic_year = $2
-           AND l.status IN ('pending','overdue') AND l.amount_paid < l.amount_due
+           AND l.status IN ('pending','overdue')
+           AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0
          GROUP BY s.id, s.name, s.roll_number, s.grade, s.section, s.parent_name, s.parent_phone
          ORDER BY outstanding DESC`,
         [school_id, academic_year]

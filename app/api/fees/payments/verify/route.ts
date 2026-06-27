@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
       const { rows } = await pool.query(
         `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section,
                 fc.name AS category_name, l.period_label, l.amount_due, l.amount_paid,
-                (l.amount_due - l.amount_paid) AS ledger_balance
+                GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS ledger_balance
          FROM fee_payments fp
          JOIN students s ON s.id = fp.student_id
          JOIN student_fee_ledger l ON l.id = fp.ledger_id
@@ -75,13 +75,13 @@ export async function POST(req: NextRequest) {
           [verified_by, payment_id]
         )
 
-        // Update ledger: amount_paid += payment.amount
+        // Update ledger: amount_paid += payment.amount (waiver_amount already applied separately)
         await client.query(
           `UPDATE student_fee_ledger
-           SET amount_paid = LEAST(amount_due, amount_paid + $1),
+           SET amount_paid = LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1),
                status = CASE
-                 WHEN LEAST(amount_due, amount_paid + $1) >= amount_due THEN 'paid'
-                 WHEN amount_paid + $1 > 0                              THEN 'partial'
+                 WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
+                 WHEN amount_paid + $1 > 0 THEN 'partial'
                  ELSE status
                END
            WHERE id = $2`,

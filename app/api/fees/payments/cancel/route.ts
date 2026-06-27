@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
           `UPDATE student_fee_ledger
            SET amount_paid = GREATEST(0, amount_paid - $1),
                status = CASE
-                 WHEN GREATEST(0, amount_paid - $1) <= 0                              THEN (CASE WHEN due_date < CURRENT_DATE THEN 'overdue' ELSE 'pending' END)
+                 WHEN GREATEST(0, amount_paid - $1) <= 0 THEN (CASE WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue' ELSE 'pending' END)
                  WHEN GREATEST(0, amount_paid - $1) < amount_due                      THEN 'partial'
                  ELSE 'paid'
                END
@@ -162,9 +162,9 @@ export async function POST(req: NextRequest) {
           `UPDATE student_fee_ledger
            SET amount_paid = amount_paid + $1,
                status = CASE
-                 WHEN amount_paid + $1 >= amount_due THEN 'paid'
+                 WHEN COALESCE(waiver_amount,0) + amount_paid + $1 >= amount_due THEN 'paid'
                  WHEN amount_paid + $1 > 0           THEN 'partial'
-                 WHEN due_date < CURRENT_DATE        THEN 'overdue'
+                 WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                  ELSE 'pending'
                END
            WHERE id = $2`,

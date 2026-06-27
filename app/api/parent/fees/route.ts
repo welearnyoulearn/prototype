@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
       const { rows: ledger } = await pool.query(
         `SELECT l.*, fc.name AS category_name, fc.frequency,
-                (l.amount_due - l.amount_paid) AS balance
+                 (l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid) AS balance
          FROM student_fee_ledger l
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE l.school_id = $1 AND l.student_id = $2 AND l.academic_year = $3
