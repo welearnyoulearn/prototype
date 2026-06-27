@@ -1,0 +1,12 @@
+roll_no,last_name,first_name,email,grade,section,parent_name,parent_phone,parent_email,phone
+1,Mehta,Arjun,,10,A,Suresh Mehta,9123456701,,
+2,Patel,Priya,priya@student.com,10,A,Ramesh Patel,9123456702,ramesh@parent.com,
+1,Singh,Kiran,,9,B,Vijay Singh,9123456703,,
+1,Singh,Meera,,7,A,Vijay Singh,9123456703,,
+10,Sharma,Rohan,,8,A,Deepak Sharma,9123456704,shared@parent.com,
+10,Sharma,Riya,,6,A,Deepak Sharma,9123456705,shared@parent.com,
+1,Kumar,Anil,,10,B,Sunil Kumar,9123456707,,
+1,Das,Bina,,11,A,Dina Das,9123456708,,
+1,Cred,Test,credtest@student.com,12,A,Cred Parent,9123456712,credparent@parent.com,
+20,Reset,Test,resettest@student.com,12,B,Reset Parent,9123456720,,
+99,Delete,Me,,5,A,Delete Parent,9123456799,,
