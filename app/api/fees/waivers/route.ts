@@ -149,6 +149,17 @@ export async function PATCH(req: NextRequest) {
       const access = await requireFeeAccess(w0.school_id)
       if (!access) { await client.query('ROLLBACK'); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
 
+      // Validate: new waiver + existing payments must not exceed amount_due
+      const { rows: [lgCheck] } = await client.query(
+        `SELECT amount_due, amount_paid FROM student_fee_ledger WHERE id = $1 FOR UPDATE`, [w0.ledger_id]
+      )
+      if (parseFloat(lgCheck.amount_paid) + newAmt > parseFloat(lgCheck.amount_due) + 0.01) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({
+          error: `Waiver ₹${newAmt} + already paid ₹${lgCheck.amount_paid} exceeds bill ₹${lgCheck.amount_due}`
+        }, { status: 400 })
+      }
+
       // Soft-revoke old waiver
       await client.query(
         `UPDATE fee_waivers SET is_revoked = TRUE, revoked_by = $1, revoked_at = NOW(), revoke_reason = $2 WHERE id = $3`,
@@ -220,7 +231,7 @@ export async function DELETE(req: NextRequest) {
       }
 
       // Reverse waiver from ledger — recalculate status correctly
-      // Count actual confirmed payments to distinguish 'partial' (real payment) vs 'pending' (zero paid)
+      // Sum actual confirmed payments (real cash only, not waivers)
       const { rows: [actualPaid] } = await client.query(
         `SELECT COALESCE(SUM(amount), 0) AS paid
          FROM fee_payments
@@ -228,20 +239,28 @@ export async function DELETE(req: NextRequest) {
         [waiver.ledger_id]
       )
       const realPaid = parseFloat(actualPaid.paid)
-      const newAmountPaid = Math.max(0, realPaid) // strip the waiver, keep only real payments
+
+      // Sum remaining active waivers (excluding the one just revoked)
+      const { rows: [remainingWaivers] } = await client.query(
+        `SELECT COALESCE(SUM(waiver_amount), 0) AS total
+         FROM fee_waivers
+         WHERE ledger_id = $1 AND is_revoked = FALSE`,
+        [waiver.ledger_id]
+      )
+      const residualWaiver = parseFloat(remainingWaivers.total)
 
       await client.query(
         `UPDATE student_fee_ledger
-         SET waiver_amount = GREATEST(0, COALESCE(waiver_amount, 0) - $3),
-             amount_paid = $1,
+         SET waiver_amount = $1,
+             amount_paid   = $2,
              status = CASE
-               WHEN $1 >= amount_due                    THEN 'paid'
-               WHEN $1 > 0 AND $1 < amount_due          THEN 'partial'
+               WHEN $1 + $2 >= amount_due THEN (CASE WHEN $1 > 0 THEN 'waived' ELSE 'paid' END)
+               WHEN $2 > 0 THEN 'partial'
                WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                ELSE 'pending'
              END
-         WHERE id = $2`,
-        [newAmountPaid, waiver.ledger_id, waiver.waiver_amount]
+         WHERE id = $3`,
+        [residualWaiver, realPaid, waiver.ledger_id]
       )
 
       await client.query('COMMIT')

@@ -72,9 +72,10 @@ export async function POST(req: NextRequest) {
           `UPDATE student_fee_ledger
            SET amount_paid = GREATEST(0, amount_paid - $1),
                status = CASE
-                 WHEN GREATEST(0, amount_paid - $1) <= 0 THEN (CASE WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue' ELSE 'pending' END)
-                 WHEN GREATEST(0, amount_paid - $1) < amount_due                      THEN 'partial'
-                 ELSE 'paid'
+                 WHEN COALESCE(waiver_amount,0) + GREATEST(0, amount_paid - $1) >= amount_due THEN 'waived'
+                 WHEN GREATEST(0, amount_paid - $1) > 0 THEN 'partial'
+                 WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
+                 ELSE 'pending'
                END
            WHERE id = $2`,
           [origAmount, pmt.ledger_id]
@@ -115,30 +116,19 @@ export async function POST(req: NextRequest) {
 
         // Current ledger state (after the reversal above)
         const { rows: [lg] } = await client.query(
-          `SELECT amount_due, amount_paid, due_date FROM student_fee_ledger WHERE id = $1`, [pmt.ledger_id]
+          `SELECT amount_due, amount_paid, waiver_amount, due_date FROM student_fee_ledger WHERE id = $1 FOR UPDATE`, [pmt.ledger_id]
         )
-        const amountDue = parseFloat(lg.amount_due)
-        const alreadyPaid = parseFloat(lg.amount_paid)        // other payments still on this bill
-        const requiredDue = alreadyPaid + newAmount           // bill must cover all real payments
+        const amountDue   = parseFloat(lg.amount_due)
+        const waiverAmt   = parseFloat(lg.waiver_amount ?? '0')
+        const alreadyPaid = parseFloat(lg.amount_paid)   // other payments still on this bill after reversal
+        const effectiveDue = amountDue - waiverAmt        // max collectable (bill minus any waiver)
 
-        // If the corrected payment makes total paid exceed the bill, raise the bill amount_due
-        // to absorb it (admin is allowed to push the generated bill up or down). Logged as an edit.
-        let billAdjusted = false
-        if (requiredDue > amountDue + 0.01) {
-          await client.query(`
-            CREATE TABLE IF NOT EXISTS student_fee_ledger_edits (
-              id SERIAL PRIMARY KEY, ledger_id INTEGER NOT NULL, school_id INTEGER NOT NULL,
-              student_id INTEGER NOT NULL, old_amount NUMERIC(10,2) NOT NULL, new_amount NUMERIC(10,2) NOT NULL,
-              reason TEXT NOT NULL, changed_by TEXT NOT NULL, changed_at TIMESTAMPTZ DEFAULT NOW()
-            )`)
-          await client.query(
-            `INSERT INTO student_fee_ledger_edits (ledger_id, school_id, student_id, old_amount, new_amount, reason, changed_by)
-             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-            [pmt.ledger_id, pmt.school_id, pmt.student_id, amountDue, requiredDue,
-             `Auto-adjusted via payment correction of ${pmt.receipt_number}: ${reason}`, done_by]
-          )
-          await client.query(`UPDATE student_fee_ledger SET amount_due = $1 WHERE id = $2`, [requiredDue, pmt.ledger_id])
-          billAdjusted = true
+        // Reject if the corrected amount would exceed the remaining balance
+        if (alreadyPaid + newAmount > effectiveDue + 0.01) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({
+            error: `Corrected amount ₹${newAmount} exceeds balance of ₹${Math.max(0, effectiveDue - alreadyPaid).toFixed(2)} remaining on this bill`
+          }, { status: 400 })
         }
 
         const { rows: [seq] } = await client.query(`SELECT nextval('receipt_number_seq') AS n`)
@@ -157,13 +147,13 @@ export async function POST(req: NextRequest) {
         )
         newPaymentId = created.id
 
-        // Apply the new payment and recompute status against the (possibly adjusted) due
+        // Apply the new payment with a safety cap so amount_paid never exceeds amount_due - waiver_amount
         await client.query(
           `UPDATE student_fee_ledger
-           SET amount_paid = amount_paid + $1,
+           SET amount_paid = LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1),
                status = CASE
-                 WHEN COALESCE(waiver_amount,0) + amount_paid + $1 >= amount_due THEN 'paid'
-                 WHEN amount_paid + $1 > 0           THEN 'partial'
+                 WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
+                 WHEN LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) > 0 THEN 'partial'
                  WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                  ELSE 'pending'
                END
@@ -176,7 +166,7 @@ export async function POST(req: NextRequest) {
              (school_id, payment_id, ledger_id, student_id, action, old_amount, new_amount, old_mode, new_mode, reason, done_by, new_receipt_number)
            VALUES ($1,$2,$3,$4,'correct',$5,$6,$7,$8,$9,$10,$11)`,
           [pmt.school_id, payment_id, pmt.ledger_id, pmt.student_id, origAmount, newAmount, pmt.payment_mode, newMode,
-           billAdjusted ? `${reason} (bill raised to ₹${requiredDue})` : reason, done_by, newReceipt]
+           reason, done_by, newReceipt]
         )
       } else {
         // cancel only
