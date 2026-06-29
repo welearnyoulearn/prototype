@@ -66,6 +66,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
   const [filterGrade, setFilterGrade] = useState('')
   const [filterSection, setFilterSection] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [submitCount, setSubmitCount] = useState(0)
   const [result, setResult] = useState<OnboardingResult | null>(null)
   const [showCredentials, setShowCredentials] = useState(false)
   const [dupRollError, setDupRollError] = useState('')
@@ -194,6 +195,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       school_roll_number: parseInt(rest.school_roll_number.trim()),
     }))
 
+    setSubmitCount(students.length)
     setSubmitting(true); setError(''); setResult(null); setCsvWarn(''); setDupRollError('')
     try {
       const res = await fetch('/api/students/bulk', {
@@ -649,6 +651,26 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
             </div>
           </div>
         </>
+      )}
+
+      {/* Enrolling overlay */}
+      {submitting && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl px-10 py-8 flex flex-col items-center gap-5 min-w-[280px]">
+            <svg className="w-10 h-10 animate-spin text-green-600" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <div className="text-center">
+              <p className="text-base font-bold text-gray-800">Enrolling students…</p>
+              <p className="text-sm text-gray-500 mt-1">Processing {submitCount} student{submitCount !== 1 ? 's' : ''}, please wait</p>
+            </div>
+            <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+              <div className="h-2 rounded-full bg-green-500 animate-pulse w-3/4" />
+            </div>
+            <p className="text-xs text-gray-400">Do not close or refresh this page</p>
+          </div>
+        </div>
       )}
     </div>
   )
