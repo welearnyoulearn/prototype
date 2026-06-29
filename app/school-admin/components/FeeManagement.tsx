@@ -1758,8 +1758,11 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
         ? `✓ Corrected — new receipt ${d.new_receipt}`
         : `✓ Payment cancelled (₹${d.reversed_amount} reversed)`)
       setCancelPmtId(null)
+      // Clear cached payment history so stale data doesn't show on re-open
+      setPaymentHistories({})
       // Always refresh the school-wide figures (Overview, class-wise, reports-on-open)
       loadStats()
+      if (reportData !== null) loadReports()
       if (origin === 'passbook' && pbData) {
         loadPassbook(pbData.student.id)
       } else if (origin === 'counter') {
@@ -1794,7 +1797,10 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
       if (r.ok) {
         setCancelWaiverMsg(cancelWaiverMode === 'correct' ? '✓ Waiver corrected' : '✓ Waiver revoked')
         setCancelWaiverId(null)
+        loadStats()
+        loadLedger()
         if (pbData) loadPassbook(pbData.student.id)
+        if (reportData !== null) loadReports()
       } else {
         setCancelWaiverMsg(d.error || 'Failed')
       }
