@@ -28,8 +28,8 @@ export async function POST(req: NextRequest) {
     const schoolName = schoolRes.rows[0].name
     const appUrl = process.env.APP_URL || 'http://localhost:3000'
 
-    // ── Step 1: validate rows client-side before touching DB ─────────────────
     const errors: { row: number; message: string }[] = []
+    const skipped: { row: number; name: string; reason: string }[] = []
     const validStudents: typeof students = []
     const seenRolls = new Set<string>()
 
@@ -46,7 +46,6 @@ export async function POST(req: NextRequest) {
           continue
         }
         school_roll_number = parsed
-        // Duplicate within this batch
         const key = `${s.grade?.trim()?.toLowerCase()}|${s.section?.trim()?.toLowerCase()}|${school_roll_number}`
         if (seenRolls.has(key)) {
           errors.push({ row: i + 1, message: `Roll No ${school_roll_number} is duplicated in this upload (Grade ${s.grade} Section ${s.section})` })
@@ -58,27 +57,30 @@ export async function POST(req: NextRequest) {
     }
 
     if (validStudents.length === 0) {
-      return NextResponse.json({ inserted: 0, students: [], errors, credentials: { students: [], parents: [] } }, { status: 201 })
+      return NextResponse.json({ inserted: 0, skipped, students: [], errors, credentials: { students: [], parents: [] } }, { status: 201 })
     }
 
-    // ── Step 2: batch DB lookups — one query each instead of N queries ───────
     const phones    = validStudents.map(s => s.phone?.trim()).filter(Boolean) as string[]
+    const parentPhones = validStudents.map(s => s.parent_phone?.trim()).filter(Boolean) as string[]
     const rollKeys  = validStudents
       .filter(s => s._school_roll_number && s.grade?.trim() && s.section?.trim())
       .map(s => ({ grade: s.grade.trim(), section: s.section.trim(), roll: s._school_roll_number as number }))
     const parentEmails  = validStudents.map(s => s.parent_email?.trim()).filter(Boolean) as string[]
-    const parentPhones  = validStudents.map(s => s.parent_phone?.trim()).filter(Boolean) as string[]
 
-    const [dupPhoneRows, dupRollRows, existingParentEmailRows, existingParentPhoneRows] = await Promise.all([
+    const [dupPhoneRows, dupRollRows, dupParentPhoneRows, existingParentEmailRows, existingParentPhoneRows] = await Promise.all([
       phones.length > 0
-        ? pool.query(`SELECT phone, name FROM students WHERE school_id = $1 AND phone = ANY($2)`, [school_id, phones])
+        ? pool.query(`SELECT phone, name FROM students WHERE school_id = $1 AND phone = ANY($2) AND status = 'active'`, [school_id, phones])
         : Promise.resolve({ rows: [] }),
       rollKeys.length > 0
         ? pool.query(
             `SELECT grade, section, school_roll_number, name FROM students
-             WHERE school_id = $1 AND (grade, section, school_roll_number) IN (${rollKeys.map((_, i) => `($${i * 3 + 2},$${i * 3 + 3},$${i * 3 + 4})`).join(',')})`,
+             WHERE school_id = $1 AND status = 'active'
+             AND (grade, section, school_roll_number) IN (${rollKeys.map((_, i) => `($${i * 3 + 2},$${i * 3 + 3},$${i * 3 + 4})`).join(',')})`,
             [school_id, ...rollKeys.flatMap(r => [r.grade, r.section, r.roll])]
           )
+        : Promise.resolve({ rows: [] }),
+      parentPhones.length > 0
+        ? pool.query(`SELECT parent_phone, name FROM students WHERE school_id = $1 AND parent_phone = ANY($2) AND status = 'active'`, [school_id, parentPhones])
         : Promise.resolve({ rows: [] }),
       parentEmails.length > 0
         ? pool.query(`SELECT id, email FROM parents WHERE school_id = $1 AND LOWER(email) = ANY($2)`, [school_id, parentEmails.map(e => e.toLowerCase())])
@@ -92,20 +94,27 @@ export async function POST(req: NextRequest) {
     const dupPhoneMap  = new Map(dupPhoneRows.rows.map((r: { phone: string; name: string }) => [r.phone, r.name]))
     const dupRollSet   = new Set(dupRollRows.rows.map((r: { grade: string; section: string; school_roll_number: number }) => `${r.grade}|${r.section}|${r.school_roll_number}`))
     const dupRollMap   = new Map(dupRollRows.rows.map((r: { grade: string; section: string; school_roll_number: number; name: string }) => [`${r.grade}|${r.section}|${r.school_roll_number}`, r.name]))
+    const dupParentPhoneMap = new Map(dupParentPhoneRows.rows.map((r: { parent_phone: string; name: string }) => [`${r.name}|${r.parent_phone}`, r.name]))
     const parentByEmail = new Map(existingParentEmailRows.rows.map((r: { id: number; email: string }) => [r.email.toLowerCase(), r.id]))
     const parentByPhone = new Map(existingParentPhoneRows.rows.map((r: { id: number; phone: string }) => [r.phone, r.id]))
 
-    // ── Step 3: filter out DB-level duplicates ────────────────────────────────
     const toInsert: typeof validStudents = []
     for (const s of validStudents) {
-      if (s.phone?.trim() && dupPhoneSet.has(s.phone.trim())) {
-        errors.push({ row: s._row, message: `Phone ${s.phone} already exists (${dupPhoneMap.get(s.phone.trim())})` })
-        continue
-      }
       if (s._school_roll_number && s.grade?.trim() && s.section?.trim()) {
         const key = `${s.grade.trim()}|${s.section.trim()}|${s._school_roll_number}`
         if (dupRollSet.has(key)) {
-          errors.push({ row: s._row, message: `Roll No ${s._school_roll_number} already exists in Grade ${s.grade} Section ${s.section} (${dupRollMap.get(key)})` })
+          skipped.push({ row: s._row, name: s.name, reason: `Roll No ${s._school_roll_number} already exists in Grade ${s.grade} Section ${s.section} (${dupRollMap.get(key)})` })
+          continue
+        }
+      }
+      if (s.phone?.trim() && dupPhoneSet.has(s.phone.trim())) {
+        skipped.push({ row: s._row, name: s.name, reason: `Phone ${s.phone} already exists (${dupPhoneMap.get(s.phone.trim())})` })
+        continue
+      }
+      if (s.parent_phone?.trim() && s.name) {
+        const key = `${s.name}|${s.parent_phone.trim()}`
+        if (dupParentPhoneMap.has(key)) {
+          skipped.push({ row: s._row, name: s.name, reason: `Student with same name and parent phone already exists` })
           continue
         }
       }
@@ -113,17 +122,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (toInsert.length === 0) {
-      return NextResponse.json({ inserted: 0, students: [], errors, credentials: { students: [], parents: [] } }, { status: 201 })
+      return NextResponse.json({ inserted: 0, skipped, students: [], errors, credentials: { students: [], parents: [] } }, { status: 201 })
     }
 
-    // ── Step 4: hash all passwords in parallel ────────────────────────────────
-    // This is the biggest speedup: bcrypt is ~100ms each, parallel cuts N×100ms → ~100ms total
     const studentTempPasswords = toInsert.map(() => generateTempPassword(8))
-    const newParentPhones = toInsert
-      .map(s => s.parent_phone?.trim())
-      .filter((p): p is string => !!p && !parentByPhone.has(p) && !parentByEmail.has((toInsert.find(s => s.parent_phone?.trim() === p)?.parent_email?.trim() || '').toLowerCase()))
-
-    // Determine which parents need new accounts (for password gen)
     const needsNewParent = toInsert.map(s => {
       const pe = s.parent_email?.trim()
       const pp = s.parent_phone?.trim()
@@ -134,18 +136,15 @@ export async function POST(req: NextRequest) {
     })
     const parentTempPasswords = needsNewParent.map(needs => needs ? generateTempPassword(10) : '')
 
-    // Hash everything in parallel
     const [studentHashes, parentHashes] = await Promise.all([
       Promise.all(studentTempPasswords.map(p => hashPassword(p))),
       Promise.all(parentTempPasswords.map(p => p ? hashPassword(p) : Promise.resolve(''))),
     ])
 
-    // ── Step 5: single transaction — bulk inserts ─────────────────────────────
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
 
-      // Ensure all needed classes exist in one query
       const uniqueClasses = [...new Set(
         toInsert.filter(s => s.grade?.trim() && s.section?.trim()).map(s => `${s.grade.trim()}|${s.section.trim()}`)
       )].map(k => k.split('|'))
@@ -158,7 +157,6 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      // Bulk insert all students in one query
       const studentValues = toInsert.map((s, i) => {
         const base = i * 12
         return `($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7},$${base+8},$${base+9},$${base+10},$${base+11},'active',$${base+12},FALSE)`
@@ -186,8 +184,7 @@ export async function POST(req: NextRequest) {
       )
       const insertedStudents = insertedRes.rows
 
-      // Handle parents: insert new ones, then link all
-      const processedParentIds = new Map<string, number>() // key → parent_id (within this batch)
+      const processedParentIds = new Map<string, number>()
 
       for (let i = 0; i < toInsert.length; i++) {
         const s = toInsert[i]
@@ -195,7 +192,6 @@ export async function POST(req: NextRequest) {
         const pe = s.parent_email?.trim() || null
         const pp = s.parent_phone?.trim() || null
         const pn = s.parent_name?.trim() || null
-
         if (!pe && !pp) continue
 
         const batchKey = pe ? `email:${pe.toLowerCase()}` : `phone:${pp}`
@@ -217,7 +213,6 @@ export async function POST(req: NextRequest) {
           )
           parentId = pRes.rows[0].id as number
           processedParentIds.set(batchKey, parentId)
-          // Update lookup maps so later rows in batch find this parent
           if (pe) parentByEmail.set(pe.toLowerCase(), parentId)
           if (pp) parentByPhone.set(pp, parentId)
         }
@@ -232,7 +227,6 @@ export async function POST(req: NextRequest) {
 
       await client.query('COMMIT')
 
-      // ── Step 6: build credentials + fire emails after commit ──────────────
       const studentCredentials = toInsert.map((s, i) => ({
         name: s.name.trim(),
         grade: s.grade?.trim() || '',
@@ -261,7 +255,6 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      // Fire-and-forget emails
       for (let i = 0; i < toInsert.length; i++) {
         const s = toInsert[i]
         const student = insertedStudents[i]
@@ -284,6 +277,7 @@ export async function POST(req: NextRequest) {
       invalidateCache(`classes:${school_id}`)
       return NextResponse.json({
         inserted: insertedStudents.length,
+        skipped,
         students: insertedStudents,
         errors,
         credentials: { students: studentCredentials, parents: parentCredentials },

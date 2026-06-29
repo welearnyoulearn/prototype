@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
       const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
       const result = await pool.query(
-        `SELECT * FROM students ${where} ORDER BY (NULLIF(regexp_replace(grade,'[^0-9]','','g'),''))::int NULLS LAST, section, school_roll_number NULLS LAST, name`,
+        `SELECT * FROM students ${where} ORDER BY (NULLIF(regexp_replace(grade,'[^0-9]','','g'),''))::int NULLS LAST, section, name`,
         values
       )
       return NextResponse.json(result.rows)
@@ -47,10 +47,31 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const { school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email, roll_number, school_roll_number } = body
     if (!school_id || !name) return NextResponse.json({ error: 'school_id and name are required' }, { status: 400 })
+    if (admin.schoolId !== school_id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+    if (phone?.trim()) {
+      const dupPhone = await pool.query(
+        `SELECT id, name FROM students WHERE school_id = $1 AND phone = $2 AND status = 'active'`,
+        [school_id, phone.trim()]
+      )
+      if (dupPhone.rows.length > 0) {
+        return NextResponse.json({ error: `Phone ${phone} already exists (${dupPhone.rows[0].name})` }, { status: 409 })
+      }
+    }
+
+    if (email?.trim()) {
+      const dupEmail = await pool.query(
+        `SELECT id, name FROM students WHERE school_id = $1 AND LOWER(email) = LOWER($2) AND status = 'active'`,
+        [school_id, email.trim()]
+      )
+      if (dupEmail.rows.length > 0) {
+        return NextResponse.json({ error: `Email ${email} already exists (${dupEmail.rows[0].name})` }, { status: 409 })
+      }
+    }
 
     if (school_roll_number != null && grade && section) {
       const dupRoll = await pool.query(
-        `SELECT id FROM students WHERE school_id = $1 AND grade = $2 AND section = $3 AND school_roll_number = $4`,
+        `SELECT id FROM students WHERE school_id = $1 AND grade = $2 AND section = $3 AND school_roll_number = $4 AND status = 'active'`,
         [school_id, grade, section, school_roll_number]
       )
       if (dupRoll.rows.length > 0) {
