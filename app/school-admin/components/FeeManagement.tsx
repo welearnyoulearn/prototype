@@ -89,6 +89,7 @@ type PaymentRecord = {
   transaction_ref: string | null; notes: string | null
   verified_by: string | null; verified_at: string | null
   rejection_reason: string | null; created_at: string
+  bill_year?: string
 }
 
 type PaySuccess = {
@@ -454,6 +455,15 @@ export default function FeeManagement({
   const [pbData, setPbData]                     = useState<PassbookData | null>(null)
   const [pbLoading, setPbLoading]               = useState(false)
   const [pbSection, setPbSection]               = useState<'timeline' | 'bills' | 'payments' | 'waivers'>('bills')
+  // Derived passbook data filtered to the selected academic year
+  const pbYearGroup = pbData?.ledger_by_year.find(y => y.academic_year === academicYear) ?? null
+  const pbSummary   = pbYearGroup
+    ? { total_billed: pbYearGroup.total_billed, total_paid: pbYearGroup.total_paid, total_waived: pbYearGroup.total_waived, outstanding: pbYearGroup.outstanding }
+    : { total_billed: 0, total_paid: 0, total_waived: 0, outstanding: 0 }
+  const pbPayments  = pbData?.payments.filter(p => p.bill_year === academicYear) ?? []
+  const pbWaivers   = pbData?.waivers.filter(w => w.bill_year === academicYear) ?? []
+  const pbTimeline  = pbData?.timeline.filter(t => t.academic_year === academicYear) ?? []
+  const pbYearOnly  = pbYearGroup ? [pbYearGroup] : []
   // Full student directory for the Passbook tab (browse + filter)
   const [pbAllStudents, setPbAllStudents]       = useState<PassbookSearchResult[]>([])
   const [pbAllLoading, setPbAllLoading]         = useState(false)
@@ -3796,10 +3806,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 </div>
                 <div className="grid grid-cols-4 gap-3 mt-4">
                   {[
-                    { l: 'Total Billed', v: pbData.summary.total_billed, c: 'text-gray-900' },
-                    { l: 'Paid',         v: pbData.summary.total_paid,    c: 'text-green-700' },
-                    { l: 'Waived',       v: pbData.summary.total_waived,  c: 'text-purple-700' },
-                    { l: 'Outstanding',  v: pbData.summary.outstanding,   c: 'text-red-600' },
+                    { l: 'Total Billed', v: pbSummary.total_billed, c: 'text-gray-900' },
+                    { l: 'Paid',         v: pbSummary.total_paid,    c: 'text-green-700' },
+                    { l: 'Waived',       v: pbSummary.total_waived,  c: 'text-purple-700' },
+                    { l: 'Outstanding',  v: pbSummary.outstanding,   c: 'text-red-600' },
                   ].map(s => (
                     <div key={s.l} className="bg-gray-50 rounded-lg px-3 py-2.5 text-center">
                       <p className="text-xs text-gray-400">{s.l}</p>
@@ -3812,9 +3822,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               {/* Section switcher */}
               <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
                 {([
-                  { key: 'bills',    label: `Bills (${pbData.ledger.length})` },
-                  { key: 'payments', label: `Payments (${pbData.payments.length})` },
-                  { key: 'waivers',  label: `Waivers (${pbData.waivers.length})` },
+                  { key: 'bills',    label: `Bills (${pbYearOnly.reduce((s, y) => s + y.entries.length, 0)})` },
+                  { key: 'payments', label: `Payments (${pbPayments.length})` },
+                  { key: 'waivers',  label: `Waivers (${pbWaivers.length})` },
                   { key: 'timeline', label: 'Full Timeline' },
                 ] as const).map(v => (
                   <button key={v.key} onClick={() => setPbSection(v.key)}
@@ -3841,9 +3851,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     </div>
                   )}
 
-                  {pbData.ledger_by_year.length === 0 ? (
-                    <div className="bg-white rounded-xl border border-gray-100 p-8 text-center text-sm text-gray-400">No bills recorded.</div>
-                  ) : pbData.ledger_by_year.map(yearGroup => (
+                  {pbYearOnly.length === 0 ? (
+                    <div className="bg-white rounded-xl border border-gray-100 p-8 text-center text-sm text-gray-400">No bills recorded for {academicYear}.</div>
+                  ) : pbYearOnly.map(yearGroup => (
                     <div key={yearGroup.academic_year} className={`bg-white rounded-xl border overflow-hidden ${yearGroup.is_current ? 'border-blue-200' : 'border-gray-100'}`}>
                       {/* Year header */}
                       <div className={`px-4 py-2.5 flex items-center justify-between ${yearGroup.is_current ? 'bg-blue-50 border-b border-blue-100' : 'bg-gray-50 border-b border-gray-100'}`}>
@@ -3925,8 +3935,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     </div>
                   )}
                   <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                    {pbData.payments.length === 0 ? (
-                      <p className="text-sm text-gray-400 p-8 text-center">No payments recorded.</p>
+                    {pbPayments.length === 0 ? (
+                      <p className="text-sm text-gray-400 p-8 text-center">No payments recorded for {academicYear}.</p>
                     ) : (
                       <table className="w-full text-sm">
                         <thead>
@@ -3940,7 +3950,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                           </tr>
                         </thead>
                         <tbody>
-                          {pbData.payments.map(p => {
+                          {pbPayments.map(p => {
                             const isCancelled = p.payment_status === 'cancelled'
                             return (
                             <Fragment key={p.id}>
@@ -4024,11 +4034,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               {/* Waivers */}
               {pbSection === 'waivers' && (
                 <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                  {pbData.waivers.length === 0 ? (
-                    <p className="text-sm text-gray-400 p-8 text-center">No waivers granted to this student.</p>
+                  {pbWaivers.length === 0 ? (
+                    <p className="text-sm text-gray-400 p-8 text-center">No waivers granted for {academicYear}.</p>
                   ) : (
                     <div className="divide-y divide-gray-50">
-                      {pbData.waivers.map(w => (
+                      {pbWaivers.map(w => (
                         <div key={w.id} className="px-4 py-3">
                           <div className="flex items-center justify-between">
                             <div>
@@ -4091,8 +4101,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <p className="text-sm font-semibold text-gray-700">Complete Financial Timeline</p>
                     <p className="text-xs text-gray-400">Every charge, payment, waiver and revision — chronological with running balance.</p>
                   </div>
-                  {pbData.timeline.length === 0 ? (
-                    <p className="text-sm text-gray-400 p-8 text-center">No activity yet.</p>
+                  {pbTimeline.length === 0 ? (
+                    <p className="text-sm text-gray-400 p-8 text-center">No activity for {academicYear}.</p>
                   ) : (
                     <table className="w-full text-sm">
                       <thead>
@@ -4106,7 +4116,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         </tr>
                       </thead>
                       <tbody>
-                        {pbData.timeline.map((t, i) => {
+                        {pbTimeline.map((t, i) => {
                           const icon = t.type === 'bill' ? '📌' : t.type === 'payment' ? '💸' : t.type === 'waiver' ? '🎁' : '✏️'
                           return (
                             <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
@@ -4678,10 +4688,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             {pbData && (
               <div className="grid grid-cols-4 gap-3 px-5 py-3 bg-gray-50 border-b border-gray-100 flex-shrink-0">
                 {[
-                  { l: 'Total Billed', v: pbData.summary.total_billed, c: 'text-gray-800' },
-                  { l: 'Paid',         v: pbData.summary.total_paid,    c: 'text-green-700' },
-                  { l: 'Waived',       v: pbData.summary.total_waived,  c: 'text-purple-700' },
-                  { l: 'Outstanding',  v: pbData.summary.outstanding,   c: 'text-red-600' },
+                  { l: 'Total Billed', v: pbSummary.total_billed, c: 'text-gray-800' },
+                  { l: 'Paid',         v: pbSummary.total_paid,    c: 'text-green-700' },
+                  { l: 'Waived',       v: pbSummary.total_waived,  c: 'text-purple-700' },
+                  { l: 'Outstanding',  v: pbSummary.outstanding,   c: 'text-red-600' },
                 ].map(s => (
                   <div key={s.l} className="text-center">
                     <p className="text-[10px] text-gray-400 uppercase tracking-wide">{s.l}</p>
@@ -4695,9 +4705,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             {pbData && (
               <div className="flex gap-1 px-5 py-2 border-b border-gray-100 bg-white flex-shrink-0">
                 {([
-                  { key: 'bills',    label: `Bills (${pbData.ledger.length})` },
-                  { key: 'payments', label: `Payments (${pbData.payments.length})` },
-                  { key: 'waivers',  label: `Waivers (${pbData.waivers.length})` },
+                  { key: 'bills',    label: `Bills (${pbYearOnly.reduce((s, y) => s + y.entries.length, 0)})` },
+                  { key: 'payments', label: `Payments (${pbPayments.length})` },
+                  { key: 'waivers',  label: `Waivers (${pbWaivers.length})` },
                   { key: 'timeline', label: 'Timeline' },
                 ] as const).map(v => (
                   <button key={v.key} onClick={() => setPbSection(v.key)}
@@ -4724,8 +4734,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   {/* Bills */}
                   {pbSection === 'bills' && (
                     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                      {pbData.ledger.length === 0
-                        ? <p className="text-sm text-gray-400 p-8 text-center">No bills recorded.</p>
+                      {pbYearOnly.length === 0
+                        ? <p className="text-sm text-gray-400 p-8 text-center">No bills recorded for {academicYear}.</p>
                         : (
                           <table className="w-full text-sm">
                             <thead className="bg-gray-50 border-b border-gray-100">
@@ -4737,7 +4747,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-50">
-                              {pbData.ledger.map(e => (
+                              {(pbYearOnly[0]?.entries ?? []).map(e => (
                                 <tr key={e.id} className="hover:bg-gray-50">
                                   <td className="px-4 py-2.5 text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></td>
                                   <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
@@ -4754,9 +4764,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   {/* Payments */}
                   {pbSection === 'payments' && (
                     <div className="space-y-3">
-                      {pbData.payments.length === 0
-                        ? <p className="text-sm text-gray-400 text-center py-8">No payments recorded.</p>
-                        : pbData.payments.map(p => {
+                      {pbPayments.length === 0
+                        ? <p className="text-sm text-gray-400 text-center py-8">No payments recorded for {academicYear}.</p>
+                        : pbPayments.map(p => {
                           const isCancelled = p.payment_status === 'cancelled'
                           return (
                             <Fragment key={p.id}>
@@ -4830,10 +4840,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   {/* Waivers */}
                   {pbSection === 'waivers' && (
                     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                      {pbData.waivers.length === 0
-                        ? <p className="text-sm text-gray-400 p-8 text-center">No waivers granted.</p>
+                      {pbWaivers.length === 0
+                        ? <p className="text-sm text-gray-400 p-8 text-center">No waivers granted for {academicYear}.</p>
                         : <div className="divide-y divide-gray-50">
-                            {pbData.waivers.map(w => (
+                            {pbWaivers.map(w => (
                               <div key={w.id} className="px-4 py-3">
                                 <div className="flex items-center justify-between">
                                   <div>
@@ -4889,10 +4899,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   {/* Timeline */}
                   {pbSection === 'timeline' && (
                     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                      {pbData.timeline.length === 0
-                        ? <p className="text-sm text-gray-400 p-8 text-center">No activity recorded.</p>
+                      {pbTimeline.length === 0
+                        ? <p className="text-sm text-gray-400 p-8 text-center">No activity for {academicYear}.</p>
                         : <div className="divide-y divide-gray-50">
-                            {pbData.timeline.map((t, i) => (
+                            {pbTimeline.map((t, i) => (
                               <div key={i} className="px-4 py-3 flex items-start gap-3">
                                 <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${(t as { type?: string }).type === 'payment' ? 'bg-green-500' : (t as { type?: string }).type === 'waiver' ? 'bg-purple-500' : 'bg-gray-300'}`} />
                                 <div className="min-w-0 flex-1">
