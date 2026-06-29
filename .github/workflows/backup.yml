@@ -18,11 +18,27 @@ jobs:
     name: Backup Production DB
     runs-on: ubuntu-latest
     if: |
-      github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'prod' || github.event.inputs.target == 'both') ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'prod' || github.event.inputs.target == 'both')) ||
       github.event_name == 'schedule'
     steps:
-      - name: Install pg_dump
-        run: sudo apt-get install -y postgresql-client
+      - name: Install pg_dump and rclone
+        run: |
+          sudo apt-get install -y postgresql-client
+          curl https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone for Google Drive
+        env:
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          mkdir -p ~/.config/rclone
+          echo "$GDRIVE_SERVICE_ACCOUNT_JSON" > /tmp/sa.json
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [gdrive]
+          type = drive
+          scope = drive
+          service_account_file = /tmp/sa.json
+          root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
+          EOF
 
       - name: Dump prod database
         env:
@@ -33,27 +49,49 @@ jobs:
           PGPASSWORD: ${{ secrets.PROD_PGPASSWORD }}
           PGSSLMODE: require
         run: |
+          FILENAME="prod/backup-prod-$(date +%Y-%m-%d).dump"
           pg_dump --no-owner --no-acl -Fc \
             -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$PGDATABASE" \
-            > backup-prod-$(date +%Y-%m-%d).dump
-          echo "Dump size: $(du -sh backup-prod-*.dump)"
+            > /tmp/backup.dump
+          echo "Dump size: $(du -sh /tmp/backup.dump)"
+          rclone copy /tmp/backup.dump gdrive:prod --drive-root-folder-id ${{ secrets.GDRIVE_FOLDER_ID }} \
+            --drive-use-trash=false \
+            -v \
+            --log-level INFO
+          echo "Uploaded: $FILENAME"
 
-      - name: Upload prod backup
+      - name: Upload to GitHub Artifacts (30-day safety copy)
         uses: actions/upload-artifact@v4
         with:
-          name: prod-backup-${{ github.run_id }}-${{ github.run_attempt }}
-          path: backup-prod-*.dump
-          retention-days: 90
+          name: prod-backup-${{ github.run_id }}
+          path: /tmp/backup.dump
+          retention-days: 30
 
   backup-dev:
     name: Backup Dev DB
     runs-on: ubuntu-latest
     if: |
-      github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'dev' || github.event.inputs.target == 'both') ||
+      (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'dev' || github.event.inputs.target == 'both')) ||
       github.event_name == 'schedule'
     steps:
-      - name: Install pg_dump
-        run: sudo apt-get install -y postgresql-client
+      - name: Install pg_dump and rclone
+        run: |
+          sudo apt-get install -y postgresql-client
+          curl https://rclone.org/install.sh | sudo bash
+
+      - name: Configure rclone for Google Drive
+        env:
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          mkdir -p ~/.config/rclone
+          echo "$GDRIVE_SERVICE_ACCOUNT_JSON" > /tmp/sa.json
+          cat > ~/.config/rclone/rclone.conf <<EOF
+          [gdrive]
+          type = drive
+          scope = drive
+          service_account_file = /tmp/sa.json
+          root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
+          EOF
 
       - name: Dump dev database
         env:
@@ -66,12 +104,16 @@ jobs:
         run: |
           pg_dump --no-owner --no-acl -Fc \
             -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$PGDATABASE" \
-            > backup-dev-$(date +%Y-%m-%d).dump
-          echo "Dump size: $(du -sh backup-dev-*.dump)"
+            > /tmp/backup.dump
+          echo "Dump size: $(du -sh /tmp/backup.dump)"
+          rclone copy /tmp/backup.dump gdrive:dev --drive-root-folder-id ${{ secrets.GDRIVE_FOLDER_ID }} \
+            --drive-use-trash=false \
+            -v \
+            --log-level INFO
 
-      - name: Upload dev backup
+      - name: Upload to GitHub Artifacts (14-day safety copy)
         uses: actions/upload-artifact@v4
         with:
-          name: dev-backup-${{ github.run_id }}-${{ github.run_attempt }}
-          path: backup-dev-*.dump
-          retention-days: 30
+          name: dev-backup-${{ github.run_id }}
+          path: /tmp/backup.dump
+          retention-days: 14
