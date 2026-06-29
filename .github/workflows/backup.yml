@@ -21,9 +21,14 @@ jobs:
       (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'prod' || github.event.inputs.target == 'both')) ||
       github.event_name == 'schedule'
     steps:
-      - name: Install pg_dump and rclone
+      - name: Install pg_dump v17 and rclone
         run: |
-          sudo apt-get install -y postgresql-client
+          sudo apt-get install -y curl ca-certificates
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
           curl https://rclone.org/install.sh | sudo bash
 
       - name: Configure rclone for Google Drive
@@ -70,9 +75,14 @@ jobs:
       (github.event_name == 'workflow_dispatch' && (github.event.inputs.target == 'dev' || github.event.inputs.target == 'both')) ||
       github.event_name == 'schedule'
     steps:
-      - name: Install pg_dump and rclone
+      - name: Install pg_dump v17 and rclone
         run: |
-          sudo apt-get install -y postgresql-client
+          sudo apt-get install -y curl ca-certificates
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
           curl https://rclone.org/install.sh | sudo bash
 
       - name: Configure rclone for Google Drive
