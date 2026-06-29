@@ -89,7 +89,7 @@ type PaymentRecord = {
   transaction_ref: string | null; notes: string | null
   verified_by: string | null; verified_at: string | null
   rejection_reason: string | null; created_at: string
-  bill_year?: string
+  bill_year?: string; ledger_id?: number
 }
 
 type PaySuccess = {
@@ -446,7 +446,7 @@ export default function FeeManagement({
     ledger_by_year: PassbookYearGroup[]
     payments: PaymentRecord[]
     pending_payments: PaymentRecord[]
-    waivers: Array<{ id: number; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; fee_head_name: string; period_label: string; bill_year?: string }>
+    waivers: Array<{ id: number; ledger_id: number; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; fee_head_name: string; period_label: string; bill_year?: string }>
     prior_unresolved: PassbookYearGroup[]
   }
   type PassbookSearchResult = { id: number; name: string; roll_number: string; grade: string; section: string; status: string }
@@ -475,6 +475,8 @@ export default function FeeManagement({
   const [correctAmount, setCorrectAmount]       = useState('')
   const [cancelBusy, setCancelBusy]             = useState(false)
   const [cancelMsg, setCancelMsg]               = useState('')
+  // ledger balance at the time Cancel/Correct is opened — used to cap corrected amount
+  const [cancelPmtMaxCorrect, setCancelPmtMaxCorrect] = useState<number | null>(null)
   // Waiver revoke / correct
   const [cancelWaiverId, setCancelWaiverId]     = useState<number | null>(null)
   const [cancelWaiverMode, setCancelWaiverMode] = useState<'revoke' | 'correct'>('revoke')
@@ -482,6 +484,8 @@ export default function FeeManagement({
   const [correctWaiverAmount, setCorrectWaiverAmount] = useState('')
   const [cancelWaiverBusy, setCancelWaiverBusy] = useState(false)
   const [cancelWaiverMsg, setCancelWaiverMsg]   = useState('')
+  // max allowed for corrected waiver = ledger balance + current waiver amount
+  const [waiverMaxCorrect, setWaiverMaxCorrect] = useState<number | null>(null)
 
   // Reports tab
   const [reportData, setReportData]             = useState<ReportData | null>(null)
@@ -933,6 +937,11 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
   async function submitPayment() {
     if (!selectedEntry) return
+    const enteredAmt = parseFloat(payAmount)
+    if (enteredAmt > selectedEntry.balance + 0.01) {
+      setPayError(`Amount ₹${enteredAmt.toFixed(2)} exceeds outstanding balance of ₹${Number(selectedEntry.balance).toFixed(2)}`)
+      return
+    }
     setCollectLoading(true); setPayError('')
     const r = await fetch('/api/fees/payments', {
       method: 'POST',
@@ -970,6 +979,20 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
   async function submitWaiver() {
     if (!selectedEntry) return
+    const balance = Number(selectedEntry.balance)
+    if (waiverForm.waiver_type === 'fixed_amount') {
+      const amt = parseFloat(waiverForm.waiver_value) || 0
+      if (amt > balance + 0.01) {
+        setWaiverError(`Waiver amount ₹${amt.toFixed(2)} exceeds outstanding balance of ₹${balance.toFixed(2)}`)
+        return
+      }
+    } else if (waiverForm.waiver_type === 'percentage') {
+      const pct = parseFloat(waiverForm.waiver_value) || 0
+      if (pct > 100) {
+        setWaiverError('Percentage cannot exceed 100%')
+        return
+      }
+    }
     setWaiverLoading(true); setWaiverError('')
     try {
       const r = await fetch('/api/fees/waivers', {
@@ -1744,9 +1767,11 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
     setPbLoading(false)
   }
 
-  function openCancel(paymentId: number) {
+  function openCancel(paymentId: number, pmtAmount: number, ledgerBalance: number) {
     setCancelPmtId(paymentId); setCancelMode('cancel')
     setCancelReason(''); setCorrectAmount(''); setCancelMsg('')
+    // max correctable = what's already free on the ledger + the amount being reversed
+    setCancelPmtMaxCorrect(ledgerBalance + pmtAmount)
   }
 
   // origin: 'passbook' refreshes the passbook; 'counter' refreshes ledger + counter payments
@@ -1754,6 +1779,9 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
     if (!cancelPmtId) return
     if (!cancelReason.trim()) { setCancelMsg('Reason is required.'); return }
     if (cancelMode === 'correct' && !(parseFloat(correctAmount) > 0)) { setCancelMsg('Enter a valid corrected amount.'); return }
+    if (cancelMode === 'correct' && cancelPmtMaxCorrect !== null && parseFloat(correctAmount) > cancelPmtMaxCorrect + 0.01) {
+      setCancelMsg(`Amount cannot exceed ₹${cancelPmtMaxCorrect.toFixed(2)} (balance remaining on this bill)`); return
+    }
     setCancelBusy(true); setCancelMsg('')
     const r = await fetch('/api/fees/payments/cancel', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1791,6 +1819,9 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
     if (!cancelWaiverReason.trim()) { setCancelWaiverMsg('Reason is required.'); return }
     if (cancelWaiverMode === 'correct' && !(parseFloat(correctWaiverAmount) > 0)) {
       setCancelWaiverMsg('Enter a valid corrected amount.'); return
+    }
+    if (cancelWaiverMode === 'correct' && waiverMaxCorrect !== null && parseFloat(correctWaiverAmount) > waiverMaxCorrect + 0.01) {
+      setCancelWaiverMsg(`Amount cannot exceed ₹${waiverMaxCorrect.toFixed(2)} (balance on this bill)`); return
     }
     setCancelWaiverBusy(true); setCancelWaiverMsg('')
     try {
@@ -3422,8 +3453,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                                   cancelPmtId === p.id ? (
                                                     <button onClick={() => setCancelPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
                                                   ) : (
-                                                    <button onClick={() => openCancel(p.id)}
-                                                      className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
+                                                    <button onClick={() => {
+                                                      const le = row.all_entries.find(e => e.id === p.ledger_id)
+                                                      openCancel(p.id, Number(p.amount), le ? Number(le.balance) : 0)
+                                                    }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
                                                   )
                                                 ) : (
                                                   <span className="text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-medium capitalize">{p.payment_status.replace('_', ' ')}</span>
@@ -3445,10 +3478,16 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                                       : <>⚠ Cancels {p.receipt_number} ({fmt(p.amount)}) and issues a new receipt for <strong>{correctAmount ? fmt(parseFloat(correctAmount) || 0) : '₹0'}</strong>. Net change: {fmt((parseFloat(correctAmount) || 0) - Number(p.amount))}.</>}
                                                   </div>
                                                   {cancelMode === 'correct' && (
-                                                    <input type="number" min="0" inputMode="decimal" value={correctAmount}
-                                                      onKeyDown={blockNonNumericKeys}
-                                                      onChange={e => setCorrectAmount(sanitizeMoney(e.target.value))}
-                                                      placeholder="Correct amount" className="w-40 border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                                    <div>
+                                                      <input type="number" min="0" inputMode="decimal" value={correctAmount}
+                                                        onKeyDown={blockNonNumericKeys}
+                                                        onChange={e => setCorrectAmount(sanitizeMoney(e.target.value))}
+                                                        placeholder={cancelPmtMaxCorrect !== null ? `max ₹${cancelPmtMaxCorrect.toFixed(2)}` : 'Correct amount'}
+                                                        className={`w-44 border rounded-lg px-3 py-1.5 text-sm ${cancelPmtMaxCorrect !== null && parseFloat(correctAmount) > cancelPmtMaxCorrect + 0.01 ? 'border-red-400 bg-red-50' : 'border-gray-200'}`} />
+                                                      {cancelPmtMaxCorrect !== null && parseFloat(correctAmount) > cancelPmtMaxCorrect + 0.01 && (
+                                                        <p className="text-xs text-red-600 mt-1">Exceeds max of ₹{cancelPmtMaxCorrect.toFixed(2)}</p>
+                                                      )}
+                                                    </div>
                                                   )}
                                                   <input type="text" placeholder="Reason (required — recorded in audit log)"
                                                     value={cancelReason} onChange={e => setCancelReason(e.target.value)}
@@ -3968,8 +4007,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                     ) : cancelPmtId === p.id ? (
                                       <button onClick={() => setCancelPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
                                     ) : (
-                                      <button onClick={() => openCancel(p.id)}
-                                        className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
+                                      <button onClick={() => {
+                                        const le = pbData?.ledger.find(e => e.id === p.ledger_id)
+                                        openCancel(p.id, Number(p.amount), le ? Number(le.balance) : 0)
+                                      }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
                                     )}
                                     <button onClick={() => printPassbookReceipt(p)} title="Print receipt"
                                       className="text-xs border border-indigo-200 text-indigo-600 px-2.5 py-1 rounded-lg hover:bg-indigo-50">🖨 Print</button>
@@ -3998,11 +4039,16 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
 
                                       {cancelMode === 'correct' && (
                                         <div>
-                                          <label className="text-xs font-medium text-gray-600">Corrected amount (₹)</label>
+                                          <label className="text-xs font-medium text-gray-600">
+                                            Corrected amount (₹){cancelPmtMaxCorrect !== null && <span className="ml-1 text-gray-400 font-normal">— max ₹{cancelPmtMaxCorrect.toFixed(2)}</span>}
+                                          </label>
                                           <input type="number" min="0" inputMode="decimal" value={correctAmount}
                                             onKeyDown={blockNonNumericKeys}
                                             onChange={e => setCorrectAmount(sanitizeMoney(e.target.value))}
-                                            className="mt-1 w-40 border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                            className={`mt-1 w-40 border rounded-lg px-3 py-1.5 text-sm ${cancelPmtMaxCorrect !== null && parseFloat(correctAmount) > cancelPmtMaxCorrect + 0.01 ? 'border-red-400 bg-red-50' : 'border-gray-200'}`} />
+                                          {cancelPmtMaxCorrect !== null && parseFloat(correctAmount) > cancelPmtMaxCorrect + 0.01 && (
+                                            <p className="text-xs text-red-600 mt-1">Exceeds maximum of ₹{cancelPmtMaxCorrect.toFixed(2)}</p>
+                                          )}
                                         </div>
                                       )}
                                       <div>
@@ -4053,8 +4099,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                               </div>
                               {cancelWaiverId === w.id
                                 ? <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
-                                : <button onClick={() => { setCancelWaiverId(w.id); setCancelWaiverMode('revoke'); setCancelWaiverReason(''); setCorrectWaiverAmount(String(w.waiver_amount)); setCancelWaiverMsg('') }}
-                                    className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
+                                : <button onClick={() => {
+                                    const le = pbData?.ledger.find(e => e.id === w.ledger_id)
+                                    setCancelWaiverId(w.id); setCancelWaiverMode('revoke'); setCancelWaiverReason(''); setCorrectWaiverAmount(String(w.waiver_amount)); setCancelWaiverMsg('')
+                                    setWaiverMaxCorrect(le ? Number(le.balance) + Number(w.waiver_amount) : null)
+                                  }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
                               }
                             </div>
                           </div>
@@ -4072,9 +4121,14 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                   : <>Revokes current waiver and records a new one with the corrected amount.</>}
                               </div>
                               {cancelWaiverMode === 'correct' && (
-                                <input type="number" min="0" value={correctWaiverAmount} onChange={e => setCorrectWaiverAmount(e.target.value)}
-                                  placeholder="Corrected waiver amount (₹)"
-                                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                <div>
+                                  <input type="number" min="0" value={correctWaiverAmount} onChange={e => setCorrectWaiverAmount(e.target.value)}
+                                    placeholder={waiverMaxCorrect !== null ? `max ₹${waiverMaxCorrect.toFixed(2)}` : 'Corrected waiver amount (₹)'}
+                                    className={`w-full border rounded-lg px-3 py-1.5 text-sm ${waiverMaxCorrect !== null && parseFloat(correctWaiverAmount) > waiverMaxCorrect + 0.01 ? 'border-red-400 bg-red-50' : 'border-gray-200'}`} />
+                                  {waiverMaxCorrect !== null && parseFloat(correctWaiverAmount) > waiverMaxCorrect + 0.01 && (
+                                    <p className="text-xs text-red-600 mt-1">Exceeds max of ₹{waiverMaxCorrect.toFixed(2)}</p>
+                                  )}
+                                </div>
                               )}
                               <input type="text" value={cancelWaiverReason} onChange={e => setCancelWaiverReason(e.target.value)}
                                 placeholder="Reason (required)" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
@@ -4792,8 +4846,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                         className="text-xs border border-gray-200 text-gray-500 px-2.5 py-1 rounded-lg hover:bg-gray-50">🖨</button>
                                       {cancelPmtId === p.id
                                         ? <button onClick={() => setCancelPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600 px-2">Close</button>
-                                        : <button onClick={() => openCancel(p.id)}
-                                            className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
+                                        : <button onClick={() => {
+                                            const le = pbData?.ledger.find(e => e.id === p.ledger_id)
+                                            openCancel(p.id, Number(p.amount), le ? Number(le.balance) : 0)
+                                          }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
                                       }
                                     </div>
                                   )}
@@ -4855,8 +4911,12 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                     <p className="text-sm font-bold text-purple-700">{fmt((w as { waiver_amount?: number }).waiver_amount || 0)}</p>
                                     {cancelWaiverId === w.id
                                       ? <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
-                                      : <button onClick={() => { setCancelWaiverId(w.id); setCancelWaiverMode('revoke'); setCancelWaiverReason(''); setCorrectWaiverAmount(String((w as { waiver_amount?: number }).waiver_amount || 0)); setCancelWaiverMsg('') }}
-                                          className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
+                                      : <button onClick={() => {
+                                          const ww = w as { id: number; ledger_id?: number; waiver_amount?: number }
+                                          const le = pbData?.ledger.find(e => e.id === ww.ledger_id)
+                                          setCancelWaiverId(ww.id); setCancelWaiverMode('revoke'); setCancelWaiverReason(''); setCorrectWaiverAmount(String(ww.waiver_amount || 0)); setCancelWaiverMsg('')
+                                          setWaiverMaxCorrect(le ? Number(le.balance) + Number(ww.waiver_amount || 0) : null)
+                                        }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
                                     }
                                   </div>
                                 </div>
@@ -4874,9 +4934,14 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                         : <>Revokes current waiver and records a new one with the corrected amount.</>}
                                     </div>
                                     {cancelWaiverMode === 'correct' && (
-                                      <input type="number" min="0" value={correctWaiverAmount} onChange={e => setCorrectWaiverAmount(e.target.value)}
-                                        placeholder="Corrected waiver amount (₹)"
-                                        className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                      <div>
+                                        <input type="number" min="0" value={correctWaiverAmount} onChange={e => setCorrectWaiverAmount(e.target.value)}
+                                          placeholder={waiverMaxCorrect !== null ? `max ₹${waiverMaxCorrect.toFixed(2)}` : 'Corrected waiver amount (₹)'}
+                                          className={`w-full border rounded-lg px-3 py-1.5 text-sm ${waiverMaxCorrect !== null && parseFloat(correctWaiverAmount) > waiverMaxCorrect + 0.01 ? 'border-red-400 bg-red-50' : 'border-gray-200'}`} />
+                                        {waiverMaxCorrect !== null && parseFloat(correctWaiverAmount) > waiverMaxCorrect + 0.01 && (
+                                          <p className="text-xs text-red-600 mt-1">Exceeds max of ₹{waiverMaxCorrect.toFixed(2)}</p>
+                                        )}
+                                      </div>
                                     )}
                                     <input type="text" value={cancelWaiverReason} onChange={e => setCancelWaiverReason(e.target.value)}
                                       placeholder="Reason (required)" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
