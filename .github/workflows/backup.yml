@@ -31,17 +31,21 @@ jobs:
           sudo apt-get install -y postgresql-client-17
           curl https://rclone.org/install.sh | sudo bash
 
-      - name: Configure rclone for Google Drive
+      - name: Configure rclone for Cloudflare R2
         env:
-          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
         run: |
           mkdir -p ~/.config/rclone
-          echo "$GDRIVE_SERVICE_ACCOUNT_JSON" > /tmp/sa.json
-          cat > ~/.config/rclone/rclone.conf << 'EOF'
-          [gdrive]
-          type = drive
-          scope = drive
-          service_account_file = /tmp/sa.json
+          cat > ~/.config/rclone/rclone.conf << EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${R2_ACCESS_KEY_ID}
+          secret_access_key = ${R2_SECRET_ACCESS_KEY}
+          endpoint = https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+          acl = private
           EOF
 
       - name: Dump prod database
@@ -58,8 +62,8 @@ jobs:
             -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$PGDATABASE" \
             > /tmp/$FILENAME
           echo "Dump size: $(du -sh /tmp/$FILENAME)"
-          rclone copy /tmp/$FILENAME gdrive:wlyl-backups/prod/ --log-level INFO
-          echo "Uploaded to service account Drive: wlyl-backups/prod/$FILENAME"
+          rclone copy /tmp/$FILENAME r2:wlyl-backups/prod/ --log-level INFO
+          echo "Uploaded: wlyl-backups/prod/$FILENAME"
 
       - name: Upload to GitHub Artifacts (30-day safety copy)
         uses: actions/upload-artifact@v4
@@ -85,17 +89,21 @@ jobs:
           sudo apt-get install -y postgresql-client-17
           curl https://rclone.org/install.sh | sudo bash
 
-      - name: Configure rclone for Google Drive
+      - name: Configure rclone for Cloudflare R2
         env:
-          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
         run: |
           mkdir -p ~/.config/rclone
-          echo "$GDRIVE_SERVICE_ACCOUNT_JSON" > /tmp/sa.json
-          cat > ~/.config/rclone/rclone.conf << 'EOF'
-          [gdrive]
-          type = drive
-          scope = drive
-          service_account_file = /tmp/sa.json
+          cat > ~/.config/rclone/rclone.conf << EOF
+          [r2]
+          type = s3
+          provider = Cloudflare
+          access_key_id = ${R2_ACCESS_KEY_ID}
+          secret_access_key = ${R2_SECRET_ACCESS_KEY}
+          endpoint = https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+          acl = private
           EOF
 
       - name: Dump dev database
@@ -112,8 +120,8 @@ jobs:
             -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$PGDATABASE" \
             > /tmp/$FILENAME
           echo "Dump size: $(du -sh /tmp/$FILENAME)"
-          rclone copy /tmp/$FILENAME gdrive:wlyl-backups/dev/ --log-level INFO
-          echo "Uploaded to service account Drive: wlyl-backups/dev/$FILENAME"
+          rclone copy /tmp/$FILENAME r2:wlyl-backups/dev/ --log-level INFO
+          echo "Uploaded: wlyl-backups/dev/$FILENAME"
 
       - name: Upload to GitHub Artifacts (14-day safety copy)
         uses: actions/upload-artifact@v4
