@@ -32,12 +32,11 @@ jobs:
         run: |
           mkdir -p ~/.config/rclone
           echo "$GDRIVE_SERVICE_ACCOUNT_JSON" > /tmp/sa.json
-          cat > ~/.config/rclone/rclone.conf <<EOF
+          cat > ~/.config/rclone/rclone.conf << 'EOF'
           [gdrive]
           type = drive
           scope = drive
           service_account_file = /tmp/sa.json
-          root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
           EOF
 
       - name: Dump prod database
@@ -49,22 +48,19 @@ jobs:
           PGPASSWORD: ${{ secrets.PROD_PGPASSWORD }}
           PGSSLMODE: require
         run: |
-          FILENAME="prod/backup-prod-$(date +%Y-%m-%d).dump"
+          FILENAME="backup-prod-$(date +%Y-%m-%d).dump"
           pg_dump --no-owner --no-acl -Fc \
             -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$PGDATABASE" \
-            > /tmp/backup.dump
-          echo "Dump size: $(du -sh /tmp/backup.dump)"
-          rclone copy /tmp/backup.dump gdrive:prod --drive-root-folder-id ${{ secrets.GDRIVE_FOLDER_ID }} \
-            --drive-use-trash=false \
-            -v \
-            --log-level INFO
-          echo "Uploaded: $FILENAME"
+            > /tmp/$FILENAME
+          echo "Dump size: $(du -sh /tmp/$FILENAME)"
+          rclone copy /tmp/$FILENAME gdrive:wlyl-backups/prod/ --log-level INFO
+          echo "Uploaded to service account Drive: wlyl-backups/prod/$FILENAME"
 
       - name: Upload to GitHub Artifacts (30-day safety copy)
         uses: actions/upload-artifact@v4
         with:
           name: prod-backup-${{ github.run_id }}
-          path: /tmp/backup.dump
+          path: /tmp/backup-prod-*.dump
           retention-days: 30
 
   backup-dev:
@@ -85,12 +81,11 @@ jobs:
         run: |
           mkdir -p ~/.config/rclone
           echo "$GDRIVE_SERVICE_ACCOUNT_JSON" > /tmp/sa.json
-          cat > ~/.config/rclone/rclone.conf <<EOF
+          cat > ~/.config/rclone/rclone.conf << 'EOF'
           [gdrive]
           type = drive
           scope = drive
           service_account_file = /tmp/sa.json
-          root_folder_id = ${{ secrets.GDRIVE_FOLDER_ID }}
           EOF
 
       - name: Dump dev database
@@ -102,18 +97,17 @@ jobs:
           PGPASSWORD: ${{ secrets.DEV_PGPASSWORD }}
           PGSSLMODE: require
         run: |
+          FILENAME="backup-dev-$(date +%Y-%m-%d).dump"
           pg_dump --no-owner --no-acl -Fc \
             -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" "$PGDATABASE" \
-            > /tmp/backup.dump
-          echo "Dump size: $(du -sh /tmp/backup.dump)"
-          rclone copy /tmp/backup.dump gdrive:dev --drive-root-folder-id ${{ secrets.GDRIVE_FOLDER_ID }} \
-            --drive-use-trash=false \
-            -v \
-            --log-level INFO
+            > /tmp/$FILENAME
+          echo "Dump size: $(du -sh /tmp/$FILENAME)"
+          rclone copy /tmp/$FILENAME gdrive:wlyl-backups/dev/ --log-level INFO
+          echo "Uploaded to service account Drive: wlyl-backups/dev/$FILENAME"
 
       - name: Upload to GitHub Artifacts (14-day safety copy)
         uses: actions/upload-artifact@v4
         with:
           name: dev-backup-${{ github.run_id }}
-          path: /tmp/backup.dump
+          path: /tmp/backup-dev-*.dump
           retention-days: 14
