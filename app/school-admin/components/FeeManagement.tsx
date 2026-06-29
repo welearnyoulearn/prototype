@@ -958,7 +958,8 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       })
       setSelectedEntry(null); setCollectSearch(''); setCollectEntries([])
       loadStats()
-      if (activeTab === 'ledger') loadLedger()
+      loadLedger()
+      if (pbData) loadPassbook(pbData.student.id)
       if (reportData !== null) loadReports()
       if (yearEnd   !== null) loadYearEnd()
     } else {
@@ -3165,7 +3166,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 grid grid-cols-12 gap-2 text-xs font-semibold text-gray-500">
                     <div className="col-span-4">Student</div>
                     <div className="col-span-2 text-right">Billed</div>
-                    <div className="col-span-2 text-right">Paid</div>
+                    <div className="col-span-2 text-right">Paid+Waived</div>
                     <div className="col-span-2 text-right">Outstanding</div>
                     <div className="col-span-2 text-center">Action</div>
                   </div>
