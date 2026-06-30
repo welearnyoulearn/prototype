@@ -1605,6 +1605,26 @@ async function runIncrementalMigrations() {
       WHERE email IS NOT NULL
   `).catch(() => {})
 
+  // ── Per-school feature overrides (self-heal) ───────────────────────────────────
+  // This table's CREATE TABLE only lived in the one-time fresh-DB bootstrap block
+  // above, which never re-runs once a database is already bootstrapped — so on any
+  // existing database (dev/qa/prod) the table was never actually created. Repeating
+  // it here (idempotent, IF NOT EXISTS) ensures it exists everywhere.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS school_feature_overrides (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      feature_key VARCHAR(50) NOT NULL,
+      enabled BOOLEAN NOT NULL,
+      updated_by TEXT,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, feature_key)
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_school_feature_overrides_school ON school_feature_overrides(school_id)
+  `).catch(() => {})
+
   // ── Student/parent portal feature keys ────────────────────────────────────────
   // New keys default to disabled if unconfigured (see GET /api/platform/features).
   // Seed every existing tier as enabled so onboarding for existing schools is
