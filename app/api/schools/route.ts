@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { hashPassword, generateTempPassword, generateSchoolCode } from '@/lib/auth'
+import { hashPassword, generateTempPassword, generateSchoolCode, requirePlatformAdmin } from '@/lib/auth'
 import { sendOnboardingEmail } from '@/lib/email'
 
 export async function GET(req: NextRequest) {
+  const session = await requirePlatformAdmin()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   try {
     const sp     = req.nextUrl.searchParams
     const search = sp.get('search')
@@ -28,7 +31,18 @@ export async function GET(req: NextRequest) {
         sub.tier,
         (SELECT COUNT(*) FROM teachers t  WHERE t.school_id  = s.id AND t.status  = 'active') AS teacher_count,
         (SELECT COUNT(*) FROM students st WHERE st.school_id = s.id AND st.status = 'active') AS student_count,
-        u.last_login_at AS admin_last_login
+        u.last_login_at AS admin_last_login,
+        COALESCE(
+          (SELECT enabled FROM school_feature_overrides WHERE school_id = s.id AND feature_key = 'student-portal'),
+          (SELECT enabled FROM plan_features WHERE tier = sub.tier AND feature_key = 'student-portal'),
+          FALSE
+        ) AS student_portal_enabled,
+        COALESCE(
+          (SELECT enabled FROM school_feature_overrides WHERE school_id = s.id AND feature_key = 'parent-portal'),
+          (SELECT enabled FROM plan_features WHERE tier = sub.tier AND feature_key = 'parent-portal'),
+          FALSE
+        ) AS parent_portal_enabled,
+        (SELECT COUNT(*) FROM students st2 WHERE st2.school_id = s.id AND st2.status = 'active' AND st2.password_hash IS NULL) AS portal_pending_count
       FROM schools s
       LEFT JOIN school_subscriptions sub ON sub.school_id = s.id
       LEFT JOIN users u ON u.school_id = s.id AND u.role = 'school_admin'
@@ -43,6 +57,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const session = await requirePlatformAdmin()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const client = await pool.connect()
   try {
     const { name, type, city, country, phone, email, address } = await req.json()

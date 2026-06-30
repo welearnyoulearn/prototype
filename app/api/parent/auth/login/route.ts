@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { verifyPassword, setParentAuthCookie, ParentJWTPayload } from '@/lib/auth'
+import { verifyPassword, setParentAuthCookie, ParentJWTPayload, schoolHasFeature } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
   try {
@@ -27,6 +27,10 @@ export async function POST(req: NextRequest) {
     const parent = result.rows[0]
     const valid = await verifyPassword(password, parent.password_hash)
     if (!valid) {
+      return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
+    }
+
+    if (!parent.school_id || !(await schoolHasFeature(parent.school_id, 'parent-portal'))) {
       return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 })
     }
 

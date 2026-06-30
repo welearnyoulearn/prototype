@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { invalidateCache } from '@/lib/responseCache'
-import { hashPassword, generateTempPassword, getAnySession, requireSchoolAdmin } from '@/lib/auth'
+import { hashPassword, generateTempPassword, getAnySession, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail } from '@/lib/email'
+import { findOrCreateParent, linkStudentParent } from '@/lib/studentOnboarding'
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,6 +15,10 @@ export async function GET(req: NextRequest) {
       const school_id = searchParams.get('school_id')
       const grade = searchParams.get('grade')
       const section = searchParams.get('section')
+
+      if (session.role !== 'platform_admin' && school_id && Number(school_id) !== Number(session.schoolId)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
 
       const conditions: string[] = []
       const values: (string | number)[] = []
@@ -87,9 +92,14 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Generate student temp password
-    const tempPassword = generateTempPassword(8)
-    const passwordHash = await hashPassword(tempPassword)
+    const [studentPortalEnabled, parentPortalEnabled] = await Promise.all([
+      schoolHasFeature(school_id, 'student-portal'),
+      schoolHasFeature(school_id, 'parent-portal'),
+    ])
+
+    // Generate student temp password (only if the portal is enabled for this school)
+    const tempPassword = studentPortalEnabled ? generateTempPassword(8) : null
+    const passwordHash = tempPassword ? await hashPassword(tempPassword) : null
 
     const result = await pool.query(
       `INSERT INTO students
@@ -105,7 +115,7 @@ export async function POST(req: NextRequest) {
     const appUrl = process.env.APP_URL || 'http://localhost:3000'
 
     // Send student welcome email (if student email provided)
-    if (email && roll_number) {
+    if (studentPortalEnabled && email && roll_number && tempPassword) {
       const schoolResult = await pool.query('SELECT name FROM schools WHERE id = $1', [school_id])
       const schoolName = schoolResult.rows[0]?.name || 'Your School'
       sendStudentWelcomeEmail({
@@ -114,11 +124,15 @@ export async function POST(req: NextRequest) {
       }).catch(console.error)
     }
 
-    // Create parent account + send parent welcome email if parent_email provided
-    if (parent_email) {
-      const schoolResult = await pool.query('SELECT name FROM schools WHERE id = $1', [school_id])
-      const schoolName = schoolResult.rows[0]?.name || 'Your School'
-      await provisionParentAccount({ parentEmail: parent_email, parentName: parent_name, studentId: student.id, schoolId: school_id, schoolName, studentName: name, appUrl })
+    // Create/link parent account + send parent welcome email if parent_email provided.
+    // Even when parent-portal is disabled, still link to an existing parent (e.g. a
+    // sibling onboarded earlier while the flag was on) — only suppress creating a new one.
+    if (parent_email || parent_phone) {
+      await provisionParentAccount({
+        parentEmail: parent_email, parentPhone: parent_phone, parentName: parent_name,
+        studentId: student.id, schoolId: school_id, studentName: name, appUrl,
+        allowCreate: parentPortalEnabled,
+      })
     }
 
     invalidateCache(`classes:${school_id}`)
@@ -129,37 +143,39 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Create or link a parent account, sending welcome email only on first creation
+// Create or link a parent account, sending welcome email only on first creation.
+// allowCreate=false only links to an existing parent and never inserts a new row —
+// used when parent-portal is disabled for the school.
 async function provisionParentAccount({
-  parentEmail, parentName, studentId, schoolId, schoolName, studentName, appUrl
+  parentEmail, parentPhone, parentName, studentId, schoolId, studentName, appUrl, allowCreate
 }: {
-  parentEmail: string; parentName: string | null; studentId: number; schoolId: number
-  schoolName: string; studentName: string; appUrl: string
+  parentEmail: string | null; parentPhone: string | null; parentName: string | null
+  studentId: number; schoolId: number; studentName: string; appUrl: string; allowCreate: boolean
 }) {
   try {
-    // Check if parent account already exists
-    const existing = await pool.query(
-      'SELECT id, name FROM parents WHERE LOWER(email) = LOWER($1)',
-      [parentEmail]
-    )
+    const batchCache = new Map<string, number>()
+    let parentHash: string | null = null
+    let tempPassword: string | null = null
+    if (allowCreate) {
+      tempPassword = generateTempPassword(10)
+      parentHash = await hashPassword(tempPassword)
+    }
 
-    let parentId: number
-    let isNew = false
-
-    if (existing.rows.length > 0) {
-      parentId = existing.rows[0].id
-    } else {
-      isNew = true
-      const tempPassword = generateTempPassword(10)
-      const passwordHash = await hashPassword(tempPassword)
-      const parentResult = await pool.query(
-        `INSERT INTO parents (name, email, school_id, password_hash, password_changed)
-         VALUES ($1, $2, $3, $4, FALSE) RETURNING id`,
-        [parentName || parentEmail, parentEmail, schoolId, passwordHash]
+    const client = await pool.connect()
+    let match: Awaited<ReturnType<typeof findOrCreateParent>>
+    try {
+      match = await findOrCreateParent(
+        client, schoolId, { name: parentName, email: parentEmail, phone: parentPhone },
+        parentHash, batchCache, allowCreate
       )
-      parentId = parentResult.rows[0].id
+      if (match) await linkStudentParent(client, studentId, match.parentId)
+    } finally {
+      client.release()
+    }
 
-      // Send welcome email
+    if (match?.wasCreated && parentEmail && tempPassword) {
+      const schoolResult = await pool.query('SELECT name FROM schools WHERE id = $1', [schoolId])
+      const schoolName = schoolResult.rows[0]?.name || 'Your School'
       sendParentWelcomeEmail({
         to: parentEmail,
         parentName: parentName || parentEmail,
@@ -169,12 +185,6 @@ async function provisionParentAccount({
         loginUrl: `${appUrl}/parent/login`,
       }).catch(console.error)
     }
-
-    // Link student to parent (idempotent)
-    await pool.query(
-      `INSERT INTO student_parents (student_id, parent_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-      [studentId, parentId]
-    )
   } catch (err) {
     console.error('[provisionParentAccount]', err)
   }

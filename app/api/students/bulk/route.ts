@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { invalidateCache } from '@/lib/responseCache'
-import { hashPassword, generateTempPassword, requireSchoolAdmin } from '@/lib/auth'
+import { hashPassword, generateTempPassword, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail } from '@/lib/email'
+import { findOrCreateParent, linkStudentParent } from '@/lib/studentOnboarding'
 
 function generateStudentId(schoolName: string): string {
   const slug = schoolName.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10)
@@ -27,6 +28,11 @@ export async function POST(req: NextRequest) {
     if (schoolRes.rows.length === 0) return NextResponse.json({ error: 'School not found' }, { status: 404 })
     const schoolName = schoolRes.rows[0].name
     const appUrl = process.env.APP_URL || 'http://localhost:3000'
+
+    const [studentPortalEnabled, parentPortalEnabled] = await Promise.all([
+      schoolHasFeature(school_id, 'student-portal'),
+      schoolHasFeature(school_id, 'parent-portal'),
+    ])
 
     const errors: { row: number; message: string }[] = []
     const skipped: { row: number; name: string; reason: string }[] = []
@@ -57,7 +63,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (validStudents.length === 0) {
-      return NextResponse.json({ inserted: 0, skipped, students: [], errors, credentials: { students: [], parents: [] } }, { status: 201 })
+      return NextResponse.json({ inserted: 0, skipped, students: [], errors, credentials: { students: [], parents: [] }, studentPortalEnabled, parentPortalEnabled }, { status: 201 })
     }
 
     const phones    = validStudents.map(s => s.phone?.trim()).filter(Boolean) as string[]
@@ -122,11 +128,12 @@ export async function POST(req: NextRequest) {
     }
 
     if (toInsert.length === 0) {
-      return NextResponse.json({ inserted: 0, skipped, students: [], errors, credentials: { students: [], parents: [] } }, { status: 201 })
+      return NextResponse.json({ inserted: 0, skipped, students: [], errors, credentials: { students: [], parents: [] }, studentPortalEnabled, parentPortalEnabled }, { status: 201 })
     }
 
-    const studentTempPasswords = toInsert.map(() => generateTempPassword(8))
+    const studentTempPasswords = toInsert.map(() => studentPortalEnabled ? generateTempPassword(8) : '')
     const needsNewParent = toInsert.map(s => {
+      if (!parentPortalEnabled) return false
       const pe = s.parent_email?.trim()
       const pp = s.parent_phone?.trim()
       if (!pe && !pp) return false
@@ -137,8 +144,8 @@ export async function POST(req: NextRequest) {
     const parentTempPasswords = needsNewParent.map(needs => needs ? generateTempPassword(10) : '')
 
     const [studentHashes, parentHashes] = await Promise.all([
-      Promise.all(studentTempPasswords.map(p => hashPassword(p))),
-      Promise.all(parentTempPasswords.map(p => p ? hashPassword(p) : Promise.resolve(''))),
+      Promise.all(studentTempPasswords.map(p => p ? hashPassword(p) : Promise.resolve(null))),
+      Promise.all(parentTempPasswords.map(p => p ? hashPassword(p) : Promise.resolve(null))),
     ])
 
     const client = await pool.connect()
@@ -194,53 +201,36 @@ export async function POST(req: NextRequest) {
         const pn = s.parent_name?.trim() || null
         if (!pe && !pp) continue
 
-        const batchKey = pe ? `email:${pe.toLowerCase()}` : `phone:${pp}`
-        let parentId: number | null = null
+        // Even when parent-portal is disabled, still link to an existing parent
+        // (e.g. a sibling onboarded earlier while the flag was on) — only suppress
+        // creating a brand-new parents row while the flag is off.
+        const match = await findOrCreateParent(
+          client, school_id, { name: pn, email: pe, phone: pp },
+          parentHashes[i], processedParentIds, needsNewParent[i]
+        )
 
-        if (processedParentIds.has(batchKey)) {
-          parentId = processedParentIds.get(batchKey)!
-        } else if (pe && parentByEmail.has(pe.toLowerCase())) {
-          parentId = parentByEmail.get(pe.toLowerCase())!
-          processedParentIds.set(batchKey, parentId)
-        } else if (pp && parentByPhone.has(pp)) {
-          parentId = parentByPhone.get(pp)!
-          processedParentIds.set(batchKey, parentId)
-        } else if (needsNewParent[i] && parentHashes[i]) {
-          const pRes = await client.query(
-            `INSERT INTO parents (school_id, name, email, phone, password_hash, password_changed)
-             VALUES ($1,$2,$3,$4,$5,FALSE) RETURNING id`,
-            [school_id, pn, pe, pp, parentHashes[i]]
-          )
-          parentId = pRes.rows[0].id as number
-          processedParentIds.set(batchKey, parentId)
-          if (pe) parentByEmail.set(pe.toLowerCase(), parentId)
-          if (pp) parentByPhone.set(pp, parentId)
-        }
-
-        if (parentId) {
-          await client.query(
-            `INSERT INTO student_parents (student_id, parent_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-            [student.id, parentId]
-          )
+        if (match) {
+          await linkStudentParent(client, student.id, match.parentId)
         }
       }
 
       await client.query('COMMIT')
 
-      const studentCredentials = toInsert.map((s, i) => ({
+      const studentCredentials = studentPortalEnabled ? toInsert.map((s, i) => ({
+        student_id: insertedStudents[i].id,
         name: s.name.trim(),
         grade: s.grade?.trim() || '',
         section: s.section?.trim() || '',
         school_roll_number: s._school_roll_number,
         login: s.email?.trim() || '(no email — share manually)',
         temp_password: studentTempPasswords[i],
-      }))
+      })) : []
 
       const parentCredentials: { name: string; phone: string; login: string; temp_password: string; is_new: boolean }[] = []
       const credParentsSeen = new Set<string>()
       for (let i = 0; i < toInsert.length; i++) {
         const s = toInsert[i]
-        if (!needsNewParent[i] || !parentTempPasswords[i]) continue
+        if (!parentPortalEnabled || !needsNewParent[i] || !parentTempPasswords[i]) continue
         const pe = s.parent_email?.trim() || null
         const pp = s.parent_phone?.trim() || null
         const key = pe ? `email:${pe.toLowerCase()}` : `phone:${pp}`
@@ -258,14 +248,14 @@ export async function POST(req: NextRequest) {
       for (let i = 0; i < toInsert.length; i++) {
         const s = toInsert[i]
         const student = insertedStudents[i]
-        if (s.email?.trim()) {
+        if (studentPortalEnabled && s.email?.trim()) {
           sendStudentWelcomeEmail({
             to: s.email.trim(), name: s.name.trim(), schoolName,
             rollNumber: student.roll_number, tempPassword: studentTempPasswords[i],
             loginUrl: `${appUrl}/student/login`,
           }).catch(console.error)
         }
-        if (needsNewParent[i] && s.parent_email?.trim()) {
+        if (parentPortalEnabled && needsNewParent[i] && s.parent_email?.trim()) {
           sendParentWelcomeEmail({
             to: s.parent_email.trim(), parentName: s.parent_name?.trim() || s.parent_email.trim(),
             studentName: s.name.trim(), schoolName,
@@ -281,6 +271,8 @@ export async function POST(req: NextRequest) {
         students: insertedStudents,
         errors,
         credentials: { students: studentCredentials, parents: parentCredentials },
+        studentPortalEnabled,
+        parentPortalEnabled,
       }, { status: 201 })
 
     } catch (err) {

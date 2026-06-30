@@ -11,6 +11,7 @@ type StudentRow = {
 }
 
 type StudentCredential = {
+  student_id: number
   name: string; grade: string; section: string; school_roll_number: number | null
   login: string; temp_password: string
 }
@@ -25,6 +26,8 @@ type OnboardingResult = {
   students: { id: number; roll_number: string; name: string }[]
   errors: { row: number; message: string }[]
   credentials: { students: StudentCredential[]; parents: ParentCredential[] }
+  studentPortalEnabled?: boolean
+  parentPortalEnabled?: boolean
 }
 
 type DupCheckMatch = {
@@ -90,6 +93,44 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
 
   const [existingRollKeys, setExistingRollKeys] = useState<Set<string>>(new Set())
 
+  const [portalStatus, setPortalStatus] = useState<{ studentPortalEnabled: boolean; parentPortalEnabled: boolean; pendingCount: number } | null>(null)
+  const [backfilling, setBackfilling] = useState(false)
+  const [showBackfillConfirm, setShowBackfillConfirm] = useState(false)
+
+  const fetchPortalStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/school-admin/students/backfill-portal?school_id=${schoolId}`)
+      if (res.ok) setPortalStatus(await res.json())
+    } catch { /* non-critical */ }
+  }, [schoolId])
+
+  async function handleBackfillPortal() {
+    if (!portalStatus) return
+    setShowBackfillConfirm(false)
+    const target = portalStatus.studentPortalEnabled && portalStatus.parentPortalEnabled ? 'both'
+      : portalStatus.studentPortalEnabled ? 'student' : 'parent'
+    setBackfilling(true); setError('')
+    try {
+      const res = await fetch('/api/school-admin/students/backfill-portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, target }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setResult({
+        inserted: 0, skipped: [], students: [], errors: [],
+        credentials: data.credentials,
+        studentPortalEnabled: portalStatus.studentPortalEnabled,
+        parentPortalEnabled: portalStatus.parentPortalEnabled,
+      })
+      setShowCredentials(true)
+      await fetchPortalStatus()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to activate portal access')
+    } finally { setBackfilling(false) }
+  }
+
   const fetchStudentCount = useCallback(async () => {
     try {
       const res = await fetch(`/api/admin/overview?school_id=${schoolId}&features=`)
@@ -113,7 +154,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     } catch { /* non-critical */ }
   }, [schoolId])
 
-  useEffect(() => { fetchStudentCount(); fetchExistingRolls() }, [fetchStudentCount, fetchExistingRolls])
+  useEffect(() => { fetchStudentCount(); fetchExistingRolls(); fetchPortalStatus() }, [fetchStudentCount, fetchExistingRolls, fetchPortalStatus])
 
   function updateRow(index: number, field: keyof StudentRow, value: string) {
     setRows(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r))
@@ -343,6 +384,13 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
           )}
         </div>
         <div className="flex gap-2">
+          {portalStatus && portalStatus.pendingCount > 0 && (portalStatus.studentPortalEnabled || portalStatus.parentPortalEnabled) && (
+            <button onClick={() => setShowBackfillConfirm(true)} disabled={backfilling}
+              data-testid="activate-portal-access-btn"
+              className="flex items-center gap-2 px-3 py-1.5 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 transition-colors disabled:opacity-50">
+              {backfilling ? 'Activating…' : `Activate Portal Access (${portalStatus.pendingCount})`}
+            </button>
+          )}
           {hasCredentials && (
             <button onClick={() => setShowCredentials(true)}
               data-testid="view-credentials-btn"
@@ -529,6 +577,11 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 </div>
               )}
 
+              {result.studentPortalEnabled === false ? (
+                <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-600">
+                  Student portal is not enabled for this school — students were added to the roster without logins.
+                </div>
+              ) : (
               <div>
                 <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                   <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs flex items-center justify-center font-bold">S</span>
@@ -547,8 +600,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {result.credentials.students.map((s, idx) => {
-                        const stu = result.students[idx]
-                        const resetResult = stu ? resetResults[stu.id] : undefined
+                        const resetResult = resetResults[s.student_id]
                         return (
                           <tr key={idx} className="hover:bg-gray-50">
                             <td className="px-3 py-2.5 font-medium text-gray-900">{s.name}</td>
@@ -574,15 +626,13 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                               )}
                             </td>
                             <td className="px-3 py-2.5">
-                              {stu && (
-                                <button
-                                  data-testid={`reset-student-${stu.id}`}
-                                  onClick={() => handleResetCredentials(stu.id)}
-                                  disabled={resetingId === stu.id}
-                                  className="text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50">
-                                  {resetingId === stu.id ? 'Resetting…' : 'Reset'}
-                                </button>
-                              )}
+                              <button
+                                data-testid={`reset-student-${s.student_id}`}
+                                onClick={() => handleResetCredentials(s.student_id)}
+                                disabled={resetingId === s.student_id}
+                                className="text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50">
+                                {resetingId === s.student_id ? 'Resetting…' : 'Reset'}
+                              </button>
                             </td>
                           </tr>
                         )
@@ -591,8 +641,13 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                   </table>
                 </div>
               </div>
+              )}
 
-              {result.credentials.parents.length > 0 && (
+              {result.parentPortalEnabled === false ? (
+                <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-600">
+                  Parent portal is not enabled for this school — no parent accounts were created.
+                </div>
+              ) : result.credentials.parents.length > 0 && (
                 <div>
                   <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                     <span className="w-5 h-5 rounded-full bg-teal-100 text-teal-600 text-xs flex items-center justify-center font-bold">P</span>
@@ -640,6 +695,34 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 className="bg-gray-900 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
                 Done
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Backfill Confirmation Popup ── */}
+      {showBackfillConfirm && portalStatus && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="bg-teal-50 border-b border-teal-100 px-6 py-5">
+              <h3 className="font-bold text-gray-900 text-base">Activate Portal Access?</h3>
+            </div>
+            <div className="px-6 py-5">
+              <p className="text-sm text-gray-600">
+                This will generate new login credentials for <strong>{portalStatus.pendingCount}</strong> existing
+                student{portalStatus.pendingCount !== 1 ? 's' : ''} (and any linked parents) who don&apos;t have one yet,
+                and send welcome emails where an email address is on file. This cannot be undone.
+              </p>
+              <div className="flex gap-3 mt-5">
+                <button onClick={() => setShowBackfillConfirm(false)} data-testid="backfill-confirm-cancel"
+                  className="flex-1 border border-gray-200 text-gray-600 hover:bg-gray-50 py-2.5 rounded-xl text-sm font-medium transition-colors">
+                  Cancel
+                </button>
+                <button onClick={handleBackfillPortal} data-testid="backfill-confirm-confirm"
+                  className="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-medium transition-colors">
+                  Activate
+                </button>
+              </div>
             </div>
           </div>
         </div>
