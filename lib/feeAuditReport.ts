@@ -1,4 +1,5 @@
 import pool from '@/lib/db'
+import { gradeOrderSql } from '@/lib/grades'
 
 // Shared builder for the Fee Audit Report — used by the JSON, Excel and PDF routes.
 // Every money section uses the reconcilable model:
@@ -126,7 +127,7 @@ export async function buildFeeAuditReport(opts: {
             COALESCE(SUM(l.amount_paid),0) AS paid
      FROM student_fee_ledger l JOIN fee_categories fc ON fc.id = l.fee_category_id
      JOIN students s ON s.id = l.student_id WHERE ${WHERE}
-     GROUP BY s.grade, s.section, fc.name ORDER BY s.grade::int NULLS LAST, s.section, fc.name`, vals
+     GROUP BY s.grade, s.section, fc.name ORDER BY ${gradeOrderSql('s.grade')}, s.section, fc.name`, vals
   )
   const by_class = byClass.map(r => ({
     class: r.section ? `${r.grade}-${r.section}` : `Grade ${r.grade}`, fee_type: r.fee_type,
@@ -146,7 +147,7 @@ export async function buildFeeAuditReport(opts: {
      JOIN fee_categories fc ON fc.id = l.fee_category_id
      WHERE ${WHERE}
      GROUP BY s.id, s.name, s.grade, s.section, s.school_roll_number, s.parent_name, s.parent_phone, fc.name
-     ORDER BY s.grade::int NULLS LAST, s.section, s.name, fc.name`, vals
+     ORDER BY ${gradeOrderSql('s.grade')}, s.section, s.name, fc.name`, vals
   )
   const by_student: BulkReport['by_student'] = []
   let curSid: number | null = null

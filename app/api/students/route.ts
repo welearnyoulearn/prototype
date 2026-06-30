@@ -20,6 +20,17 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
 
+      // Lightweight mode: just the distinct grades with active students, for screens
+      // that need to know which grades are actually in use (e.g. fee setup validation)
+      // without paying for a full SELECT * roster fetch.
+      if (searchParams.get('grades_only') === '1' && school_id) {
+        const { rows } = await pool.query(
+          `SELECT DISTINCT grade FROM students WHERE school_id = $1 AND (status IS NULL OR status = 'active')`,
+          [school_id]
+        )
+        return NextResponse.json(rows.map(r => r.grade))
+      }
+
       const conditions: string[] = []
       const values: (string | number)[] = []
 

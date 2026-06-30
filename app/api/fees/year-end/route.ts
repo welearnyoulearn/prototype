@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { gradeOrderSql } from '@/lib/grades'
 
 const ENSURE_CLOSE = `
   CREATE TABLE IF NOT EXISTS fee_year_close (
@@ -97,7 +98,7 @@ export async function GET(req: NextRequest) {
        WHERE l.school_id = $1 AND l.academic_year = $2
          AND l.status IN ('pending', 'overdue', 'partial')
          AND GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) > 0
-       ORDER BY s.grade::int NULLS LAST, s.section, s.name, l.due_date`,
+       ORDER BY ${gradeOrderSql('s.grade')}, s.section, s.name, l.due_date`,
       [school_id, academic_year]
     )
 

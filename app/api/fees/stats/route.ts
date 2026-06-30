@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { gradeOrderSql } from '@/lib/grades'
 
 // GET /api/fees/stats?school_id=X&academic_year=2025-26
 export async function GET(req: NextRequest) {
@@ -163,7 +164,7 @@ export async function GET(req: NextRequest) {
                 COUNT(*) FILTER (WHERE s_out > 0)  AS defaulter_students
          FROM per_student
          GROUP BY grade, section
-         ORDER BY grade::int NULLS LAST, section`,
+         ORDER BY ${gradeOrderSql('grade')}, section`,
         [school_id, academic_year]
       )
 

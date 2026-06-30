@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { gradeOrderSql } from '@/lib/grades'
 
 // GET /api/fees/structures?school_id=X&academic_year=2025-26
 export async function GET(req: NextRequest) {
@@ -15,7 +16,7 @@ export async function GET(req: NextRequest) {
          FROM fee_structures fs
          JOIN fee_categories fc ON fc.id = fs.fee_category_id
          WHERE fs.school_id = $1 ${academic_year ? 'AND fs.academic_year = $2' : ''}
-         ORDER BY fc.name, fs.grade`,
+         ORDER BY fc.name, ${gradeOrderSql('fs.grade')}`,
         academic_year ? [school_id, academic_year] : [school_id]
       )
       return NextResponse.json(rows)

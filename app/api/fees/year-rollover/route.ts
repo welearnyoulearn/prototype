@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { GRADE_SEQUENCE, nextGradeSql } from '@/lib/grades'
 
 // GET /api/fees/year-rollover?school_id=X
 // Returns list of closed academic years for this school.
@@ -230,12 +231,15 @@ export async function POST(req: NextRequest) {
         [school_id]
       )
 
-      // All other active students: grade++ (numeric grades only)
+      // All other active students: grade -> next grade in the sequence (Nursery -> LKG
+      // -> UKG -> 1 -> ... -> 12). Previously this only matched `grade ~ '^[0-9]+$'`,
+      // which silently skipped Nursery/LKG/UKG students entirely — they never advanced
+      // on rollover even though their bills/ledger still rolled into the new year.
+      const promotableGrades = GRADE_SEQUENCE.slice(0, -1) // all but '12', which "leaves" instead
       const { rowCount: promotedCount } = await client.query(
-        `UPDATE students SET grade = (grade::int + 1)::text, updated_at = NOW()
-         WHERE school_id = $1 AND status = 'active'
-           AND grade ~ '^[0-9]+$' AND grade::int < 12`,
-        [school_id]
+        `UPDATE students SET grade = ${nextGradeSql('grade')}, updated_at = NOW()
+         WHERE school_id = $1 AND status = 'active' AND grade = ANY($2)`,
+        [school_id, promotableGrades]
       )
 
       // ── STEP 5: Fill in the final carry-forward totals on the claim row from above ──

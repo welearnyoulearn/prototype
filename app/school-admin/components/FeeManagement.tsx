@@ -108,9 +108,11 @@ type PaySuccess = {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const GRADES = ['1','2','3','4','5','6','7','8','9','10','11','12']
+const GRADES = ['Nursery','LKG','UKG','1','2','3','4','5','6','7','8','9','10','11','12']
+function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
 
 const GRADE_GROUPS = [
+  { key: 'pre_primary', label: 'Pre-Primary', sub: 'Nursery–UKG', grades: ['Nursery','LKG','UKG'] },
   { key: 'primary',   label: 'Primary',   sub: 'Grade 1–5',   grades: ['1','2','3','4','5'] },
   { key: 'middle',    label: 'Middle',    sub: 'Grade 6–8',   grades: ['6','7','8'] },
   { key: 'secondary', label: 'Secondary', sub: 'Grade 9–10',  grades: ['9','10'] },
@@ -305,6 +307,10 @@ export default function FeeManagement({
   const [structures, setStructures]     = useState<FeeStructure[]>([])
   const [structureLock, setStructureLock] = useState<StructureLock>(null)
   const [amendments, setAmendments]     = useState<Amendment[]>([])
+  // Grades with at least one active student — "all grades must have an amount" only
+  // applies to grades the school actually enrolls, not every grade in the master list
+  // (e.g. a school with no Nursery/LKG/UKG section shouldn't be blocked on those).
+  const [enrolledGrades, setEnrolledGrades] = useState<string[] | null>(null)
   const [editAmounts, setEditAmounts]   = useState<Record<string, string>>({})
   const [dueDays, setDueDays]           = useState<Record<number, string>>({})
   const [showAddCategory, setShowAddCategory] = useState(false)
@@ -607,20 +613,23 @@ export default function FeeManagement({
   const loadSetup = useCallback(async () => {
     if (!academicYear) return
     setSetupLoading(true)
-    const [catRes, strRes, lockRes, amendRes] = await Promise.all([
+    const [catRes, strRes, lockRes, amendRes, gradesRes] = await Promise.all([
       fetch(`/api/fees/categories?school_id=${schoolId}`),
       fetch(`/api/fees/structures?school_id=${schoolId}&academic_year=${academicYear}`),
       fetch(`/api/fees/structures/lock?school_id=${schoolId}&academic_year=${academicYear}`),
       fetch(`/api/fees/structures/amend?school_id=${schoolId}&academic_year=${academicYear}`),
+      fetch(`/api/students?school_id=${schoolId}&grades_only=1`),
     ])
     const cats: FeeCategory[] = catRes.ok ? await catRes.json() : []
     const strs: FeeStructure[] = strRes.ok ? await strRes.json() : []
     const lock = lockRes.ok ? await lockRes.json() : null
     const amends: Amendment[] = amendRes.ok ? await amendRes.json() : []
+    const grades: string[] = gradesRes.ok ? await gradesRes.json() : []
     setCategories(cats)
     setStructures(strs)
     setStructureLock(lock)
     setAmendments(amends)
+    setEnrolledGrades(grades.length > 0 ? grades : null)
     const init: Record<string, string> = {}
     strs.forEach(s => { init[`${s.fee_category_id}_${s.grade}`] = String(s.amount) })
     setEditAmounts(init)
@@ -1031,7 +1040,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     if (!fixedAmountsComplete()) {
       const details = fixedFeeHeads()
         .filter(c => !feeHasAmounts(c.id, c.category_type))
-        .map(c => `${c.name} (missing: Grade ${feeGradesMissingAmounts(c.id).join(', ')})`)
+        .map(c => `${c.name} (missing: ${feeGradesMissingAmounts(c.id).map(gradeLabel).join(', ')})`)
       setStructureMsg(`⚠ Set amounts for all grades on every fixed fee first — ${details.join(' · ')}`)
       return
     }
@@ -1122,18 +1131,28 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   }
 
   // Whether a fee head has any amount configured
+  // Grades the "every grade must have an amount" mandate actually applies to: grades
+  // with enrolled students if known, otherwise every grade in the master list (e.g.
+  // before any students have been onboarded yet, so setup isn't blocked on that).
+  function gradesToValidate(): string[] {
+    return enrolledGrades && enrolledGrades.length > 0
+      ? GRADES.filter(g => enrolledGrades.includes(g))
+      : GRADES
+  }
   function feeHasAmounts(catId: number, type: string): boolean {
     if (type === 'variable') {
       return structures.some(s => s.fee_category_id === catId && Number(s.amount) > 0)
     }
-    // ALL grades must have an amount, not just one — otherwise "Generate Bills" silently
-    // skips every grade left at 0 with no warning, contradicting the stated mandate that
-    // every fixed fee head must be fully configured before bills can be generated.
-    return GRADES.every(g => parseFloat(editAmounts[`${catId}_${g}`] || '0') > 0)
+    // ALL enrolled grades must have an amount, not just one — otherwise "Generate Bills"
+    // silently skips every grade left at 0 with no warning, contradicting the stated
+    // mandate that every fixed fee head must be fully configured before bills can be
+    // generated. Grades with no enrolled students (e.g. a school with no Nursery
+    // section) are excluded so setup isn't blocked on grades that don't apply.
+    return gradesToValidate().every(g => parseFloat(editAmounts[`${catId}_${g}`] || '0') > 0)
   }
   // Which specific grades are still missing an amount for a fixed fee head
   function feeGradesMissingAmounts(catId: number): string[] {
-    return GRADES.filter(g => !(parseFloat(editAmounts[`${catId}_${g}`] || '0') > 0))
+    return gradesToValidate().filter(g => !(parseFloat(editAmounts[`${catId}_${g}`] || '0') > 0))
   }
 
   // Whether bills are generated for this fee head
@@ -2632,7 +2651,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <select value={vgGrade} onChange={e => { setVgGrade(e.target.value); setVgStudents([]); setVgCategories([]); setVgMsg('') }}
                     className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
                     <option value="">Select grade…</option>
-                    {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                    {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                   </select>
                   <select value={vgSection} onChange={e => setVgSection(e.target.value)}
                     className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
@@ -2850,7 +2869,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                 onChange={e => { setApplGrade(e.target.value); setApplStudents([]); setApplCategories([]); setApplAmounts({}); setApplMsg('') }}
                                 className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
                                 <option value="">Select grade…</option>
-                                {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                                {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                               </select>
                               <button onClick={() => loadApplicability(applGrade)} disabled={!applGrade || applLoading}
                                 className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
@@ -2952,7 +2971,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                               <div className="grid grid-cols-4 gap-2">
                                 {GRADES.map(g => (
                                   <div key={g} className="flex items-center gap-1">
-                                    <span className="text-[10px] text-gray-400 w-8">Gr.{g}</span>
+                                    <span className="text-[10px] text-gray-400 w-10 shrink-0">{/^\d+$/.test(g) ? `Gr.${g}` : g}</span>
                                     <input type="number" min="0" placeholder="0"
                                       value={editAmounts[`${cat.id}_${g}`] || ''}
                                       onKeyDown={blockNonNumericKeys}
@@ -3201,7 +3220,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <select value={ledgerGrade} onChange={e => setLedgerGrade(e.target.value)}
                   className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
                   <option value="">All Grades</option>
-                  {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                  {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                 </select>
                 <button onClick={loadLedger} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Refresh</button>
                 <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download
@@ -3818,7 +3837,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <select value={pbGrade} onChange={e => setPbGrade(e.target.value)}
                   className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
                   <option value="">All Grades</option>
-                  {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                  {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                 </select>
                 <input type="text" placeholder="Search name or roll number…" value={pbSearch}
                   onChange={e => setPbSearch(e.target.value)}
@@ -4267,7 +4286,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <>
                   <select value={arGrade} onChange={e => setArGrade(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
                     <option value="">Grade…</option>
-                    {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                    {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                   </select>
                   <select value={arSection} onChange={e => setArSection(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
                     <option value="all">All sections</option>
