@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { gradeOrderSql } from '@/lib/grades'
 
 function toCSV(rows: Record<string, unknown>[], cols: { key: string; label: string }[]): string {
   const header = cols.map(c => `"${c.label}"`).join(',')
@@ -53,7 +54,7 @@ export async function GET(req: NextRequest) {
            JOIN students s ON s.id = l.student_id
            JOIN fee_categories fc ON fc.id = l.fee_category_id
            WHERE ${conditions.join(' AND ')}
-           ORDER BY s.grade, s.section, s.name, l.due_date`,
+           ORDER BY ${gradeOrderSql('s.grade')}, s.section, s.name, l.due_date`,
           values
         )
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { GRADE_SEQUENCE, nextGradeSql } from '@/lib/grades'
 
 // GET /api/fees/year-rollover?school_id=X
 // Returns list of closed academic years for this school.
@@ -116,6 +117,23 @@ export async function POST(req: NextRequest) {
 
       await client.query('BEGIN')
 
+      // Claim the close immediately, inside the transaction, before any carry-forward
+      // work happens — the "already rolled over?" check above ran before BEGIN with no
+      // lock, so two concurrent rollover requests (double-click, two tabs) could both
+      // pass it and both carry-forward/waive the same balances. The UNIQUE(school_id,
+      // academic_year) constraint makes this insert race-safe: only one request can
+      // succeed; the other gets 0 rows back and aborts before touching any ledger data.
+      const { rowCount: claimed } = await client.query(
+        `INSERT INTO fee_year_close (school_id, academic_year, closed_by)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (school_id, academic_year) DO NOTHING`,
+        [school_id, from_year, done_by]
+      )
+      if (!claimed) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: `Year ${from_year} is already closed.` }, { status: 409 })
+      }
+
       // ── STEP 1: Get or create "Previous Year Dues" fee head ──────────────────
       await client.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS category_type TEXT NOT NULL DEFAULT 'fixed'`)
       let prevDuesCatId: number
@@ -179,7 +197,7 @@ export async function POST(req: NextRequest) {
            ON CONFLICT (student_id, fee_category_id, academic_year, period_label)
            DO UPDATE SET amount_due = EXCLUDED.amount_due`,
           [school_id, row.student_id, prevDuesCatId, to_year, periodLabel,
-           balance, `${toStartYear}-04-30`, `Auto-carried from ${from_year}`]
+           balance, `${toStartYear + 1}-03-31`, `Auto-carried from ${from_year}`]
         )
 
         // Mark original bills as waived/settled in old year
@@ -196,7 +214,7 @@ export async function POST(req: NextRequest) {
           )
           await client.query(
             `INSERT INTO fee_waivers (school_id, student_id, ledger_id, waiver_type, waiver_amount, reason, granted_by_name)
-             VALUES ($1, $2, $3, 'full', $4, $5, $6)`,
+             VALUES ($1, $2, $3, 'carry_forward', $4, $5, $6)`,
             [school_id, row.student_id, ids[i], bals[i], `Carried forward to ${to_year}`, done_by]
           )
         }
@@ -213,23 +231,23 @@ export async function POST(req: NextRequest) {
         [school_id]
       )
 
-      // All other active students: grade++ (numeric grades only)
+      // All other active students: grade -> next grade in the sequence (Nursery -> LKG
+      // -> UKG -> 1 -> ... -> 12). Previously this only matched `grade ~ '^[0-9]+$'`,
+      // which silently skipped Nursery/LKG/UKG students entirely — they never advanced
+      // on rollover even though their bills/ledger still rolled into the new year.
+      const promotableGrades = GRADE_SEQUENCE.slice(0, -1) // all but '12', which "leaves" instead
       const { rowCount: promotedCount } = await client.query(
-        `UPDATE students SET grade = (grade::int + 1)::text, updated_at = NOW()
-         WHERE school_id = $1 AND status = 'active'
-           AND grade ~ '^[0-9]+$' AND grade::int < 12`,
-        [school_id]
+        `UPDATE students SET grade = ${nextGradeSql('grade')}, updated_at = NOW()
+         WHERE school_id = $1 AND status = 'active' AND grade = ANY($2)`,
+        [school_id, promotableGrades]
       )
 
-      // ── STEP 5: Close from_year ──────────────────────────────────────────────
+      // ── STEP 5: Fill in the final carry-forward totals on the claim row from above ──
       await client.query(
-        `INSERT INTO fee_year_close
-           (school_id, academic_year, closed_by, carried_count, carried_total)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (school_id, academic_year) DO UPDATE
-           SET closed_by = $3, closed_at = NOW(), is_reopened = FALSE,
-               carried_count = $4, carried_total = $5`,
-        [school_id, from_year, done_by, carriedCount, carriedTotal]
+        `UPDATE fee_year_close
+         SET carried_count = $3, carried_total = $4
+         WHERE school_id = $1 AND academic_year = $2`,
+        [school_id, from_year, carriedCount, carriedTotal]
       )
 
       await client.query('COMMIT')

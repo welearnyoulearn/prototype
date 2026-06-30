@@ -27,33 +27,50 @@ export async function POST(req: NextRequest) {
       await client.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancel_reason   TEXT`)
       await client.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`)
 
-      // Fetch the payment
-      const { rows: [pmt] } = await client.query(
-        `SELECT fp.*, l.academic_year, l.amount_due, l.amount_paid AS ledger_paid
+      // Fetch the payment (no lock yet — just to resolve school_id for the access check)
+      const { rows: [pmtPreview] } = await client.query(
+        `SELECT fp.school_id, l.academic_year
          FROM fee_payments fp
          JOIN student_fee_ledger l ON l.id = fp.ledger_id
          WHERE fp.id = $1`,
         [payment_id]
       )
-      if (!pmt) { client.release(); return NextResponse.json({ error: 'Payment not found' }, { status: 404 }) }
+      if (!pmtPreview) return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
       // Verify the caller owns this payment's school (school-admin only)
-      const access = await requireFeeAccess(pmt.school_id)
-      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      const access = await requireFeeAccess(pmtPreview.school_id)
+      if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const done_by = access.actor
-      if (pmt.payment_status === 'cancelled') {
-        return NextResponse.json({ error: 'Payment already cancelled' }, { status: 409 })
-      }
 
       // Block if the academic year is closed
       const { rows: [locked] } = await client.query(
         `SELECT 1 FROM fee_year_close WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
-        [pmt.school_id, pmt.academic_year]
+        [pmtPreview.school_id, pmtPreview.academic_year]
       ).catch(() => ({ rows: [] }))
       if (locked) {
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to cancel/correct payments.' }, { status: 409 })
       }
 
       await client.query('BEGIN')
+
+      // Re-fetch WITH a row lock now that we're inside the transaction, so two
+      // concurrent cancel/correct requests for the same payment can't both pass
+      // the "already cancelled" check and both reverse the ledger.
+      const { rows: [pmt] } = await client.query(
+        `SELECT fp.*, l.academic_year, l.amount_due, l.amount_paid AS ledger_paid
+         FROM fee_payments fp
+         JOIN student_fee_ledger l ON l.id = fp.ledger_id
+         WHERE fp.id = $1
+         FOR UPDATE OF fp`,
+        [payment_id]
+      )
+      if (!pmt) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
+      }
+      if (pmt.payment_status === 'cancelled') {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Payment already cancelled' }, { status: 409 })
+      }
 
       const wasCompleted = pmt.payment_status === 'completed'
       const origAmount = parseFloat(pmt.amount)

@@ -46,11 +46,12 @@ type LedgerEntry = {
 type FeeStats = {
   summary: {
     total_students: number; total_due: number; total_collected: number; total_waived: number
+    discretionary_waived?: number
     total_outstanding: number; paid_count: number; partial_count: number
     pending_count: number; overdue_count: number; waived_count: number; defaulters_count: number
     students_fully_paid: number; students_partial: number; students_not_paid: number
   }
-  by_category: Array<{ category_name: string; frequency: string; total_due: number; total_collected: number; overdue_count: number }>
+  by_category: Array<{ category_name: string; frequency: string; total_due: number; total_collected: number; total_waived?: number; overdue_count: number }>
   monthly_trend: Array<{ month: string; collected: number }>
   top_defaulters: Array<{ student_id: number; student_name: string; grade: string; section: string; roll_number: string; outstanding: number; overdue_entries: number }>
   by_payment_mode: Array<{ payment_mode: string; count: number; total: number }>
@@ -72,11 +73,11 @@ type EditRecord = {
 }
 
 type ReportData = {
-  balance: { total_billed: number; total_collected: number; total_outstanding: number; total_waived: number; paid_entries: number; partial_entries: number; unpaid_entries: number; waived_entries: number; total_students: number }
+  balance: { total_billed: number; total_collected: number; total_outstanding: number; total_waived: number; discretionary_waived?: number; paid_entries: number; partial_entries: number; unpaid_entries: number; waived_entries: number; total_students: number }
   monthly: Array<{ month: string; collected: number; payment_count: number; students_paid: number }>
   monthlyDue: Array<{ month: string; billed: number }>
   byGrade: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; total_waived: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
-  byCategory: Array<{ category_name: string; frequency: string; students: number; total_due: number; total_collected: number; total_waived: number; outstanding: number; paid_count: number; unpaid_count: number }>
+  byCategory: Array<{ category_name: string; frequency: string; students: number; total_due: number; total_collected: number; total_waived: number; discretionary_waived?: number; outstanding: number; paid_count: number; unpaid_count: number }>
   byMode: Array<{ payment_mode: string; count: number; total: number }>
   defaulters: Array<{ student_name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; outstanding: number; overdue_entries: number; unpaid_entries: number }>
 }
@@ -98,13 +99,20 @@ type PaySuccess = {
   category_name: string; period_label: string; amount_due: number
   payment_mode: string; paid_date: string; collected_by_name: string | null
   transaction_ref: string | null; notes: string | null
+  // Outstanding balance snapshotted at the moment of submission, BEFORE the async
+  // loadLedger() refetch — printing the receipt later reads this instead of the live
+  // `row` state, which can still reflect the pre-payment balance if the admin clicks
+  // Print before the refetch has resolved and re-rendered.
+  outstanding_before?: number
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const GRADES = ['1','2','3','4','5','6','7','8','9','10','11','12']
+const GRADES = ['Nursery','LKG','UKG','1','2','3','4','5','6','7','8','9','10','11','12']
+function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
 
 const GRADE_GROUPS = [
+  { key: 'pre_primary', label: 'Pre-Primary', sub: 'Nursery–UKG', grades: ['Nursery','LKG','UKG'] },
   { key: 'primary',   label: 'Primary',   sub: 'Grade 1–5',   grades: ['1','2','3','4','5'] },
   { key: 'middle',    label: 'Middle',    sub: 'Grade 6–8',   grades: ['6','7','8'] },
   { key: 'secondary', label: 'Secondary', sub: 'Grade 9–10',  grades: ['9','10'] },
@@ -154,8 +162,8 @@ function fmt(n: number | string) {
   return `₹${Number(n).toLocaleString('en-IN')}`
 }
 function pct(num: number, den: number) {
-  if (!den) return 0
-  return Math.round((num / den) * 100)
+  if (!den || den < 0) return 0
+  return Math.min(100, Math.round((num / den) * 100))
 }
 function fmtDate(d: string) {
   return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -299,8 +307,11 @@ export default function FeeManagement({
   const [structures, setStructures]     = useState<FeeStructure[]>([])
   const [structureLock, setStructureLock] = useState<StructureLock>(null)
   const [amendments, setAmendments]     = useState<Amendment[]>([])
+  // Grades with at least one active student — "all grades must have an amount" only
+  // applies to grades the school actually enrolls, not every grade in the master list
+  // (e.g. a school with no Nursery/LKG/UKG section shouldn't be blocked on those).
+  const [enrolledGrades, setEnrolledGrades] = useState<string[] | null>(null)
   const [editAmounts, setEditAmounts]   = useState<Record<string, string>>({})
-  const [dueDays, setDueDays]           = useState<Record<number, string>>({})
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [newCategory, setNewCategory]   = useState({ name: '', frequency: 'monthly', description: '', category_type: 'fixed' })
   const [savingStructure, setSavingStructure] = useState(false)
@@ -310,6 +321,8 @@ export default function FeeManagement({
   const [deletingCatId, setDeletingCatId] = useState<number | null>(null)
   const [showAmendForm, setShowAmendForm] = useState<{ cat_id: number; grade: string; cat_name: string; current: number } | null>(null)
   const [amendForm, setAmendForm]       = useState({ new_amount: '', reason: '' })
+  const [amendMsg, setAmendMsg]         = useState('')
+  const [amendSaving, setAmendSaving]   = useState(false)
   const [showAmendLog, setShowAmendLog] = useState(false)
 
   // ── Fee Plan (new Tab 2) ──
@@ -356,12 +369,6 @@ export default function FeeManagement({
   const [ledgerStatus, setLedgerStatus] = useState('')
   const [ledgerSearch, setLedgerSearch] = useState('')
 
-  // Ledger inline edit
-  const [deletingId, setDeletingId]   = useState<number | null>(null)
-  const [editingId, setEditingId]     = useState<number | null>(null)
-  const [editForm, setEditForm]       = useState({ new_amount: '', reason: '' })
-  const [editLoading, setEditLoading] = useState(false)
-  const [editError, setEditError]     = useState('')
   const [editHistories, setEditHistories] = useState<Record<number, EditRecord[]>>({})
   const [showHistoryId, setShowHistoryId] = useState<number | null>(null)
   const [paymentHistories, setPaymentHistories] = useState<Record<number, PaymentRecord[]>>({})
@@ -434,13 +441,13 @@ export default function FeeManagement({
   }
   type PassbookYearGroup = {
     academic_year: string; is_current: boolean
-    total_billed: number; total_paid: number; total_waived: number; outstanding: number
+    total_billed: number; total_paid: number; total_waived: number; discretionary_waived?: number; outstanding: number
     entries: LedgerEntry[]
   }
   type PassbookData = {
     student: { id: number; name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; parent_email: string | null }
     current_year: string | null
-    summary: { total_billed: number; total_paid: number; total_waived: number; outstanding: number }
+    summary: { total_billed: number; total_paid: number; total_waived: number; discretionary_waived?: number; outstanding: number }
     timeline: PassbookTimeline[]
     ledger: LedgerEntry[]
     ledger_by_year: PassbookYearGroup[]
@@ -458,8 +465,8 @@ export default function FeeManagement({
   // Derived passbook data filtered to the selected academic year
   const pbYearGroup = pbData?.ledger_by_year.find(y => y.academic_year === academicYear) ?? null
   const pbSummary   = pbYearGroup
-    ? { total_billed: pbYearGroup.total_billed, total_paid: pbYearGroup.total_paid, total_waived: pbYearGroup.total_waived, outstanding: pbYearGroup.outstanding }
-    : { total_billed: 0, total_paid: 0, total_waived: 0, outstanding: 0 }
+    ? { total_billed: pbYearGroup.total_billed, total_paid: pbYearGroup.total_paid, total_waived: pbYearGroup.total_waived, discretionary_waived: pbYearGroup.discretionary_waived ?? pbYearGroup.total_waived, outstanding: pbYearGroup.outstanding }
+    : { total_billed: 0, total_paid: 0, total_waived: 0, discretionary_waived: 0, outstanding: 0 }
   const pbPayments  = pbData?.payments.filter(p => p.bill_year === academicYear) ?? []
   const pbWaivers   = pbData?.waivers.filter(w => w.bill_year === academicYear) ?? []
   const pbTimeline  = pbData?.timeline.filter(t => t.academic_year === academicYear) ?? []
@@ -508,7 +515,7 @@ export default function FeeManagement({
   type YearEndStudent = { student_id: number; student_name: string; roll_number: string; grade: string; section: string; student_status: string; is_leaver: boolean; leaver_reason: string | null; total_unpaid: number; bills: YearEndBill[] }
   type YearEndState = {
     academic_year: string
-    summary: { total_billed: number; total_collected: number; total_waived: number; total_unpaid: number }
+    summary: { total_billed: number; total_collected: number; total_waived: number; discretionary_waived?: number; total_unpaid: number }
     students: YearEndStudent[]
     unpaid_count: number
     target_year: string
@@ -605,26 +612,26 @@ export default function FeeManagement({
   const loadSetup = useCallback(async () => {
     if (!academicYear) return
     setSetupLoading(true)
-    const [catRes, strRes, lockRes, amendRes] = await Promise.all([
+    const [catRes, strRes, lockRes, amendRes, gradesRes] = await Promise.all([
       fetch(`/api/fees/categories?school_id=${schoolId}`),
       fetch(`/api/fees/structures?school_id=${schoolId}&academic_year=${academicYear}`),
       fetch(`/api/fees/structures/lock?school_id=${schoolId}&academic_year=${academicYear}`),
       fetch(`/api/fees/structures/amend?school_id=${schoolId}&academic_year=${academicYear}`),
+      fetch(`/api/students?school_id=${schoolId}&grades_only=1`),
     ])
     const cats: FeeCategory[] = catRes.ok ? await catRes.json() : []
     const strs: FeeStructure[] = strRes.ok ? await strRes.json() : []
     const lock = lockRes.ok ? await lockRes.json() : null
     const amends: Amendment[] = amendRes.ok ? await amendRes.json() : []
+    const grades: string[] = gradesRes.ok ? await gradesRes.json() : []
     setCategories(cats)
     setStructures(strs)
     setStructureLock(lock)
     setAmendments(amends)
+    setEnrolledGrades(grades.length > 0 ? grades : null)
     const init: Record<string, string> = {}
     strs.forEach(s => { init[`${s.fee_category_id}_${s.grade}`] = String(s.amount) })
     setEditAmounts(init)
-    const initDueDays: Record<number, string> = {}
-    strs.forEach(s => { if (!initDueDays[s.fee_category_id]) initDueDays[s.fee_category_id] = String(s.due_day) })
-    setDueDays(initDueDays)
     setSetupLoading(false)
   }, [schoolId, academicYear])
 
@@ -745,7 +752,10 @@ export default function FeeManagement({
     setLedgerLoading(false)
   }, [schoolId, academicYear, ledgerGrade])
 
-  useEffect(() => { if (activeTab === 'ledger') loadLedger() }, [activeTab, loadLedger])
+  // Note: the visible "Ledger" nav tab actually uses key 'collect' — see line ~1566 for
+  // the effect that loads ledger data when that tab is active. The 'ledger' Tab value
+  // itself has no render path; kept in the type only for the legacy /api/fees/ledger
+  // direct calls below, not as a real navigable tab.
 
   async function loadEditHistory(ledgerId: number) {
     if (editHistories[ledgerId]) { setShowHistoryId(ledgerId); return }
@@ -765,42 +775,6 @@ export default function FeeManagement({
     if (r.ok) {
       const rows = await r.json()
       setPaymentHistories(p => ({ ...p, [ledgerId]: rows }))
-    }
-  }
-
-  async function submitEdit(entry: LedgerEntry) {
-    if (!editForm.new_amount || !editForm.reason) return
-    setEditLoading(true); setEditError('')
-    const r = await fetch(`/api/fees/ledger/${entry.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        school_id: schoolId,
-        new_amount: parseFloat(editForm.new_amount),
-        reason: editForm.reason,
-        changed_by: adminName || 'Admin',
-      }),
-    })
-    const d = await r.json()
-    if (r.ok) {
-      setLedger(prev => prev.map(e => e.id === entry.id
-        ? { ...e, amount_due: d.amount_due, balance: Math.max(0, d.amount_due - (d.waiver_amount ?? e.waiver_amount ?? 0) - d.amount_paid), status: d.status, has_edits: true }
-        : e
-      ))
-      setEditHistories(p => { const next = { ...p }; delete next[entry.id]; return next })
-      setEditingId(null)
-      setEditForm({ new_amount: '', reason: '' })
-    } else {
-      setEditError(d.error || 'Failed to update')
-    }
-    setEditLoading(false)
-  }
-
-  async function deleteEntry(entry: LedgerEntry) {
-    const r = await fetch(`/api/fees/ledger/${entry.id}?school_id=${schoolId}`, { method: 'DELETE' })
-    if (r.ok) {
-      setLedger(prev => prev.filter(e => e.id !== entry.id))
-      setDeletingId(null)
     }
   }
 
@@ -1040,23 +1014,30 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
         const key = `${cat.id}_${grade}`
         const val = editAmounts[key]
         if (val && parseFloat(val) > 0)
-          structs.push({ fee_category_id: cat.id, grade, amount: parseFloat(val), due_day: parseInt(dueDays[cat.id] || '10') || 10 })
+          structs.push({ fee_category_id: cat.id, grade, amount: parseFloat(val) })
       }
     }
     const r = await fetch('/api/fees/structures', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, structures: structs, changed_by: adminName || 'Admin' }),
     })
-    setStructureMsg(r.ok ? '✓ Structure saved' : 'Failed to save')
+    if (!r.ok) {
+      const d = await r.json().catch(() => null)
+      setStructureMsg(d?.error || 'Failed to save')
+    } else {
+      setStructureMsg('✓ Structure saved')
+    }
     setSavingStructure(false)
     loadSetup()
   }
 
   async function generateLedger() {
-    // Mandate: all fixed fees must have amounts before generating bills
+    // Mandate: all fixed fees must have amounts for EVERY grade before generating bills
     if (!fixedAmountsComplete()) {
-      const missing = fixedFeesMissingAmounts()
-      setStructureMsg(`⚠ Set amounts for all fixed fees first — missing: ${missing.join(', ')}`)
+      const details = fixedFeeHeads()
+        .filter(c => !feeHasAmounts(c.id, c.category_type))
+        .map(c => `${c.name} (missing: ${feeGradesMissingAmounts(c.id).map(gradeLabel).join(', ')})`)
+      setStructureMsg(`⚠ Set amounts for all grades on every fixed fee first — ${details.join(' · ')}`)
       return
     }
     // Show confirmation with due-day summary before running
@@ -1129,23 +1110,45 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     for (const grade of GRADES) {
       const val = editAmounts[`${cat.id}_${grade}`]
       if (val && parseFloat(val) > 0)
-        structs.push({ fee_category_id: cat.id, grade, amount: parseFloat(val), due_day: parseInt(dueDays[cat.id] || '10') || 10 })
+        structs.push({ fee_category_id: cat.id, grade, amount: parseFloat(val) })
     }
     const r = await fetch('/api/fees/structures', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, structures: structs, changed_by: adminName || 'Admin' }),
     })
-    setStructureMsg(r.ok ? `✓ Amounts saved for ${cat.name}` : 'Failed to save')
+    if (!r.ok) {
+      const d = await r.json().catch(() => null)
+      setStructureMsg(d?.error || 'Failed to save')
+    } else {
+      setStructureMsg(`✓ Amounts saved for ${cat.name}`)
+    }
     setSavingStructure(false)
     loadSetup()
   }
 
   // Whether a fee head has any amount configured
+  // Grades the "every grade must have an amount" mandate actually applies to: grades
+  // with enrolled students if known, otherwise every grade in the master list (e.g.
+  // before any students have been onboarded yet, so setup isn't blocked on that).
+  function gradesToValidate(): string[] {
+    return enrolledGrades && enrolledGrades.length > 0
+      ? GRADES.filter(g => enrolledGrades.includes(g))
+      : GRADES
+  }
   function feeHasAmounts(catId: number, type: string): boolean {
     if (type === 'variable') {
       return structures.some(s => s.fee_category_id === catId && Number(s.amount) > 0)
     }
-    return GRADES.some(g => parseFloat(editAmounts[`${catId}_${g}`] || '0') > 0)
+    // ALL enrolled grades must have an amount, not just one — otherwise "Generate Bills"
+    // silently skips every grade left at 0 with no warning, contradicting the stated
+    // mandate that every fixed fee head must be fully configured before bills can be
+    // generated. Grades with no enrolled students (e.g. a school with no Nursery
+    // section) are excluded so setup isn't blocked on grades that don't apply.
+    return gradesToValidate().every(g => parseFloat(editAmounts[`${catId}_${g}`] || '0') > 0)
+  }
+  // Which specific grades are still missing an amount for a fixed fee head
+  function feeGradesMissingAmounts(catId: number): string[] {
+    return gradesToValidate().filter(g => !(parseFloat(editAmounts[`${catId}_${g}`] || '0') > 0))
   }
 
   // Whether bills are generated for this fee head
@@ -1201,19 +1204,27 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
   async function submitAmendment() {
     if (!showAmendForm || !amendForm.new_amount || !amendForm.reason) return
-    const r = await fetch('/api/fees/structures/amend', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        school_id: schoolId, academic_year: academicYear,
-        fee_category_id: showAmendForm.cat_id, grade: showAmendForm.grade,
-        new_amount: parseFloat(amendForm.new_amount), reason: amendForm.reason,
-        changed_by: adminName || 'Admin',
-      }),
-    })
-    if (r.ok) {
-      setShowAmendForm(null); setAmendForm({ new_amount: '', reason: '' })
-      loadSetup()
-    }
+    setAmendSaving(true); setAmendMsg('')
+    try {
+      const r = await fetch('/api/fees/structures/amend', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId, academic_year: academicYear,
+          fee_category_id: showAmendForm.cat_id, grade: showAmendForm.grade,
+          new_amount: parseFloat(amendForm.new_amount), reason: amendForm.reason,
+          changed_by: adminName || 'Admin',
+        }),
+      })
+      if (r.ok) {
+        setShowAmendForm(null); setAmendForm({ new_amount: '', reason: '' })
+        // Amending updates amount_due on already-generated unpaid/partial bills, so the
+        // Overview tab's billed/outstanding/collection-% figures go stale without this.
+        loadSetup(); loadStats()
+      } else {
+        const d = await r.json().catch(() => null)
+        setAmendMsg(d?.error || 'Failed to amend amount')
+      }
+    } finally { setAmendSaving(false) }
   }
 
   // ── Applicability tab ────────────────────────────────────────────────────────
@@ -1253,9 +1264,13 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     const d = await r.json()
     if (r.ok) {
       setApplMsg(`✓ Saved — ${d.upserted} assignments${d.ledgerUpdated > 0 ? `, ${d.ledgerUpdated} ledger entries updated` : ''}`)
+      // Variable-fee assignments can change amount_due on existing bills (ledgerUpdated),
+      // so the Overview tab's totals would otherwise stay stale until a tab switch.
+      loadStats()
     } else {
       setApplMsg(d.error || 'Failed to save')
     }
+
     setApplSaving(false)
   }
 
@@ -1312,10 +1327,16 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
   async function toggleCategoryType(cat: FeeCategory) {
     const newType = cat.category_type === 'fixed' ? 'variable' : 'fixed'
-    await fetch(`/api/fees/categories?id=${cat.id}`, {
+    if (!confirm(`Switch "${cat.name}" from ${cat.category_type === 'fixed' ? 'Fixed' : 'Variable'} to ${newType === 'fixed' ? 'Fixed' : 'Variable'}? This only works if no bills have been generated for this fee yet.`)) return
+    const r = await fetch(`/api/fees/categories?id=${cat.id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ category_type: newType, changed_by: adminName || 'Admin' }),
     })
+    if (!r.ok) {
+      const d = await r.json().catch(() => null)
+      setStructureMsg(d?.error || 'Failed to change fee type')
+      return
+    }
     setCategories(prev => prev.map(c => c.id === cat.id ? { ...c, category_type: newType } : c))
   }
 
@@ -1453,7 +1474,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 <div class="sumbox">
   <div><div class="l">Total Billed</div><div class="v">₹${Number(s.total_billed).toLocaleString('en-IN')}</div></div>
   <div><div class="l">Collected</div><div class="v">₹${Number(s.total_collected).toLocaleString('en-IN')}</div></div>
-  <div><div class="l">Waived</div><div class="v">₹${Number(s.total_waived).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Waived</div><div class="v">₹${Number(s.discretionary_waived ?? s.total_waived).toLocaleString('en-IN')}</div></div>
   <div><div class="l">Unpaid</div><div class="v">₹${Number(s.total_unpaid).toLocaleString('en-IN')}</div></div>
 </div>
 <p style="font-size:12px;color:#555">Resolution plan: ${carryN} carry forward · ${woN} write off · ${openN} left open</p>
@@ -1657,6 +1678,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
         payment_mode: payMode, paid_date: payDate,
         collected_by_name: payCollectedBy || null,
         transaction_ref: payRef || null, notes: payNotes || null,
+        outstanding_before: openStudent.outstanding,
       })
       setShowCollectForm(false)
       loadLedger(); loadStats()
@@ -1705,7 +1727,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   ${paid.collected_by_name ? `<div><div class="lbl">Collected By</div><div class="val">${paid.collected_by_name}</div></div>` : ''}
 </div>
 ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><div class="val">${paid.notes}</div></div>` : ''}
-<div class="ftr">Balance after this payment: ₹${Number(Math.max(0, row.outstanding - paid.amount)).toLocaleString('en-IN')} &nbsp;·&nbsp; Generated on ${new Date().toLocaleString('en-IN')} &nbsp;·&nbsp; Computer-generated receipt.</div>
+<div class="ftr">Balance after this payment: ₹${Number(Math.max(0, (paid.outstanding_before ?? row.outstanding) - paid.amount)).toLocaleString('en-IN')} &nbsp;·&nbsp; Generated on ${new Date().toLocaleString('en-IN')} &nbsp;·&nbsp; Computer-generated receipt.</div>
 </body></html>`
     const win = window.open('', '_blank', 'width=800,height=650')
     if (win) { win.document.write(html); win.document.close(); win.print() }
@@ -1930,7 +1952,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
 <div class="sumbox">
   <div><div class="l">Total Billed</div><div class="v">₹${Number(pbData.summary.total_billed).toLocaleString('en-IN')}</div></div>
   <div><div class="l">Paid</div><div class="v">₹${Number(pbData.summary.total_paid).toLocaleString('en-IN')}</div></div>
-  <div><div class="l">Waived</div><div class="v">₹${Number(pbData.summary.total_waived).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Waived</div><div class="v">₹${Number(pbData.summary.discretionary_waived ?? pbData.summary.total_waived).toLocaleString('en-IN')}</div></div>
   <div><div class="l">Outstanding</div><div class="v">₹${Number(pbData.summary.outstanding).toLocaleString('en-IN')}</div></div>
 </div>
 <table><thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Charge</th><th style="text-align:right">Paid</th><th style="text-align:right">Balance</th></tr></thead>
@@ -2003,9 +2025,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             if (pendingPayments.length > 0)
               actions.push({ msg: `${pendingPayments.length} online payment${pendingPayments.length > 1 ? 's' : ''} waiting for your verification`, tab: 'pending' as const, color: 'text-red-700 bg-red-50 border-red-200' })
             if (stats && stats.summary.overdue_count > 20)
-              actions.push({ msg: `${stats.summary.overdue_count} overdue entries — follow up with parents`, tab: 'ledger' as const, color: 'text-orange-700 bg-orange-50 border-orange-200' })
+              actions.push({ msg: `${stats.summary.overdue_count} overdue entries — follow up with parents`, tab: 'collect' as const, color: 'text-orange-700 bg-orange-50 border-orange-200' })
             if (stats && stats.summary.defaulters_count > 0)
-              actions.push({ msg: `${stats.summary.defaulters_count} students have made zero payment this year`, tab: 'ledger' as const, color: 'text-amber-700 bg-amber-50 border-amber-200' })
+              actions.push({ msg: `${stats.summary.defaulters_count} students have made zero payment this year`, tab: 'collect' as const, color: 'text-amber-700 bg-amber-50 border-amber-200' })
             // Warn if the immediately preceding year (older, higher index since array is DESC) is not closed
             if (academicYears.length > 1) {
               const idx = academicYears.indexOf(academicYear)
@@ -2053,7 +2075,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 {[
                   { label: 'Total Billed',  value: stats.summary.total_due,                                                                    sub: `${stats.summary.total_students} students`,           border: 'border-gray-100',   text: 'text-gray-900',   sub_color: 'text-gray-400' },
                   { label: 'Collected',     value: stats.summary.total_collected,    sub: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}% of net demand`, border: 'border-green-100',  text: 'text-green-700',  sub_color: 'text-green-500' },
-                  { label: 'Waived',        value: stats.summary.total_waived,                                                                  sub: `${stats.summary.waived_count} entries waived`,       border: 'border-purple-100', text: 'text-purple-700', sub_color: 'text-purple-400' },
+                  { label: 'Waived',        value: stats.summary.discretionary_waived ?? stats.summary.total_waived,                            sub: `${stats.summary.waived_count} entries waived`,       border: 'border-purple-100', text: 'text-purple-700', sub_color: 'text-purple-400' },
                   { label: 'Outstanding',   value: stats.summary.total_outstanding,                                                             sub: `${stats.summary.overdue_count} overdue entries`,     border: 'border-red-100',    text: 'text-red-600',    sub_color: 'text-red-400' },
                   { label: 'Zero Payers',   value: stats.summary.defaulters_count,                                                              sub: 'students with no payment or waiver',                 border: 'border-orange-100', text: 'text-orange-600', sub_color: 'text-orange-400', isCount: true },
                 ].map(card => (
@@ -2097,12 +2119,16 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               {/* ── Class-wise Analysis ── */}
               {gradeStats.length > 0 && (() => {
                 const label = (g: GradeStat) => g.section ? `${g.grade}-${g.section}` : `Grade ${g.grade}`
-                const withRate = gradeStats.map(g => ({ ...g, rate: pct(Number(g.total_collected), Number(g.total_due)), label: label(g) }))
+                // Net of waivers — matches the Reports tab's class-wise collection % and the
+                // overall progress bar above, so the same data doesn't show two different
+                // percentages on different screens.
+                const withRate = gradeStats.map(g => ({ ...g, rate: pct(Number(g.total_collected), Number(g.total_due) - Number(g.total_waived ?? 0)), label: label(g) }))
                 const ranked = [...withRate].filter(g => Number(g.total_due) > 0).sort((a, b) => b.rate - a.rate)
                 const best = ranked[0]
                 const worst = ranked[ranked.length - 1]
                 const totDue = gradeStats.reduce((s, g) => s + Number(g.total_due), 0)
                 const totCol = gradeStats.reduce((s, g) => s + Number(g.total_collected), 0)
+                const totWaivedAll = gradeStats.reduce((s, g) => s + Number(g.total_waived ?? 0), 0)
                 const totStu = gradeStats.reduce((s, g) => s + Number(g.students), 0)
                 const totDef = gradeStats.reduce((s, g) => s + Number(g.defaulter_students || 0), 0)
                 return (
@@ -2142,7 +2168,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         <p className="text-xs text-gray-400">collected</p>
                       </div>
                       <div className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2.5">
-                        <p className="text-[10px] text-amber-600 uppercase font-semibold tracking-wide">Defaulters</p>
+                        <p className="text-[10px] text-amber-600 uppercase font-semibold tracking-wide">Pending Payments</p>
                         <p className="text-sm font-bold text-amber-700 mt-0.5">{totDef} <span className="text-xs font-normal text-amber-500">of {totStu}</span></p>
                         <p className="text-xs text-amber-500">students owe</p>
                       </div>
@@ -2205,7 +2231,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                             <td className="pt-2.5 text-right text-green-700">{fmt(totCol)}</td>
                             <td className="pt-2.5 text-right text-red-700">{fmt(gradeStats.reduce((s, g) => s + Number(g.outstanding), 0))}</td>
                             <td className="pt-2.5 pl-4">
-                              <span className="text-xs font-bold text-blue-600">{pct(totCol, totDue)}% overall</span>
+                              <span className="text-xs font-bold text-blue-600">{pct(totCol, totDue - totWaivedAll)}% overall</span>
                             </td>
                           </tr>
                         </tfoot>
@@ -2227,7 +2253,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <div className="space-y-4">
                       {stats.by_category.map(cat => {
                         const collected = Number(cat.total_collected)
-                        const due = Number(cat.total_due)
+                        const due = Number(cat.total_due) - Number(cat.total_waived ?? 0)
                         const p = pct(collected, due)
                         const color = p >= 80 ? 'bg-green-500' : p >= 50 ? 'bg-yellow-400' : 'bg-red-400'
                         return (
@@ -2255,15 +2281,15 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   )}
                 </div>
 
-                {/* Right column: Top Defaulters + Recent Payments */}
+                {/* Right column: Highest Pending + Recent Payments */}
                 <div className="space-y-4">
 
-                  {/* Top Defaulters */}
+                  {/* Highest Pending */}
                   <div className="bg-white rounded-xl border border-gray-100 p-5">
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-semibold text-gray-700">Top Defaulters</h3>
+                      <h3 className="text-sm font-semibold text-gray-700">Highest Pending</h3>
                       <button
-                        onClick={() => setActiveTab('ledger')}
+                        onClick={() => setActiveTab('collect')}
                         className="text-xs text-blue-600 hover:text-blue-800"
                       >
                         View all →
@@ -2274,7 +2300,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
                           <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                         </div>
-                        <p className="text-sm text-green-600 font-medium">No defaulters — great!</p>
+                        <p className="text-sm text-green-600 font-medium">No pending payments — great!</p>
                       </div>
                     ) : (
                       <div className="space-y-3">
@@ -2607,7 +2633,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <select value={vgGrade} onChange={e => { setVgGrade(e.target.value); setVgStudents([]); setVgCategories([]); setVgMsg('') }}
                     className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
                     <option value="">Select grade…</option>
-                    {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                    {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                   </select>
                   <select value={vgSection} onChange={e => setVgSection(e.target.value)}
                     className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
@@ -2726,7 +2752,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 const generated = feeBillsGenerated(cat)
                 const catStat = stats?.by_category.find(c => c.category_name === cat.name)
                 const collected = catStat ? Number(catStat.total_collected) : 0
-                const due = catStat ? Number(catStat.total_due) : 0
+                const due = catStat ? Number(catStat.total_due) - Number(catStat.total_waived ?? 0) : 0
                 const collPct = pct(collected, due)
                 return (
                   <div key={cat.id} className={`bg-white rounded-xl border p-5 shadow-sm ${!cat.is_active ? 'border-gray-200 opacity-60' : 'border-gray-200'}`}>
@@ -2825,7 +2851,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                 onChange={e => { setApplGrade(e.target.value); setApplStudents([]); setApplCategories([]); setApplAmounts({}); setApplMsg('') }}
                                 className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
                                 <option value="">Select grade…</option>
-                                {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                                {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                               </select>
                               <button onClick={() => loadApplicability(applGrade)} disabled={!applGrade || applLoading}
                                 className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
@@ -2869,10 +2895,12 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                 </div>
                                 <div className="flex items-center justify-between">
                                   {applMsg && <span className={`text-xs ${applMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{applMsg}</span>}
-                                  <button onClick={saveApplicability} disabled={applSaving}
-                                    className="ml-auto text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg font-medium disabled:opacity-50">
-                                    {applSaving ? 'Saving…' : 'Save Amounts'}
-                                  </button>
+                                  <div className="ml-auto flex items-center gap-3">
+                                    <button onClick={() => saveApplicability()} disabled={applSaving}
+                                      className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg font-medium disabled:opacity-50">
+                                      {applSaving ? 'Saving…' : 'Save Amounts'}
+                                    </button>
+                                  </div>
                                 </div>
                                 <p className="text-[10px] text-gray-400">Tip: leave blank = student is not charged this fee.</p>
                               </>
@@ -2918,7 +2946,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                               <div className="grid grid-cols-4 gap-2">
                                 {GRADES.map(g => (
                                   <div key={g} className="flex items-center gap-1">
-                                    <span className="text-[10px] text-gray-400 w-8">Gr.{g}</span>
+                                    <span className="text-[10px] text-gray-400 w-10 shrink-0">{/^\d+$/.test(g) ? `Gr.${g}` : g}</span>
                                     <input type="number" min="0" placeholder="0"
                                       value={editAmounts[`${cat.id}_${g}`] || ''}
                                       onKeyDown={blockNonNumericKeys}
@@ -2969,44 +2997,37 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-4" onClick={() => setShowGenerateConfirm(false)}>
               <div className="bg-white rounded-2xl w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
                 <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-                  <p className="font-semibold text-gray-800">Confirm Due Dates Before Generating Bills</p>
+                  <p className="font-semibold text-gray-800">Confirm — Generate Bills</p>
                   <button onClick={() => setShowGenerateConfirm(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
                 </div>
                 <div className="p-5 space-y-3">
-                  <p className="text-sm text-gray-500">Bills will be generated with the following due dates. Check each one before continuing.</p>
+                  <p className="text-sm text-gray-500">
+                    Bills will be generated for academic year <strong>{academicYear}</strong>. Every fee head, regardless of frequency,
+                    becomes due on the academic year&apos;s end date.
+                  </p>
                   <div className="border border-gray-100 rounded-xl overflow-hidden">
                     <table className="w-full text-sm">
                       <thead className="bg-gray-50">
                         <tr className="text-xs text-gray-500 border-b border-gray-100">
                           <th className="text-left px-4 py-2 font-semibold">Fee Head</th>
                           <th className="text-left px-4 py-2 font-semibold">Frequency</th>
-                          <th className="text-center px-4 py-2 font-semibold">Due Day</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
-                        {categories.filter(c => c.is_active).map(cat => {
-                          const day = parseInt(dueDays[cat.id] || '10') || 10
-                          const isDefault = !dueDays[cat.id] || dueDays[cat.id] === '10'
-                          return (
-                            <tr key={cat.id} className="hover:bg-gray-50/60">
-                              <td className="px-4 py-2.5 font-medium text-gray-800">{cat.name}</td>
-                              <td className="px-4 py-2.5 text-gray-500">{FREQ_LABEL[cat.frequency]}</td>
-                              <td className="px-4 py-2.5 text-center">
-                                <span className={`font-semibold ${isDefault ? 'text-amber-600' : 'text-gray-800'}`}>{day}</span>
-                                {isDefault && <span className="ml-1 text-[10px] text-amber-500">(default)</span>}
-                              </td>
-                            </tr>
-                          )
-                        })}
+                        {categories.filter(c => c.is_active).map(cat => (
+                          <tr key={cat.id} className="hover:bg-gray-50/60">
+                            <td className="px-4 py-2.5 font-medium text-gray-800">{cat.name}</td>
+                            <td className="px-4 py-2.5 text-gray-500">{FREQ_LABEL[cat.frequency]}</td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
-                  <p className="text-xs text-amber-600">⚠ Dates marked <strong>default</strong> were not explicitly set. Go back to change them on the fee head card before generating.</p>
                 </div>
                 <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between">
                   <button onClick={() => setShowGenerateConfirm(false)}
                     className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2">
-                    ← Go back & edit
+                    ← Go back
                   </button>
                   <button onClick={confirmGenerateLedger}
                     className="text-sm bg-green-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-green-700">
@@ -3137,7 +3158,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             {([
               { key: 'counter',    label: 'Daily Counter', show: true },
               { key: 'online',     label: pendingPayments.length > 0 ? `Online (${pendingPayments.length})` : 'Online', show: hasOnlinePayments },
-              { key: 'defaulters', label: 'Defaulters',    show: true },
+              { key: 'defaulters', label: 'Pending Payments', show: true },
               { key: 'dayclose',   label: 'Day Close',     show: true },
             ] as const).filter(v => v.show).map(v => (
               <button key={v.key} onClick={() => setCollectionView(v.key)}
@@ -3160,7 +3181,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <select value={ledgerGrade} onChange={e => setLedgerGrade(e.target.value)}
                   className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
                   <option value="">All Grades</option>
-                  {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                  {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                 </select>
                 <button onClick={loadLedger} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Refresh</button>
                 <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download
@@ -3593,20 +3614,20 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             </div>
           )}
 
-          {/* ─── DEFAULTERS ─── */}
+          {/* ─── PENDING PAYMENTS ─── */}
           {collectionView === 'defaulters' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold text-gray-800">Defaulters — Outstanding Dues</h3>
+                <h3 className="text-base font-semibold text-gray-800">Pending Payments — Outstanding Dues</h3>
                 <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&outstanding=1`} download
-                  className="text-sm border border-red-200 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50">Export Defaulters</a>
+                  className="text-sm border border-red-200 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50">Export Pending Payments</a>
               </div>
               {(() => {
                 const defaulters = studentRows.filter(r => r.outstanding > 0).sort((a, b) => b.outstanding - a.outstanding)
                 if (ledgerLoading) return <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-sm text-gray-400">Loading…</div>
                 if (defaulters.length === 0) return (
                   <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-                    <p className="text-green-700 font-medium">No defaulters — all dues cleared!</p>
+                    <p className="text-green-700 font-medium">No pending payments — all dues cleared!</p>
                   </div>
                 )
                 return (
@@ -3777,7 +3798,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <select value={pbGrade} onChange={e => setPbGrade(e.target.value)}
                   className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
                   <option value="">All Grades</option>
-                  {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                  {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                 </select>
                 <input type="text" placeholder="Search name or roll number…" value={pbSearch}
                   onChange={e => setPbSearch(e.target.value)}
@@ -3848,7 +3869,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   {[
                     { l: 'Total Billed', v: pbSummary.total_billed, c: 'text-gray-900' },
                     { l: 'Paid',         v: pbSummary.total_paid,    c: 'text-green-700' },
-                    { l: 'Waived',       v: pbSummary.total_waived,  c: 'text-purple-700' },
+                    { l: 'Waived',       v: pbSummary.discretionary_waived,  c: 'text-purple-700' },
                     { l: 'Outstanding',  v: pbSummary.outstanding,   c: 'text-red-600' },
                   ].map(s => (
                     <div key={s.l} className="bg-gray-50 rounded-lg px-3 py-2.5 text-center">
@@ -3914,7 +3935,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         <div className="flex items-center gap-4 text-xs text-gray-500">
                           <span>Billed <span className="font-semibold text-gray-700">{fmt(yearGroup.total_billed)}</span></span>
                           <span>Paid <span className="font-semibold text-green-700">{fmt(yearGroup.total_paid)}</span></span>
-                          {yearGroup.total_waived > 0 && <span>Waived <span className="font-semibold text-purple-700">{fmt(yearGroup.total_waived)}</span></span>}
+                          {(yearGroup.discretionary_waived ?? yearGroup.total_waived) > 0 && <span>Waived <span className="font-semibold text-purple-700">{fmt(yearGroup.discretionary_waived ?? yearGroup.total_waived)}</span></span>}
                           <span>Outstanding <span className={`font-bold ${yearGroup.outstanding > 0 ? 'text-red-600' : 'text-green-600'}`}>{fmt(yearGroup.outstanding)}</span></span>
                         </div>
                       </div>
@@ -4226,7 +4247,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <>
                   <select value={arGrade} onChange={e => setArGrade(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
                     <option value="">Grade…</option>
-                    {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                    {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                   </select>
                   <select value={arSection} onChange={e => setArSection(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
                     <option value="all">All sections</option>
@@ -4285,7 +4306,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   { label: 'Total Billed',      val: reportData.balance.total_billed,      color: 'text-gray-800',  bg: 'bg-white' },
                   { label: 'Total Collected',   val: reportData.balance.total_collected,   color: 'text-green-700', bg: 'bg-green-50' },
                   { label: 'Total Outstanding', val: reportData.balance.total_outstanding, color: 'text-red-600',   bg: 'bg-red-50' },
-                  { label: 'Total Waived',      val: reportData.balance.total_waived,      color: 'text-purple-700',bg: 'bg-purple-50' },
+                  { label: 'Total Waived',      val: reportData.balance.discretionary_waived ?? reportData.balance.total_waived, color: 'text-purple-700',bg: 'bg-purple-50' },
                 ].map(s => (
                   <div key={s.label} className={`${s.bg} rounded-xl border border-gray-100 p-4`}>
                     <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">{s.label}</p>
@@ -4302,16 +4323,16 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <div className="space-y-3">
                     {reportData.byGrade.map(g => {
                       const netDemand = Number(g.total_due) - Number(g.total_waived ?? 0)
-                      const pct = netDemand > 0 ? Math.round((Number(g.total_collected) / netDemand) * 100) : 0
+                      const gradePct = pct(Number(g.total_collected), netDemand)
                       const cls = g.section ? `${g.grade}-${g.section}` : `Grade ${g.grade}`
                       return (
                         <div key={cls}>
                           <div className="flex justify-between text-xs mb-1">
                             <span className="font-medium text-gray-700">{cls} <span className="text-gray-400">({g.students} students)</span></span>
-                            <span className="text-gray-500">{fmt(g.total_collected)} / {fmt(g.total_due)} <span className="font-bold text-blue-600">{pct}%</span></span>
+                            <span className="text-gray-500">{fmt(g.total_collected)} / {fmt(g.total_due)} <span className="font-bold text-blue-600">{gradePct}%</span></span>
                           </div>
                           <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div className="bg-blue-500 h-full rounded-full" style={{ width: `${pct}%` }} />
+                            <div className="bg-blue-500 h-full rounded-full" style={{ width: `${gradePct}%` }} />
                           </div>
                         </div>
                       )
@@ -4362,7 +4383,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                           </td>
                           <td className="px-4 py-2.5 text-right text-gray-700">{fmt(c.total_due)}</td>
                           <td className="px-4 py-2.5 text-right text-green-600 font-medium">{fmt(c.total_collected)}</td>
-                          <td className="px-4 py-2.5 text-right text-purple-600">{Number(c.total_waived) > 0 ? fmt(c.total_waived) : '—'}</td>
+                          <td className="px-4 py-2.5 text-right text-purple-600">{Number(c.discretionary_waived ?? c.total_waived) > 0 ? fmt(c.discretionary_waived ?? c.total_waived) : '—'}</td>
                           <td className="px-4 py-2.5 text-right text-red-600 font-medium">{fmt(c.outstanding)}</td>
                           <td className="px-4 py-2.5 text-center text-xs">
                             <span className="text-green-600">{c.paid_count} paid</span>
@@ -4376,14 +4397,14 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 </div>
               </div>
 
-              {/* Defaulters list */}
+              {/* Pending payments list */}
               {reportData.defaulters.length > 0 && (
                 <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                   <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                    <p className="text-sm font-semibold text-gray-700">Fee Defaulters — {reportData.defaulters.length} students</p>
+                    <p className="text-sm font-semibold text-gray-700">Pending Payments — {reportData.defaulters.length} students</p>
                     <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&outstanding=1`} download
                       className="text-xs text-red-600 border border-red-200 px-2.5 py-1 rounded-lg hover:bg-red-50">
-                      Export Defaulters
+                      Export Pending Payments
                     </a>
                   </div>
                   <div className="overflow-x-auto max-h-80">
@@ -4537,7 +4558,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   {[
                     { l: 'Total Billed', v: yearEnd.summary.total_billed,    c: 'text-gray-900' },
                     { l: 'Collected',    v: yearEnd.summary.total_collected, c: 'text-green-700' },
-                    { l: 'Waived',       v: yearEnd.summary.total_waived,    c: 'text-purple-700' },
+                    { l: 'Waived',       v: yearEnd.summary.discretionary_waived ?? yearEnd.summary.total_waived, c: 'text-purple-700' },
                     { l: 'Still Unpaid', v: yearEnd.summary.total_unpaid,    c: 'text-red-600' },
                   ].map(s => (
                     <div key={s.l} className="bg-gray-50 rounded-lg px-3 py-2.5 text-center">
@@ -4745,7 +4766,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 {[
                   { l: 'Total Billed', v: pbSummary.total_billed, c: 'text-gray-800' },
                   { l: 'Paid',         v: pbSummary.total_paid,    c: 'text-green-700' },
-                  { l: 'Waived',       v: pbSummary.total_waived,  c: 'text-purple-700' },
+                  { l: 'Waived',       v: pbSummary.discretionary_waived,  c: 'text-purple-700' },
                   { l: 'Outstanding',  v: pbSummary.outstanding,   c: 'text-red-600' },
                 ].map(s => (
                   <div key={s.l} className="text-center">

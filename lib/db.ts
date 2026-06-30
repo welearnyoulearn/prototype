@@ -1605,6 +1605,26 @@ async function runIncrementalMigrations() {
       WHERE email IS NOT NULL
   `).catch(() => {})
 
+  // ── Per-school feature overrides (self-heal) ───────────────────────────────────
+  // This table's CREATE TABLE only lived in the one-time fresh-DB bootstrap block
+  // above, which never re-runs once a database is already bootstrapped — so on any
+  // existing database (dev/qa/prod) the table was never actually created. Repeating
+  // it here (idempotent, IF NOT EXISTS) ensures it exists everywhere.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS school_feature_overrides (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      feature_key VARCHAR(50) NOT NULL,
+      enabled BOOLEAN NOT NULL,
+      updated_by TEXT,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, feature_key)
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_school_feature_overrides_school ON school_feature_overrides(school_id)
+  `).catch(() => {})
+
   // ── Student/parent portal feature keys ────────────────────────────────────────
   // New keys default to disabled if unconfigured (see GET /api/platform/features).
   // Seed every existing tier as enabled so onboarding for existing schools is
@@ -1616,5 +1636,37 @@ async function runIncrementalMigrations() {
       ('student-portal', 'basic', true), ('student-portal', 'standard', true), ('student-portal', 'premium', true),
       ('parent-portal',  'basic', true), ('parent-portal',  'standard', true), ('parent-portal',  'premium', true)
     ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+
+  // ── Academic year date-order safety ────────────────────────────────────────────
+  // Nothing previously stopped start_date >= end_date on academic_years.
+  await pool.query(`
+    ALTER TABLE academic_years ADD CONSTRAINT chk_academic_years_date_order CHECK (start_date < end_date)
+  `).catch(() => {})
+
+  // ── Academic year edit snapshots ────────────────────────────────────────────────
+  // Read-only audit trail captured whenever an academic year's dates are edited
+  // AFTER fee bills already exist for it. Stores the pre-edit ledger state (as
+  // JSON, row-level) so it can be inspected or exported later, without keeping a
+  // second "live" copy of the year around — only one version of a year is ever
+  // active/transactable at a time; this table is purely historical record-keeping.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS academic_year_snapshots (
+      id SERIAL PRIMARY KEY,
+      academic_year_id INTEGER NOT NULL REFERENCES academic_years(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      label VARCHAR(20) NOT NULL,
+      old_start_date DATE NOT NULL,
+      old_end_date DATE NOT NULL,
+      new_start_date DATE NOT NULL,
+      new_end_date DATE NOT NULL,
+      ledger_snapshot JSONB NOT NULL DEFAULT '[]',
+      status_summary JSONB NOT NULL DEFAULT '{}',
+      changed_by TEXT NOT NULL,
+      changed_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_academic_year_snapshots_year ON academic_year_snapshots(academic_year_id)
   `).catch(() => {})
 }

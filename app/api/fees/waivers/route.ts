@@ -57,6 +57,16 @@ export async function POST(req: NextRequest) {
     if (!school_id || !student_id || !ledger_id || !waiver_type || !reason) {
       return NextResponse.json({ error: 'school_id, student_id, ledger_id, waiver_type, reason required' }, { status: 400 })
     }
+    // 'carry_forward' is a system-only waiver_type written exclusively by year-end/
+    // rollover bookkeeping — it's excluded from "discretionary waived" totals across
+    // Overview/Reports/Passbook/Stats. Without this guard, any caller of this admin-
+    // facing endpoint could mislabel a real discretionary waiver as carry_forward,
+    // making it vanish entirely from concession reporting (waiver_amount computed
+    // below would also be $0 since 'carry_forward' isn't a recognized calc branch,
+    // but block it outright so the intent is unambiguous and not relying on that).
+    if (!['full', 'percentage', 'fixed_amount'].includes(waiver_type)) {
+      return NextResponse.json({ error: 'waiver_type must be full, percentage, or fixed_amount' }, { status: 400 })
+    }
 
     const client = await pool.connect()
     try {
@@ -149,6 +159,16 @@ export async function PATCH(req: NextRequest) {
       const access = await requireFeeAccess(w0.school_id)
       if (!access) { await client.query('ROLLBACK'); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
 
+      // Same reasoning as DELETE: correcting a carry_forward waiver's amount would
+      // change the closed year's debt without touching the matching "Previous Year
+      // Dues" bill already created in the new year.
+      if (w0.waiver_type === 'carry_forward') {
+        await client.query('ROLLBACK')
+        return NextResponse.json({
+          error: 'This waiver was created automatically during year-end closure and cannot be corrected here. Reopen the academic year to undo the closure instead.',
+        }, { status: 409 })
+      }
+
       // Validate: new waiver + existing payments must not exceed amount_due
       const { rows: [lgCheck] } = await client.query(
         `SELECT amount_due, amount_paid FROM student_fee_ledger WHERE id = $1 FOR UPDATE`, [w0.ledger_id]
@@ -166,11 +186,17 @@ export async function PATCH(req: NextRequest) {
         [access.actor, reason, id]
       )
 
-      // Create new waiver with corrected amount
+      // Create new waiver with corrected amount, preserving the original waiver_type —
+      // carry_forward waivers (year-end/rollover bookkeeping) must never be relabelled
+      // as a discretionary 'fixed_amount' waiver, since the carry_forward/discretionary
+      // split is used to keep "Total Waived" reports from being inflated by closed-year
+      // bookkeeping. Discretionary corrections still record the new amount as fixed_amount
+      // for consistency with how they're created elsewhere.
+      const correctedType = w0.waiver_type === 'carry_forward' ? 'carry_forward' : 'fixed_amount'
       const { rows: [newWaiver] } = await client.query(
         `INSERT INTO fee_waivers (school_id, student_id, ledger_id, waiver_type, waiver_value, waiver_amount, reason, granted_by_name)
-         VALUES ($1, $2, $3, 'fixed_amount', $4, $4, $5, $6) RETURNING *`,
-        [w0.school_id, w0.student_id, w0.ledger_id, newAmt, reason, access.actor]
+         VALUES ($1, $2, $3, $4, $5, $5, $6, $7) RETURNING *`,
+        [w0.school_id, w0.student_id, w0.ledger_id, correctedType, newAmt, reason, access.actor]
       )
 
       // Update ledger: adjust waiver_amount by the difference (new - old)
@@ -209,11 +235,21 @@ export async function DELETE(req: NextRequest) {
 
     const client = await pool.connect()
     try {
-      const { rows: [w0] } = await client.query(`SELECT school_id FROM fee_waivers WHERE id = $1`, [id])
+      const { rows: [w0] } = await client.query(`SELECT school_id, waiver_type FROM fee_waivers WHERE id = $1`, [id])
       if (!w0) return NextResponse.json({ error: 'Waiver not found' }, { status: 404 })
       const access = await requireFeeAccess(w0.school_id)
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const revoked_by = access.actor
+
+      // Revoking a carry_forward waiver would un-waive a closed year's debt without
+      // reversing the corresponding "Previous Year Dues" bill already created in the
+      // new year — the same debt would then be collectible in BOTH years at once.
+      // This bookkeeping waiver can only be undone by reopening the year itself.
+      if (w0.waiver_type === 'carry_forward') {
+        return NextResponse.json({
+          error: 'This waiver was created automatically during year-end closure and cannot be revoked here. Reopen the academic year to undo the closure instead.',
+        }, { status: 409 })
+      }
 
       await client.query('BEGIN')
 

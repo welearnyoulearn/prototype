@@ -1,4 +1,5 @@
 import pool from '@/lib/db'
+import { gradeOrderSql } from '@/lib/grades'
 
 // Shared builder for the Fee Audit Report — used by the JSON, Excel and PDF routes.
 // Every money section uses the reconcilable model:
@@ -126,7 +127,7 @@ export async function buildFeeAuditReport(opts: {
             COALESCE(SUM(l.amount_paid),0) AS paid
      FROM student_fee_ledger l JOIN fee_categories fc ON fc.id = l.fee_category_id
      JOIN students s ON s.id = l.student_id WHERE ${WHERE}
-     GROUP BY s.grade, s.section, fc.name ORDER BY s.grade::int NULLS LAST, s.section, fc.name`, vals
+     GROUP BY s.grade, s.section, fc.name ORDER BY ${gradeOrderSql('s.grade')}, s.section, fc.name`, vals
   )
   const by_class = byClass.map(r => ({
     class: r.section ? `${r.grade}-${r.section}` : `Grade ${r.grade}`, fee_type: r.fee_type,
@@ -146,7 +147,7 @@ export async function buildFeeAuditReport(opts: {
      JOIN fee_categories fc ON fc.id = l.fee_category_id
      WHERE ${WHERE}
      GROUP BY s.id, s.name, s.grade, s.section, s.school_roll_number, s.parent_name, s.parent_phone, fc.name
-     ORDER BY s.grade::int NULLS LAST, s.section, s.name, fc.name`, vals
+     ORDER BY ${gradeOrderSql('s.grade')}, s.section, s.name, fc.name`, vals
   )
   const by_student: BulkReport['by_student'] = []
   let curSid: number | null = null
@@ -174,8 +175,14 @@ export async function buildFeeAuditReport(opts: {
   // Change log
   type LogRow = { type: string; detail: string; user: string; at: string; amount: number | null }
   const log: LogRow[] = []
-  const gParams = (extra: unknown[] = []) => grade ? [school_id, academic_year, grade, ...extra] : [school_id, academic_year, ...extra]
-  const gClause = grade ? 'AND st.grade = $3' : ''
+  // Mirrors the same grade+section scoping used for the numeric tables above (WHERE/cond) —
+  // previously this only filtered by grade, so a single-section report's Change Log
+  // leaked payments/waivers/edits from other sections of the same grade.
+  const gFilterParams: unknown[] = [school_id, academic_year]
+  let gClause = ''
+  if (grade) { gFilterParams.push(grade); gClause += ` AND st.grade = $${gFilterParams.length}` }
+  if (section && section !== 'all') { gFilterParams.push(section); gClause += ` AND st.section = $${gFilterParams.length}` }
+  const gParams = (extra: unknown[] = []) => [...gFilterParams, ...extra]
 
   async function tableExists(t: string) { return (await pool.query(`SELECT to_regclass($1) AS t`, [t])).rows[0].t != null }
 
