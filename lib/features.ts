@@ -6,6 +6,8 @@ export const ALL_FEATURES = [
   { key: 'staff',              label: 'Staff Directory & Onboarding',    category: 'Core' },
   { key: 'students',           label: 'Students List & Onboarding',      category: 'Core' },
   { key: 'class-management',   label: 'Class Management',                category: 'Core' },
+  { key: 'student-portal',     label: 'Student Portal Access',           category: 'Core' },
+  { key: 'parent-portal',      label: 'Parent Portal Access',            category: 'Core' },
 
   // ── Scheduling ────────────────────────────────────────────────────────────
   { key: 'attendance',         label: 'Attendance Tracking',             category: 'Scheduling' },
@@ -38,3 +40,7 @@ export const ALL_FEATURES = [
 ]
 
 export const CATEGORY_ORDER = ['Core', 'Scheduling', 'Analytics', 'Finance', 'Communication', 'Administration']
+
+// Features that can be overridden per-school via school_feature_overrides,
+// taking precedence over the tier-level plan_features setting.
+export const OVERRIDABLE_FEATURE_KEYS = ['student-portal', 'parent-portal']

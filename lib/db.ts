@@ -1572,4 +1572,49 @@ async function runIncrementalMigrations() {
     END
     WHERE staff_limit IS NULL
   `).catch(() => {})
+
+  // ── Login performance indexes (functional, case-insensitive) ─────────────────
+  // teachers.email: every teacher login was a full table scan — no index existed
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_teachers_email_lower
+      ON teachers(LOWER(email))
+      WHERE email IS NOT NULL
+  `).catch(() => {})
+  // students.roll_number: every student login was a full table scan — no index existed
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_students_roll_number_lower
+      ON students(LOWER(roll_number))
+      WHERE roll_number IS NOT NULL
+  `).catch(() => {})
+  // users.email: existing index was on raw column; LOWER() queries couldn't use it
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_users_email_lower
+      ON users(LOWER(email))
+      WHERE email IS NOT NULL
+  `).catch(() => {})
+  // users.school_code: admin login ORs on school_code — no index existed at all
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_users_school_code_lower
+      ON users(LOWER(school_code))
+      WHERE school_code IS NOT NULL
+  `).catch(() => {})
+  // parents.email: existing index was on raw column; LOWER() queries couldn't use it
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_parents_email_lower
+      ON parents(LOWER(email))
+      WHERE email IS NOT NULL
+  `).catch(() => {})
+
+  // ── Student/parent portal feature keys ────────────────────────────────────────
+  // New keys default to disabled if unconfigured (see GET /api/platform/features).
+  // Seed every existing tier as enabled so onboarding for existing schools is
+  // unaffected by this change — schools that want to disable portals do so via
+  // a per-school override in school_feature_overrides instead.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES
+      ('student-portal', 'basic', true), ('student-portal', 'standard', true), ('student-portal', 'premium', true),
+      ('parent-portal',  'basic', true), ('parent-portal',  'standard', true), ('parent-portal',  'premium', true)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
 }

@@ -189,6 +189,16 @@ export async function POST(req: NextRequest) {
           [ledger_ids, school_id]
         )
 
+        const totalBalance = entries.reduce((sum, e) => sum + parseFloat(String(e.balance)), 0)
+        const totalAmount = parseFloat(String(total_amount))
+        if (totalAmount > totalBalance + 0.001) {
+          await client.query('ROLLBACK')
+          const msg = totalBalance <= 0
+            ? 'These fees have already been paid by another user. Please refresh and try again.'
+            : `Amount exceeds total balance due (₹${totalBalance.toFixed(2)}). Another payment may have been recorded simultaneously — please refresh.`
+          return NextResponse.json({ error: msg }, { status: 400 })
+        }
+
         let remaining = parseFloat(String(total_amount))
 
         for (const entry of entries) {

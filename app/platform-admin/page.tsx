@@ -21,6 +21,9 @@ type School = {
   teacher_count?: number | string
   student_count?: number | string
   admin_last_login?: string
+  student_portal_enabled?: boolean
+  parent_portal_enabled?: boolean
+  portal_pending_count?: number | string
 }
 
 type PlatformStats = {
@@ -695,6 +698,7 @@ export default function PlatformAdmin() {
                     <th className="text-left px-5 py-3 font-medium text-gray-500 whitespace-nowrap">School ID</th>
                     {thSort('plan',        'Plan')}
                     {thSort('staff',       'Staff / Students')}
+                    <th className="text-left px-5 py-3 font-medium text-gray-500">Portals</th>
                     <th className="text-left px-5 py-3 font-medium text-gray-500">Location</th>
                     {thSort('last_active', 'Last Active')}
                     {thSort('joined',      'Joined')}
@@ -797,6 +801,20 @@ export default function PlatformAdmin() {
                           </div>
                           <div className={`text-xs ${scnt === 0 ? 'text-amber-600' : 'text-gray-500'}`}>
                             <span className={`font-semibold ${scnt === 0 ? 'text-amber-600' : 'text-gray-800'}`}>{scnt}</span> students
+                          </div>
+                        </td>
+
+                        {/* Portal status */}
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-1">
+                            <span title="Student Portal" className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${school.student_portal_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>S</span>
+                            <span title="Parent Portal" className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${school.parent_portal_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>P</span>
+                            {Number(school.portal_pending_count || 0) > 0 && (school.student_portal_enabled || school.parent_portal_enabled) && (
+                              <span title={`${school.portal_pending_count} students missing a login`}
+                                className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
+                                {school.portal_pending_count} pending
+                              </span>
+                            )}
                           </div>
                         </td>
 

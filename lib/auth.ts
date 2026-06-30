@@ -1,7 +1,9 @@
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
+import { randomInt } from 'crypto'
 import { cookies } from 'next/headers'
 import { NextRequest } from 'next/server'
+import pool from './db'
 
 if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
   console.error('[FATAL] JWT_SECRET env var is not set — auth cookies will not work correctly')
@@ -66,14 +68,14 @@ export function verifyPassword(plain: string, hash: string): Promise<boolean> {
 export function generateTempPassword(length = 10): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
   let out = ''
-  for (let i = 0; i < length; i++) out += chars[Math.floor(Math.random() * chars.length)]
+  for (let i = 0; i < length; i++) out += chars[randomInt(chars.length)]
   return out
 }
 
 export function generateResetToken(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
   let out = ''
-  for (let i = 0; i < 48; i++) out += chars[Math.floor(Math.random() * chars.length)]
+  for (let i = 0; i < 48; i++) out += chars[randomInt(chars.length)]
   return out
 }
 
@@ -239,6 +241,28 @@ export async function requireFeeAccess(requestedSchoolId: string | number | null
   }
 
   return null
+}
+
+// ─── Per-school feature resolution ────────────────────────────────────────────
+// Checks school_feature_overrides first (per-school, takes precedence), then
+// falls back to the school's tier in plan_features. Unconfigured = disabled,
+// matching the convention in GET /api/platform/features.
+export async function schoolHasFeature(schoolId: number, featureKey: string): Promise<boolean> {
+  const overrideRes = await pool.query(
+    `SELECT enabled FROM school_feature_overrides WHERE school_id = $1 AND feature_key = $2`,
+    [schoolId, featureKey]
+  )
+  if (overrideRes.rows.length > 0) return overrideRes.rows[0].enabled
+
+  const tierRes = await pool.query(
+    `SELECT sub.tier, pf.enabled
+     FROM school_subscriptions sub
+     LEFT JOIN plan_features pf ON pf.tier = sub.tier AND pf.feature_key = $2
+     WHERE sub.school_id = $1`,
+    [schoolId, featureKey]
+  )
+  if (tierRes.rows.length === 0) return false
+  return tierRes.rows[0].enabled === true
 }
 
 // ─── Any authenticated session ────────────────────────────────────────────────
