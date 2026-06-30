@@ -197,7 +197,7 @@ export async function POST(req: NextRequest) {
            ON CONFLICT (student_id, fee_category_id, academic_year, period_label)
            DO UPDATE SET amount_due = EXCLUDED.amount_due`,
           [school_id, row.student_id, prevDuesCatId, to_year, periodLabel,
-           balance, `${toStartYear}-04-30`, `Auto-carried from ${from_year}`]
+           balance, `${toStartYear + 1}-03-31`, `Auto-carried from ${from_year}`]
         )
 
         // Mark original bills as waived/settled in old year

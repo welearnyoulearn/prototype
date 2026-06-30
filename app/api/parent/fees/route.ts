@@ -15,10 +15,31 @@ export async function GET(req: NextRequest) {
     ).then(r => r.rows[0]?.label ?? '2025-26').catch(() => '2025-26')
 
     try {
-      // Auto-mark overdue for this student only (targeted, not full table scan)
+      // Auto-mark overdue for this student only (targeted, not full table scan).
+      // A bill only becomes overdue once its academic year has ended — matches the
+      // rule used everywhere else (generate.ts, stats.ts) — not merely once its
+      // due_date has passed, since due_date alone no longer distinguishes "this
+      // month's installment" from "the whole year is over."
       await pool.query(
-        `UPDATE student_fee_ledger SET status = 'overdue'
-         WHERE school_id = $1 AND student_id = $2 AND status = 'pending' AND due_date < CURRENT_DATE`,
+        `UPDATE student_fee_ledger l SET status = 'overdue'
+         WHERE l.school_id = $1 AND l.student_id = $2 AND l.status = 'pending'
+           AND EXISTS (
+             SELECT 1 FROM academic_years ay
+             WHERE ay.school_id = l.school_id AND ay.label = l.academic_year
+               AND ay.end_date < CURRENT_DATE
+           )`,
+        [school_id, student_id]
+      )
+      // Symmetric revert — if an admin reopens/extends a year after a bill was marked
+      // overdue, this student's view shouldn't stay stuck showing Overdue forever.
+      await pool.query(
+        `UPDATE student_fee_ledger l SET status = 'pending'
+         WHERE l.school_id = $1 AND l.student_id = $2 AND l.status = 'overdue'
+           AND EXISTS (
+             SELECT 1 FROM academic_years ay
+             WHERE ay.school_id = l.school_id AND ay.label = l.academic_year
+               AND ay.end_date >= CURRENT_DATE
+           )`,
         [school_id, student_id]
       )
 

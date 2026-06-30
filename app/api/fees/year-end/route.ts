@@ -221,16 +221,18 @@ export async function POST(req: NextRequest) {
         // For carry-forward, verify the target year exists and prepare the "Previous Year Dues" head
         const carryRequested = decisions.some(d => d.decision === 'carry')
         let prevDuesCatId: number | null = null
+        let toYearEndDate: string | null = null
         if (carryRequested) {
           if (!to_year) {
             return NextResponse.json({ error: 'to_year required for carry-forward' }, { status: 400 })
           }
           const { rows: [ty] } = await client.query(
-            `SELECT label FROM academic_years WHERE school_id = $1 AND label = $2`, [school_id, to_year]
+            `SELECT label, end_date FROM academic_years WHERE school_id = $1 AND label = $2`, [school_id, to_year]
           )
           if (!ty) {
             return NextResponse.json({ error: `Academic year ${to_year} does not exist. Create it first.` }, { status: 400 })
           }
+          toYearEndDate = ty.end_date
           // Auto-create the "Previous Year Dues" fee head (one-time) if missing
           await client.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS category_type TEXT NOT NULL DEFAULT 'fixed'`)
           const { rows: [pd] } = await client.query(
@@ -301,7 +303,7 @@ export async function POST(req: NextRequest) {
                ON CONFLICT (student_id, fee_category_id, academic_year, period_label) DO UPDATE
                  SET amount_due = EXCLUDED.amount_due, notes = EXCLUDED.notes`,
               [school_id, d.student_id, prevDuesCatId, to_year, periodLabel,
-               studentBalance, `${startYearOf(to_year)}-04-30`,
+               studentBalance, toYearEndDate,
                `Carried from ${from_year}: ${note}`]
             )
             // Close out the original bills (mark as carried = waived in source year, with record)

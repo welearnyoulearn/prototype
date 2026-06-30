@@ -312,7 +312,6 @@ export default function FeeManagement({
   // (e.g. a school with no Nursery/LKG/UKG section shouldn't be blocked on those).
   const [enrolledGrades, setEnrolledGrades] = useState<string[] | null>(null)
   const [editAmounts, setEditAmounts]   = useState<Record<string, string>>({})
-  const [dueDays, setDueDays]           = useState<Record<number, string>>({})
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [newCategory, setNewCategory]   = useState({ name: '', frequency: 'monthly', description: '', category_type: 'fixed' })
   const [savingStructure, setSavingStructure] = useState(false)
@@ -633,9 +632,6 @@ export default function FeeManagement({
     const init: Record<string, string> = {}
     strs.forEach(s => { init[`${s.fee_category_id}_${s.grade}`] = String(s.amount) })
     setEditAmounts(init)
-    const initDueDays: Record<number, string> = {}
-    strs.forEach(s => { if (!initDueDays[s.fee_category_id]) initDueDays[s.fee_category_id] = String(s.due_day) })
-    setDueDays(initDueDays)
     setSetupLoading(false)
   }, [schoolId, academicYear])
 
@@ -1018,7 +1014,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
         const key = `${cat.id}_${grade}`
         const val = editAmounts[key]
         if (val && parseFloat(val) > 0)
-          structs.push({ fee_category_id: cat.id, grade, amount: parseFloat(val), due_day: parseInt(dueDays[cat.id] || '10') || 10 })
+          structs.push({ fee_category_id: cat.id, grade, amount: parseFloat(val) })
       }
     }
     const r = await fetch('/api/fees/structures', {
@@ -1114,7 +1110,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     for (const grade of GRADES) {
       const val = editAmounts[`${cat.id}_${grade}`]
       if (val && parseFloat(val) > 0)
-        structs.push({ fee_category_id: cat.id, grade, amount: parseFloat(val), due_day: parseInt(dueDays[cat.id] || '10') || 10 })
+        structs.push({ fee_category_id: cat.id, grade, amount: parseFloat(val) })
     }
     const r = await fetch('/api/fees/structures', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1251,7 +1247,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     setApplLoading(false)
   }
 
-  async function saveApplicability(dueDayCatId?: number) {
+  async function saveApplicability() {
     if (!applGrade || !academicYear) return
     setApplSaving(true); setApplMsg('')
     const assignments: { student_id: number; fee_category_id: number; amount: string }[] = []
@@ -1273,20 +1269,6 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       loadStats()
     } else {
       setApplMsg(d.error || 'Failed to save')
-    }
-
-    // Variable categories have no per-grade structure row — generate.ts reads their due
-    // day from fee_structures via a sentinel 'ALL' grade row. Save it alongside the
-    // assignments so variable fees stop silently defaulting to due day 10.
-    if (dueDayCatId) {
-      await fetch('/api/fees/structures', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          school_id: schoolId, academic_year: academicYear,
-          structures: [{ fee_category_id: dueDayCatId, grade: 'ALL', amount: 0, due_day: parseInt(dueDays[dueDayCatId] || '10') || 10 }],
-          changed_by: adminName || 'Admin',
-        }),
-      }).catch(() => {})
     }
 
     setApplSaving(false)
@@ -2914,14 +2896,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                 <div className="flex items-center justify-between">
                                   {applMsg && <span className={`text-xs ${applMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{applMsg}</span>}
                                   <div className="ml-auto flex items-center gap-3">
-                                    <div className="flex items-center gap-2">
-                                      <label className="text-xs text-gray-500">Due day of month</label>
-                                      <input type="number" min="1" max="31"
-                                        value={dueDays[cat.id] || '10'}
-                                        onChange={e => setDueDays(p => ({ ...p, [cat.id]: e.target.value.replace(/\D/g, '') }))}
-                                        className="w-16 text-center border border-gray-200 rounded px-1 py-1 text-xs" />
-                                    </div>
-                                    <button onClick={() => saveApplicability(cat.id)} disabled={applSaving}
+                                    <button onClick={() => saveApplicability()} disabled={applSaving}
                                       className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg font-medium disabled:opacity-50">
                                       {applSaving ? 'Saving…' : 'Save Amounts'}
                                     </button>
@@ -2982,14 +2957,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                               </div>
                             </div>
 
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <label className="text-xs text-gray-500">Due day of month</label>
-                                <input type="number" min="1" max="31"
-                                  value={dueDays[cat.id] || '10'}
-                                  onChange={e => setDueDays(p => ({ ...p, [cat.id]: e.target.value.replace(/\D/g, '') }))}
-                                  className="w-16 text-center border border-gray-200 rounded px-1 py-1 text-xs" />
-                              </div>
+                            <div className="flex items-center justify-end">
                               <button onClick={() => saveFeeAmounts(cat)} disabled={savingStructure}
                                 className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg font-medium disabled:opacity-50">
                                 {savingStructure ? 'Saving…' : 'Save Amounts'}
@@ -3029,44 +2997,37 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-4" onClick={() => setShowGenerateConfirm(false)}>
               <div className="bg-white rounded-2xl w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
                 <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-                  <p className="font-semibold text-gray-800">Confirm Due Dates Before Generating Bills</p>
+                  <p className="font-semibold text-gray-800">Confirm — Generate Bills</p>
                   <button onClick={() => setShowGenerateConfirm(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
                 </div>
                 <div className="p-5 space-y-3">
-                  <p className="text-sm text-gray-500">Bills will be generated with the following due dates. Check each one before continuing.</p>
+                  <p className="text-sm text-gray-500">
+                    Bills will be generated for academic year <strong>{academicYear}</strong>. Every fee head, regardless of frequency,
+                    becomes due on the academic year&apos;s end date.
+                  </p>
                   <div className="border border-gray-100 rounded-xl overflow-hidden">
                     <table className="w-full text-sm">
                       <thead className="bg-gray-50">
                         <tr className="text-xs text-gray-500 border-b border-gray-100">
                           <th className="text-left px-4 py-2 font-semibold">Fee Head</th>
                           <th className="text-left px-4 py-2 font-semibold">Frequency</th>
-                          <th className="text-center px-4 py-2 font-semibold">Due Day</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
-                        {categories.filter(c => c.is_active).map(cat => {
-                          const day = parseInt(dueDays[cat.id] || '10') || 10
-                          const isDefault = !dueDays[cat.id] || dueDays[cat.id] === '10'
-                          return (
-                            <tr key={cat.id} className="hover:bg-gray-50/60">
-                              <td className="px-4 py-2.5 font-medium text-gray-800">{cat.name}</td>
-                              <td className="px-4 py-2.5 text-gray-500">{FREQ_LABEL[cat.frequency]}</td>
-                              <td className="px-4 py-2.5 text-center">
-                                <span className={`font-semibold ${isDefault ? 'text-amber-600' : 'text-gray-800'}`}>{day}</span>
-                                {isDefault && <span className="ml-1 text-[10px] text-amber-500">(default)</span>}
-                              </td>
-                            </tr>
-                          )
-                        })}
+                        {categories.filter(c => c.is_active).map(cat => (
+                          <tr key={cat.id} className="hover:bg-gray-50/60">
+                            <td className="px-4 py-2.5 font-medium text-gray-800">{cat.name}</td>
+                            <td className="px-4 py-2.5 text-gray-500">{FREQ_LABEL[cat.frequency]}</td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
-                  <p className="text-xs text-amber-600">⚠ Dates marked <strong>default</strong> were not explicitly set. Go back to change them on the fee head card before generating.</p>
                 </div>
                 <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between">
                   <button onClick={() => setShowGenerateConfirm(false)}
                     className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2">
-                    ← Go back & edit
+                    ← Go back
                   </button>
                   <button onClick={confirmGenerateLedger}
                     className="text-sm bg-green-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-green-700">
