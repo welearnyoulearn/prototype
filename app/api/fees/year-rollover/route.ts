@@ -106,7 +106,6 @@ export async function POST(req: NextRequest) {
       const pendingCount = parseInt(pendingSummary.count)
       const pendingTotal = parseFloat(pendingSummary.total)
       if (pendingCount > 0 && !body.confirmed) {
-        client.release()
         return NextResponse.json({
           requires_confirmation: true,
           pending_count: pendingCount,
