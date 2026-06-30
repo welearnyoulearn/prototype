@@ -69,6 +69,19 @@ export async function GET(req: NextRequest) {
       [school_id, academic_year]
     )
 
+    // Discretionary waivers only — excludes 'carry_forward' bookkeeping waivers, in case
+    // this year itself already contains a carried-forward "Previous Year Dues" bill that
+    // was later waived again. Same computation used on Overview/Reports/Passbook.
+    const { rows: [discretionary] } = await pool.query(
+      `SELECT COALESCE(SUM(w.waiver_amount), 0) AS total
+       FROM fee_waivers w
+       JOIN student_fee_ledger l ON l.id = w.ledger_id
+       WHERE w.school_id = $1 AND l.academic_year = $2
+         AND COALESCE(w.is_revoked, FALSE) = FALSE
+         AND w.waiver_type != 'carry_forward'`,
+      [school_id, academic_year]
+    ).catch(() => ({ rows: [{ total: summary.total_waived }] }))
+
     // Unpaid bills grouped by student, with leaver detection
     const { rows: bills } = await pool.query(
       `SELECT l.id, l.student_id, l.fee_category_id, l.period_label,
@@ -137,6 +150,7 @@ export async function GET(req: NextRequest) {
         total_billed:    parseFloat(summary.total_billed),
         total_collected: parseFloat(summary.total_collected),
         total_waived:    parseFloat(summary.total_waived),
+        discretionary_waived: parseFloat(discretionary.total),
         total_unpaid:    parseFloat(summary.total_unpaid),
       },
       students,
@@ -300,7 +314,7 @@ export async function POST(req: NextRequest) {
               )
               await client.query(
                 `INSERT INTO fee_waivers (school_id, student_id, ledger_id, waiver_type, waiver_amount, reason, granted_by_name)
-                 VALUES ($1, $2, $3, 'full', $4, $5, $6)`,
+                 VALUES ($1, $2, $3, 'carry_forward', $4, $5, $6)`,
                 [school_id, d.student_id, b.id, parseFloat(b.balance),
                  `Carried forward to ${to_year}`, done_by]
               )

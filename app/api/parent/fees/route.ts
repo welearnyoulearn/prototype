@@ -123,11 +123,25 @@ export async function POST(req: NextRequest) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: 'Ledger entry not found or not payable' }, { status: 404 })
         }
-        const balance = parseFloat(ledgerRow.amount_due) - parseFloat(ledgerRow.waiver_amount) - parseFloat(ledgerRow.amount_paid)
+        // Also count amounts already submitted and awaiting admin verification against
+        // this same bill — amount_paid only reflects approved payments, so without this
+        // a parent could submit twice (e.g. after a network hiccup) before either gets
+        // verified, and an admin approving both later would overstate day-close totals
+        // even though the ledger itself stays correctly capped.
+        const { rows: [pendingRow] } = await client.query(
+          `SELECT COALESCE(SUM(amount), 0) AS pending_total
+           FROM fee_payments
+           WHERE ledger_id = $1 AND payment_status = 'pending_verification'`,
+          [ledger_id]
+        )
+        const alreadyPending = parseFloat(pendingRow.pending_total)
+        const balance = parseFloat(ledgerRow.amount_due) - parseFloat(ledgerRow.waiver_amount) - parseFloat(ledgerRow.amount_paid) - alreadyPending
         if (payAmount > balance + 0.001) {
           await client.query('ROLLBACK')
           const msg = balance <= 0
-            ? 'This fee has already been paid. Please refresh and try again.'
+            ? alreadyPending > 0
+              ? 'A payment for this fee is already awaiting verification. Please wait for it to be processed.'
+              : 'This fee has already been paid. Please refresh and try again.'
             : `Amount exceeds balance due (₹${balance.toFixed(2)}).`
           return NextResponse.json({ error: msg }, { status: 400 })
         }
@@ -155,11 +169,22 @@ export async function POST(req: NextRequest) {
           [ledger_ids, school_id, student_id]
         )
 
-        const totalBalance = entries.reduce((sum, e) => sum + parseFloat(String(e.balance)), 0)
+        // Subtract amounts already submitted and awaiting verification on these same
+        // bills — see the matching comment in the single-entry branch above.
+        const { rows: [pendingRow] } = await client.query(
+          `SELECT COALESCE(SUM(amount), 0) AS pending_total
+           FROM fee_payments
+           WHERE ledger_id = ANY($1) AND payment_status = 'pending_verification'`,
+          [ledger_ids]
+        )
+        const alreadyPending = parseFloat(pendingRow.pending_total)
+        const totalBalance = entries.reduce((sum, e) => sum + parseFloat(String(e.balance)), 0) - alreadyPending
         if (payAmount > totalBalance + 0.001) {
           await client.query('ROLLBACK')
           const msg = totalBalance <= 0
-            ? 'These fees have already been paid. Please refresh and try again.'
+            ? alreadyPending > 0
+              ? 'A payment for these fees is already awaiting verification. Please wait for it to be processed.'
+              : 'These fees have already been paid. Please refresh and try again.'
             : `Amount exceeds total balance due (₹${totalBalance.toFixed(2)}).`
           return NextResponse.json({ error: msg }, { status: 400 })
         }

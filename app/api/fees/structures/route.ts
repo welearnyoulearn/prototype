@@ -37,6 +37,31 @@ export async function POST(req: NextRequest) {
       if (!school_id || !academic_year || !Array.isArray(structures)) {
         return NextResponse.json({ error: 'school_id, academic_year, structures required' }, { status: 400 })
       }
+      for (const s of structures) {
+        const amt = parseFloat(s.amount)
+        if (!(amt >= 0)) {
+          return NextResponse.json({ error: 'Amount must be zero or greater' }, { status: 400 })
+        }
+        if (s.due_day != null && (parseInt(s.due_day) < 1 || parseInt(s.due_day) > 31)) {
+          return NextResponse.json({ error: 'Due day must be between 1 and 31' }, { status: 400 })
+        }
+      }
+
+      // Server-side enforcement of the fee-structure lock — the UI hides the edit form
+      // when locked, but that's presentation-only; without this check, a direct API call
+      // (or a future UI bug) could change amounts after the plan was locked for the year,
+      // with no guarantee already-generated bills get amended to match (only the dedicated
+      // /api/fees/structures/amend route updates existing student_fee_ledger.amount_due).
+      const { rows: [lock] } = await pool.query(
+        `SELECT 1 FROM fee_structure_locks WHERE school_id = $1 AND academic_year = $2`,
+        [school_id, academic_year]
+      ).catch(() => ({ rows: [] }))
+      if (lock) {
+        return NextResponse.json({
+          error: 'This fee plan is locked for the year. Unlock it first, or use the Amend flow to change an amount with an audit trail.',
+        }, { status: 409 })
+      }
+
       const client = await pool.connect()
       const saved = []
       try {

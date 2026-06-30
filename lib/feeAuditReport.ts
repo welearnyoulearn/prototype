@@ -174,8 +174,14 @@ export async function buildFeeAuditReport(opts: {
   // Change log
   type LogRow = { type: string; detail: string; user: string; at: string; amount: number | null }
   const log: LogRow[] = []
-  const gParams = (extra: unknown[] = []) => grade ? [school_id, academic_year, grade, ...extra] : [school_id, academic_year, ...extra]
-  const gClause = grade ? 'AND st.grade = $3' : ''
+  // Mirrors the same grade+section scoping used for the numeric tables above (WHERE/cond) —
+  // previously this only filtered by grade, so a single-section report's Change Log
+  // leaked payments/waivers/edits from other sections of the same grade.
+  const gFilterParams: unknown[] = [school_id, academic_year]
+  let gClause = ''
+  if (grade) { gFilterParams.push(grade); gClause += ` AND st.grade = $${gFilterParams.length}` }
+  if (section && section !== 'all') { gFilterParams.push(section); gClause += ` AND st.section = $${gFilterParams.length}` }
+  const gParams = (extra: unknown[] = []) => [...gFilterParams, ...extra]
 
   async function tableExists(t: string) { return (await pool.query(`SELECT to_regclass($1) AS t`, [t])).rows[0].t != null }
 

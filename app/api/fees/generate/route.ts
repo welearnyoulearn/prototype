@@ -99,8 +99,33 @@ export async function POST(req: NextRequest) {
                  ON CONFLICT (student_id, fee_category_id, academic_year, period_label) DO NOTHING`,
                 [school_id, student.id, s.fee_category_id, s.id, academic_year, period.label, s.amount, period.due_date]
               )
-              if (rowCount && rowCount > 0) created++
-              else skipped++
+              if (rowCount && rowCount > 0) {
+                created++
+              } else {
+                skipped++
+                // A bill for this exact period already exists — but if the student has since
+                // moved to a different grade (e.g. promoted/transferred outside year-rollover),
+                // the existing row's fee_structure_id may now point at the WRONG grade's amount.
+                // Re-sync unpaid/overdue/partial bills to the current grade's structure, exactly
+                // like amending a structure does, so the student is billed at their actual grade.
+                // GREATEST(...) guards against amount_due ending up below amount_paid if the new
+                // grade's fee is lower than what the student already paid toward the old grade's
+                // bill — amount_due must never be less than what's already been collected.
+                await client.query(
+                  `UPDATE student_fee_ledger
+                   SET fee_structure_id = $1, amount_due = GREATEST($2, amount_paid),
+                       status = CASE
+                         WHEN COALESCE(waiver_amount,0) + amount_paid >= GREATEST($2, amount_paid) THEN 'paid'
+                         WHEN amount_paid > 0 THEN 'partial'
+                         ELSE status
+                       END
+                   WHERE school_id = $3 AND student_id = $4 AND fee_category_id = $5
+                     AND academic_year = $6 AND period_label = $7
+                     AND status IN ('pending', 'overdue', 'partial')
+                     AND fee_structure_id IS DISTINCT FROM $1`,
+                  [s.id, s.amount, school_id, student.id, s.fee_category_id, academic_year, period.label]
+                )
+              }
             }
           }
         }

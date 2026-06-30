@@ -68,6 +68,21 @@ export async function GET(req: NextRequest) {
         [school_id, academic_year]
       )
 
+      // Discretionary waivers only (scholarships, hardship, etc.) — excludes the
+      // 'carry_forward' waiver_type used internally to zero out an old year's balance
+      // during year-end/rollover, so "Total Waived" reflects actual concessions granted,
+      // not administrative bookkeeping from closing out unpaid dues.
+      const { rows: [discretionary] } = await pool.query(
+        `SELECT COALESCE(SUM(w.waiver_amount), 0) AS total
+         FROM fee_waivers w
+         JOIN student_fee_ledger l ON l.id = w.ledger_id
+         WHERE w.school_id = $1 AND l.academic_year = $2
+           AND COALESCE(w.is_revoked, FALSE) = FALSE
+           AND w.waiver_type != 'carry_forward'`,
+        [school_id, academic_year]
+      ).catch(() => ({ rows: [{ total: summary.total_waived }] }))
+      summary.discretionary_waived = discretionary.total
+
       // Collection by category
       const { rows: by_category } = await pool.query(
         `SELECT fc.name AS category_name, fc.frequency,
@@ -98,7 +113,9 @@ export async function GET(req: NextRequest) {
         [school_id]
       )
 
-      // Top defaulters
+      // Top defaulters — outstanding balance > 0 regardless of status, so partially-paid
+      // students aren't silently excluded (they still owe money). Matches the Defaulters
+      // CSV export's definition.
       const { rows: top_defaulters } = await pool.query(
         `SELECT s.id AS student_id, s.name AS student_name, s.grade, s.section, s.roll_number,
                 SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS outstanding,
@@ -106,7 +123,7 @@ export async function GET(req: NextRequest) {
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
          WHERE l.school_id = $1 AND l.academic_year = $2
-           AND l.status IN ('overdue','pending')
+           AND l.status NOT IN ('paid', 'waived')
            AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0
          GROUP BY s.id, s.name, s.grade, s.section, s.roll_number
          ORDER BY outstanding DESC

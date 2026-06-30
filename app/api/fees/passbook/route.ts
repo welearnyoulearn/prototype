@@ -127,6 +127,7 @@ export async function GET(req: NextRequest) {
       total_billed: number
       total_paid: number
       total_waived: number
+      discretionary_waived: number
       outstanding: number
       entries: typeof ledger
     }>()
@@ -137,7 +138,7 @@ export async function GET(req: NextRequest) {
         yearMap.set(yr, {
           academic_year: yr,
           is_current: yr === current_year,
-          total_billed: 0, total_paid: 0, total_waived: 0, outstanding: 0,
+          total_billed: 0, total_paid: 0, total_waived: 0, discretionary_waived: 0, outstanding: 0,
           entries: [],
         })
       }
@@ -147,6 +148,15 @@ export async function GET(req: NextRequest) {
       g.total_waived  += parseFloat(e.waiver_amount)
       g.outstanding   += parseFloat(e.balance)
       g.entries.push(e)
+    }
+
+    // Add per-year discretionary waiver totals (excludes 'carry_forward' bookkeeping
+    // waivers) — fee_waivers carries waiver_type, student_fee_ledger doesn't, so this
+    // is computed from the waivers list rather than inside the ledger loop above.
+    for (const w of waivers as Array<{ bill_year: string; waiver_amount: string; waiver_type: string }>) {
+      if (w.waiver_type === 'carry_forward') continue
+      const g = yearMap.get(w.bill_year)
+      if (g) g.discretionary_waived += parseFloat(w.waiver_amount)
     }
 
     // Sort years chronologically
@@ -245,6 +255,12 @@ export async function GET(req: NextRequest) {
     const totalWaived = (waivers as Array<{waiver_amount: string}>)
       .reduce((s, w) => s + parseFloat(w.waiver_amount), 0)
     const outstanding = Math.max(0, totalBilled - totalPaid - totalWaived)
+    // Discretionary waivers only (excludes 'carry_forward' bookkeeping waivers from
+    // year-end/rollover) — shown alongside total_waived so the passbook doesn't imply
+    // a student received more discretionary concessions than they actually did.
+    const discretionaryWaived = (waivers as Array<{ waiver_amount: string; waiver_type: string }>)
+      .filter(w => w.waiver_type !== 'carry_forward')
+      .reduce((s, w) => s + parseFloat(w.waiver_amount), 0)
 
     // 10. Prior year unresolved dues (years before current_year with outstanding > 0)
     const priorUnresolved = ledgerByYear.filter(y =>
@@ -256,7 +272,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       student,
       current_year,
-      summary: { total_billed: totalBilled, total_paid: totalPaid, total_waived: totalWaived, outstanding },
+      summary: { total_billed: totalBilled, total_paid: totalPaid, total_waived: totalWaived, discretionary_waived: discretionaryWaived, outstanding },
       ledger_by_year: ledgerByYear,   // grouped by year with headers
       ledger,                          // flat list (for backward compat)
       payments,
