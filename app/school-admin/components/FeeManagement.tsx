@@ -1247,7 +1247,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     setApplLoading(false)
   }
 
-  async function saveApplicability() {
+  async function saveApplicability(dueDayCatId?: number) {
     if (!applGrade || !academicYear) return
     setApplSaving(true); setApplMsg('')
     const assignments: { student_id: number; fee_category_id: number; amount: string }[] = []
@@ -2957,7 +2957,14 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                               </div>
                             </div>
 
-                            <div className="flex items-center justify-end">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <label className="text-xs text-gray-500">Due day of month</label>
+                                <input type="number" min="1" max="31"
+                                  value={dueDays[cat.id] || '10'}
+                                  onChange={e => setDueDays(p => ({ ...p, [cat.id]: e.target.value.replace(/\D/g, '') }))}
+                                  className="w-16 text-center border border-gray-200 rounded px-1 py-1 text-xs" />
+                              </div>
                               <button onClick={() => saveFeeAmounts(cat)} disabled={savingStructure}
                                 className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg font-medium disabled:opacity-50">
                                 {savingStructure ? 'Saving…' : 'Save Amounts'}
