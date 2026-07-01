@@ -150,9 +150,15 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Stable composite-key string for a row's primary-key columns.
+// Stable composite-key string for a row's primary-key columns. Live rows return
+// timestamp/date PKs as JS Date objects while the backup stored ISO strings;
+// normalise Dates to ISO so both sides key identically (JSON.stringify of a Date
+// already yields its ISO string, so the backup side matches).
 function pkKey(pk: string[], row: Record<string, unknown>): string {
-  return JSON.stringify(pk.map(c => row[c]))
+  return JSON.stringify(pk.map(c => {
+    const v = row[c]
+    return v instanceof Date ? v.toISOString() : v
+  }))
 }
 
 function parseBackup(jsonl: string): Map<string, { header: TableHeader; rows: Record<string, unknown>[] }> {

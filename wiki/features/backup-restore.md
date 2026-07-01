@@ -12,7 +12,7 @@ Automatically backs up the Supabase Postgres database to Cloudflare R2 once a da
 
 ## How it works
 
-- **Backup (automatic):** A Vercel Cron job hits `POST /api/cron/backup` daily at 02:30 UTC. The route reads every public table via the shared `pg` pool and writes a gzipped JSON Lines dump to R2 at `db/supabase-<timestamp>.jsonl.gz`, updates a `db/latest.json` pointer, and prunes to the newest 14 backups.
+- **Backup (automatic):** A Vercel Cron job hits `POST /api/cron/backup` daily at 02:30 UTC. The route streams every public table row-by-row (via `pg-query-stream`) through gzip into an R2 multipart upload at `db/supabase-<timestamp>.jsonl.gz` — memory stays flat regardless of DB size — updates a `db/latest.json` pointer, and prunes to the newest 14 backups.
 - **Restore (manual, non-destructive):** Call `POST /api/restore`. It reads a backup (the latest by default, or a specific `key`), compares each table's live primary-key set against the backup, and re-inserts only the missing rows with `INSERT ... ON CONFLICT DO NOTHING`. Pass `{"dryRun":true}` to see what *would* be inserted without writing. It never runs `UPDATE`, `DELETE` or `TRUNCATE`, so an edited row (same PK) is left untouched.
 
 Both routes require `Authorization: Bearer $CRON_SECRET`.
