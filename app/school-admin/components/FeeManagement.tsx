@@ -533,6 +533,29 @@ export default function FeeManagement({
   const [yeMsg, setYeMsg]                        = useState('')
   const [yeClosing, setYeClosing]               = useState(false)
 
+  // 15-day banner: days until year end (null = not loaded yet, -1 = not applicable)
+  const [daysUntilYearEnd, setDaysUntilYearEnd] = useState<number | null>(null)
+  const [yearEndDate, setYearEndDate]           = useState<string | null>(null)
+  // Carry-forward modal state (when target year doesn't exist)
+  const [showCfModal, setShowCfModal]           = useState(false)
+  const [cfExistingYears, setCfExistingYears]   = useState<{ label: string; start_date: string; end_date: string }[]>([])
+  const [cfSelectedYear, setCfSelectedYear]     = useState('')
+  const [cfCreateMode, setCfCreateMode]         = useState(false)
+  const [cfNewLabel, setCfNewLabel]             = useState('')
+  const [cfNewStart, setCfNewStart]             = useState('')
+  const [cfNewEnd, setCfNewEnd]                 = useState('')
+  const [cfCreating, setCfCreating]             = useState(false)
+  const [cfMsg, setCfMsg]                       = useState('')
+  // First-login wizard: true when school has no academic years at all
+  const [showYearWizard, setShowYearWizard]     = useState(false)
+  const [wizLabel, setWizLabel]                 = useState('')
+  const [wizStart, setWizStart]                 = useState('')
+  const [wizEnd, setWizEnd]                     = useState('')
+  const [wizSaving, setWizSaving]               = useState(false)
+  const [wizMsg, setWizMsg]                     = useState('')
+  // Fee setup wizard: shown after first academic year is created, tracks setup steps
+  const [setupWizardDismissed, setSetupWizardDismissed] = useState(false)
+
   // Amendment impact preview
   const [amendImpact, setAmendImpact]           = useState<number | null>(null)
   const [amendPartialCount, setAmendPartialCount] = useState<number | null>(null)
@@ -563,12 +586,31 @@ export default function FeeManagement({
       fetch(`/api/academic-years?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
       fetch(`/api/fees/year-rollover?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
     ]).then(([current, all, closed]) => {
-      const labels: string[] = Array.isArray(all) ? all.map((y: { label: string }) => y.label) : []
+      const allYears: { label: string; end_date: string }[] = Array.isArray(all) ? all : []
+      const labels: string[] = allYears.map((y) => y.label)
       const cur: string = current?.label ?? labels[0] ?? ''
       setAcademicYears(labels)
       setAcademicYear(cur)
       const closedSet = new Set<string>(Array.isArray(closed) ? closed.map((c: { academic_year: string }) => c.academic_year) : [])
       setClosedYears(closedSet)
+
+      // Show first-login wizard if no academic years exist yet
+      if (labels.length === 0) {
+        setShowYearWizard(true)
+        return
+      }
+
+      // Compute days until current year's end_date for 15-day banner
+      const curYear = allYears.find(y => y.label === cur)
+      if (curYear?.end_date && !closedSet.has(cur)) {
+        const today = new Date(); today.setHours(0, 0, 0, 0)
+        const end = new Date(curYear.end_date); end.setHours(0, 0, 0, 0)
+        const diff = Math.ceil((end.getTime() - today.getTime()) / 86400000)
+        setDaysUntilYearEnd(diff)
+        setYearEndDate(curYear.end_date)
+      } else {
+        setDaysUntilYearEnd(-1)
+      }
     }).catch(() => { setAcademicYears([]); setAcademicYear('') })
   }, [schoolId])
 
@@ -636,6 +678,9 @@ export default function FeeManagement({
   }, [schoolId, academicYear])
 
   useEffect(() => { if (activeTab === 'setup') loadSetup() }, [activeTab, loadSetup])
+  // Load setup data on first mount so the 5-step wizard can show accurate step state
+  // even when the user is on the Overview tab.
+  useEffect(() => { if (academicYear) loadSetup() }, [academicYear]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load the school's UPI ID when Fee Plan opens (once)
   useEffect(() => {
@@ -1384,7 +1429,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     if (badLeaver) { setYeMsg(`${badLeaver.student_name} is leaving — cannot carry forward. Choose Write Off or Leave Open.`); return }
 
     if (decisions.some(d => d.decision === 'carry') && !yearEnd.target_year_exists) {
-      setYeMsg(`Academic year ${yearEnd.target_year} must be created before carrying forward.`); return
+      openCfModal(); return
     }
 
     setYeProcessing(true); setYeMsg('')
@@ -1436,6 +1481,55 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     setYeMsg(r.ok ? '✓ Year reopened — edits allowed again' : (d.error || 'Failed'))
     setYeClosing(false)
     if (r.ok) loadYearEnd()
+  }
+
+  // ── First-login year wizard: create the school's first academic year ────────────
+  async function createFirstYear() {
+    if (!wizLabel.trim() || !wizStart || !wizEnd) { setWizMsg('All fields are required'); return }
+    setWizSaving(true); setWizMsg('')
+    const r = await fetch('/api/academic-years', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId, label: wizLabel.trim(), start_date: wizStart, end_date: wizEnd, set_current: true }),
+    })
+    const d = await r.json()
+    if (r.ok) {
+      setShowYearWizard(false)
+      loadAcademicYears()
+    } else {
+      setWizMsg(d.error || 'Failed to create year')
+    }
+    setWizSaving(false)
+  }
+
+  // ── Carry-forward modal: open it and load existing years ────────────────────────
+  async function openCfModal() {
+    setCfMsg(''); setCfCreateMode(false); setCfSelectedYear(''); setShowCfModal(true)
+    const r = await fetch(`/api/academic-years?school_id=${schoolId}`)
+    if (r.ok) {
+      const all = await r.json()
+      setCfExistingYears(Array.isArray(all) ? all : [])
+    }
+  }
+
+  async function createYearInCfModal() {
+    if (!cfNewLabel.trim() || !cfNewStart || !cfNewEnd) { setCfMsg('All fields required'); return }
+    setCfCreating(true); setCfMsg('')
+    const r = await fetch('/api/academic-years', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId, label: cfNewLabel.trim(), start_date: cfNewStart, end_date: cfNewEnd }),
+    })
+    const d = await r.json()
+    if (r.ok) {
+      const all = await fetch(`/api/academic-years?school_id=${schoolId}`).then(x => x.ok ? x.json() : [])
+      setCfExistingYears(Array.isArray(all) ? all : [])
+      setCfSelectedYear(cfNewLabel.trim())
+      setCfCreateMode(false)
+      setCfNewLabel(''); setCfNewStart(''); setCfNewEnd('')
+      loadAcademicYears()
+    } else {
+      setCfMsg(d.error || 'Failed')
+    }
+    setCfCreating(false)
   }
 
   // Year-end view helpers
@@ -1967,6 +2061,120 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
 
   return (
     <div className="space-y-6">
+
+      {/* ── First-login academic year gate ── */}
+      {showYearWizard && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 text-xl font-bold">1</div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Create your Academic Year</h2>
+                <p className="text-sm text-gray-500">Required before using any school features</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-600 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              Every fee, attendance, and exam record is tied to an academic year. Set yours up now to get started.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Year Label (e.g. 2025-26)</label>
+                <input data-testid="wizard-year-label" value={wizLabel} onChange={e => setWizLabel(e.target.value)}
+                  placeholder="2025-26" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Start Date</label>
+                  <input data-testid="wizard-start-date" type="date" value={wizStart} onChange={e => setWizStart(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">End Date</label>
+                  <input data-testid="wizard-end-date" type="date" value={wizEnd} onChange={e => setWizEnd(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+              {wizMsg && <p className="text-sm text-red-600">{wizMsg}</p>}
+              <button data-testid="wizard-create-year" onClick={createFirstYear} disabled={wizSaving}
+                className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium text-sm hover:bg-blue-700 disabled:opacity-50">
+                {wizSaving ? 'Creating…' : 'Create Academic Year & Continue'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Carry-forward modal (target year missing) ── */}
+      {showCfModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900">Select Target Academic Year for Carry Forward</h2>
+              <button onClick={() => setShowCfModal(false)} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
+            </div>
+            <p className="text-sm text-gray-600">The next year <strong>{yearEnd?.target_year}</strong> doesn&apos;t exist yet. Select an existing year or create a new one to carry unpaid dues into.</p>
+
+            {!cfCreateMode ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Select Year</label>
+                  <select data-testid="cf-year-select" value={cfSelectedYear} onChange={e => setCfSelectedYear(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">— Choose a year —</option>
+                    {cfExistingYears.filter(y => y.label !== academicYear).map(y => (
+                      <option key={y.label} value={y.label}>{y.label} ({y.start_date?.slice(0,10)} → {y.end_date?.slice(0,10)})</option>
+                    ))}
+                  </select>
+                </div>
+                <button onClick={() => setCfCreateMode(true)} className="text-sm text-blue-600 hover:underline">+ Create new academic year instead</button>
+                {cfMsg && <p className="text-sm text-red-600">{cfMsg}</p>}
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => setShowCfModal(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+                  <button data-testid="cf-confirm" disabled={!cfSelectedYear} onClick={() => {
+                    if (!yearEnd) return
+                    // Patch the yearEnd state so applyYearEndDecisions uses the selected year
+                    setYearEnd(prev => prev ? { ...prev, target_year: cfSelectedYear, target_year_exists: true } : prev)
+                    setShowCfModal(false)
+                    // Re-run after state update
+                    setTimeout(() => applyYearEndDecisions(), 50)
+                  }} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
+                    Confirm & Carry Forward
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Year Label (e.g. 2026-27)</label>
+                  <input data-testid="cf-new-label" value={cfNewLabel} onChange={e => setCfNewLabel(e.target.value)}
+                    placeholder="2026-27" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Start Date</label>
+                    <input data-testid="cf-new-start" type="date" value={cfNewStart} onChange={e => setCfNewStart(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">End Date</label>
+                    <input data-testid="cf-new-end" type="date" value={cfNewEnd} onChange={e => setCfNewEnd(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </div>
+                {cfMsg && <p className="text-sm text-red-600">{cfMsg}</p>}
+                <div className="flex gap-2">
+                  <button onClick={() => setCfCreateMode(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50">Back</button>
+                  <button data-testid="cf-create-year" onClick={createYearInCfModal} disabled={cfCreating}
+                    className="flex-1 bg-green-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50">
+                    {cfCreating ? 'Creating…' : 'Create Year'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -1988,6 +2196,75 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           ))}
         </select>
       </div>
+
+      {/* ── 15-day approaching year-end banner ── */}
+      {daysUntilYearEnd !== null && daysUntilYearEnd >= 0 && daysUntilYearEnd <= 15 && !closedYears.has(academicYear) && (
+        <div data-testid="year-end-banner" className="flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-xl px-4 py-3">
+          <span className="text-amber-500 text-lg mt-0.5">⚠</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800">
+              {daysUntilYearEnd === 0
+                ? `Academic year ${academicYear} ends today (${yearEndDate})`
+                : `Academic year ${academicYear} ends in ${daysUntilYearEnd} day${daysUntilYearEnd === 1 ? '' : 's'} — ${yearEndDate}`}
+            </p>
+            <p className="text-xs text-amber-700 mt-0.5">Collect outstanding fees before year-end. You can extend the due date or close the year.</p>
+          </div>
+          <div className="flex gap-2 flex-shrink-0">
+            <button data-testid="banner-extend" onClick={() => setActiveTab('yearend' as Tab)}
+              className="text-xs bg-white border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg hover:bg-amber-50 font-medium">
+              Extend / Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── 5-step setup wizard (shown when there are no bills yet) ── */}
+      {!setupWizardDismissed && academicYear && !closedYears.has(academicYear) && (
+        (() => {
+          const step1Done = true // year exists
+          const step2Done = categories.filter(c => c.is_active !== false).length > 0
+          const step3Done = structures.length > 0
+          const step4Done = (stats?.summary?.total_due ?? 0) > 0
+          const step5Done = !!structureLock
+          const allDone = step1Done && step2Done && step3Done && step4Done && step5Done
+          if (allDone) return null
+          const steps = [
+            { n: 1, label: 'Academic Year', done: step1Done, tab: null as Tab | null },
+            { n: 2, label: 'Fee Heads',     done: step2Done, tab: 'setup' as Tab },
+            { n: 3, label: 'Set Amounts',   done: step3Done, tab: 'setup' as Tab },
+            { n: 4, label: 'Generate Bills', done: step4Done, tab: 'setup' as Tab },
+            { n: 5, label: 'Lock Plan',     done: step5Done, tab: 'setup' as Tab },
+          ]
+          const nextStep = steps.find(s => !s.done)
+          return (
+            <div data-testid="setup-wizard" className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-semibold text-blue-800">Fee Setup — {nextStep ? `Step ${nextStep.n} of 5: ${nextStep.label}` : 'Almost done!'}</p>
+                <button onClick={() => setSetupWizardDismissed(true)} className="text-xs text-blue-400 hover:text-blue-600">Dismiss</button>
+              </div>
+              <div className="flex items-center gap-1">
+                {steps.map((s, i) => (
+                  <div key={s.n} className="flex items-center gap-1 flex-1">
+                    <div className={`flex items-center gap-1.5 flex-1 ${s.tab && !s.done ? 'cursor-pointer' : ''}`}
+                      onClick={() => { if (s.tab && !s.done) setActiveTab(s.tab) }}>
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                        s.done ? 'bg-green-500 text-white' : s.n === (nextStep?.n ?? 0) ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
+                      }`}>{s.done ? '✓' : s.n}</div>
+                      <span className={`text-xs hidden sm:inline ${s.done ? 'text-green-700 line-through' : s.n === (nextStep?.n ?? 0) ? 'text-blue-700 font-medium' : 'text-gray-400'}`}>{s.label}</span>
+                    </div>
+                    {i < steps.length - 1 && <div className={`h-0.5 flex-1 mx-1 ${s.done ? 'bg-green-400' : 'bg-gray-200'}`} />}
+                  </div>
+                ))}
+              </div>
+              {nextStep?.tab && (
+                <button onClick={() => setActiveTab(nextStep.tab!)} className="mt-3 text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">
+                  Go to {nextStep.label} →
+                </button>
+              )}
+            </div>
+          )
+        })()
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200 flex-wrap">
