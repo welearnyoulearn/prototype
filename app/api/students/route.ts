@@ -4,6 +4,7 @@ import { invalidateCache } from '@/lib/responseCache'
 import { hashPassword, generateTempPassword, getAnySession, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail } from '@/lib/email'
 import { findOrCreateParent, linkStudentParent } from '@/lib/studentOnboarding'
+import { gradeOrderSql } from '@/lib/grades'
 
 export async function GET(req: NextRequest) {
   try {
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
       const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
       const result = await pool.query(
-        `SELECT * FROM students ${where} ORDER BY (NULLIF(regexp_replace(grade,'[^0-9]','','g'),''))::int NULLS LAST, section, name`,
+        `SELECT * FROM students ${where} ORDER BY ${gradeOrderSql('grade')}, section, name`,
         values
       )
       return NextResponse.json(result.rows)
@@ -64,6 +65,10 @@ export async function POST(req: NextRequest) {
     const { school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email, roll_number, school_roll_number } = body
     if (!school_id || !name) return NextResponse.json({ error: 'school_id and name are required' }, { status: 400 })
     if (admin.schoolId !== school_id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!section?.trim()) return NextResponse.json({ error: 'Section is required' }, { status: 400 })
+    if (!parent_name?.trim()) return NextResponse.json({ error: 'Parent name is required' }, { status: 400 })
+    if (!parent_phone?.trim()) return NextResponse.json({ error: 'Parent phone is required' }, { status: 400 })
+    if (school_roll_number == null || school_roll_number === '') return NextResponse.json({ error: 'Roll number is required' }, { status: 400 })
 
     if (phone?.trim()) {
       const dupPhone = await pool.query(

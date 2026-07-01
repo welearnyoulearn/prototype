@@ -162,7 +162,19 @@ export async function POST(req: NextRequest) {
         [school_id, academic_year]
       )
 
-      return NextResponse.json({ created, skipped, total_students: students.length })
+      // Auto-lock the fee structure after bills are generated so amounts can't be
+      // changed directly (amendments still work via the audit-trail route).
+      // ON CONFLICT DO NOTHING: if already locked, silently skip — idempotent.
+      const access = await requireFeeAccess(school_id)
+      const lockedBy = access ? access.actor : 'system'
+      await pool.query(
+        `INSERT INTO fee_structure_locks (school_id, academic_year, locked_by, locked_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (school_id, academic_year) DO NOTHING`,
+        [school_id, academic_year, lockedBy]
+      ).catch(() => {/* lock table may not exist yet — non-fatal */})
+
+      return NextResponse.json({ created, skipped, total_students: students.length, auto_locked: true })
     } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed to generate ledger' }, { status: 500 }) }
 } catch (err: unknown) {
     console.error('[API]', err)

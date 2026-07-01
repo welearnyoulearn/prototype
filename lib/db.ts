@@ -1669,4 +1669,12 @@ async function runIncrementalMigrations() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_academic_year_snapshots_year ON academic_year_snapshots(academic_year_id)
   `).catch(() => {})
+
+  // ── source_academic_year on student_fee_ledger ────────────────────────────────
+  // Tracks which year a bill was originally generated in. NULL = current-year bill.
+  // Set to the source year when a carry-forward bill is created in a new year so
+  // ledger/reports can badge or separate "Previous Year Dues" from current-year fees.
+  await pool.query(`
+    ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS source_academic_year VARCHAR(10)
+  `).catch(() => {})
 }

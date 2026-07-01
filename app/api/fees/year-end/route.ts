@@ -298,13 +298,14 @@ export async function POST(req: NextRequest) {
             await client.query(
               `INSERT INTO student_fee_ledger
                  (school_id, student_id, fee_category_id, fee_structure_id, academic_year,
-                  period_label, amount_due, due_date, status, notes)
-               VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, 'pending', $8)
+                  period_label, amount_due, due_date, status, notes, source_academic_year)
+               VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, 'pending', $8, $9)
                ON CONFLICT (student_id, fee_category_id, academic_year, period_label) DO UPDATE
-                 SET amount_due = EXCLUDED.amount_due, notes = EXCLUDED.notes`,
+                 SET amount_due = EXCLUDED.amount_due, notes = EXCLUDED.notes,
+                     source_academic_year = EXCLUDED.source_academic_year`,
               [school_id, d.student_id, prevDuesCatId, to_year, periodLabel,
                studentBalance, toYearEndDate,
-               `Carried from ${from_year}: ${note}`]
+               `Carried from ${from_year}: ${note}`, from_year]
             )
             // Close out the original bills (mark as carried = waived in source year, with record)
             for (const b of studentBills) {

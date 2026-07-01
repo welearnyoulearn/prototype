@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import nodemailer from 'nodemailer'
 import { getAnySession } from '@/lib/auth'
+import { gradeOrderSql } from '@/lib/grades'
 
 // GET /api/attendance
 //   ?school_id=X&date=YYYY-MM-DD&view=school                           → school-wide: all classes attendance status for that day
@@ -87,7 +88,7 @@ export async function GET(req: NextRequest) {
            LEFT JOIN teachers mm ON mm.id = lmm.marked_by_teacher_id
            LEFT JOIN teachers am ON am.id = lma.marked_by_teacher_id
            WHERE c.school_id = $1
-           ORDER BY (NULLIF(regexp_replace(c.grade,'[^0-9]','','g'),''))::int NULLS LAST, c.section`,
+           ORDER BY ${gradeOrderSql('c.grade')}, c.section`,
           [school_id, date]
         )
         return NextResponse.json(result.rows)
