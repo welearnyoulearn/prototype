@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
         waiver_amount = remaining
       } else if (waiver_type === 'percentage') {
         // BUG 7 fix: apply percentage to remaining balance, not full amount_due
-        waiver_amount = Math.round((remaining * (waiver_value || 0)) / 100)
+        waiver_amount = Math.round(remaining * (waiver_value || 0)) / 100
       } else if (waiver_type === 'fixed_amount') {
         // BUG 8 fix: cap fixed waiver at remaining balance
         waiver_amount = Math.min(waiver_value || 0, remaining)

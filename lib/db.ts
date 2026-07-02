@@ -1677,4 +1677,31 @@ async function runIncrementalMigrations() {
   await pool.query(`
     ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS source_academic_year VARCHAR(10)
   `).catch(() => {})
+
+  // ── source_ledger_id on student_fee_ledger ────────────────────────────────────
+  // For passout-ledger bills (academic_year = 'passout'): links back to the original
+  // bill(s) in the closed year. Enables the passout ledger to show which year's debt
+  // each entry originated from without duplicating the source year's ledger data.
+  await pool.query(`
+    ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS source_ledger_id INTEGER REFERENCES student_fee_ledger(id)
+  `).catch(() => {})
+
+  // ── passout_students table ────────────────────────────────────────────────────
+  // Tracks which students were moved to passout status and when. Lets the overview
+  // panel filter/count passout students separately from active students.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS passout_students (
+      id            SERIAL PRIMARY KEY,
+      school_id     INTEGER NOT NULL REFERENCES schools(id),
+      student_id    INTEGER NOT NULL REFERENCES students(id),
+      passout_year  TEXT    NOT NULL,
+      moved_by      TEXT    NOT NULL,
+      moved_at      TIMESTAMPTZ DEFAULT NOW(),
+      notes         TEXT,
+      UNIQUE(school_id, student_id)
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_passout_students_school ON passout_students(school_id)
+  `).catch(() => {})
 }

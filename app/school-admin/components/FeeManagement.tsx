@@ -41,6 +41,7 @@ type LedgerEntry = {
   amount_due: number; amount_paid: number; balance: number; waiver_amount: number
   due_date: string; status: 'pending' | 'paid' | 'partial' | 'overdue' | 'waived'
   days_overdue: number; has_edits: boolean
+  source_academic_year: string | null
 }
 
 type FeeStats = {
@@ -151,11 +152,13 @@ const CATEGORY_SUGGESTIONS = [
 ] as const
 
 const STATUS_COLORS: Record<string, string> = {
-  paid:    'bg-green-100 text-green-700',
-  partial: 'bg-yellow-100 text-yellow-700',
-  pending: 'bg-gray-100 text-gray-600',
-  overdue: 'bg-red-100 text-red-700',
-  waived:  'bg-purple-100 text-purple-700',
+  paid:     'bg-green-100 text-green-700',
+  partial:  'bg-yellow-100 text-yellow-700',
+  pending:  'bg-gray-100 text-gray-600',
+  overdue:  'bg-red-100 text-red-700',
+  waived:   'bg-purple-100 text-purple-700',
+  settled:  'bg-teal-100 text-teal-700',
+  passout:  'bg-indigo-100 text-indigo-700',
 }
 
 function fmt(n: number | string) {
@@ -276,7 +279,7 @@ export default function FeeManagement({
   schoolId: number
   adminName?: string
 }) {
-  type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'pending' | 'students' | 'reports' | 'yearend'
+  type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'students' | 'reports' | 'yearend'
   const [activeTab, setActiveTab] = useState<Tab>('overview')
 
   const hasOnlinePayments = useFeature('online-payments')
@@ -526,12 +529,41 @@ export default function FeeManagement({
   const [yearEnd, setYearEnd]                   = useState<YearEndState | null>(null)
   const [yearEndLoading, setYearEndLoading]     = useState(false)
   // per-student decision: studentId -> 'carry' | 'writeoff' | 'open'
-  const [yeDecisions, setYeDecisions]           = useState<Record<number, 'carry' | 'writeoff' | 'open'>>({})
+  const [yeDecisions, setYeDecisions]           = useState<Record<number, 'carry' | 'writeoff' | 'open' | 'passout'>>({})
   const [yeReasons, setYeReasons]               = useState<Record<number, string>>({})
   const [yeFilter, setYeFilter]                 = useState<'all' | 'leavers' | 'continuing'>('all')
   const [yeProcessing, setYeProcessing]         = useState(false)
   const [yeMsg, setYeMsg]                        = useState('')
   const [yeClosing, setYeClosing]               = useState(false)
+
+  // Passout ledger panel state
+  type PassoutSummary = {
+    passout_students: number
+    total_billed: number
+    total_collected: number
+    total_waived: number
+    total_outstanding: number
+  }
+  type PassoutStudent = {
+    student_id: number
+    student_name: string
+    roll_number: string
+    grade: string
+    section: string
+    passout_year: string
+    outstanding: number
+    total_collected: number
+  }
+  type RecentCollection = {
+    id: number; student_name: string; amount: number; payment_mode: string
+    paid_date: string; receipt_number: string; period_label: string
+  }
+  const [passoutData, setPassoutData] = useState<{
+    summary: PassoutSummary
+    students: PassoutStudent[]
+    recent_collections: RecentCollection[]
+  } | null>(null)
+  const [passoutLoading, setPassoutLoading] = useState(false)
 
   // 15-day banner: days until year end (null = not loaded yet, -1 = not applicable)
   const [daysUntilYearEnd, setDaysUntilYearEnd] = useState<number | null>(null)
@@ -617,6 +649,15 @@ export default function FeeManagement({
   useEffect(() => { loadAcademicYears() }, [loadAcademicYears])
 
   // ── Overview stats ───────────────────────────────────────────────────────────
+  const loadPassout = useCallback(async () => {
+    setPassoutLoading(true)
+    try {
+      const res = await fetch(`/api/fees/passout?school_id=${schoolId}`)
+      if (res.ok) setPassoutData(await res.json())
+    } catch { /* silent */ }
+    setPassoutLoading(false)
+  }, [schoolId])
+
   const loadStats = useCallback(async () => {
     if (!academicYear) return
     setStatsLoading(true)
@@ -648,7 +689,7 @@ export default function FeeManagement({
     setStatsLoading(false)
   }, [schoolId, academicYear])
 
-  useEffect(() => { if (academicYear) loadStats() }, [loadStats, academicYear])
+  useEffect(() => { if (academicYear) { loadStats(); loadPassout() } }, [loadStats, loadPassout, academicYear])
 
   // ── Setup: categories + structures + lock + amendments ───────────────────────
   const loadSetup = useCallback(async () => {
@@ -1416,19 +1457,20 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     setCatChangelogLoading(false)
   }
 
-  async function applyYearEndDecisions() {
+  async function applyYearEndDecisions(overrideTargetYear?: string) {
     if (!yearEnd) return
-    // Build decisions only for students who have a non-'open' decision (open = no-op leave as is)
+    // Build decisions only for students who have an actionable (non-'open') decision
     const decisions = yearEnd.students
       .map(s => ({ student_id: s.student_id, decision: yeDecisions[s.student_id] || 'open', reason: yeReasons[s.student_id] }))
-      .filter(d => d.decision === 'carry' || d.decision === 'writeoff')
-    if (decisions.length === 0) { setYeMsg('No carry-forward or write-off decisions selected.'); return }
+      .filter(d => d.decision === 'carry' || d.decision === 'writeoff' || d.decision === 'passout')
+    if (decisions.length === 0) { setYeMsg('No carry-forward, write-off, or passout decisions selected.'); return }
 
     // Guard on client too: leavers cannot carry
     const badLeaver = yearEnd.students.find(s => s.is_leaver && yeDecisions[s.student_id] === 'carry')
-    if (badLeaver) { setYeMsg(`${badLeaver.student_name} is leaving — cannot carry forward. Choose Write Off or Leave Open.`); return }
+    if (badLeaver) { setYeMsg(`${badLeaver.student_name} is leaving — cannot carry forward. Choose Passout, Write Off, or Leave Open.`); return }
 
-    if (decisions.some(d => d.decision === 'carry') && !yearEnd.target_year_exists) {
+    const targetYear = overrideTargetYear ?? yearEnd.target_year
+    if (decisions.some(d => d.decision === 'carry') && !overrideTargetYear && !yearEnd.target_year_exists) {
       openCfModal(); return
     }
 
@@ -1437,13 +1479,15 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'apply', school_id: schoolId, from_year: academicYear,
-        to_year: yearEnd.target_year, done_by: adminName || 'Admin', decisions,
+        to_year: targetYear, done_by: adminName || 'Admin', decisions,
       }),
     })
     const d = await r.json()
     if (r.ok) {
-      setYeMsg(`✓ Applied — ${d.carried.count} carried (${fmt(d.carried.total)}), ${d.writeoff.count} written off (${fmt(d.writeoff.total)})`)
+      const passoutPart = d.passout?.count > 0 ? `, ${d.passout.count} to passout ledger (${fmt(d.passout.total)})` : ''
+      setYeMsg(`✓ Applied — ${d.carried.count} carried (${fmt(d.carried.total)}), ${d.writeoff.count} written off (${fmt(d.writeoff.total)})${passoutPart}`)
       loadYearEnd()
+      if (d.passout?.count > 0) loadPassout()
     } else {
       setYeMsg(d.error || 'Failed to apply')
     }
@@ -1596,7 +1640,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     setPendingLoading(false)
   }, [schoolId])
 
-  useEffect(() => { if (activeTab === 'pending') loadPending() }, [activeTab, loadPending])
+  useEffect(() => { if (activeTab === 'collect') loadPending() }, [activeTab, loadPending])
 
   async function verifyPayment(paymentId: number, action: 'approve' | 'reject') {
     setVerifyingId(paymentId); setVerifyMsg('')
@@ -2132,11 +2176,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <button onClick={() => setShowCfModal(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
                   <button data-testid="cf-confirm" disabled={!cfSelectedYear} onClick={() => {
                     if (!yearEnd) return
-                    // Patch the yearEnd state so applyYearEndDecisions uses the selected year
-                    setYearEnd(prev => prev ? { ...prev, target_year: cfSelectedYear, target_year_exists: true } : prev)
                     setShowCfModal(false)
-                    // Re-run after state update
-                    setTimeout(() => applyYearEndDecisions(), 50)
+                    applyYearEndDecisions(cfSelectedYear)
                   }} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
                     Confirm & Carry Forward
                   </button>
@@ -2223,7 +2264,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
         (() => {
           const step1Done = true // year exists
           const step2Done = categories.filter(c => c.is_active !== false).length > 0
-          const step3Done = structures.length > 0
+          const step3Done = fixedAmountsComplete()
           const step4Done = (stats?.summary?.total_due ?? 0) > 0
           const step5Done = !!structureLock
           const allDone = step1Done && step2Done && step3Done && step4Done && step5Done
@@ -2278,6 +2319,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
         ] as const).map(t => (
           <button
             key={t.key}
+            data-testid={`tab-${t.key}`}
             onClick={() => setActiveTab(t.key as Tab)}
             className={`px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors ${
               activeTab === t.key
@@ -2298,9 +2340,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
 
           {/* ── Action Required ── */}
           {(() => {
-            const actions: Array<{ msg: string; tab: Tab; color: string }> = []
+            const actions: Array<{ msg: string; tab: Tab; color: string; subView?: 'online' }> = []
             if (pendingPayments.length > 0)
-              actions.push({ msg: `${pendingPayments.length} online payment${pendingPayments.length > 1 ? 's' : ''} waiting for your verification`, tab: 'pending' as const, color: 'text-red-700 bg-red-50 border-red-200' })
+              actions.push({ msg: `${pendingPayments.length} online payment${pendingPayments.length > 1 ? 's' : ''} waiting for your verification`, tab: 'collect' as const, subView: 'online', color: 'text-red-700 bg-red-50 border-red-200' })
             if (stats && stats.summary.overdue_count > 20)
               actions.push({ msg: `${stats.summary.overdue_count} overdue entries — follow up with parents`, tab: 'collect' as const, color: 'text-orange-700 bg-orange-50 border-orange-200' })
             if (stats && stats.summary.defaulters_count > 0)
@@ -2323,7 +2365,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <div key={i} className="flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50">
                       <p className="text-sm text-gray-700">{a.msg}</p>
                       <button
-                        onClick={() => setActiveTab(a.tab)}
+                        onClick={() => { setActiveTab(a.tab); if (a.subView === 'online') setCollectionView('online') }}
                         className="text-xs font-semibold text-blue-600 hover:text-blue-800 ml-4 flex-shrink-0"
                       >
                         View →
@@ -2646,6 +2688,68 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       </div>
                     </div>
                   )}
+
+                  {/* Passout Students Pending Bills */}
+                  {passoutData && passoutData.summary.passout_students > 0 && (
+                    <div className="bg-white rounded-xl border border-indigo-100 p-5">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <h3 className="text-sm font-semibold text-indigo-700">Passout Students — Pending Bills</h3>
+                          <p className="text-xs text-gray-400 mt-0.5">{passoutData.summary.passout_students} student{passoutData.summary.passout_students > 1 ? 's' : ''} · open ledger</p>
+                        </div>
+                        <button
+                          onClick={loadPassout}
+                          disabled={passoutLoading}
+                          className="text-xs text-indigo-600 hover:text-indigo-800"
+                        >
+                          {passoutLoading ? '…' : '↻ Refresh'}
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 mb-3">
+                        <div className="bg-indigo-50 rounded-lg px-3 py-2 text-center">
+                          <p className="text-xs text-indigo-500 mb-0.5">Outstanding</p>
+                          <p className="text-sm font-bold text-indigo-700">{fmt(passoutData.summary.total_outstanding)}</p>
+                        </div>
+                        <div className="bg-green-50 rounded-lg px-3 py-2 text-center">
+                          <p className="text-xs text-green-500 mb-0.5">Collected</p>
+                          <p className="text-sm font-bold text-green-700">{fmt(passoutData.summary.total_collected)}</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
+                          <p className="text-xs text-gray-400 mb-0.5">Net Pending</p>
+                          <p className="text-sm font-bold text-gray-700">{fmt(passoutData.summary.total_outstanding - passoutData.summary.total_collected)}</p>
+                        </div>
+                      </div>
+                      {passoutData.students.length > 0 && (
+                        <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                          {passoutData.students.slice(0, 5).map(s => (
+                            <div key={s.student_id} className="flex items-center justify-between py-1">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-medium text-gray-800 truncate">{s.student_name}</p>
+                                <p className="text-[10px] text-gray-400">Gr.{s.grade}{s.section} · Batch {s.passout_year}</p>
+                              </div>
+                              <p className="text-xs font-bold text-red-600 flex-shrink-0 ml-2">{fmt(s.outstanding)}</p>
+                            </div>
+                          ))}
+                          {passoutData.students.length > 5 && (
+                            <p className="text-xs text-gray-400 text-center pt-1">+{passoutData.students.length - 5} more</p>
+                          )}
+                        </div>
+                      )}
+                      {passoutData.recent_collections.length > 0 && (
+                        <div className="mt-3 border-t border-gray-100 pt-3">
+                          <p className="text-xs font-semibold text-gray-500 mb-2">Recent Collections</p>
+                          <div className="space-y-1.5">
+                            {passoutData.recent_collections.slice(0, 3).map(c => (
+                              <div key={c.id} className="flex items-center justify-between">
+                                <p className="text-xs text-gray-600 truncate flex-1">{c.student_name} · {c.period_label}</p>
+                                <p className="text-xs font-bold text-green-600 flex-shrink-0 ml-2">{fmt(c.amount)}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </>
@@ -2805,7 +2909,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <button onClick={() => setShowAmendLog(p => !p)} className="text-xs text-amber-700 border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-100">
                     {showAmendLog ? 'Hide' : 'View'} Amendments ({amendments.length})
                   </button>
-                  <button onClick={unlockStructure} disabled={lockingStructure} className="text-xs text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50 disabled:opacity-50">
+                  <button data-testid="btn-unlock-plan" onClick={unlockStructure} disabled={lockingStructure} className="text-xs text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50 disabled:opacity-50">
                     {lockingStructure ? 'Unlocking…' : 'Unlock'}
                   </button>
                 </div>
@@ -2860,11 +2964,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               )}
               {!structureLock && (
                 <>
-                  <button onClick={() => { setShowAddFee(true); setAddFeeStep(1) }}
+                  <button data-testid="btn-add-fee-head" onClick={() => { setShowAddFee(true); setAddFeeStep(1) }}
                     className="text-sm border border-blue-200 text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-lg font-medium">
                     + Add Fee Head
                   </button>
-                  <button onClick={generateLedger}
+                  <button data-testid="btn-generate-bills" onClick={generateLedger}
                     disabled={generatingLedger || categories.length === 0 || !fixedAmountsComplete()}
                     title={!fixedAmountsComplete() ? `Set amounts for all fixed fees first${fixedFeesMissingAmounts().length ? ': ' + fixedFeesMissingAmounts().join(', ') : ''}` : 'Generate bills for all students'}
                     className="text-sm bg-green-600 text-white hover:bg-green-700 px-4 py-2 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed">
@@ -3261,7 +3365,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     : 'Generate bills first — the plan can only be locked after bills are generated.'}
                 </p>
               </div>
-              <button onClick={lockStructure} disabled={lockingStructure || !anyBillsGenerated()}
+              <button data-testid="btn-lock-plan" onClick={lockStructure} disabled={lockingStructure || !anyBillsGenerated()}
                 title={!anyBillsGenerated() ? 'Generate bills before locking' : 'Lock the fee plan'}
                 className="text-sm bg-blue-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
                 {lockingStructure ? 'Locking…' : '🔒 Lock Fee Plan'}
@@ -3452,15 +3556,15 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             <div className="space-y-4">
               {/* Filters */}
               <div className="flex items-center gap-3">
-                <input type="text" placeholder="Search name, roll, grade, phone, parent…" value={ledgerSearch}
+                <input data-testid="input-ledger-search" type="text" placeholder="Search name, roll, grade, phone, parent…" value={ledgerSearch}
                   onChange={e => setLedgerSearch(e.target.value)}
                   className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <select value={ledgerGrade} onChange={e => setLedgerGrade(e.target.value)}
+                <select data-testid="select-ledger-grade" value={ledgerGrade} onChange={e => setLedgerGrade(e.target.value)}
                   className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
                   <option value="">All Grades</option>
                   {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                 </select>
-                <button onClick={loadLedger} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Refresh</button>
+                <button data-testid="btn-refresh-ledger" onClick={loadLedger} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Refresh</button>
                 <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download
                   className="text-sm border border-gray-200 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-50">Export</a>
               </div>
@@ -3598,6 +3702,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                   <div className="relative mt-1">
                                     <span className="absolute left-3 top-2.5 text-gray-400 text-sm">₹</span>
                                     <input
+                                      data-testid="input-pay-amount"
                                       type="number" min="0" step="0.01" inputMode="decimal" value={payAmount}
                                       onKeyDown={blockNonNumericKeys}
                                       onChange={e => setPayAmount(sanitizeMoney(e.target.value))}
@@ -3662,6 +3767,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                 )}
                                 <div className="flex gap-2">
                                   <button
+                                    data-testid="btn-review-payment"
                                     onClick={() => setShowPayConfirm(true)}
                                     disabled={collectLoading || !(parseFloat(payAmount) > 0) || parseFloat(payAmount) > checkedTotal + 0.01}
                                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2">
@@ -3669,6 +3775,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                     Review & Confirm
                                   </button>
                                   <button
+                                    data-testid="btn-grant-waiver"
                                     onClick={() => { setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
                                     className="px-3 py-2.5 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium whitespace-nowrap">
                                     Grant Waiver
@@ -3825,7 +3932,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-base font-semibold text-gray-800">Online Payments — Pending Verification</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Check your school's UPI/bank statement, then approve or reject. Parent is notified by email.</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Check your school&apos;s UPI/bank statement, then approve or reject. Parent is notified by email.</p>
                 </div>
                 <button onClick={loadPending} className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Refresh</button>
               </div>
@@ -3958,7 +4065,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-base font-semibold text-gray-800">Day Close — End of Day Reconciliation</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Review the day's collections and verify cash in hand. Closing locks the day's record.</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Review the day&apos;s collections and verify cash in hand. Closing locks the day&apos;s record.</p>
                 </div>
                 <input type="date" value={dayCloseDate} onChange={e => setDayCloseDate(e.target.value)}
                   className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white" />
@@ -4046,7 +4153,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <div className="flex justify-end gap-2">
                     <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=payments&date=${new Date().toISOString().slice(0,10)}`} download
                       className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">Export Day Report</a>
-                    <button onClick={submitDayClose} disabled={dayCloseSubmitting || dayCloseData.receipts.count === 0}
+                    <button data-testid="btn-submit-dayclose" onClick={submitDayClose} disabled={dayCloseSubmitting || dayCloseData.receipts.count === 0}
                       className="text-sm bg-blue-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
                       {dayCloseSubmitting ? 'Closing…' : dayCloseData.already_closed ? 'Update Day Close' : 'Submit Day Close'}
                     </button>
@@ -4097,7 +4204,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <div className="px-3 py-2 bg-gray-50 border-b border-gray-100 text-xs text-gray-500">{list.length} student{list.length !== 1 ? 's' : ''}</div>
                     <div className="divide-y divide-gray-50 max-h-[480px] overflow-y-auto">
                       {list.map(s => (
-                        <button key={s.id} onClick={() => loadPassbook(s.id)}
+                        <button key={s.id} data-testid={`student-row-${s.id}`} onClick={() => loadPassbook(s.id)}
                           className="w-full text-left px-4 py-2.5 hover:bg-blue-50 flex items-center justify-between group">
                           <span className="flex items-center gap-2">
                             <span className="text-sm font-medium text-gray-800">{s.name}</span>
@@ -4232,7 +4339,12 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         <tbody>
                           {yearGroup.entries.map(e => (
                             <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
-                              <td className="px-4 py-2.5 text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></td>
+                              <td className="px-4 py-2.5 text-gray-700">
+                                {e.category_name} · <span className="text-gray-400">{e.period_label}</span>
+                                {e.source_academic_year && (
+                                  <span className="ml-2 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-medium" title={`Carried from ${e.source_academic_year}`}>↩ {e.source_academic_year}</span>
+                                )}
+                              </td>
                               <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
                               <td className="px-4 py-2.5 text-right text-green-600">{fmt(e.amount_paid)}</td>
                               <td className="px-4 py-2.5 text-right text-purple-600">{Number(e.waiver_amount) > 0 ? fmt(e.waiver_amount) : '—'}</td>
@@ -4910,10 +5022,18 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                     <button
                                       onClick={() => !s.is_leaver && setYeDecisions(p => ({ ...p, [s.student_id]: 'carry' }))}
                                       disabled={s.is_leaver}
-                                      title={s.is_leaver ? 'Leavers cannot carry forward' : ''}
+                                      title={s.is_leaver ? 'Leavers cannot carry forward — use Passout instead' : ''}
                                       className={`px-2.5 py-1 transition-colors ${decision === 'carry' ? 'bg-blue-600 text-white' : s.is_leaver ? 'bg-gray-50 text-gray-300 cursor-not-allowed' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
                                       Carry
                                     </button>
+                                    {s.is_leaver && (
+                                      <button
+                                        onClick={() => setYeDecisions(p => ({ ...p, [s.student_id]: 'passout' }))}
+                                        title="Move unpaid dues to the always-open Passout Ledger"
+                                        className={`px-2.5 py-1 border-l border-gray-200 transition-colors ${decision === 'passout' ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-500 hover:bg-indigo-50'}`}>
+                                        Passout
+                                      </button>
+                                    )}
                                     <button
                                       onClick={() => setYeDecisions(p => ({ ...p, [s.student_id]: 'writeoff' }))}
                                       className={`px-2.5 py-1 border-l border-gray-200 transition-colors ${decision === 'writeoff' ? 'bg-red-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
@@ -4959,13 +5079,19 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       </p>
                       {yeMsg && <p className={`text-sm font-medium ${yeMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{yeMsg}</p>}
                       {(() => {
-                        const carryN = Object.values(yeDecisions).filter(d => d === 'carry').length
-                        const woN = Object.values(yeDecisions).filter(d => d === 'writeoff').length
-                        const total = carryN + woN
+                        const carryN   = Object.values(yeDecisions).filter(d => d === 'carry').length
+                        const woN      = Object.values(yeDecisions).filter(d => d === 'writeoff').length
+                        const passoutN = Object.values(yeDecisions).filter(d => d === 'passout').length
+                        const total    = carryN + woN + passoutN
+                        const label    = [
+                          carryN   > 0 ? `${carryN} carry`   : '',
+                          woN      > 0 ? `${woN} write off`  : '',
+                          passoutN > 0 ? `${passoutN} passout` : '',
+                        ].filter(Boolean).join(', ')
                         return (
-                          <button onClick={applyYearEndDecisions} disabled={yeProcessing || total === 0}
+                          <button data-testid="btn-apply-yearend" onClick={() => applyYearEndDecisions()} disabled={yeProcessing || total === 0}
                             className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
-                            {yeProcessing ? 'Applying…' : `Apply Decisions (${carryN} carry, ${woN} write off)`}
+                            {yeProcessing ? 'Applying…' : `Apply Decisions (${label || 'none'})`}
                           </button>
                         )
                       })()}
@@ -4987,7 +5113,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">🖨 Print Statement</button>
                     <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download
                       className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">Export Ledger CSV</a>
-                    <button onClick={() => { if (window.confirm(`Close ${academicYear}? This locks the year. You can reopen later if needed.`)) closeYear() }}
+                    <button data-testid="btn-close-year" onClick={() => { if (window.confirm(`Close ${academicYear}? This locks the year. You can reopen later if needed.`)) closeYear() }}
                       disabled={yeClosing}
                       className="ml-auto text-sm bg-gray-800 text-white px-5 py-2 rounded-lg font-medium hover:bg-gray-900 disabled:opacity-50">
                       {yeClosing ? 'Closing…' : `🔒 Close Financial Year ${academicYear}`}
@@ -5102,7 +5228,12 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                             <tbody className="divide-y divide-gray-50">
                               {(pbYearOnly[0]?.entries ?? []).map(e => (
                                 <tr key={e.id} className="hover:bg-gray-50">
-                                  <td className="px-4 py-2.5 text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></td>
+                                  <td className="px-4 py-2.5 text-gray-700">
+                                    {e.category_name} · <span className="text-gray-400">{e.period_label}</span>
+                                    {e.source_academic_year && (
+                                      <span className="ml-2 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-medium" title={`Carried from ${e.source_academic_year}`}>↩ {e.source_academic_year}</span>
+                                    )}
+                                  </td>
                                   <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
                                   <td className="px-4 py-2.5 text-right text-green-600">{fmt(e.amount_paid)}</td>
                                   <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full capitalize font-medium ${STATUS_COLORS[e.status as keyof typeof STATUS_COLORS] || ''}`}>{e.status}</span></td>
@@ -5385,6 +5516,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 ← Edit
               </button>
               <button
+                data-testid="btn-confirm-payment"
                 onClick={() => { setShowPayConfirm(false); submitCounterPayment() }}
                 disabled={collectLoading}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-blue-200">
@@ -5545,6 +5677,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   Cancel
                 </button>
                 <button
+                  data-testid="btn-submit-waiver"
                   onClick={submitWaiver}
                   disabled={waiverLoading || !waiverForm.reason.trim() || (waiverForm.waiver_type !== 'full' && !waiverForm.waiver_value)}
                   className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-purple-200">
