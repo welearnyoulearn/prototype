@@ -84,14 +84,16 @@ export async function GET(req: NextRequest) {
       ).catch(() => ({ rows: [{ total: summary.total_waived }] }))
       summary.discretionary_waived = discretionary.total
 
-      // Collection by category
+      // Collection by category — discretionary_waived computed from fee_waivers
+      // (separate query to avoid multiplying total_due/collected when joining waivers)
       const { rows: by_category } = await pool.query(
         `SELECT fc.name AS category_name, fc.frequency,
                 COALESCE(SUM(l.amount_due), 0)                                                             AS total_due,
                 COALESCE(SUM(l.amount_paid), 0)                                                            AS total_collected,
                 COALESCE(SUM(COALESCE(l.waiver_amount, 0)), 0)                                             AS total_waived,
                 COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)), 0)  AS total_outstanding,
-                COUNT(*) FILTER (WHERE l.status = 'overdue') AS overdue_count
+                COUNT(*) FILTER (WHERE l.status = 'overdue') AS overdue_count,
+                fc.id AS fee_category_id
          FROM student_fee_ledger l
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE l.school_id = $1 AND l.academic_year = $2
@@ -99,8 +101,24 @@ export async function GET(req: NextRequest) {
          ORDER BY total_due DESC`,
         [school_id, academic_year]
       )
+      // Discretionary waivers per category (excludes carry_forward bookkeeping)
+      const { rows: discByCat } = await pool.query(
+        `SELECT fc.id AS fee_category_id, COALESCE(SUM(w.waiver_amount), 0) AS total
+         FROM fee_waivers w
+         JOIN student_fee_ledger l ON l.id = w.ledger_id
+         JOIN fee_categories fc ON fc.id = l.fee_category_id
+         WHERE l.school_id = $1 AND l.academic_year = $2
+           AND COALESCE(w.is_revoked, FALSE) = FALSE
+           AND w.waiver_type != 'carry_forward'
+         GROUP BY fc.id`,
+        [school_id, academic_year]
+      ).catch(() => ({ rows: [] as Array<{fee_category_id: number; total: string}> }))
+      const discCatMap = new Map(discByCat.map((r: {fee_category_id: number; total: string}) => [r.fee_category_id, r.total]))
+      for (const c of by_category) c.discretionary_waived = discCatMap.get(c.fee_category_id) ?? '0'
 
-      // Monthly collection trend (last 12 months of payments)
+      // Monthly collection trend — scoped to the selected academic year (Apr → Mar)
+      const [ayStartStr] = academic_year.split('-')
+      const ayStart = parseInt(ayStartStr)
       const { rows: monthly_trend } = await pool.query(
         `SELECT TO_CHAR(fp.paid_date, 'Mon YYYY') AS month,
                 DATE_TRUNC('month', fp.paid_date) AS month_start,
@@ -108,10 +126,11 @@ export async function GET(req: NextRequest) {
          FROM fee_payments fp
          WHERE fp.school_id = $1
            AND fp.payment_status = 'completed'
-           AND fp.paid_date >= CURRENT_DATE - INTERVAL '12 months'
+           AND fp.paid_date >= ($2 || '-04-01')::date
+           AND fp.paid_date <  (($3)::text || '-04-01')::date
          GROUP BY month, month_start
          ORDER BY month_start`,
-        [school_id]
+        [school_id, ayStart, ayStart + 1]
       )
 
       // Top defaulters — outstanding balance > 0 regardless of status, so partially-paid
