@@ -39,7 +39,7 @@ type LedgerEntry = {
   student_status: string
   category_name: string; period_label: string
   amount_due: number; amount_paid: number; balance: number; waiver_amount: number
-  due_date: string; status: 'pending' | 'paid' | 'partial' | 'overdue' | 'waived'
+  due_date: string; status: 'pending' | 'paid' | 'partial' | 'overdue' | 'waived' | 'settled'
   days_overdue: number; has_edits: boolean
   source_academic_year: string | null
 }
@@ -422,6 +422,8 @@ export default function FeeManagement({
   const [counterPmtLoading, setCounterPmtLoading] = useState(false)
   const [showCounterHistory, setShowCounterHistory] = useState(false)
   const [showPassbookModal, setShowPassbookModal] = useState(false)
+  // Synthetic StudentRow for passout students collected from the Overview panel
+  const [passoutOpenStudent, setPassoutOpenStudent] = useState<StudentRow | null>(null)
   // Day close
   type DayCloseData = {
     date: string
@@ -535,6 +537,14 @@ export default function FeeManagement({
   const [yeProcessing, setYeProcessing]         = useState(false)
   const [yeMsg, setYeMsg]                        = useState('')
   const [yeClosing, setYeClosing]               = useState(false)
+
+  // Year rollover modal state
+  const [showRolloverModal, setShowRolloverModal] = useState(false)
+  type RolloverPreview = { requires_confirmation: boolean; pending_count: number; pending_total: number; message: string }
+  const [rolloverPreview, setRolloverPreview]   = useState<RolloverPreview | null>(null)
+  const [rolloverLoading, setRolloverLoading]   = useState(false)
+  const [rolloverMsg, setRolloverMsg]           = useState('')
+  const [rolloverDone, setRolloverDone]         = useState(false)
 
   // Passout ledger panel state
   type PassoutSummary = {
@@ -657,6 +667,45 @@ export default function FeeManagement({
     } catch { /* silent */ }
     setPassoutLoading(false)
   }, [schoolId])
+
+  // Passout collect: load a passout student's open ledger entries, then open the payment form
+  const [passoutCollectLoading, setPassoutCollectLoading] = useState<number | null>(null)
+
+  async function collectPassoutStudent(s: { student_id: number; student_name: string; roll_number: string; grade: string; section: string; outstanding: number }) {
+    setPassoutCollectLoading(s.student_id)
+    try {
+      const res = await fetch(`/api/fees/ledger?school_id=${schoolId}&student_id=${s.student_id}&academic_year=passout`)
+      if (!res.ok) { setPassoutCollectLoading(null); return }
+      const entries: LedgerEntry[] = await res.json()
+      const open = entries.filter(e => ['pending', 'partial', 'overdue'].includes(e.status))
+      if (open.length === 0) { setPassoutCollectLoading(null); return }
+      // Reuse the existing counter collect flow: set openStudent + collectChecked + switch to collect tab
+      const row: StudentRow = {
+        student_id: s.student_id, student_name: s.student_name, roll_number: s.roll_number,
+        school_roll_number: null, grade: s.grade, section: s.section,
+        email: null, phone: null, parent_name: null, parent_phone: null, parent_email: null,
+        student_status: 'left',
+        total_billed: open.reduce((a, e) => a + Number(e.amount_due), 0),
+        total_paid: 0,
+        outstanding: s.outstanding,
+        open_entries: open, all_entries: entries,
+        has_overdue: open.some(e => e.status === 'overdue'), never_paid: false,
+      }
+      setActiveTab('collect' as Tab)
+      setCollectionView('counter')
+      setOpenStudentId(s.student_id)
+      setCollectChecked(new Set(open.map(e => e.id)))
+      const fullTotal = open.reduce((a, e) => a + Number(e.balance), 0)
+      setPayAmount(fullTotal > 0 ? String(fullTotal) : '')
+      setPayMode('cash'); setPayRef(''); setPayNotes(''); setPayDate(new Date().toISOString().slice(0, 10))
+      setPayError(''); setPaySuccess(null); setShowCollectForm(true)
+      // Inject the passout row into openStudent via ledger search trick — set openStudent directly
+      // openStudent is derived from studentRows which comes from the regular ledger; passout students
+      // won't be there, so we store the synthesised row in a dedicated state slot.
+      setPassoutOpenStudent(row)
+    } catch { /* silent */ }
+    setPassoutCollectLoading(null)
+  }
 
   const loadStats = useCallback(async () => {
     if (!academicYear) return
@@ -1513,6 +1562,45 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     }
   }
 
+  // Two-phase year rollover: phase 1 = preview pending dues, phase 2 = confirm → execute
+  async function startRollover() {
+    setRolloverLoading(true); setRolloverMsg(''); setRolloverPreview(null); setRolloverDone(false)
+    const r = await fetch('/api/fees/year-rollover', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId, from_year: academicYear }),
+    })
+    const d = await r.json()
+    setRolloverLoading(false)
+    if (d.requires_confirmation) {
+      setRolloverPreview(d)
+    } else if (r.ok) {
+      // No pending dues — rolled over immediately
+      setRolloverDone(true)
+      setRolloverMsg(`✓ Rolled over to ${d.to_year} — ${d.dues_carried} student${d.dues_carried !== 1 ? 's' : ''} carried (${fmt(d.dues_amount)})`)
+      loadYearEnd(); loadStats(); loadAcademicYears()
+    } else {
+      setRolloverMsg(d.error || 'Rollover failed')
+    }
+  }
+
+  async function confirmRollover() {
+    setRolloverLoading(true); setRolloverMsg('')
+    const r = await fetch('/api/fees/year-rollover', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId, from_year: academicYear, confirmed: true }),
+    })
+    const d = await r.json()
+    setRolloverLoading(false)
+    if (r.ok) {
+      setRolloverDone(true)
+      setRolloverPreview(null)
+      setRolloverMsg(`✓ Rolled over to ${d.to_year} — ${d.dues_carried} student${d.dues_carried !== 1 ? 's' : ''} carried (${fmt(d.dues_amount)})`)
+      loadYearEnd(); loadStats(); loadAcademicYears()
+    } else {
+      setRolloverMsg(d.error || 'Rollover failed')
+    }
+  }
+
   async function reopenYear() {
     const reason = window.prompt('Reason for reopening this closed year? (logged permanently)')
     if (!reason) return
@@ -1739,6 +1827,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
   const openStudent = collectionFiltered.find(r => r.student_id === openStudentId)
     || studentRows.find(r => r.student_id === openStudentId)
+    || (passoutOpenStudent?.student_id === openStudentId ? passoutOpenStudent : undefined)
 
   // Total of currently-checked entries in the collect form
   const checkedTotal = openStudent
@@ -1747,7 +1836,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
   function toggleStudent(id: number) {
     if (openStudentId === id) {
-      setOpenStudentId(null); setShowCollectForm(false); setShowCounterHistory(false)
+      setOpenStudentId(null); setShowCollectForm(false); setShowCounterHistory(false); setPassoutOpenStudent(null)
       // Scroll the row back into view after collapsing
       setTimeout(() => {
         document.getElementById(`student-row-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -1819,7 +1908,8 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
         outstanding_before: openStudent.outstanding,
       })
       setShowCollectForm(false)
-      loadLedger(); loadStats()
+      setPassoutOpenStudent(null)
+      loadLedger(); loadStats(); loadPassout()
       if (reportData !== null) loadReports()
       if (yearEnd   !== null) loadYearEnd()
     } else {
@@ -2720,19 +2810,23 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         </div>
                       </div>
                       {passoutData.students.length > 0 && (
-                        <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                          {passoutData.students.slice(0, 5).map(s => (
-                            <div key={s.student_id} className="flex items-center justify-between py-1">
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                          {passoutData.students.map(s => (
+                            <div key={s.student_id} className="flex items-center justify-between py-1 gap-2">
                               <div className="min-w-0 flex-1">
                                 <p className="text-xs font-medium text-gray-800 truncate">{s.student_name}</p>
                                 <p className="text-[10px] text-gray-400">Gr.{s.grade}{s.section} · Batch {s.passout_year}</p>
                               </div>
-                              <p className="text-xs font-bold text-red-600 flex-shrink-0 ml-2">{fmt(s.outstanding)}</p>
+                              <p className="text-xs font-bold text-red-600 flex-shrink-0">{fmt(s.outstanding)}</p>
+                              <button
+                                data-testid={`btn-passout-collect-${s.student_id}`}
+                                onClick={() => collectPassoutStudent(s)}
+                                disabled={passoutCollectLoading === s.student_id}
+                                className="flex-shrink-0 text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded font-medium hover:bg-indigo-700 disabled:opacity-50">
+                                {passoutCollectLoading === s.student_id ? '…' : 'Collect'}
+                              </button>
                             </div>
                           ))}
-                          {passoutData.students.length > 5 && (
-                            <p className="text-xs text-gray-400 text-center pt-1">+{passoutData.students.length - 5} more</p>
-                          )}
                         </div>
                       )}
                       {passoutData.recent_collections.length > 0 && (
@@ -4931,9 +5025,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         className="text-xs bg-gray-600 text-white px-3 py-1.5 rounded-lg hover:bg-gray-500 disabled:opacity-50">
                         {yeClosing ? 'Working…' : 'Reopen'}
                       </button>
-                      <button onClick={() => alert('Go to Year Rollover in the sidebar to start the new academic year.')}
+                      <button
+                        data-testid="btn-start-rollover"
+                        onClick={() => { setShowRolloverModal(true); setRolloverPreview(null); setRolloverMsg(''); setRolloverDone(false) }}
                         className="text-xs bg-green-500 text-white px-4 py-1.5 rounded-lg font-semibold hover:bg-green-400">
-                        Go to Year Rollover →
+                        Start Year Rollover →
                       </button>
                     </div>
                   </div>
@@ -5127,6 +5223,92 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       )}
 
 
+
+      {/* ══ Year Rollover Modal ═════════════════════════════════════════════════ */}
+      {showRolloverModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={e => { if (e.target === e.currentTarget && !rolloverLoading) setShowRolloverModal(false) }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-bold text-gray-900">Year Rollover — {academicYear}</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Creates next academic year and carries forward unpaid dues</p>
+              </div>
+              {!rolloverLoading && (
+                <button onClick={() => setShowRolloverModal(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+              )}
+            </div>
+
+            {!rolloverPreview && !rolloverDone && !rolloverMsg && (
+              <div className="space-y-3">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 space-y-1.5">
+                  <p className="font-semibold">What this does:</p>
+                  <ul className="list-disc list-inside space-y-1 text-xs">
+                    <li>Creates the next academic year and sets it as current</li>
+                    <li>Carries all remaining unpaid dues forward as &quot;Previous Year Dues&quot;</li>
+                    <li>Grade 12 students and leavers are excluded from auto-carry</li>
+                  </ul>
+                </div>
+                <p className="text-xs text-gray-500">This is irreversible. Make sure all year-end decisions (carry / write-off / passout) are applied first.</p>
+                <button
+                  data-testid="btn-rollover-preview"
+                  onClick={startRollover}
+                  disabled={rolloverLoading}
+                  className="w-full bg-green-600 text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-green-700 disabled:opacity-50">
+                  {rolloverLoading ? 'Checking…' : 'Check & Start Rollover'}
+                </button>
+              </div>
+            )}
+
+            {rolloverPreview && !rolloverDone && (
+              <div className="space-y-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                  <p className="text-sm font-semibold text-blue-800 mb-1">Pending dues will be carried forward</p>
+                  <p className="text-xs text-blue-700">{rolloverPreview.pending_count} ledger entries · {fmt(rolloverPreview.pending_total)} will become &quot;Previous Year Dues&quot; in the new year</p>
+                </div>
+                <p className="text-xs text-gray-500">Confirm to proceed. This cannot be undone without reopening the year.</p>
+                {rolloverMsg && <p className="text-sm text-red-600">{rolloverMsg}</p>}
+                <div className="flex gap-2">
+                  <button onClick={() => { setRolloverPreview(null) }} disabled={rolloverLoading}
+                    className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50 disabled:opacity-50">
+                    Cancel
+                  </button>
+                  <button
+                    data-testid="btn-rollover-confirm"
+                    onClick={confirmRollover}
+                    disabled={rolloverLoading}
+                    className="flex-1 bg-green-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-green-700 disabled:opacity-50">
+                    {rolloverLoading ? 'Rolling over…' : `Confirm — Carry ${rolloverPreview.pending_count} entries`}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {(rolloverDone || (rolloverMsg && !rolloverPreview)) && (
+              <div className="space-y-4">
+                <p className={`text-sm font-medium ${rolloverMsg.startsWith('✓') ? 'text-green-700' : 'text-red-600'}`}>{rolloverMsg}</p>
+                {rolloverDone && (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800">
+                    Rollover complete. The new academic year is now active. Go to the Setup tab to generate fee bills for the new year.
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <button onClick={() => setShowRolloverModal(false)}
+                    className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">
+                    Close
+                  </button>
+                  {rolloverDone && (
+                    <button onClick={() => { setShowRolloverModal(false); setActiveTab('setup' as Tab) }}
+                      className="flex-1 bg-blue-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-blue-700">
+                      Go to Setup →
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ══ Passbook Modal ══════════════════════════════════════════════════════ */}
       {showPassbookModal && (
