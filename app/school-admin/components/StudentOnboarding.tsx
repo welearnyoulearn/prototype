@@ -825,6 +825,12 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
               <p className="text-xs text-gray-400">Student/Parent Email optional — credentials sent by email if provided, else share manually</p>
               <p className="text-xs text-amber-600">Roll No unique within Grade + Section</p>
             </div>
+            {error && (
+              <div className="px-4 py-2 bg-red-50 border-t border-red-200 text-red-700 text-xs flex items-start justify-between gap-3">
+                <span>{error}</span>
+                <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 shrink-0">✕</button>
+              </div>
+            )}
             <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
               <button onClick={addRow} className="text-sm text-green-600 hover:text-green-800 font-medium">+ Add Row</button>
               <div className="flex items-center gap-3">
