@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
+import { JWT_SECRET as JWT_SECRET_RAW, COOKIE_ADMIN, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from '@/lib/auth-constants'
 
 // Combined middleware: auth routing (formerly proxy.ts) + Watchline observability logging.
 // Edge runtime only — cannot use pg, jsonwebtoken, or lib/auth / lib/db.
+// Cookie names and JWT secret come from lib/auth-constants (dependency-free, Edge-safe)
+// so they can never drift out of sync with lib/auth.ts's Node-runtime values again.
 
 export const config = {
   matcher: [
@@ -10,14 +13,7 @@ export const config = {
   ],
 }
 
-// ── Auth constants (must be inline — cannot import lib/auth in Edge) ──────────
-const COOKIE_ADMIN   = 'wlyl-auth'
-const COOKIE_TEACHER = 'wlyl-teacher'
-const COOKIE_STUDENT = 'wlyl-student'
-const COOKIE_PARENT  = 'wlyl-parent'
-
-const JWT_SECRET_RAW = process.env.JWT_SECRET || 'wlyl-super-secret-key-change-in-production'
-const JWT_SECRET     = new TextEncoder().encode(JWT_SECRET_RAW)
+const JWT_SECRET = new TextEncoder().encode(JWT_SECRET_RAW)
 
 async function getTokenPayload(token: string): Promise<Record<string, unknown> | null> {
   try {
