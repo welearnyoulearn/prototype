@@ -22,6 +22,14 @@ type TopRoute = { route: string; count: number; last_seen: string }
 
 type Tab = 'requests' | 'errors'
 
+type HealthStatus = 'ok' | 'warn' | 'critical'
+type WatchlineHealth = {
+  request_logs: { count: number; limit: number; pct: number; status: HealthStatus }
+  error_events: { count: number; limit: number; pct: number; status: HealthStatus }
+  overall: HealthStatus
+  checked_at: string
+}
+
 const SEVERITY_CHIP: Record<string, string> = {
   info:     'bg-blue-100 text-blue-700',
   warn:     'bg-amber-100 text-amber-700',
@@ -46,6 +54,13 @@ export default function WatchlinePage() {
   const [rows, setRows]         = useState<(RequestRow | ErrorRow)[]>([])
   const [total, setTotal]       = useState(0)
   const [page, setPage]         = useState(0)
+
+  // Storage health
+  const [health, setHealth]           = useState<WatchlineHealth | null>(null)
+  const [clearing, setClearing]       = useState(false)
+  const [clearDone, setClearDone]     = useState<string | null>(null)
+  const [clearError, setClearError]   = useState<string | null>(null)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
 
   // Filters
   const [schoolFilter, setSchoolFilter] = useState('')
@@ -82,24 +97,73 @@ export default function WatchlinePage() {
     } finally { setLoading(false) }
   }, [buildParams])
 
+  const loadHealth = useCallback(async () => {
+    try {
+      const res = await fetch('/api/platform/watchline/health')
+      if (res.ok) setHealth(await res.json())
+    } catch { /* health is non-critical — silent fail */ }
+  }, [])
+
   useEffect(() => { load() }, [load])
+  useEffect(() => { loadHealth() }, [loadHealth])
 
   // Reset page when tab or filters change
   useEffect(() => { setPage(0) }, [tab, schoolFilter, severityFilter, fromDate, toDate])
 
-  async function handleExport(fmt: 'csv' | 'json') {
+  async function handleExport(exportFmt: 'csv' | 'json') {
     setExporting(true)
     try {
-      const url = `/api/platform/watchline?${buildParams({ export: fmt, page: '0' })}`
+      const url = `/api/platform/watchline?${buildParams({ export: exportFmt, page: '0' })}`
       const res = await fetch(url)
       if (!res.ok) return
-      const blob = await res.blob()
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = `watchline-${tab}-${fromDate}-to-${toDate}.${fmt}`
-      a.click()
+      triggerDownload(await res.blob(), `watchline-${tab}-${fromDate}-to-${toDate}.${exportFmt}`)
     } finally { setExporting(false) }
   }
+
+  function triggerDownload(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 100)
+  }
+
+  async function handleDownloadAndClear() {
+    setClearing(true)
+    setClearError(null)
+    setClearDone(null)
+    const today = new Date().toISOString().slice(0, 10)
+    try {
+      // Step 1: download all requests as CSV (no from-filter — export everything)
+      const rRes = await fetch(`/api/platform/watchline?type=request&export=csv&from=1970-01-01&to=${today}&page=0`)
+      if (rRes.ok) triggerDownload(await rRes.blob(), `watchline-requests-full-${today}.csv`)
+
+      // Step 2: download all errors as CSV
+      const eRes = await fetch(`/api/platform/watchline?type=error&export=csv&from=1970-01-01&to=${today}&page=0`)
+      if (eRes.ok) triggerDownload(await eRes.blob(), `watchline-errors-full-${today}.csv`)
+
+      // Step 3: clear all rows
+      const delRes = await fetch('/api/platform/watchline', { method: 'DELETE' })
+      if (!delRes.ok) { setClearError('Download succeeded but clear failed — try again.'); return }
+      const del = await delRes.json() as { deleted: { request_logs: number; error_events: number } }
+      setClearDone(`Cleared ${(del.deleted.request_logs ?? 0).toLocaleString('en-IN')} request logs and ${(del.deleted.error_events ?? 0).toLocaleString('en-IN')} error events.`)
+      setHealth(null)
+      loadHealth()
+      load()
+    } catch {
+      setClearError('An error occurred during download or clear.')
+    } finally {
+      setClearing(false)
+      setShowClearConfirm(false)
+    }
+  }
+
+  const healthBgClass = health?.overall === 'critical'
+    ? 'bg-red-50 border-red-300'
+    : health?.overall === 'warn'
+    ? 'bg-amber-50 border-amber-300'
+    : null
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -118,6 +182,85 @@ export default function WatchlinePage() {
           <span className="bg-purple-100 text-purple-700 text-xs font-medium px-3 py-1 rounded-full">Platform Admin</span>
         </div>
       </div>
+
+      {/* Storage health banner */}
+      {health && health.overall !== 'ok' && healthBgClass && (
+        <div className={`border-b px-6 py-3 ${healthBgClass}`}>
+          <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="text-lg">{health.overall === 'critical' ? '🚨' : '⚠️'}</span>
+              <div>
+                <p className={`text-sm font-semibold ${health.overall === 'critical' ? 'text-red-800' : 'text-amber-800'}`}>
+                  {health.overall === 'critical' ? 'Log storage is almost full' : 'Log storage is running high'}
+                </p>
+                <p className={`text-xs mt-0.5 ${health.overall === 'critical' ? 'text-red-600' : 'text-amber-600'}`}>
+                  request_logs: {health.request_logs.count.toLocaleString('en-IN')} / {health.request_logs.limit.toLocaleString('en-IN')} ({health.request_logs.pct}%)
+                  &nbsp;·&nbsp;
+                  error_events: {health.error_events.count.toLocaleString('en-IN')} / {health.error_events.limit.toLocaleString('en-IN')} ({health.error_events.pct}%)
+                </p>
+              </div>
+            </div>
+            <button
+              data-testid="watchline-download-clear-banner"
+              onClick={() => setShowClearConfirm(true)}
+              className={`text-sm font-semibold px-4 py-2 rounded-lg transition-colors ${
+                health.overall === 'critical'
+                  ? 'bg-red-600 text-white hover:bg-red-700'
+                  : 'bg-amber-500 text-white hover:bg-amber-600'
+              }`}
+            >
+              Download &amp; Clear logs
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Clear success / error feedback */}
+      {clearDone && (
+        <div className="bg-green-50 border-b border-green-200 px-6 py-2.5">
+          <div className="max-w-6xl mx-auto flex items-center justify-between">
+            <p className="text-sm text-green-700 font-medium">✓ {clearDone}</p>
+            <button onClick={() => setClearDone(null)} className="text-xs text-green-500 hover:text-green-700">Dismiss</button>
+          </div>
+        </div>
+      )}
+      {clearError && (
+        <div className="bg-red-50 border-b border-red-200 px-6 py-2.5">
+          <div className="max-w-6xl mx-auto flex items-center justify-between">
+            <p className="text-sm text-red-700">{clearError}</p>
+            <button onClick={() => setClearError(null)} className="text-xs text-red-500 hover:text-red-700">Dismiss</button>
+          </div>
+        </div>
+      )}
+
+      {/* Clear confirm modal */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full mx-4">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-2xl">🗑️</span>
+              <h2 className="text-lg font-bold text-gray-900">Download &amp; Clear all logs</h2>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              This will first download a full CSV backup of both <strong>request_logs</strong> and <strong>error_events</strong>,
+              then permanently delete all rows from both tables.
+            </p>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700 mb-6">
+              This action cannot be undone. Your CSV downloads will start automatically before deletion.
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button data-testid="watchline-clear-cancel" onClick={() => setShowClearConfirm(false)}
+                className="text-sm px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+              <button data-testid="watchline-clear-confirm" onClick={handleDownloadAndClear} disabled={clearing}
+                className="text-sm px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors font-medium">
+                {clearing ? 'Downloading & clearing…' : 'Download & Clear'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
 
