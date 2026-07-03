@@ -32,8 +32,7 @@ export async function GET(req: NextRequest) {
            COALESCE(SUM(COALESCE(l.waiver_amount, 0)), 0)                                          AS total_waived,
            COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)), 0) AS total_outstanding
          FROM student_fee_ledger l
-         WHERE l.school_id = $1 AND l.academic_year = 'passout'
-           AND l.status IN ('pending', 'partial', 'overdue')`,
+         WHERE l.school_id = $1 AND l.academic_year = 'passout'`,
         [school_id]
       )
 

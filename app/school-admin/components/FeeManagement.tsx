@@ -541,6 +541,13 @@ export default function FeeManagement({
   const [yeMsg, setYeMsg]                        = useState('')
   const [yeCreateYearLoading, setYeCreateYearLoading] = useState(false)
   const [yeClosing, setYeClosing]               = useState(false)
+  // Reopen year modal
+  const [showReopenModal, setShowReopenModal]   = useState(false)
+  const [reopenReason, setReopenReason]         = useState('')
+  // Close year confirm modal
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false)
+  // Apply decisions confirm modal
+  const [showApplyConfirm, setShowApplyConfirm] = useState(false)
 
   // Year rollover modal state
   const [showRolloverModal, setShowRolloverModal] = useState(false)
@@ -668,8 +675,8 @@ export default function FeeManagement({
     try {
       const res = await fetch(`/api/fees/passout?school_id=${schoolId}`)
       if (res.ok) setPassoutData(await res.json())
-    } catch { /* silent */ }
-    setPassoutLoading(false)
+    } catch { /* network error — passout panel stays stale, refresh button visible */ }
+    finally { setPassoutLoading(false) }
   }, [schoolId])
 
   // Passout collect: load a passout student's open ledger entries, then open the payment form
@@ -707,7 +714,7 @@ export default function FeeManagement({
       // openStudent is derived from studentRows which comes from the regular ledger; passout students
       // won't be there, so we store the synthesised row in a dedicated state slot.
       setPassoutOpenStudent(row)
-    } catch { /* silent */ }
+    } catch { setPayError('Network error — could not load passout dues') }
     setPassoutCollectLoading(null)
   }
 
@@ -738,8 +745,8 @@ export default function FeeManagement({
         const d = await reportRes.json()
         if (Array.isArray(d.byGrade) && d.byGrade.length > 0) setGradeStats(d.byGrade)
       }
-    } catch { /* silent */ }
-    setStatsLoading(false)
+    } catch { /* network error — stats stay stale */ }
+    finally { setStatsLoading(false) }
   }, [schoolId, academicYear])
 
   useEffect(() => { if (academicYear) { loadStats(); loadPassout() } }, [loadStats, loadPassout, academicYear])
@@ -748,27 +755,29 @@ export default function FeeManagement({
   const loadSetup = useCallback(async () => {
     if (!academicYear) return
     setSetupLoading(true)
-    const [catRes, strRes, lockRes, amendRes, gradesRes] = await Promise.all([
-      fetch(`/api/fees/categories?school_id=${schoolId}`),
-      fetch(`/api/fees/structures?school_id=${schoolId}&academic_year=${academicYear}`),
-      fetch(`/api/fees/structures/lock?school_id=${schoolId}&academic_year=${academicYear}`),
-      fetch(`/api/fees/structures/amend?school_id=${schoolId}&academic_year=${academicYear}`),
-      fetch(`/api/students?school_id=${schoolId}&grades_only=1`),
-    ])
-    const cats: FeeCategory[] = catRes.ok ? await catRes.json() : []
-    const strs: FeeStructure[] = strRes.ok ? await strRes.json() : []
-    const lock = lockRes.ok ? await lockRes.json() : null
-    const amends: Amendment[] = amendRes.ok ? await amendRes.json() : []
-    const grades: string[] = gradesRes.ok ? await gradesRes.json() : []
-    setCategories(cats)
-    setStructures(strs)
-    setStructureLock(lock)
-    setAmendments(amends)
-    setEnrolledGrades(grades.length > 0 ? grades : null)
-    const init: Record<string, string> = {}
-    strs.forEach(s => { init[`${s.fee_category_id}_${s.grade}`] = String(s.amount) })
-    setEditAmounts(init)
-    setSetupLoading(false)
+    try {
+      const [catRes, strRes, lockRes, amendRes, gradesRes] = await Promise.all([
+        fetch(`/api/fees/categories?school_id=${schoolId}`),
+        fetch(`/api/fees/structures?school_id=${schoolId}&academic_year=${academicYear}`),
+        fetch(`/api/fees/structures/lock?school_id=${schoolId}&academic_year=${academicYear}`),
+        fetch(`/api/fees/structures/amend?school_id=${schoolId}&academic_year=${academicYear}`),
+        fetch(`/api/students?school_id=${schoolId}&grades_only=1`),
+      ])
+      const cats: FeeCategory[] = catRes.ok ? await catRes.json() : []
+      const strs: FeeStructure[] = strRes.ok ? await strRes.json() : []
+      const lock = lockRes.ok ? await lockRes.json() : null
+      const amends: Amendment[] = amendRes.ok ? await amendRes.json() : []
+      const grades: string[] = gradesRes.ok ? await gradesRes.json() : []
+      setCategories(cats)
+      setStructures(strs)
+      setStructureLock(lock)
+      setAmendments(amends)
+      setEnrolledGrades(grades.length > 0 ? grades : null)
+      const init: Record<string, string> = {}
+      strs.forEach(s => { init[`${s.fee_category_id}_${s.grade}`] = String(s.amount) })
+      setEditAmounts(init)
+    } catch { /* network error — setup stays stale */ }
+    finally { setSetupLoading(false) }
   }, [schoolId, academicYear])
 
   useEffect(() => { if (activeTab === 'setup') loadSetup() }, [activeTab, loadSetup])
@@ -800,9 +809,11 @@ export default function FeeManagement({
   const loadReports = useCallback(async () => {
     if (!academicYear) return
     setReportLoading(true)
-    const r = await fetch(`/api/fees/reports?school_id=${schoolId}&academic_year=${academicYear}`)
-    if (r.ok) setReportData(await r.json())
-    setReportLoading(false)
+    try {
+      const r = await fetch(`/api/fees/reports?school_id=${schoolId}&academic_year=${academicYear}`)
+      if (r.ok) setReportData(await r.json())
+    } catch { /* network error — reports stay stale */ }
+    finally { setReportLoading(false) }
   }, [schoolId, academicYear])
 
   useEffect(() => { if (activeTab === 'reports' && academicYear) loadReports() }, [activeTab, loadReports, academicYear])
@@ -863,16 +874,18 @@ export default function FeeManagement({
   const loadYearEnd = useCallback(async () => {
     if (!academicYear) return
     setYearEndLoading(true); setYeMsg('')
-    const r = await fetch(`/api/fees/year-end?school_id=${schoolId}&academic_year=${academicYear}`)
-    if (r.ok) {
-      const d: YearEndState = await r.json()
-      setYearEnd(d)
-      // default every student to 'open' (admin decides each — no auto default action)
-      const init: Record<number, 'carry' | 'writeoff' | 'open'> = {}
-      d.students.forEach(s => { init[s.student_id] = 'open' })
-      setYeDecisions(init)
-    }
-    setYearEndLoading(false)
+    try {
+      const r = await fetch(`/api/fees/year-end?school_id=${schoolId}&academic_year=${academicYear}`)
+      if (r.ok) {
+        const d: YearEndState = await r.json()
+        setYearEnd(d)
+        // default every student to 'open' (admin decides each — no auto default action)
+        const init: Record<number, 'carry' | 'writeoff' | 'open'> = {}
+        d.students.forEach(s => { init[s.student_id] = 'open' })
+        setYeDecisions(init)
+      }
+    } catch { /* network error — year-end stays stale */ }
+    finally { setYearEndLoading(false) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schoolId, academicYear])
 
@@ -882,13 +895,15 @@ export default function FeeManagement({
   const loadLedger = useCallback(async () => {
     if (!academicYear) return
     setLedgerLoading(true)
-    // Never pass ledgerStatus to API — always load all entries and filter client-side
-    // so chip counts stay accurate regardless of which tab is active
-    const params = new URLSearchParams({ school_id: String(schoolId), academic_year: academicYear })
-    if (ledgerGrade) params.set('grade', ledgerGrade)
-    const r = await fetch(`/api/fees/ledger?${params}`)
-    if (r.ok) setLedger(await r.json())
-    setLedgerLoading(false)
+    try {
+      // Never pass ledgerStatus to API — always load all entries and filter client-side
+      // so chip counts stay accurate regardless of which tab is active
+      const params = new URLSearchParams({ school_id: String(schoolId), academic_year: academicYear })
+      if (ledgerGrade) params.set('grade', ledgerGrade)
+      const r = await fetch(`/api/fees/ledger?${params}`)
+      if (r.ok) setLedger(await r.json())
+    } catch { /* network error — ledger stays stale */ }
+    finally { setLedgerLoading(false) }
   }, [schoolId, academicYear, ledgerGrade])
 
   // Note: the visible "Ledger" nav tab actually uses key 'collect' — see line ~1566 for
@@ -1286,16 +1301,18 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, action: 'lock', locked_by: adminName || 'Admin' }),
     })
     if (r.ok) loadSetup()
+    else { const d = await r.json().catch(() => ({})); setStructureMsg(d.error || 'Failed to lock fee plan') }
     setLockingStructure(false)
   }
 
   async function unlockStructure() {
     setLockingStructure(true)
-    await fetch('/api/fees/structures/lock', {
+    const r = await fetch('/api/fees/structures/lock', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, action: 'unlock', locked_by: adminName || 'Admin' }),
     })
-    loadSetup()
+    if (!r.ok) { const d = await r.json().catch(() => ({})); setStructureMsg(d.error || 'Failed to unlock fee plan') }
+    else loadSetup()
     setLockingStructure(false)
   }
 
@@ -1497,7 +1514,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     if (r.ok) {
       const passoutPart = d.passout?.count > 0 ? `, ${d.passout.count} to passout ledger (${fmt(d.passout.total)})` : ''
       setYeMsg(`✓ Applied — ${d.carried.count} carried (${fmt(d.carried.total)}), ${d.writeoff.count} written off (${fmt(d.writeoff.total)})${passoutPart}`)
-      loadYearEnd()
+      loadYearEnd(); loadStats(); loadLedger()
       if (d.passout?.count > 0) loadPassout()
     } else {
       setYeMsg(d.error || 'Failed to apply')
@@ -1516,11 +1533,6 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     setYeClosing(false)
     if (r.ok) {
       loadYearEnd()
-      // BUG 14: prompt admin to generate fee ledger for the new year
-      const nextYear = yearEnd?.target_year
-      if (nextYear && window.confirm(`Year ${academicYear} is now closed.\n\nDo you want to go to the Setup tab to generate fee ledger for ${nextYear}?`)) {
-        setActiveTab('setup' as Tab)
-      }
     }
   }
 
@@ -1539,7 +1551,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       // No pending dues — rolled over immediately
       setRolloverDone(true)
       setRolloverMsg(`✓ Rolled over to ${d.to_year} — ${d.dues_carried} student${d.dues_carried !== 1 ? 's' : ''} carried (${fmt(d.dues_amount)})`)
-      loadYearEnd(); loadStats(); loadAcademicYears()
+      loadYearEnd(); loadStats(); loadAcademicYears(); loadLedger()
     } else {
       setRolloverMsg(d.error || 'Rollover failed')
     }
@@ -1557,22 +1569,23 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       setRolloverDone(true)
       setRolloverPreview(null)
       setRolloverMsg(`✓ Rolled over to ${d.to_year} — ${d.dues_carried} student${d.dues_carried !== 1 ? 's' : ''} carried (${fmt(d.dues_amount)})`)
-      loadYearEnd(); loadStats(); loadAcademicYears()
+      loadYearEnd(); loadStats(); loadAcademicYears(); loadLedger()
     } else {
       setRolloverMsg(d.error || 'Rollover failed')
     }
   }
 
   async function reopenYear() {
-    const reason = window.prompt('Reason for reopening this closed year? (logged permanently)')
-    if (!reason) return
+    if (!reopenReason.trim()) return
+    setShowReopenModal(false)
     setYeClosing(true); setYeMsg('')
     const r = await fetch('/api/fees/year-end', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'reopen', school_id: schoolId, from_year: academicYear, done_by: adminName || 'Admin', reason }),
+      body: JSON.stringify({ action: 'reopen', school_id: schoolId, from_year: academicYear, done_by: adminName || 'Admin', reason: reopenReason }),
     })
     const d = await r.json()
     setYeMsg(r.ok ? '✓ Year reopened — edits allowed again' : (d.error || 'Failed'))
+    setReopenReason('')
     setYeClosing(false)
     if (r.ok) loadYearEnd()
   }
@@ -5118,7 +5131,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <button onClick={reopenYear} disabled={yeClosing}
+                      <button onClick={() => { setReopenReason(''); setShowReopenModal(true) }} disabled={yeClosing}
                         className="text-xs bg-gray-600 text-white px-3 py-1.5 rounded-lg hover:bg-gray-500 disabled:opacity-50">
                         {yeClosing ? 'Working…' : 'Reopen'}
                       </button>
@@ -5308,7 +5321,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                           passoutN > 0 ? `${passoutN} passout` : '',
                         ].filter(Boolean).join(', ')
                         return (
-                          <button data-testid="btn-apply-yearend" onClick={() => applyYearEndDecisions()} disabled={yeProcessing || total === 0}
+                          <button data-testid="btn-apply-yearend" onClick={() => setShowApplyConfirm(true)} disabled={yeProcessing || total === 0}
                             className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
                             {yeProcessing ? 'Applying…' : `Apply Decisions (${label || 'none'})`}
                           </button>
@@ -5332,7 +5345,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">🖨 Print Statement</button>
                     <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download
                       className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">Export Ledger CSV</a>
-                    <button data-testid="btn-close-year" onClick={() => { if (window.confirm(`Close ${academicYear}? This locks the year. You can reopen later if needed.`)) closeYear() }}
+                    <button data-testid="btn-close-year" onClick={() => setShowCloseConfirm(true)}
                       disabled={yeClosing}
                       className="ml-auto text-sm bg-gray-800 text-white px-5 py-2 rounded-lg font-medium hover:bg-gray-900 disabled:opacity-50">
                       {yeClosing ? 'Closing…' : `🔒 Close Financial Year ${academicYear}`}
@@ -5429,6 +5442,81 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ Reopen Year Modal ════════════════════════════════════════════════════ */}
+      {showReopenModal && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowReopenModal(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div>
+              <p className="text-base font-bold text-gray-900">Reopen {academicYear}?</p>
+              <p className="text-xs text-gray-400 mt-1">This unlocks the year for edits. The reason is logged permanently.</p>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Reason (required)</label>
+              <input autoFocus type="text" value={reopenReason} onChange={e => setReopenReason(e.target.value)}
+                placeholder="e.g. Correction of waiver entry"
+                className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-400" />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setShowReopenModal(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
+              <button onClick={reopenYear} disabled={!reopenReason.trim() || yeClosing}
+                className="flex-1 bg-amber-500 text-white py-2 rounded-xl text-sm font-semibold hover:bg-amber-600 disabled:opacity-50">
+                {yeClosing ? 'Reopening…' : 'Confirm Reopen'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Close Year Confirm Modal ══════════════════════════════════════════════ */}
+      {showCloseConfirm && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowCloseConfirm(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div>
+              <p className="text-base font-bold text-gray-900">Close {academicYear}?</p>
+              <p className="text-sm text-gray-500 mt-1">This locks the year — no new payments or waivers can be added. You can reopen it later if needed.</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setShowCloseConfirm(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
+              <button onClick={() => { setShowCloseConfirm(false); closeYear() }} disabled={yeClosing}
+                className="flex-1 bg-gray-800 text-white py-2 rounded-xl text-sm font-semibold hover:bg-gray-700 disabled:opacity-50">
+                {yeClosing ? 'Closing…' : `Close ${academicYear}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Apply Year-End Decisions Confirm Modal ════════════════════════════════ */}
+      {showApplyConfirm && yearEnd && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowApplyConfirm(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div>
+              <p className="text-base font-bold text-gray-900">Apply Year-End Decisions?</p>
+              <p className="text-xs text-gray-400 mt-1">This action modifies student ledgers and cannot be undone without reopening the year.</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl px-4 py-3 space-y-1 text-sm">
+              {(() => {
+                const carryN   = Object.values(yeDecisions).filter(d => d === 'carry').length
+                const woN      = Object.values(yeDecisions).filter(d => d === 'writeoff').length
+                const passoutN = Object.values(yeDecisions).filter(d => d === 'passout').length
+                return <>
+                  {carryN   > 0 && <p className="text-blue-700"><strong>{carryN}</strong> student{carryN !== 1 ? 's' : ''} — carry dues to {yearEnd.target_year}</p>}
+                  {woN      > 0 && <p className="text-red-600"><strong>{woN}</strong> student{woN !== 1 ? 's' : ''} — write off outstanding dues</p>}
+                  {passoutN > 0 && <p className="text-indigo-700"><strong>{passoutN}</strong> student{passoutN !== 1 ? 's' : ''} — move to passout ledger</p>}
+                </>
+              })()}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setShowApplyConfirm(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
+              <button onClick={() => { setShowApplyConfirm(false); applyYearEndDecisions() }} disabled={yeProcessing}
+                className="flex-1 bg-blue-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
+                {yeProcessing ? 'Applying…' : 'Confirm & Apply'}
+              </button>
+            </div>
           </div>
         </div>
       )}
