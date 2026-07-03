@@ -13,12 +13,6 @@ export async function GET(req: NextRequest) {
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    // Self-heal: add soft-delete columns
-    await pool.query(`ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS is_revoked    BOOLEAN     NOT NULL DEFAULT FALSE`)
-    await pool.query(`ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoked_by    TEXT`)
-    await pool.query(`ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoked_at    TIMESTAMPTZ`)
-    await pool.query(`ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoke_reason TEXT`)
-
     const showRevoked = p.get('show_revoked') === '1'
     const conditions = ['w.school_id = $1']
     const values: (string | number)[] = [school_id]
@@ -116,9 +110,6 @@ export async function POST(req: NextRequest) {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
         [school_id, student_id, ledger_id, waiver_type, waiver_value || null, waiver_amount, reason, granted_by_name || null]
       )
-
-      // Self-heal: add waiver_amount column if missing
-      await client.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`)
 
       // Apply waiver — track separately from cash payments, do NOT inflate amount_paid
       await client.query(

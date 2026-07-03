@@ -898,6 +898,10 @@ export async function initDB() {
     )`,
     `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) DEFAULT 0`,
     `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS granted_by_name VARCHAR(100)`,
+    `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS is_revoked    BOOLEAN     NOT NULL DEFAULT FALSE`,
+    `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoked_by    TEXT`,
+    `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoked_at    TIMESTAMPTZ`,
+    `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoke_reason TEXT`,
 
     // ── Receipt number sequence ───────────────────────────────────────────────
     `CREATE SEQUENCE IF NOT EXISTS receipt_number_seq START 1000`,
