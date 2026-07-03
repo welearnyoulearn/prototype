@@ -9,7 +9,11 @@ if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
 
 export const JWT_SECRET = process.env.JWT_SECRET || 'wlyl-dev-only-secret-not-for-production'
 
-export const COOKIE_ADMIN   = 'wlyl-auth'
-export const COOKIE_TEACHER = 'wlyl-teacher'
-export const COOKIE_STUDENT = 'wlyl-student'
-export const COOKIE_PARENT  = 'wlyl-parent'
+// COOKIE_ADMIN is for school-side staff (school_admin/principal/vice_principal) only.
+// Platform Admin gets its own cookie so logging into one portal in a browser
+// can never silently overwrite/invalidate a session in the other.
+export const COOKIE_ADMIN    = 'wlyl-auth'
+export const COOKIE_PLATFORM = 'wlyl-platform'
+export const COOKIE_TEACHER  = 'wlyl-teacher'
+export const COOKIE_STUDENT  = 'wlyl-student'
+export const COOKIE_PARENT   = 'wlyl-parent'

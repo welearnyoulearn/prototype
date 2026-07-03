@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
-import { JWT_SECRET as JWT_SECRET_RAW, COOKIE_ADMIN, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from '@/lib/auth-constants'
+import { JWT_SECRET as JWT_SECRET_RAW, COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from '@/lib/auth-constants'
 
 // Combined middleware: auth routing (formerly proxy.ts) + Watchline observability logging.
 // Edge runtime only — cannot use pg, jsonwebtoken, or lib/auth / lib/db.
@@ -84,10 +84,11 @@ function extractSchoolId(req: NextRequest): number | null {
 }
 
 function extractActorRole(req: NextRequest): string | null {
-  if (req.cookies.get(COOKIE_ADMIN))   return 'admin'
-  if (req.cookies.get(COOKIE_TEACHER)) return 'teacher'
-  if (req.cookies.get(COOKIE_STUDENT)) return 'student'
-  if (req.cookies.get(COOKIE_PARENT))  return 'parent'
+  if (req.cookies.get(COOKIE_PLATFORM)) return 'platform_admin'
+  if (req.cookies.get(COOKIE_ADMIN))    return 'admin'
+  if (req.cookies.get(COOKIE_TEACHER))  return 'teacher'
+  if (req.cookies.get(COOKIE_STUDENT))  return 'student'
+  if (req.cookies.get(COOKIE_PARENT))   return 'parent'
   return null
 }
 
@@ -107,7 +108,7 @@ export async function proxy(req: NextRequest) {
       return NextResponse.redirect(new URL('/login?role=platform', req.url))
     }
     if (pathname.startsWith('/platform-admin')) {
-      const token = req.cookies.get(COOKIE_ADMIN)?.value
+      const token = req.cookies.get(COOKIE_PLATFORM)?.value
       const payload = token ? await getTokenPayload(token) : null
       if (!payload || payload.role !== 'platform_admin') {
         return NextResponse.redirect(new URL('/login?role=platform', req.url))
@@ -122,7 +123,7 @@ export async function proxy(req: NextRequest) {
 
   // ── Main domain ───────────────────────────────────────────────────────────
   if (pathname.startsWith('/platform-admin')) {
-    const token = req.cookies.get(COOKIE_ADMIN)?.value
+    const token = req.cookies.get(COOKIE_PLATFORM)?.value
     const payload = token ? await getTokenPayload(token) : null
     if (!payload || payload.role !== 'platform_admin') {
       return NextResponse.redirect(new URL('/admin', req.url))
