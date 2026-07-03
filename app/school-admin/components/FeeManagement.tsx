@@ -429,6 +429,7 @@ export default function FeeManagement({
     date: string
     by_mode: Record<string, { count: number; total: number }>
     receipts: { first: string | null; last: string | null; count: number; total: number }
+    payments: Array<{ id: number; student_name: string; grade: string; section: string; fee_head_name: string; period_label: string; amount: number; payment_mode: string; receipt_number: string; collected_by_name: string | null; notes: string | null }>
     already_closed: boolean
   }
   const [dayCloseData, setDayCloseData]         = useState<DayCloseData | null>(null)
@@ -536,6 +537,7 @@ export default function FeeManagement({
   const [yeFilter, setYeFilter]                 = useState<'all' | 'leavers' | 'continuing'>('all')
   const [yeProcessing, setYeProcessing]         = useState(false)
   const [yeMsg, setYeMsg]                        = useState('')
+  const [yeCreateYearLoading, setYeCreateYearLoading] = useState(false)
   const [yeClosing, setYeClosing]               = useState(false)
 
   // Year rollover modal state
@@ -4207,6 +4209,42 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     )}
                   </div>
 
+                  {/* Transaction list */}
+                  {dayCloseData.payments.length > 0 && (
+                    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                      <div className="px-4 py-3 border-b border-gray-100">
+                        <p className="text-sm font-semibold text-gray-700">Transactions ({dayCloseData.payments.length})</p>
+                      </div>
+                      <div className="overflow-x-auto max-h-64">
+                        <table className="w-full text-sm">
+                          <thead className="sticky top-0 bg-gray-50">
+                            <tr className="text-xs text-gray-500 border-b border-gray-100">
+                              <th className="text-left px-4 py-2 font-semibold">Receipt</th>
+                              <th className="text-left px-4 py-2 font-semibold">Student</th>
+                              <th className="text-left px-4 py-2 font-semibold">Fee Head</th>
+                              <th className="text-left px-4 py-2 font-semibold">Mode</th>
+                              <th className="text-right px-4 py-2 font-semibold">Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dayCloseData.payments.map(p => (
+                              <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
+                                <td className="px-4 py-2 font-mono text-xs text-indigo-600">{p.receipt_number}</td>
+                                <td className="px-4 py-2 text-gray-700">
+                                  {p.student_name}
+                                  <span className="text-gray-400 ml-1 text-xs">{p.grade}{p.section ? `-${p.section}` : ''}</span>
+                                </td>
+                                <td className="px-4 py-2 text-gray-500 text-xs">{p.fee_head_name} · {p.period_label}</td>
+                                <td className="px-4 py-2 capitalize text-gray-500 text-xs">{p.payment_mode}</td>
+                                <td className="px-4 py-2 text-right font-medium text-gray-800">{fmt(p.amount)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Cash verification */}
                   <div className="bg-white rounded-xl border border-gray-100 p-5">
                     <p className="text-sm font-semibold text-gray-700 mb-3">Cash Verification</p>
@@ -4245,7 +4283,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <p className={`text-sm font-medium ${dayCloseMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{dayCloseMsg}</p>
                   )}
                   <div className="flex justify-end gap-2">
-                    <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=payments&date=${new Date().toISOString().slice(0,10)}`} download
+                    <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=payments&date=${dayCloseDate}`} download
                       className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">Export Day Report</a>
                     <button data-testid="btn-submit-dayclose" onClick={submitDayClose} disabled={dayCloseSubmitting || dayCloseData.receipts.count === 0}
                       className="text-sm bg-blue-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
@@ -4840,6 +4878,46 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 </div>
               </div>
 
+              {/* Month-wise billed vs collected */}
+              {reportData.monthly.length > 0 && (
+                <div className="bg-white rounded-xl border border-gray-100 p-5">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-4">Month-wise Billed vs Collected</h3>
+                  <div className="space-y-2">
+                    {(() => {
+                      const dueMap = new Map(reportData.monthlyDue.map(d => [d.month, d.billed]))
+                      const allMonths = Array.from(new Set([...reportData.monthly.map(m => m.month), ...reportData.monthlyDue.map(d => d.month)])).sort()
+                      const maxVal = Math.max(...allMonths.map(m => Math.max(dueMap.get(m) ?? 0, reportData.monthly.find(x => x.month === m)?.collected ?? 0)), 1)
+                      return allMonths.map(month => {
+                        const billed    = dueMap.get(month) ?? 0
+                        const collected = reportData.monthly.find(x => x.month === month)?.collected ?? 0
+                        const billedPct    = Math.round((billed    / maxVal) * 100)
+                        const collectedPct = Math.round((collected / maxVal) * 100)
+                        const label = new Date(month + '-01').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' })
+                        return (
+                          <div key={month}>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="font-medium text-gray-600">{label}</span>
+                              <span className="text-gray-400">
+                                Billed <span className="text-gray-700 font-semibold">{fmt(billed)}</span>
+                                {' · '}Collected <span className="text-green-600 font-semibold">{fmt(collected)}</span>
+                              </span>
+                            </div>
+                            <div className="relative h-2 bg-gray-100 rounded-full overflow-hidden">
+                              <div className="absolute inset-y-0 left-0 bg-blue-100 rounded-full" style={{ width: `${billedPct}%` }} />
+                              <div className="absolute inset-y-0 left-0 bg-green-500 rounded-full" style={{ width: `${collectedPct}%` }} />
+                            </div>
+                          </div>
+                        )
+                      })
+                    })()}
+                  </div>
+                  <div className="flex gap-4 mt-3 text-xs text-gray-400">
+                    <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-full bg-blue-100 inline-block" />Billed</span>
+                    <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-full bg-green-500 inline-block" />Collected</span>
+                  </div>
+                </div>
+              )}
+
               {/* Category-wise summary */}
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                 <div className="px-4 py-3 border-b border-gray-100">
@@ -5167,7 +5245,33 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         {yearEnd.target_year_exists ? (
                           <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">✓ Year exists</span>
                         ) : (
-                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">⚠ Not created yet — create it in Academic Calendar before carrying forward</span>
+                          <>
+                            <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">⚠ Not created yet</span>
+                            <button
+                              disabled={yeCreateYearLoading}
+                              onClick={async () => {
+                                const startNum = parseInt(startYearLabel(yearEnd.target_year))
+                                if (isNaN(startNum)) return
+                                setYeCreateYearLoading(true)
+                                const r = await fetch('/api/academic-years', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    school_id: schoolId,
+                                    label: yearEnd.target_year,
+                                    start_date: `${startNum}-04-01`,
+                                    end_date: `${startNum + 1}-03-31`,
+                                    set_current: false,
+                                  }),
+                                })
+                                setYeCreateYearLoading(false)
+                                if (r.ok) { loadYearEnd(); loadAcademicYears() }
+                                else { const e = await r.json(); setYeMsg(e.error || 'Failed to create year') }
+                              }}
+                              className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
+                              {yeCreateYearLoading ? 'Creating…' : `Create ${yearEnd.target_year}`}
+                            </button>
+                          </>
                         )}
                       </div>
                       <p className="text-xs text-gray-400">
@@ -5394,36 +5498,47 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <>
                   {/* Bills */}
                   {pbSection === 'bills' && (
-                    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                      {pbYearOnly.length === 0
-                        ? <p className="text-sm text-gray-400 p-8 text-center">No bills recorded for {academicYear}.</p>
-                        : (
-                          <table className="w-full text-sm">
-                            <thead className="bg-gray-50 border-b border-gray-100">
-                              <tr>
-                                <th className="text-left px-4 py-2 font-semibold text-gray-500 text-xs">Fee</th>
-                                <th className="text-right px-4 py-2 font-semibold text-gray-500 text-xs">Billed</th>
-                                <th className="text-right px-4 py-2 font-semibold text-gray-500 text-xs">Paid</th>
-                                <th className="text-left px-4 py-2 font-semibold text-gray-500 text-xs">Status</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-50">
-                              {(pbYearOnly[0]?.entries ?? []).map(e => (
-                                <tr key={e.id} className="hover:bg-gray-50">
-                                  <td className="px-4 py-2.5 text-gray-700">
-                                    {e.category_name} · <span className="text-gray-400">{e.period_label}</span>
-                                    {e.source_academic_year && (
-                                      <span className="ml-2 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-medium" title={`Carried from ${e.source_academic_year}`}>↩ {e.source_academic_year}</span>
-                                    )}
-                                  </td>
-                                  <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
-                                  <td className="px-4 py-2.5 text-right text-green-600">{fmt(e.amount_paid)}</td>
-                                  <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full capitalize font-medium ${STATUS_COLORS[e.status as keyof typeof STATUS_COLORS] || ''}`}>{e.status}</span></td>
+                    <div className="space-y-3">
+                      {!pbData || pbData.ledger_by_year.length === 0
+                        ? <div className="bg-white rounded-xl border border-gray-100 p-8 text-center text-sm text-gray-400">No bills recorded.</div>
+                        : pbData.ledger_by_year.map(yearGroup => (
+                          <div key={yearGroup.academic_year} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                            <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                              <span className="text-xs font-bold text-gray-600">{yearGroup.academic_year}</span>
+                              <div className="flex gap-3 text-xs text-gray-400">
+                                <span>Billed <span className="font-semibold text-gray-700">{fmt(yearGroup.total_billed)}</span></span>
+                                <span>Paid <span className="font-semibold text-green-600">{fmt(yearGroup.total_paid)}</span></span>
+                                {yearGroup.outstanding > 0 && <span>Due <span className="font-semibold text-red-600">{fmt(yearGroup.outstanding)}</span></span>}
+                              </div>
+                            </div>
+                            <table className="w-full text-sm">
+                              <thead className="bg-gray-50 border-b border-gray-100">
+                                <tr>
+                                  <th className="text-left px-4 py-2 font-semibold text-gray-500 text-xs">Fee</th>
+                                  <th className="text-right px-4 py-2 font-semibold text-gray-500 text-xs">Billed</th>
+                                  <th className="text-right px-4 py-2 font-semibold text-gray-500 text-xs">Paid</th>
+                                  <th className="text-left px-4 py-2 font-semibold text-gray-500 text-xs">Status</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )}
+                              </thead>
+                              <tbody className="divide-y divide-gray-50">
+                                {yearGroup.entries.map(e => (
+                                  <tr key={e.id} className="hover:bg-gray-50">
+                                    <td className="px-4 py-2.5 text-gray-700">
+                                      {e.category_name} · <span className="text-gray-400">{e.period_label}</span>
+                                      {e.source_academic_year && (
+                                        <span className="ml-2 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-medium" title={`Carried from ${e.source_academic_year}`}>↩ {e.source_academic_year}</span>
+                                      )}
+                                    </td>
+                                    <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
+                                    <td className="px-4 py-2.5 text-right text-green-600">{fmt(e.amount_paid)}</td>
+                                    <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full capitalize font-medium ${STATUS_COLORS[e.status as keyof typeof STATUS_COLORS] || ''}`}>{e.status}</span></td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ))
+                      }
                     </div>
                   )}
 
