@@ -82,6 +82,17 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Ledger entry not found' }, { status: 404 })
       }
 
+      // Block waivers on a closed year (same guard as payments route)
+      const { rows: [closedYear] } = await client.query(
+        `SELECT 1 FROM fee_year_close
+         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
+        [school_id, ledger.academic_year]
+      )
+      if (closedYear) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to grant waivers.' }, { status: 409 })
+      }
+
       // Calculate waiver amount — always on remaining balance (after existing waiver), not full amount_due
       const remaining = parseFloat(ledger.amount_due) - parseFloat(ledger.waiver_amount || '0') - parseFloat(ledger.amount_paid)
       let waiver_amount = 0
@@ -89,7 +100,7 @@ export async function POST(req: NextRequest) {
         waiver_amount = remaining
       } else if (waiver_type === 'percentage') {
         // BUG 7 fix: apply percentage to remaining balance, not full amount_due
-        waiver_amount = Math.round((remaining * (waiver_value || 0)) / 100)
+        waiver_amount = Math.round(remaining * (waiver_value || 0)) / 100
       } else if (waiver_type === 'fixed_amount') {
         // BUG 8 fix: cap fixed waiver at remaining balance
         waiver_amount = Math.min(waiver_value || 0, remaining)

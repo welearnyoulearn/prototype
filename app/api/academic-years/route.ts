@@ -237,8 +237,25 @@ export async function PUT(req: NextRequest) {
         [newLabel, newStartDate, newEndDate, id, school_id]
       )
 
+      // Cascade new end_date to all bills in this year whose due_date was the OLD end_date.
+      // Bills whose due_date was already manually set to something else are left alone.
+      // Only updates unpaid/partial/overdue rows — paid bills keep their original due_date
+      // as a historical record of when payment was due when they settled.
+      let billsCascaded = 0
+      if (hasBills && newEndDate !== year.end_date) {
+        const { rowCount } = await client.query(
+          `UPDATE student_fee_ledger
+           SET due_date = $1
+           WHERE school_id = $2 AND academic_year = $3
+             AND due_date = $4
+             AND status NOT IN ('paid', 'waived')`,
+          [newEndDate, school_id, year.label, year.end_date]
+        )
+        billsCascaded = rowCount ?? 0
+      }
+
       await client.query('COMMIT')
-      return NextResponse.json({ ok: true, year: updated, snapshot_created: hasBills })
+      return NextResponse.json({ ok: true, year: updated, snapshot_created: hasBills, bills_cascaded: billsCascaded })
     } catch (err: unknown) {
       await client.query('ROLLBACK')
       const msg = err instanceof Error ? err.message : 'Failed'

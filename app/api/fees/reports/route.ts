@@ -111,6 +111,20 @@ export async function GET(req: NextRequest) {
          ORDER BY ${gradeOrderSql('grade')}, section`,
         [school_id, academic_year]
       )
+      // Discretionary waivers per grade/section (excludes carry_forward bookkeeping)
+      const { rows: discByGradeRows } = await pool.query(
+        `SELECT s.grade, COALESCE(s.section, '') AS section, COALESCE(SUM(w.waiver_amount), 0) AS total
+         FROM fee_waivers w
+         JOIN student_fee_ledger l ON l.id = w.ledger_id
+         JOIN students s ON s.id = l.student_id
+         WHERE l.school_id = $1 AND l.academic_year = $2
+           AND COALESCE(w.is_revoked, FALSE) = FALSE
+           AND w.waiver_type != 'carry_forward'
+         GROUP BY s.grade, s.section`,
+        [school_id, academic_year]
+      ).catch(() => ({ rows: [] as Array<{grade: string; section: string; total: string}> }))
+      const discGradeMap = new Map(discByGradeRows.map((r: {grade: string; section: string; total: string}) => [`${r.grade}|${r.section}`, r.total]))
+      for (const g of byGrade) g.discretionary_waived = discGradeMap.get(`${g.grade}|${g.section}`) ?? '0'
 
       // Category-wise annual summary
       const { rows: byCategory } = await pool.query(

@@ -4,6 +4,7 @@ import { invalidateCache } from '@/lib/responseCache'
 import { hashPassword, generateTempPassword, getAnySession, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail } from '@/lib/email'
 import { findOrCreateParent, linkStudentParent } from '@/lib/studentOnboarding'
+import { gradeOrderSql } from '@/lib/grades'
 
 export async function GET(req: NextRequest) {
   try {
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
       const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
       const result = await pool.query(
-        `SELECT * FROM students ${where} ORDER BY (NULLIF(regexp_replace(grade,'[^0-9]','','g'),''))::int NULLS LAST, section, name`,
+        `SELECT * FROM students ${where} ORDER BY ${gradeOrderSql('grade')}, section, name`,
         values
       )
       return NextResponse.json(result.rows)
@@ -64,6 +65,10 @@ export async function POST(req: NextRequest) {
     const { school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email, roll_number, school_roll_number } = body
     if (!school_id || !name) return NextResponse.json({ error: 'school_id and name are required' }, { status: 400 })
     if (admin.schoolId !== school_id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!section?.trim()) return NextResponse.json({ error: 'Section is required' }, { status: 400 })
+    if (!parent_name?.trim()) return NextResponse.json({ error: 'Parent name is required' }, { status: 400 })
+    if (!parent_phone?.trim()) return NextResponse.json({ error: 'Parent phone is required' }, { status: 400 })
+    if (school_roll_number == null || school_roll_number === '') return NextResponse.json({ error: 'Roll number is required' }, { status: 400 })
 
     if (phone?.trim()) {
       const dupPhone = await pool.query(
@@ -138,8 +143,9 @@ export async function POST(req: NextRequest) {
     // Create/link parent account + send parent welcome email if parent_email provided.
     // Even when parent-portal is disabled, still link to an existing parent (e.g. a
     // sibling onboarded earlier while the flag was on) — only suppress creating a new one.
+    let parentWarning: string | null = null
     if (parent_email || parent_phone) {
-      await provisionParentAccount({
+      parentWarning = await provisionParentAccount({
         parentEmail: parent_email, parentPhone: parent_phone, parentName: parent_name,
         studentId: student.id, schoolId: school_id, studentName: name, appUrl,
         allowCreate: parentPortalEnabled,
@@ -147,7 +153,10 @@ export async function POST(req: NextRequest) {
     }
 
     invalidateCache(`classes:${school_id}`)
-    return NextResponse.json(student, { status: 201 })
+    return NextResponse.json(
+      { ...student, ...(parentWarning ? { parent_warning: parentWarning } : {}) },
+      { status: 201 }
+    )
   } catch (error) {
     console.error(error)
     return NextResponse.json({ error: 'Failed to create student' }, { status: 500 })
@@ -157,12 +166,14 @@ export async function POST(req: NextRequest) {
 // Create or link a parent account, sending welcome email only on first creation.
 // allowCreate=false only links to an existing parent and never inserts a new row —
 // used when parent-portal is disabled for the school.
+// Returns null on success, or a warning string if the operation partially failed
+// (student was created but parent account could not be set up).
 async function provisionParentAccount({
   parentEmail, parentPhone, parentName, studentId, schoolId, studentName, appUrl, allowCreate
 }: {
   parentEmail: string | null; parentPhone: string | null; parentName: string | null
   studentId: number; schoolId: number; studentName: string; appUrl: string; allowCreate: boolean
-}) {
+}): Promise<string | null> {
   try {
     const batchCache = new Map<string, number>()
     let parentHash: string | null = null
@@ -196,7 +207,9 @@ async function provisionParentAccount({
         loginUrl: `${appUrl}/parent/login`,
       }).catch(console.error)
     }
+    return null
   } catch (err) {
     console.error('[provisionParentAccount]', err)
+    return 'Student was created but the parent account could not be set up. Please retry by editing the student or contact support.'
   }
 }

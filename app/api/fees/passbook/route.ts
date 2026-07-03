@@ -254,7 +254,8 @@ export async function GET(req: NextRequest) {
       .reduce((s, pay) => s + (pay.payment_status === 'completed' ? parseFloat(pay.amount) : 0), 0)
     const totalWaived = (waivers as Array<{waiver_amount: string}>)
       .reduce((s, w) => s + parseFloat(w.waiver_amount), 0)
-    const outstanding = Math.max(0, totalBilled - totalPaid - totalWaived)
+    // Per-bill floor applied in SQL (GREATEST(..., 0) AS balance) — sum those floors
+    const outstanding = ledger.reduce((s: number, l: {balance: string}) => s + parseFloat(l.balance), 0)
     // Discretionary waivers only (excludes 'carry_forward' bookkeeping waivers from
     // year-end/rollover) — shown alongside total_waived so the passbook doesn't imply
     // a student received more discretionary concessions than they actually did.

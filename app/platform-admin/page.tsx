@@ -353,6 +353,11 @@ export default function PlatformAdmin() {
             className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors">
             Audit Log
           </Link>
+          <Link href="/platform-admin/logs"
+            className="text-xs text-teal-700 hover:text-teal-900 border border-teal-200 bg-teal-50 hover:bg-teal-100 px-3 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-teal-500 inline-block" />
+            Watchline
+          </Link>
           <button
             onClick={() => { fetchSchools(tab); fetchStats() }}
             className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors"

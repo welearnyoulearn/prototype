@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
-import { GRADE_SEQUENCE, nextGradeSql } from '@/lib/grades'
 
 // GET /api/fees/year-rollover?school_id=X
 // Returns list of closed academic years for this school.
@@ -165,6 +164,9 @@ export async function POST(req: NextRequest) {
       )
 
       // ── STEP 3: Carry forward all unpaid dues ────────────────────────────────
+      // Grade 12 graduates (and inactive students) are excluded — their dues must go
+      // through the passout ledger via the year-end / passout API, not auto-carried
+      // into the next year (they won't be enrolled in it).
       const { rows: unpaidStudents } = await client.query(
         `SELECT l.student_id,
                 SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)) AS balance,
@@ -176,6 +178,7 @@ export async function POST(req: NextRequest) {
            AND l.status IN ('pending','overdue','partial')
            AND GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) > 0
            AND s.status = 'active'
+           AND s.grade != '12'
          GROUP BY l.student_id`,
         [school_id, from_year]
       )
@@ -192,25 +195,33 @@ export async function POST(req: NextRequest) {
         await client.query(
           `INSERT INTO student_fee_ledger
              (school_id, student_id, fee_category_id, fee_structure_id, academic_year,
-              period_label, amount_due, due_date, status, notes)
-           VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, 'pending', $8)
+              period_label, amount_due, due_date, status, notes, source_academic_year)
+           VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, 'pending', $8, $9)
            ON CONFLICT (student_id, fee_category_id, academic_year, period_label)
-           DO UPDATE SET amount_due = EXCLUDED.amount_due`,
+           DO UPDATE SET amount_due = EXCLUDED.amount_due, source_academic_year = EXCLUDED.source_academic_year`,
           [school_id, row.student_id, prevDuesCatId, to_year, periodLabel,
-           balance, `${toStartYear + 1}-03-31`, `Auto-carried from ${from_year}`]
+           balance, `${toStartYear + 1}-03-31`, `Auto-carried from ${from_year}`, from_year]
         )
 
-        // Mark original bills as waived/settled in old year
+        // Mark original bills as settled/waived in old year.
+        // 'settled' = some cash was already collected before the carry; 'waived' = nothing paid.
         const ids: number[] = row.ledger_ids
         const bals: number[] = row.balances.map(Number)
+        // Fetch amount_paid for each bill to determine correct status
+        const { rows: billPaid } = await client.query(
+          `SELECT id, amount_paid FROM student_fee_ledger WHERE id = ANY($1)`,
+          [ids]
+        )
+        const paidMap = new Map(billPaid.map((r: {id: number; amount_paid: string}) => [r.id, parseFloat(r.amount_paid)]))
         for (let i = 0; i < ids.length; i++) {
           if (bals[i] <= 0) continue
+          const newStatus = (paidMap.get(ids[i]) ?? 0) > 0 ? 'settled' : 'waived'
           await client.query(
             `UPDATE student_fee_ledger
-             SET status = 'waived',
-                 waiver_amount = COALESCE(waiver_amount, 0) + $1
-             WHERE id = $2`,
-            [bals[i], ids[i]]
+             SET status = $1,
+                 waiver_amount = COALESCE(waiver_amount, 0) + $2
+             WHERE id = $3`,
+            [newStatus, bals[i], ids[i]]
           )
           await client.query(
             `INSERT INTO fee_waivers (school_id, student_id, ledger_id, waiver_type, waiver_amount, reason, granted_by_name)
@@ -222,27 +233,11 @@ export async function POST(req: NextRequest) {
         carriedTotal += balance
       }
 
-      // ── STEP 4: Promote students ─────────────────────────────────────────────
-      // Grade 12 → mark as left
-      const { rowCount: leftCount } = await client.query(
-        `UPDATE students SET status = 'left', updated_at = NOW()
-         WHERE school_id = $1 AND status = 'active'
-           AND (grade = '12' OR grade = 'XII')`,
-        [school_id]
-      )
+      // Grade promotion is intentionally NOT done here — it belongs exclusively in
+      // POST /api/academic-years/rollover to avoid double-promotion when both routes
+      // are triggered in the same year transition (would skip a grade per student).
 
-      // All other active students: grade -> next grade in the sequence (Nursery -> LKG
-      // -> UKG -> 1 -> ... -> 12). Previously this only matched `grade ~ '^[0-9]+$'`,
-      // which silently skipped Nursery/LKG/UKG students entirely — they never advanced
-      // on rollover even though their bills/ledger still rolled into the new year.
-      const promotableGrades = GRADE_SEQUENCE.slice(0, -1) // all but '12', which "leaves" instead
-      const { rowCount: promotedCount } = await client.query(
-        `UPDATE students SET grade = ${nextGradeSql('grade')}, updated_at = NOW()
-         WHERE school_id = $1 AND status = 'active' AND grade = ANY($2)`,
-        [school_id, promotableGrades]
-      )
-
-      // ── STEP 5: Fill in the final carry-forward totals on the claim row from above ──
+      // ── STEP 4: Fill in the final carry-forward totals on the claim row from above ──
       await client.query(
         `UPDATE fee_year_close
          SET carried_count = $3, carried_total = $4
@@ -256,8 +251,6 @@ export async function POST(req: NextRequest) {
         ok: true,
         from_year,
         to_year,
-        students_promoted: promotedCount ?? 0,
-        students_left: leftCount ?? 0,
         dues_carried: carriedCount,
         dues_amount: carriedTotal,
       })

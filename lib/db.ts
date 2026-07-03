@@ -1669,4 +1669,86 @@ async function runIncrementalMigrations() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_academic_year_snapshots_year ON academic_year_snapshots(academic_year_id)
   `).catch(() => {})
+
+  // ── source_academic_year on student_fee_ledger ────────────────────────────────
+  // Tracks which year a bill was originally generated in. NULL = current-year bill.
+  // Set to the source year when a carry-forward bill is created in a new year so
+  // ledger/reports can badge or separate "Previous Year Dues" from current-year fees.
+  await pool.query(`
+    ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS source_academic_year VARCHAR(10)
+  `).catch(() => {})
+
+  // ── source_ledger_id on student_fee_ledger ────────────────────────────────────
+  // For passout-ledger bills (academic_year = 'passout'): links back to the original
+  // bill(s) in the closed year. Enables the passout ledger to show which year's debt
+  // each entry originated from without duplicating the source year's ledger data.
+  await pool.query(`
+    ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS source_ledger_id INTEGER REFERENCES student_fee_ledger(id)
+  `).catch(() => {})
+
+  // ── passout_students table ────────────────────────────────────────────────────
+  // Tracks which students were moved to passout status and when. Lets the overview
+  // panel filter/count passout students separately from active students.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS passout_students (
+      id            SERIAL PRIMARY KEY,
+      school_id     INTEGER NOT NULL REFERENCES schools(id),
+      student_id    INTEGER NOT NULL REFERENCES students(id),
+      passout_year  TEXT    NOT NULL,
+      moved_by      TEXT    NOT NULL,
+      moved_at      TIMESTAMPTZ DEFAULT NOW(),
+      notes         TEXT,
+      UNIQUE(school_id, student_id)
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_passout_students_school ON passout_students(school_id)
+  `).catch(() => {})
+
+  // ── Watchline: request_logs ───────────────────────────────────────────────
+  // One row per HTTP request for schools with api-monitoring enabled.
+  // school_id is nullable — platform-level errors have no school context.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS request_logs (
+      id            BIGSERIAL PRIMARY KEY,
+      school_id     INTEGER     REFERENCES schools(id) ON DELETE CASCADE,
+      route         TEXT        NOT NULL,
+      method        VARCHAR(10) NOT NULL,
+      status_code   SMALLINT    NOT NULL,
+      duration_ms   INTEGER     NOT NULL,
+      actor_role    VARCHAR(30),
+      actor_email   VARCHAR(200),
+      error_code    VARCHAR(50),
+      error_message TEXT,
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS rl_school_time ON request_logs (school_id, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS rl_status      ON request_logs (status_code)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS rl_route       ON request_logs (route, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS rl_created     ON request_logs (created_at DESC)`).catch(() => {})
+
+  // ── Watchline: error_events ───────────────────────────────────────────────
+  // Written on every non-2xx or caught exception regardless of monitoring toggle —
+  // errors are always captured so platform admin can see failures even for schools
+  // that have monitoring off.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS error_events (
+      id             BIGSERIAL PRIMARY KEY,
+      school_id      INTEGER     REFERENCES schools(id) ON DELETE CASCADE,
+      severity       VARCHAR(10) NOT NULL CHECK (severity IN ('info','warn','error','critical')),
+      source         VARCHAR(50) NOT NULL,
+      route          TEXT,
+      error_name     TEXT,
+      error_message  TEXT        NOT NULL,
+      stack_trace    TEXT,
+      context        JSONB       DEFAULT '{}',
+      actor_email    VARCHAR(200),
+      request_log_id BIGINT      REFERENCES request_logs(id) ON DELETE SET NULL,
+      created_at     TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS ee_school_time ON error_events (school_id, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS ee_severity    ON error_events (severity, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS ee_created     ON error_events (created_at DESC)`).catch(() => {})
 }

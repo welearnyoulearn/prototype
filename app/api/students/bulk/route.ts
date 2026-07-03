@@ -42,23 +42,27 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < students.length; i++) {
       const s = students[i]
       if (!s.name?.trim()) { errors.push({ row: i + 1, message: 'Name is required' }); continue }
+      if (!s.section?.trim()) { errors.push({ row: i + 1, message: 'Section is required' }); continue }
+      if (!s.parent_name?.trim()) { errors.push({ row: i + 1, message: 'Parent name is required' }); continue }
+      if (!s.parent_phone?.trim()) { errors.push({ row: i + 1, message: 'Parent phone is required' }); continue }
 
       const schoolRollRaw = s.school_roll_number ?? s.roll_no
-      let school_roll_number: number | null = null
-      if (schoolRollRaw !== undefined && schoolRollRaw !== null && String(schoolRollRaw).trim() !== '') {
-        const parsed = parseInt(String(schoolRollRaw).trim(), 10)
-        if (isNaN(parsed) || parsed <= 0) {
-          errors.push({ row: i + 1, message: `Roll No must be a positive integer (got: ${schoolRollRaw})` })
-          continue
-        }
-        school_roll_number = parsed
-        const key = `${s.grade?.trim()?.toLowerCase()}|${s.section?.trim()?.toLowerCase()}|${school_roll_number}`
-        if (seenRolls.has(key)) {
-          errors.push({ row: i + 1, message: `Roll No ${school_roll_number} is duplicated in this upload (Grade ${s.grade} Section ${s.section})` })
-          continue
-        }
-        seenRolls.add(key)
+      if (schoolRollRaw === undefined || schoolRollRaw === null || String(schoolRollRaw).trim() === '') {
+        errors.push({ row: i + 1, message: 'Roll No is required' })
+        continue
       }
+      const parsed = parseInt(String(schoolRollRaw).trim(), 10)
+      if (isNaN(parsed) || parsed <= 0) {
+        errors.push({ row: i + 1, message: `Roll No must be a positive integer (got: ${schoolRollRaw})` })
+        continue
+      }
+      const school_roll_number: number = parsed
+      const key = `${s.grade?.trim()?.toLowerCase()}|${s.section?.trim()?.toLowerCase()}|${school_roll_number}`
+      if (seenRolls.has(key)) {
+        errors.push({ row: i + 1, message: `Roll No ${school_roll_number} is duplicated in this upload (Grade ${s.grade} Section ${s.section})` })
+        continue
+      }
+      seenRolls.add(key)
       validStudents.push({ ...s, _school_roll_number: school_roll_number, _row: i + 1 })
     }
 
