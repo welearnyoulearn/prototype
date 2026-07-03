@@ -1704,4 +1704,51 @@ async function runIncrementalMigrations() {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_passout_students_school ON passout_students(school_id)
   `).catch(() => {})
+
+  // ── Watchline: request_logs ───────────────────────────────────────────────
+  // One row per HTTP request for schools with api-monitoring enabled.
+  // school_id is nullable — platform-level errors have no school context.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS request_logs (
+      id            BIGSERIAL PRIMARY KEY,
+      school_id     INTEGER     REFERENCES schools(id) ON DELETE CASCADE,
+      route         TEXT        NOT NULL,
+      method        VARCHAR(10) NOT NULL,
+      status_code   SMALLINT    NOT NULL,
+      duration_ms   INTEGER     NOT NULL,
+      actor_role    VARCHAR(30),
+      actor_email   VARCHAR(200),
+      error_code    VARCHAR(50),
+      error_message TEXT,
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS rl_school_time ON request_logs (school_id, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS rl_status      ON request_logs (status_code)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS rl_route       ON request_logs (route, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS rl_created     ON request_logs (created_at DESC)`).catch(() => {})
+
+  // ── Watchline: error_events ───────────────────────────────────────────────
+  // Written on every non-2xx or caught exception regardless of monitoring toggle —
+  // errors are always captured so platform admin can see failures even for schools
+  // that have monitoring off.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS error_events (
+      id             BIGSERIAL PRIMARY KEY,
+      school_id      INTEGER     REFERENCES schools(id) ON DELETE CASCADE,
+      severity       VARCHAR(10) NOT NULL CHECK (severity IN ('info','warn','error','critical')),
+      source         VARCHAR(50) NOT NULL,
+      route          TEXT,
+      error_name     TEXT,
+      error_message  TEXT        NOT NULL,
+      stack_trace    TEXT,
+      context        JSONB       DEFAULT '{}',
+      actor_email    VARCHAR(200),
+      request_log_id BIGINT      REFERENCES request_logs(id) ON DELETE SET NULL,
+      created_at     TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS ee_school_time ON error_events (school_id, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS ee_severity    ON error_events (severity, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS ee_created     ON error_events (created_at DESC)`).catch(() => {})
 }
