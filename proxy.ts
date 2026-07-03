@@ -11,10 +11,10 @@ export const config = {
 }
 
 // ── Auth constants (must be inline — cannot import lib/auth in Edge) ──────────
-const COOKIE_ADMIN   = 'wlyl_admin_token'
-const COOKIE_TEACHER = 'wlyl_teacher_token'
-const COOKIE_STUDENT = 'wlyl_student_token'
-const COOKIE_PARENT  = 'wlyl_parent_token'
+const COOKIE_ADMIN   = 'wlyl-auth'
+const COOKIE_TEACHER = 'wlyl-teacher'
+const COOKIE_STUDENT = 'wlyl-student'
+const COOKIE_PARENT  = 'wlyl-parent'
 
 const JWT_SECRET_RAW = process.env.JWT_SECRET || 'wlyl-super-secret-key-change-in-production'
 const JWT_SECRET     = new TextEncoder().encode(JWT_SECRET_RAW)
