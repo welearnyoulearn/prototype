@@ -433,6 +433,24 @@ export async function POST(req: NextRequest) {
         }
 
         await client.query('COMMIT')
+
+        // M-18: persist apply counts into fee_year_close so the year-close banner
+        // can show carry/writeoff/passout totals even before the year is formally closed
+        await client.query(
+          `INSERT INTO fee_year_close
+             (school_id, academic_year, closed_by, carried_count, carried_total,
+              writeoff_count, writeoff_total, open_count, open_total, is_reopened)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE)
+           ON CONFLICT (school_id, academic_year) DO UPDATE
+             SET carried_count  = $4, carried_total  = $5,
+                 writeoff_count = $6, writeoff_total = $7,
+                 open_count     = $8, open_total     = $9`,
+          [school_id, from_year, done_by,
+           carriedCount, carriedTotal,
+           writeoffCount, writeoffTotal,
+           openCount, openTotal]
+        ).catch(e => console.warn('[year-end apply] fee_year_close upsert skipped:', e))
+
         return NextResponse.json({
           applied: true,
           carried: { count: carriedCount, total: carriedTotal },
