@@ -290,6 +290,12 @@ export default function FeeManagement({
   const [closedYears, setClosedYears]     = useState<Set<string>>(new Set())
 
 
+  // Section-level load errors — keyed by section name, cleared on successful load.
+  // Shown as a banner inside each section so failures are never silent.
+  const [loadErrors, setLoadErrors]   = useState<Record<string, string>>({})
+  const setLoadError   = (key: string, msg: string) => setLoadErrors(prev => ({ ...prev, [key]: msg }))
+  const clearLoadError = (key: string)               => setLoadErrors(prev => { const n = { ...prev }; delete n[key]; return n })
+
   // Overview
   const [stats, setStats]             = useState<FeeStats | null>(null)
   const [statsLoading, setStatsLoading] = useState(true)
@@ -674,8 +680,9 @@ export default function FeeManagement({
     setPassoutLoading(true)
     try {
       const res = await fetch(`/api/fees/passout?school_id=${schoolId}`)
-      if (res.ok) setPassoutData(await res.json())
-    } catch { /* network error — passout panel stays stale, refresh button visible */ }
+      if (res.ok) { clearLoadError('passout'); setPassoutData(await res.json()) }
+      else setLoadError('passout', 'Could not load passout dues — try refreshing')
+    } catch { setLoadError('passout', 'Network error — could not load passout dues') }
     finally { setPassoutLoading(false) }
   }, [schoolId])
 
@@ -686,10 +693,10 @@ export default function FeeManagement({
     setPassoutCollectLoading(s.student_id)
     try {
       const res = await fetch(`/api/fees/ledger?school_id=${schoolId}&student_id=${s.student_id}&academic_year=passout`)
-      if (!res.ok) { setPassoutCollectLoading(null); return }
+      if (!res.ok) { setPayError('Could not load passout dues — please try again'); setPassoutCollectLoading(null); return }
       const entries: LedgerEntry[] = await res.json()
       const open = entries.filter(e => ['pending', 'partial', 'overdue'].includes(e.status))
-      if (open.length === 0) { setPassoutCollectLoading(null); return }
+      if (open.length === 0) { setPayError('No outstanding dues found for this student'); setPassoutCollectLoading(null); return }
       // Reuse the existing counter collect flow: set openStudent + collectChecked + switch to collect tab
       const row: StudentRow = {
         student_id: s.student_id, student_name: s.student_name, roll_number: s.roll_number,
@@ -728,10 +735,11 @@ export default function FeeManagement({
         fetch(`/api/fees/reports?school_id=${schoolId}&academic_year=${academicYear}`),
       ])
       if (statsRes.ok) {
+        clearLoadError('stats')
         const sd = await statsRes.json()
         setStats(sd)
         setGradeStats(Array.isArray(sd.by_class) ? sd.by_class : [])
-      }
+      } else setLoadError('stats', 'Could not load fee summary — try refreshing the page')
       if (pmtRes.ok) {
         const all = await pmtRes.json() as Array<RecentPayment & { payment_status?: string }>
         setRecentPayments(
@@ -745,7 +753,7 @@ export default function FeeManagement({
         const d = await reportRes.json()
         if (Array.isArray(d.byGrade) && d.byGrade.length > 0) setGradeStats(d.byGrade)
       }
-    } catch { /* network error — stats stay stale */ }
+    } catch { setLoadError('stats', 'Network error — fee summary could not be loaded') }
     finally { setStatsLoading(false) }
   }, [schoolId, academicYear])
 
@@ -772,11 +780,12 @@ export default function FeeManagement({
       setStructures(strs)
       setStructureLock(lock)
       setAmendments(amends)
+      clearLoadError('setup')
       setEnrolledGrades(grades.length > 0 ? grades : null)
       const init: Record<string, string> = {}
       strs.forEach(s => { init[`${s.fee_category_id}_${s.grade}`] = String(s.amount) })
       setEditAmounts(init)
-    } catch { /* network error — setup stays stale */ }
+    } catch { setLoadError('setup', 'Network error — fee plan could not be loaded') }
     finally { setSetupLoading(false) }
   }, [schoolId, academicYear])
 
@@ -811,8 +820,9 @@ export default function FeeManagement({
     setReportLoading(true)
     try {
       const r = await fetch(`/api/fees/reports?school_id=${schoolId}&academic_year=${academicYear}`)
-      if (r.ok) setReportData(await r.json())
-    } catch { /* network error — reports stay stale */ }
+      if (r.ok) { clearLoadError('reports'); setReportData(await r.json()) }
+      else setLoadError('reports', 'Could not load reports — try refreshing')
+    } catch { setLoadError('reports', 'Network error — reports could not be loaded') }
     finally { setReportLoading(false) }
   }, [schoolId, academicYear])
 
@@ -877,14 +887,15 @@ export default function FeeManagement({
     try {
       const r = await fetch(`/api/fees/year-end?school_id=${schoolId}&academic_year=${academicYear}`)
       if (r.ok) {
+        clearLoadError('yearend')
         const d: YearEndState = await r.json()
         setYearEnd(d)
         // default every student to 'open' (admin decides each — no auto default action)
         const init: Record<number, 'carry' | 'writeoff' | 'open'> = {}
         d.students.forEach(s => { init[s.student_id] = 'open' })
         setYeDecisions(init)
-      }
-    } catch { /* network error — year-end stays stale */ }
+      } else setLoadError('yearend', 'Could not load year-end data — try refreshing')
+    } catch { setLoadError('yearend', 'Network error — year-end data could not be loaded') }
     finally { setYearEndLoading(false) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schoolId, academicYear])
@@ -901,8 +912,9 @@ export default function FeeManagement({
       const params = new URLSearchParams({ school_id: String(schoolId), academic_year: academicYear })
       if (ledgerGrade) params.set('grade', ledgerGrade)
       const r = await fetch(`/api/fees/ledger?${params}`)
-      if (r.ok) setLedger(await r.json())
-    } catch { /* network error — ledger stays stale */ }
+      if (r.ok) { clearLoadError('ledger'); setLedger(await r.json()) }
+      else setLoadError('ledger', 'Could not load ledger — try refreshing')
+    } catch { setLoadError('ledger', 'Network error — ledger could not be loaded') }
     finally { setLedgerLoading(false) }
   }, [schoolId, academicYear, ledgerGrade])
 
@@ -2166,6 +2178,20 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
     if (win) { win.document.write(html); win.document.close(); win.print() }
   }
 
+  // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+  function LoadErrorBanner({ sectionKey, onRetry }: { sectionKey: string; onRetry: () => void }) {
+    const msg = loadErrors[sectionKey]
+    if (!msg) return null
+    return (
+      <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="flex-shrink-0"><path d="M8 2L1.5 13.5h13L8 2z" stroke="#DC2626" strokeWidth="1.5" strokeLinejoin="round"/><path d="M8 7v3M8 11.5v.5" stroke="#DC2626" strokeWidth="1.5" strokeLinecap="round"/></svg>
+        <span className="flex-1">{msg}</span>
+        <button onClick={onRetry} className="text-xs font-semibold text-red-700 underline underline-offset-2 hover:text-red-900">Retry</button>
+      </div>
+    )
+  }
+
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
@@ -2402,6 +2428,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       {/* ═══ OVERVIEW ═══════════════════════════════════════════════════════════ */}
       {activeTab === 'overview' && (
         <div className="space-y-5">
+
+          <LoadErrorBanner sectionKey="stats"   onRetry={loadStats} />
+          <LoadErrorBanner sectionKey="passout" onRetry={loadPassout} />
 
           {/* ── Action Required ── */}
           {(() => {
@@ -2856,6 +2885,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       {/* ═══ FEE PLAN ════════════════════════════════════════════════════════════ */}
       {activeTab === 'setup' && (
         <div className="space-y-5">
+
+          <LoadErrorBanner sectionKey="setup" onRetry={loadSetup} />
 
           {setupLoading && (
             <div className="space-y-4 animate-pulse">
@@ -3607,6 +3638,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       {/* ═══ COLLECTION ══════════════════════════════════════════════════════════ */}
       {activeTab === 'collect' && (
         <div className="space-y-4">
+
+          <LoadErrorBanner sectionKey="ledger" onRetry={loadLedger} />
 
           {/* Online payments alert banner — only when feature enabled */}
           {hasOnlinePayments && pendingPayments.length > 0 && collectionView !== 'online' && (
@@ -4757,6 +4790,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       {/* ═══ REPORTS ═════════════════════════════════════════════════════════════ */}
       {activeTab === 'reports' && (
         <div className="space-y-5">
+          <LoadErrorBanner sectionKey="reports" onRetry={loadReports} />
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-base font-semibold text-gray-800">Annual Financial Report — {academicYear}</h2>
@@ -5093,6 +5127,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       {/* ═══ YEAR-END ════════════════════════════════════════════════════════════ */}
       {activeTab === 'yearend' && (
         <div className="space-y-5">
+          <LoadErrorBanner sectionKey="yearend" onRetry={loadYearEnd} />
           <div>
             <h2 className="text-base font-semibold text-gray-800">Year-End Closure — {academicYear}</h2>
             <p className="text-xs text-gray-400 mt-0.5">Review the year, then roll over to the next — all dues carry forward automatically, students are promoted.</p>
