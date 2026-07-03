@@ -22,7 +22,9 @@ export async function GET(req: NextRequest) {
   const schoolId  = p.get('school_id') ? Number(p.get('school_id')) : null
   const severity  = p.get('severity')
   const fromDate  = p.get('from') || new Date(Date.now() - 7 * 86400_000).toISOString()
-  const toDate    = p.get('to')   || new Date().toISOString()
+  // Append end-of-day time so a date-only string like '2024-07-03' includes the full day
+  const toDateRaw = p.get('to') || new Date().toISOString().slice(0, 10)
+  const toDate    = toDateRaw.length === 10 ? `${toDateRaw}T23:59:59.999Z` : toDateRaw
   const page      = Math.max(0, Number(p.get('page') || 0))
   const exportFmt = p.get('export') as 'csv' | 'json' | null
 
@@ -147,6 +149,40 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ summary, top_routes: topRoutes, rows, total, page, page_size: PAGE_SIZE })
   } catch (err) {
     console.error('[watchline GET]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+// ── DELETE /api/platform/watchline ──────────────────────────────────────────
+// Clears all rows from request_logs and error_events (platform admin only).
+// Optional body: { before?: ISO string } — only deletes rows older than that date.
+// Without `before`, deletes everything.
+export async function DELETE(req: NextRequest) {
+  const session = await requirePlatformAdmin()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  try {
+    const body = await req.json().catch(() => ({})) as { before?: string }
+    const before = body.before || null
+
+    const [r1, r2] = await Promise.all([
+      before
+        ? pool.query('DELETE FROM request_logs WHERE created_at < $1', [before])
+        : pool.query('DELETE FROM request_logs'),
+      before
+        ? pool.query('DELETE FROM error_events WHERE created_at < $1', [before])
+        : pool.query('DELETE FROM error_events'),
+    ])
+    return NextResponse.json({
+      deleted: {
+        request_logs: r1.rowCount,
+        error_events: r2.rowCount,
+      },
+      cleared_at: new Date().toISOString(),
+      cleared_by: `userId:${session.userId} (${session.role})`,
+    })
+  } catch (err) {
+    console.error('[watchline DELETE]', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

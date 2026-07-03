@@ -415,6 +415,9 @@ export default function FeeManagement({
   // Generate bills confirmation dialog
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
 
+  // Toggle category type (fixed ↔ variable) confirmation dialog
+  const [toggleTypeConfirm, setToggleTypeConfirm] = useState<{ cat: FeeCategory; newType: 'fixed' | 'variable' } | null>(null)
+
   // ── Collection (new Tab 3) ──
   type CollectionView = 'counter' | 'online' | 'defaulters' | 'dayclose'
   const [collectionView, setCollectionView]     = useState<CollectionView>('counter')
@@ -729,10 +732,9 @@ export default function FeeManagement({
     if (!academicYear) return
     setStatsLoading(true)
     try {
-      const [statsRes, pmtRes, reportRes] = await Promise.all([
+      const [statsRes, pmtRes] = await Promise.all([
         fetch(`/api/fees/stats?school_id=${schoolId}&academic_year=${academicYear}`),
         fetch(`/api/fees/payments?school_id=${schoolId}`),
-        fetch(`/api/fees/reports?school_id=${schoolId}&academic_year=${academicYear}`),
       ])
       if (statsRes.ok) {
         clearLoadError('stats')
@@ -747,11 +749,6 @@ export default function FeeManagement({
             .filter(p => p.payment_status === 'completed' || !p.payment_status)
             .slice(0, 6)
         )
-      }
-      // reports endpoint still fetched for backward-compat but class data now comes from stats
-      if (reportRes.ok) {
-        const d = await reportRes.json()
-        if (Array.isArray(d.byGrade) && d.byGrade.length > 0) setGradeStats(d.byGrade)
       }
     } catch { setLoadError('stats', 'Network error — fee summary could not be loaded') }
     finally { setStatsLoading(false) }
@@ -789,10 +786,12 @@ export default function FeeManagement({
     finally { setSetupLoading(false) }
   }, [schoolId, academicYear])
 
-  useEffect(() => { if (activeTab === 'setup') loadSetup() }, [activeTab, loadSetup])
-  // Load setup data on first mount so the 5-step wizard can show accurate step state
-  // even when the user is on the Overview tab.
-  useEffect(() => { if (academicYear) loadSetup() }, [academicYear]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Load setup on tab switch; also load once on mount (academicYear change) so the
+  // 5-step wizard on the Overview tab shows accurate step state without a tab switch.
+  // The tab-switch effect guards on activeTab==='setup', so the two effects don't
+  // double-fire when the user is already on the setup tab and academicYear changes.
+  useEffect(() => { if (activeTab === 'setup' && academicYear) loadSetup() }, [activeTab, loadSetup, academicYear])
+  useEffect(() => { if (academicYear && activeTab !== 'setup') loadSetup() }, [academicYear]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load the school's UPI ID when Fee Plan opens (once)
   useEffect(() => {
@@ -806,12 +805,14 @@ export default function FeeManagement({
 
   async function saveUpiId() {
     setUpiSaving(true); setUpiMsg('')
-    const r = await fetch('/api/fees/upi-id', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ school_id: schoolId, upi_id: upiId }),
-    })
-    const d = await r.json()
-    setUpiMsg(r.ok ? '✓ UPI ID saved' : (d.error || 'Failed to save'))
+    try {
+      const r = await fetch('/api/fees/upi-id', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, upi_id: upiId }),
+      })
+      const d = await r.json().catch(() => ({}))
+      setUpiMsg(r.ok ? '✓ UPI ID saved' : ((d as { error?: string }).error || 'Failed to save'))
+    } catch { setUpiMsg('Network error — could not save UPI ID') }
     setUpiSaving(false)
   }
 
@@ -828,12 +829,17 @@ export default function FeeManagement({
 
   useEffect(() => { if (activeTab === 'reports' && academicYear) loadReports() }, [activeTab, loadReports, academicYear])
 
-  async function loadAuditLog() {
+  const [auditLogError, setAuditLogError] = useState('')
+
+  async function loadAuditLog(forceRefresh = false) {
     setShowAuditLog(true)
-    if (auditLog.length > 0) return
-    setAuditLoading(true)
-    const r = await fetch(`/api/fees/audit-log?school_id=${schoolId}&academic_year=${academicYear}`)
-    if (r.ok) setAuditLog(await r.json())
+    if (auditLog.length > 0 && !forceRefresh) return
+    setAuditLoading(true); setAuditLogError('')
+    try {
+      const r = await fetch(`/api/fees/audit-log?school_id=${schoolId}&academic_year=${academicYear}`)
+      if (r.ok) setAuditLog(await r.json())
+      else setAuditLogError('Could not load audit log — try refreshing')
+    } catch { setAuditLogError('Network error — audit log could not be loaded') }
     setAuditLoading(false)
   }
 
@@ -944,6 +950,8 @@ export default function FeeManagement({
     }
   }
 
+  const [deactivatePromptCatId, setDeactivatePromptCatId] = useState<number | null>(null)
+
   async function deleteCategory(catId: number) {
     const r = await fetch(`/api/fees/categories?id=${catId}`, { method: 'DELETE' })
     if (r.ok) {
@@ -952,8 +960,9 @@ export default function FeeManagement({
     } else {
       const d = await r.json()
       if (d.error === 'has_ledger_data') {
-        // Automatically deactivate instead — fee history must be preserved
-        await deactivateCategory(catId, false)
+        // Cannot delete — fee history exists. Ask the admin to confirm deactivation instead.
+        setDeletingCatId(null)
+        setDeactivatePromptCatId(catId)
       }
     }
   }
@@ -1046,26 +1055,21 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   })
 
   // ── Collect: search students ─────────────────────────────────────────────────
-  async function searchStudent(q: string) {
+  // Filter from already-loaded ledger state — no extra fetch on each keystroke
+  function searchStudent(q: string) {
     if (!q.trim() || !academicYear) { setCollectEntries([]); return }
-    setCollectLoading(true)
-    const r = await fetch(`/api/fees/ledger?school_id=${schoolId}&academic_year=${academicYear}`)
-    if (r.ok) {
-      const all: LedgerEntry[] = await r.json()
-      const ql = q.trim().toLowerCase()
-      setCollectEntries(
-        all.filter(e =>
-          [
-            e.student_name, e.roll_number,
-            e.school_roll_number != null ? String(e.school_roll_number) : '',
-            e.grade, e.section, e.email, e.phone,
-            e.parent_name, e.parent_phone, e.parent_email,
-          ].some(v => (v || '').toLowerCase().includes(ql))
-          && e.status !== 'paid' && e.status !== 'waived'
-        )
+    const ql = q.trim().toLowerCase()
+    setCollectEntries(
+      ledger.filter(e =>
+        [
+          e.student_name, e.roll_number,
+          e.school_roll_number != null ? String(e.school_roll_number) : '',
+          e.grade, e.section, e.email, e.phone,
+          e.parent_name, e.parent_phone, e.parent_email,
+        ].some(v => (v || '').toLowerCase().includes(ql))
+        && e.status !== 'paid' && e.status !== 'waived'
       )
-    }
-    setCollectLoading(false)
+    )
   }
 
   function openCollect(entry: LedgerEntry) {
@@ -1368,8 +1372,10 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
           init[`${a.student_id}:${a.fee_category_id}`] = String(a.amount)
         })
         setApplAmounts(init)
+      } else {
+        setApplMsg('Could not load variable fee assignments — try refreshing')
       }
-    } catch { /* silent */ }
+    } catch { setApplMsg('Network error — variable fee assignments could not be loaded') }
     setApplLoading(false)
   }
 
@@ -1451,9 +1457,15 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     setVgSaving(false)
   }
 
-  async function toggleCategoryType(cat: FeeCategory) {
+  function toggleCategoryType(cat: FeeCategory) {
     const newType = cat.category_type === 'fixed' ? 'variable' : 'fixed'
-    if (!confirm(`Switch "${cat.name}" from ${cat.category_type === 'fixed' ? 'Fixed' : 'Variable'} to ${newType === 'fixed' ? 'Fixed' : 'Variable'}? This only works if no bills have been generated for this fee yet.`)) return
+    setToggleTypeConfirm({ cat, newType })
+  }
+
+  async function confirmToggleCategoryType() {
+    if (!toggleTypeConfirm) return
+    const { cat, newType } = toggleTypeConfirm
+    setToggleTypeConfirm(null)
     const r = await fetch(`/api/fees/categories?id=${cat.id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ category_type: newType, changed_by: adminName || 'Admin' }),
@@ -1466,23 +1478,30 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     setCategories(prev => prev.map(c => c.id === cat.id ? { ...c, category_type: newType } : c))
   }
 
+  const [structHistError, setStructHistError]   = useState('')
+
   async function loadAssignHistory(studentId: number, catId: number) {
     const key = `${studentId}:${catId}`
     if (assignHistoryKey === key) { setAssignHistoryKey(null); return }
     setAssignHistoryKey(key); setAssignHistLoading(true)
     if (!assignHistories[key]) {
-      const r = await fetch(`/api/fees/assignment-history?school_id=${schoolId}&student_id=${studentId}&fee_category_id=${catId}&academic_year=${academicYear}`)
-      if (r.ok) { const rows = await r.json(); setAssignHistories(p => ({ ...p, [key]: rows })) }
+      try {
+        const r = await fetch(`/api/fees/assignment-history?school_id=${schoolId}&student_id=${studentId}&fee_category_id=${catId}&academic_year=${academicYear}`)
+        if (r.ok) { const rows = await r.json(); setAssignHistories(p => ({ ...p, [key]: rows })) }
+      } catch { /* history panel stays empty on error — non-critical */ }
     }
     setAssignHistLoading(false)
   }
 
   async function loadStructHistory(catId: number) {
     if (structHistCatId === catId) { setStructHistCatId(null); return }
-    setStructHistCatId(catId); setStructHistLoading(true)
+    setStructHistCatId(catId); setStructHistLoading(true); setStructHistError('')
     if (!structHistories[catId]) {
-      const r = await fetch(`/api/fees/structure-history?school_id=${schoolId}&fee_category_id=${catId}&academic_year=${academicYear}`)
-      if (r.ok) { const rows = await r.json(); setStructHistories(p => ({ ...p, [catId]: rows })) }
+      try {
+        const r = await fetch(`/api/fees/structure-history?school_id=${schoolId}&fee_category_id=${catId}&academic_year=${academicYear}`)
+        if (r.ok) { const rows = await r.json(); setStructHistories(p => ({ ...p, [catId]: rows })) }
+        else setStructHistError('Could not load structure history')
+      } catch { setStructHistError('Network error') }
     }
     setStructHistLoading(false)
   }
@@ -1491,8 +1510,10 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     if (catChangelogId === catId) { setCatChangelogId(null); return }
     setCatChangelogId(catId); setCatChangelogLoading(true)
     if (!catChangelogs[catId]) {
-      const r = await fetch(`/api/fees/category-changelog?school_id=${schoolId}&category_id=${catId}`)
-      if (r.ok) { const rows = await r.json(); setCatChangelogs(p => ({ ...p, [catId]: rows })) }
+      try {
+        const r = await fetch(`/api/fees/category-changelog?school_id=${schoolId}&category_id=${catId}`)
+        if (r.ok) { const rows = await r.json(); setCatChangelogs(p => ({ ...p, [catId]: rows })) }
+      } catch { /* changelog panel stays empty on error — non-critical */ }
     }
     setCatChangelogLoading(false)
   }
@@ -1623,11 +1644,15 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   // ── Carry-forward modal: open it and load existing years ────────────────────────
   async function openCfModal() {
     setCfMsg(''); setCfCreateMode(false); setCfSelectedYear(''); setShowCfModal(true)
-    const r = await fetch(`/api/academic-years?school_id=${schoolId}`)
-    if (r.ok) {
-      const all = await r.json()
-      setCfExistingYears(Array.isArray(all) ? all : [])
-    }
+    try {
+      const r = await fetch(`/api/academic-years?school_id=${schoolId}`)
+      if (r.ok) {
+        const all = await r.json()
+        setCfExistingYears(Array.isArray(all) ? all : [])
+      } else {
+        setCfMsg('Could not load existing academic years — you can still create a new one below')
+      }
+    } catch { setCfMsg('Network error — could not load existing academic years') }
   }
 
   async function createYearInCfModal() {
@@ -1708,10 +1733,15 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   }
 
   // ── Pending verifications ────────────────────────────────────────────────────
+  const [pendingError, setPendingError] = useState('')
+
   const loadPending = useCallback(async () => {
-    setPendingLoading(true)
-    const r = await fetch(`/api/fees/payments/verify?school_id=${schoolId}`)
-    if (r.ok) setPendingPayments(await r.json())
+    setPendingLoading(true); setPendingError('')
+    try {
+      const r = await fetch(`/api/fees/payments/verify?school_id=${schoolId}`)
+      if (r.ok) setPendingPayments(await r.json())
+      else setPendingError('Could not load pending verifications — try refreshing')
+    } catch { setPendingError('Network error — pending verifications could not be loaded') }
     setPendingLoading(false)
   }, [schoolId])
 
@@ -1840,12 +1870,15 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     }, 50)
   }
 
+  const [counterPmtError, setCounterPmtError] = useState('')
+
   async function loadCounterPayments(studentId: number) {
-    setShowCounterHistory(true); setCounterPmtLoading(true)
+    setShowCounterHistory(true); setCounterPmtLoading(true); setCounterPmtError('')
     try {
       const r = await fetch(`/api/fees/payments?school_id=${schoolId}&student_id=${studentId}`)
       if (r.ok) setCounterPayments(await r.json())
-    } catch { /* silent */ }
+      else setCounterPmtError('Could not load payment history')
+    } catch { setCounterPmtError('Network error — payment history could not be loaded') }
     setCounterPmtLoading(false)
   }
 
@@ -3315,6 +3348,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       <div className="mt-3 bg-indigo-50 rounded-lg p-2 text-[10px] max-h-40 overflow-y-auto">
                         <p className="font-semibold text-indigo-700 mb-1 uppercase tracking-wide">Amount Change History</p>
                         {structHistLoading ? <p className="text-indigo-400">Loading…</p> :
+                          structHistError ? <p className="text-red-500 text-[10px]">{structHistError}</p> :
                           !(structHistories[cat.id]?.length) ? <p className="text-gray-400 italic">No changes recorded yet.</p> : (
                           <div className="space-y-1">
                             {structHistories[cat.id].map(h => (
@@ -3955,7 +3989,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                         <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Payments</p>
                                         <button onClick={() => { setShowCounterHistory(false); setCancelPmtId(null) }} className="text-xs text-gray-400 hover:text-gray-600">Hide</button>
                                       </div>
-                                      {counterPmtLoading ? (
+                                      {counterPmtError ? (
+                                        <p className="text-xs text-red-500">{counterPmtError}</p>
+                                      ) : counterPmtLoading ? (
                                         <p className="text-xs text-gray-400">Loading…</p>
                                       ) : counterPayments.length === 0 ? (
                                         <p className="text-xs text-gray-400 italic">No payments recorded yet.</p>
@@ -4060,9 +4096,12 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <div className={`text-sm px-4 py-3 rounded-lg ${verifyMsg.startsWith('✓') ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-600 border border-red-200'}`}>{verifyMsg}</div>
               )}
 
+              {pendingError && (
+                <div className="text-sm px-4 py-3 rounded-lg bg-red-50 text-red-600 border border-red-200">{pendingError}</div>
+              )}
               {pendingLoading ? (
                 <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-sm text-gray-400">Loading…</div>
-              ) : pendingPayments.length === 0 ? (
+              ) : !pendingError && pendingPayments.length === 0 ? (
                 <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
                   <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
@@ -5064,17 +5103,23 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <a href={`/api/fees/audit-log?school_id=${schoolId}&academic_year=${academicYear}&format=csv&generated_by=${encodeURIComponent(adminName || 'Admin')}&limit=5000`} download
                       className="text-sm border border-gray-800 text-gray-800 px-3 py-1.5 rounded-lg hover:bg-gray-100">⬇ Export Audit (CSV)</a>
                     {!showAuditLog ? (
-                      <button onClick={loadAuditLog}
+                      <button onClick={() => loadAuditLog()}
                         className="text-sm bg-gray-800 text-white px-4 py-1.5 rounded-lg hover:bg-gray-900">View Audit Log</button>
                     ) : (
-                      <button onClick={() => setShowAuditLog(false)}
-                        className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Hide</button>
+                      <>
+                        <button onClick={() => loadAuditLog(true)}
+                          className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Refresh</button>
+                        <button onClick={() => setShowAuditLog(false)}
+                          className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Hide</button>
+                      </>
                     )}
                   </div>
                 </div>
                 {showAuditLog && (
                   auditLoading ? (
                     <p className="text-sm text-gray-400 p-8 text-center">Loading audit log…</p>
+                  ) : auditLogError ? (
+                    <p className="text-sm text-red-500 p-8 text-center">{auditLogError}</p>
                   ) : auditLog.length === 0 ? (
                     <p className="text-sm text-gray-400 p-8 text-center">No financial actions recorded yet.</p>
                   ) : (
@@ -5550,6 +5595,63 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               <button onClick={() => { setShowApplyConfirm(false); applyYearEndDecisions() }} disabled={yeProcessing}
                 className="flex-1 bg-blue-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
                 {yeProcessing ? 'Applying…' : 'Confirm & Apply'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Deactivate Category Instead of Delete ═══════════════════════════════ */}
+      {deactivatePromptCatId !== null && (() => {
+        const cat = categories.find(c => c.id === deactivatePromptCatId)
+        return (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={() => setDeactivatePromptCatId(null)}>
+            <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+              <div>
+                <p className="text-base font-bold text-gray-900">Cannot Delete — Fee Records Exist</p>
+                <p className="text-sm text-gray-500 mt-1">
+                  <span className="font-semibold">{cat?.name ?? 'This category'}</span> has fee history that must be preserved.
+                  You can deactivate it instead — it will be hidden from new bills but all existing records are kept.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button data-testid="deactivate-prompt-cancel" onClick={() => setDeactivatePromptCatId(null)}
+                  className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">
+                  Cancel
+                </button>
+                <button data-testid="deactivate-prompt-confirm" onClick={() => { setDeactivatePromptCatId(null); if (deactivatePromptCatId) deactivateCategory(deactivatePromptCatId, false) }}
+                  className="flex-1 bg-amber-500 text-white py-2 rounded-xl text-sm font-semibold hover:bg-amber-600">
+                  Deactivate Instead
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ══ Toggle Category Type Confirm ════════════════════════════════════════ */}
+      {toggleTypeConfirm && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={() => setToggleTypeConfirm(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div>
+              <p className="text-base font-bold text-gray-900">Switch fee type?</p>
+              <p className="text-sm text-gray-500 mt-1">
+                Switch <span className="font-semibold">{toggleTypeConfirm.cat.name}</span> from{' '}
+                <span className="font-semibold">{toggleTypeConfirm.cat.category_type === 'fixed' ? 'Fixed' : 'Variable'}</span> to{' '}
+                <span className="font-semibold">{toggleTypeConfirm.newType === 'fixed' ? 'Fixed' : 'Variable'}</span>?
+                This only works if no bills have been generated for this fee yet.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button data-testid="toggle-type-cancel" onClick={() => setToggleTypeConfirm(null)}
+                className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">
+                Cancel
+              </button>
+              <button data-testid="toggle-type-confirm" onClick={confirmToggleCategoryType}
+                className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-indigo-700">
+                Switch Type
               </button>
             </div>
           </div>
