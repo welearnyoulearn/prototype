@@ -64,12 +64,17 @@ export default function WatchlinePage() {
 
   // Filters
   const [schoolFilter, setSchoolFilter] = useState('')
+  const [schoolQuery, setSchoolQuery]   = useState('')
+  const [schoolResults, setSchoolResults] = useState<{ id: number; name: string; city: string | null }[]>([])
+  const [schoolSelected, setSchoolSelected] = useState<{ id: number; name: string } | null>(null)
+  const [schoolDropdownOpen, setSchoolDropdownOpen] = useState(false)
   const [severityFilter, setSeverityFilter] = useState('')
   const [fromDate, setFromDate] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 7); return d.toISOString().slice(0, 10)
   })
   const [toDate, setToDate]     = useState(() => new Date().toISOString().slice(0, 10))
   const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   const buildParams = useCallback((extra: Record<string, string> = {}) => {
     const p = new URLSearchParams({
@@ -97,6 +102,33 @@ export default function WatchlinePage() {
     } finally { setLoading(false) }
   }, [buildParams])
 
+  // Search schools by name as the admin types — mirrors the /api/schools?search= picker
+  // used elsewhere, so filtering by school doesn't require already knowing its numeric ID.
+  useEffect(() => {
+    if (schoolSelected || !schoolQuery.trim()) { setSchoolResults([]); return }
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/schools?search=${encodeURIComponent(schoolQuery.trim())}`)
+        if (res.ok) setSchoolResults(await res.json())
+      } catch { /* non-critical */ }
+    }, 250)
+    return () => clearTimeout(t)
+  }, [schoolQuery, schoolSelected])
+
+  function selectSchool(s: { id: number; name: string }) {
+    setSchoolSelected(s)
+    setSchoolFilter(String(s.id))
+    setSchoolQuery(s.name)
+    setSchoolDropdownOpen(false)
+  }
+
+  function clearSchoolSelection() {
+    setSchoolSelected(null)
+    setSchoolFilter('')
+    setSchoolQuery('')
+    setSchoolResults([])
+  }
+
   const loadHealth = useCallback(async () => {
     try {
       const res = await fetch('/api/platform/watchline/health')
@@ -112,11 +144,21 @@ export default function WatchlinePage() {
 
   async function handleExport(exportFmt: 'csv' | 'json') {
     setExporting(true)
+    setExportError(null)
     try {
       const url = `/api/platform/watchline?${buildParams({ export: exportFmt, page: '0' })}`
       const res = await fetch(url)
-      if (!res.ok) return
-      triggerDownload(await res.blob(), `watchline-${tab}-${fromDate}-to-${toDate}.${exportFmt}`)
+      if (!res.ok) {
+        setExportError(res.status === 401
+          ? 'Your session expired — refresh the page and sign in again.'
+          : `Export failed (status ${res.status}). Try again.`)
+        return
+      }
+      const blob = await res.blob()
+      if (blob.size === 0) { setExportError('No data to export for the selected filters.'); return }
+      triggerDownload(blob, `watchline-${tab}-${fromDate}-to-${toDate}.${exportFmt}`)
+    } catch {
+      setExportError('Network error — export failed.')
     } finally { setExporting(false) }
   }
 
@@ -284,6 +326,13 @@ export default function WatchlinePage() {
           </div>
         </div>
 
+        {exportError && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-lg flex items-center justify-between">
+            <span>{exportError}</span>
+            <button onClick={() => setExportError(null)} className="text-red-400 hover:text-red-600 ml-4">✕</button>
+          </div>
+        )}
+
         {/* Summary cards */}
         {summary && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -324,11 +373,41 @@ export default function WatchlinePage() {
 
         {/* Filters */}
         <div className="flex flex-wrap gap-3 items-end">
-          <div>
-            <label className="block text-xs text-gray-400 mb-1 font-medium">School ID</label>
-            <input type="number" placeholder="All schools" value={schoolFilter}
-              onChange={e => setSchoolFilter(e.target.value)}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 w-36 focus:outline-none focus:ring-2 focus:ring-teal-400" />
+          <div className="relative">
+            <label className="block text-xs text-gray-400 mb-1 font-medium">School</label>
+            <div className="relative w-56">
+              <input
+                type="text"
+                placeholder="Search school by name…"
+                value={schoolQuery}
+                onChange={e => {
+                  setSchoolQuery(e.target.value)
+                  setSchoolSelected(null)
+                  setSchoolFilter('')
+                  setSchoolDropdownOpen(true)
+                }}
+                onFocus={() => setSchoolDropdownOpen(true)}
+                onBlur={() => setTimeout(() => setSchoolDropdownOpen(false), 150)}
+                className="text-sm border border-gray-200 rounded-lg pl-3 pr-7 py-1.5 w-full focus:outline-none focus:ring-2 focus:ring-teal-400"
+              />
+              {schoolQuery && (
+                <button type="button" onClick={clearSchoolSelection}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 text-xs">
+                  ✕
+                </button>
+              )}
+              {schoolDropdownOpen && schoolResults.length > 0 && (
+                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+                  {schoolResults.map(s => (
+                    <button key={s.id} type="button" onClick={() => selectSchool(s)}
+                      className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 flex items-center justify-between gap-2">
+                      <span className="truncate">{s.name}</span>
+                      <span className="text-xs text-gray-300 shrink-0">{s.city || `#${s.id}`}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <div>
             <label className="block text-xs text-gray-400 mb-1 font-medium">From</label>
