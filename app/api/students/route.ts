@@ -143,8 +143,9 @@ export async function POST(req: NextRequest) {
     // Create/link parent account + send parent welcome email if parent_email provided.
     // Even when parent-portal is disabled, still link to an existing parent (e.g. a
     // sibling onboarded earlier while the flag was on) — only suppress creating a new one.
+    let parentWarning: string | null = null
     if (parent_email || parent_phone) {
-      await provisionParentAccount({
+      parentWarning = await provisionParentAccount({
         parentEmail: parent_email, parentPhone: parent_phone, parentName: parent_name,
         studentId: student.id, schoolId: school_id, studentName: name, appUrl,
         allowCreate: parentPortalEnabled,
@@ -152,7 +153,10 @@ export async function POST(req: NextRequest) {
     }
 
     invalidateCache(`classes:${school_id}`)
-    return NextResponse.json(student, { status: 201 })
+    return NextResponse.json(
+      { ...student, ...(parentWarning ? { parent_warning: parentWarning } : {}) },
+      { status: 201 }
+    )
   } catch (error) {
     console.error(error)
     return NextResponse.json({ error: 'Failed to create student' }, { status: 500 })
@@ -162,12 +166,14 @@ export async function POST(req: NextRequest) {
 // Create or link a parent account, sending welcome email only on first creation.
 // allowCreate=false only links to an existing parent and never inserts a new row —
 // used when parent-portal is disabled for the school.
+// Returns null on success, or a warning string if the operation partially failed
+// (student was created but parent account could not be set up).
 async function provisionParentAccount({
   parentEmail, parentPhone, parentName, studentId, schoolId, studentName, appUrl, allowCreate
 }: {
   parentEmail: string | null; parentPhone: string | null; parentName: string | null
   studentId: number; schoolId: number; studentName: string; appUrl: string; allowCreate: boolean
-}) {
+}): Promise<string | null> {
   try {
     const batchCache = new Map<string, number>()
     let parentHash: string | null = null
@@ -201,7 +207,9 @@ async function provisionParentAccount({
         loginUrl: `${appUrl}/parent/login`,
       }).catch(console.error)
     }
+    return null
   } catch (err) {
     console.error('[provisionParentAccount]', err)
+    return 'Student was created but the parent account could not be set up. Please retry by editing the student or contact support.'
   }
 }
