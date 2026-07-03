@@ -577,6 +577,9 @@ export default function SchoolDetailPage() {
           </div>
         </div>
 
+        {/* ── Watchline ────────────────────────────────────────────────────── */}
+        <WatchlineCard schoolId={schoolId} schoolName={school?.name ?? ''} />
+
         {/* ── Danger Zone ──────────────────────────────────────────────────── */}
         <div className="bg-white rounded-xl border border-red-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-red-100 bg-red-50">
@@ -761,6 +764,140 @@ export default function SchoolDetailPage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Watchline card ────────────────────────────────────────────────────────────
+function WatchlineCard({ schoolId, schoolName }: { schoolId: string; schoolName: string }) {
+  const [enabled, setEnabled]   = useState(false)
+  const [saving, setSaving]     = useState(false)
+  const [saved, setSaved]       = useState(false)
+  const [recentErrors, setRecentErrors] = useState<Array<{
+    id: number; severity: string; error_message: string; route: string | null; created_at: string
+  }>>([])
+  const [errLoading, setErrLoading] = useState(true)
+
+  useEffect(() => {
+    // Load current override state
+    fetch(`/api/platform/schools/${schoolId}/feature-overrides`)
+      .then(r => r.ok ? r.json() : { overrides: {} })
+      .then(d => setEnabled(d.overrides['api-monitoring'] === true))
+      .catch(() => {})
+
+    // Load recent errors for this school (always shown regardless of toggle)
+    fetch(`/api/platform/watchline?type=error&school_id=${schoolId}&page=0`)
+      .then(r => r.ok ? r.json() : { rows: [] })
+      .then(d => setRecentErrors((d.rows || []).slice(0, 5)))
+      .catch(() => {})
+      .finally(() => setErrLoading(false))
+  }, [schoolId])
+
+  async function toggleMonitoring() {
+    setSaving(true); setSaved(false)
+    const nextEnabled = !enabled
+    try {
+      const res = await fetch(`/api/platform/schools/${schoolId}/feature-overrides`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feature_key: 'api-monitoring', enabled: nextEnabled }),
+      })
+      if (res.ok) { setEnabled(nextEnabled); setSaved(true); setTimeout(() => setSaved(false), 3000) }
+    } finally { setSaving(false) }
+  }
+
+  const SEV: Record<string, string> = {
+    info: 'bg-blue-100 text-blue-700', warn: 'bg-amber-100 text-amber-700',
+    error: 'bg-red-100 text-red-700', critical: 'bg-red-700 text-white',
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="font-semibold text-gray-900">Watchline</h2>
+            {enabled && (
+              <span className="inline-flex items-center gap-1 text-xs text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
+                Monitoring active
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-gray-500 mt-0.5">
+            API request monitoring for {schoolName}. Errors are always captured; request logs require monitoring to be on.
+          </p>
+        </div>
+        <a href={`/platform-admin/logs?school_id=${schoolId}`}
+          className="text-xs text-gray-400 hover:text-gray-700 underline underline-offset-2 flex-shrink-0 ml-4">
+          View logs →
+        </a>
+      </div>
+      <div className="px-6 py-5 space-y-4">
+        {/* Toggle */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-gray-800">Request monitoring</p>
+            <p className="text-xs text-gray-400 mt-0.5">Captures route, latency, and actor for every API call from this school</p>
+          </div>
+          <div className="flex items-center gap-3">
+            {saved && <span className="text-green-600 text-xs font-medium">✓ Saved</span>}
+            <button onClick={toggleMonitoring} disabled={saving}
+              data-testid="watchline-toggle"
+              className={`relative w-11 h-6 rounded-full transition-colors disabled:opacity-50 ${enabled ? 'bg-teal-500' : 'bg-gray-300'}`}>
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${enabled ? 'translate-x-5' : ''}`} />
+            </button>
+          </div>
+        </div>
+
+        {/* Recent errors */}
+        <div className="border-t border-gray-100 pt-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Recent errors</p>
+            <a href={`/platform-admin/logs?school_id=${schoolId}&type=error`}
+              className="text-xs text-gray-400 hover:text-gray-700 underline underline-offset-2">
+              View all →
+            </a>
+          </div>
+          {errLoading ? (
+            <p className="text-xs text-gray-400">Loading…</p>
+          ) : recentErrors.length === 0 ? (
+            <p className="text-xs text-gray-400">No errors recorded for this school.</p>
+          ) : (
+            <div className="space-y-2">
+              {recentErrors.map(e => (
+                <div key={e.id} className="flex items-start gap-2 text-xs">
+                  <span className={`flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${SEV[e.severity] || 'bg-gray-100 text-gray-600'}`}>
+                    {e.severity}
+                  </span>
+                  <span className="text-gray-700 truncate flex-1" title={e.error_message}>{e.error_message}</span>
+                  <span className="flex-shrink-0 text-gray-300 font-mono">
+                    {new Date(e.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Download link */}
+        <div className="border-t border-gray-100 pt-4 flex gap-3">
+          <a href={`/api/platform/watchline?school_id=${schoolId}&type=request&export=csv`}
+            className="text-xs text-gray-500 hover:text-gray-800 underline underline-offset-2">
+            Download requests CSV
+          </a>
+          <span className="text-gray-200">·</span>
+          <a href={`/api/platform/watchline?school_id=${schoolId}&type=error&export=csv`}
+            className="text-xs text-gray-500 hover:text-gray-800 underline underline-offset-2">
+            Download errors CSV
+          </a>
+          <span className="text-gray-200">·</span>
+          <a href={`/api/platform/watchline?school_id=${schoolId}&type=error&export=json`}
+            className="text-xs text-gray-500 hover:text-gray-800 underline underline-offset-2">
+            JSON
+          </a>
+        </div>
+      </div>
     </div>
   )
 }
