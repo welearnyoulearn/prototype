@@ -4,18 +4,12 @@ import { randomInt } from 'crypto'
 import { cookies } from 'next/headers'
 import { NextRequest } from 'next/server'
 import pool from './db'
+import { JWT_SECRET, COOKIE_ADMIN, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from './auth-constants'
 
-if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
-  console.error('[FATAL] JWT_SECRET env var is not set — auth cookies will not work correctly')
-}
-const JWT_SECRET = process.env.JWT_SECRET || 'wlyl-dev-only-secret-not-for-production'
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
 
 // ─── Cookie names ─────────────────────────────────────────────────────────────
-export const COOKIE_ADMIN   = 'wlyl-auth'
-export const COOKIE_TEACHER = 'wlyl-teacher'
-export const COOKIE_STUDENT = 'wlyl-student'
-export const COOKIE_PARENT  = 'wlyl-parent'
+export { COOKIE_ADMIN, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT }
 
 // ─── JWT Payload types ────────────────────────────────────────────────────────
 export type JWTPayload = {
