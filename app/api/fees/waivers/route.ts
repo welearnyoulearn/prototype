@@ -319,10 +319,7 @@ async function handleDELETE(req: NextRequest) {
     } catch (e) {
       await client.query('ROLLBACK')
       console.error(e)
-      // TEMPORARY: surface the real DB error so it's visible without server-log
-      // access while diagnosing this specific failure — revert once resolved.
-      const detail = e instanceof Error ? e.message : String(e)
-      return NextResponse.json({ error: 'Failed to revoke waiver', detail }, { status: 500 })
+      return NextResponse.json({ error: 'Failed to revoke waiver' }, { status: 500 })
     } finally { client.release() }
 } catch (err: unknown) {
     console.error('[API]', err)
