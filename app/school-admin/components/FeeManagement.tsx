@@ -2114,7 +2114,9 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
         if (pbData) loadPassbook(pbData.student.id)
         if (reportData !== null) loadReports()
       } else {
-        setCancelWaiverMsg(d.error || 'Failed')
+        // TEMPORARY: include d.detail (real DB error) while diagnosing this
+        // specific failure — revert once resolved.
+        setCancelWaiverMsg([d.error, d.detail].filter(Boolean).join(' — ') || 'Failed')
       }
     } catch { setCancelWaiverMsg('Network error') }
     setCancelWaiverBusy(false)
