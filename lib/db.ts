@@ -898,10 +898,6 @@ export async function initDB() {
     )`,
     `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) DEFAULT 0`,
     `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS granted_by_name VARCHAR(100)`,
-    `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS is_revoked    BOOLEAN     NOT NULL DEFAULT FALSE`,
-    `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoked_by    TEXT`,
-    `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoked_at    TIMESTAMPTZ`,
-    `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoke_reason TEXT`,
 
     // ── Receipt number sequence ───────────────────────────────────────────────
     `CREATE SEQUENCE IF NOT EXISTS receipt_number_seq START 1000`,
@@ -1491,6 +1487,10 @@ async function runIncrementalMigrations() {
   await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancelled_by     TEXT`)
   await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancelled_at     TIMESTAMPTZ`)
   await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancel_reason    TEXT`)
+  await pool.query(`ALTER TABLE fee_waivers  ADD COLUMN IF NOT EXISTS is_revoked    BOOLEAN NOT NULL DEFAULT FALSE`)
+  await pool.query(`ALTER TABLE fee_waivers  ADD COLUMN IF NOT EXISTS revoked_by    TEXT`)
+  await pool.query(`ALTER TABLE fee_waivers  ADD COLUMN IF NOT EXISTS revoked_at    TIMESTAMPTZ`)
+  await pool.query(`ALTER TABLE fee_waivers  ADD COLUMN IF NOT EXISTS revoke_reason TEXT`)
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS uq_student_fee_ledger_entry
     ON student_fee_ledger (student_id, fee_category_id, academic_year, period_label)
