@@ -90,18 +90,24 @@ export async function GET(req: NextRequest) {
       if (type === 'payments') {
         const pmtValues: unknown[] = [school_id, academic_year]
         const pmtCond = date ? (pmtValues.push(date), `AND fp.paid_date = $${pmtValues.length}`) : ''
+        // Include cancelled payments too (not just completed) — otherwise a receipt
+        // collected and later cancelled the same day disappears entirely from this
+        // export, leaving an unexplained gap in the receipt-number sequence with no
+        // record of why. The full audit-report already surfaces cancellations; this
+        // day-collection/reconciliation export should too.
         const { rows } = await pool.query(
           `SELECT s.name AS student_name, s.roll_number, s.grade, s.section,
                   s.parent_name, s.parent_phone,
                   fc.name AS category_name, l.period_label,
                   fp.receipt_number, fp.amount, fp.payment_mode, fp.payment_status,
-                  fp.paid_date, fp.transaction_ref, fp.collected_by_name, fp.notes
+                  fp.paid_date, fp.transaction_ref, fp.collected_by_name, fp.notes,
+                  fp.cancelled_by, fp.cancel_reason, fp.cancelled_at
            FROM fee_payments fp
            JOIN students s ON s.id = fp.student_id
            JOIN student_fee_ledger l ON l.id = fp.ledger_id
            JOIN fee_categories fc ON fc.id = l.fee_category_id
            WHERE fp.school_id = $1 AND l.academic_year = $2
-             AND fp.payment_status = 'completed' ${pmtCond}
+             AND fp.payment_status IN ('completed', 'cancelled') ${pmtCond}
            ORDER BY fp.paid_date DESC, fp.created_at DESC`,
           pmtValues
         )
@@ -118,10 +124,14 @@ export async function GET(req: NextRequest) {
           { key: 'receipt_number',   label: 'Receipt Number' },
           { key: 'amount',           label: 'Amount (₹)' },
           { key: 'payment_mode',     label: 'Payment Mode' },
+          { key: 'payment_status',   label: 'Status' },
           { key: 'paid_date',        label: 'Payment Date' },
           { key: 'transaction_ref',  label: 'Transaction Ref' },
           { key: 'collected_by_name', label: 'Collected By' },
           { key: 'notes',            label: 'Notes' },
+          { key: 'cancelled_by',     label: 'Cancelled By' },
+          { key: 'cancel_reason',    label: 'Cancel Reason' },
+          { key: 'cancelled_at',     label: 'Cancelled At' },
         ]
 
         const csv = toCSV(rows as Record<string, unknown>[], cols)

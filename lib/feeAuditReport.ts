@@ -29,7 +29,7 @@ export type StudentReport = {
   balance: Money
   bills: { fee_type: string; period_label: string; billed: number; waived: number; paid: number; balance: number; due_date: string; status: string }[]
   payments: { receipt_number: string; amount: number; payment_mode: string; payment_status: string; paid_date: string; transaction_ref: string | null; collected_by_name: string | null; notes: string | null; fee_type: string; period_label: string }[]
-  waivers: { fee_type: string; period_label: string; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; is_revoked: boolean }[]
+  waivers: { fee_type: string; period_label: string; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; is_revoked: boolean; revoked_by: string | null; revoked_at: string | null; revoke_reason: string | null }[]
 }
 
 function money(billed: number, waived: number, paid: number): Money {
@@ -81,7 +81,8 @@ export async function buildFeeAuditReport(opts: {
     )
     const { rows: waivers } = await pool.query(
       `SELECT fc.name AS fee_type, l.period_label, w.waiver_type, w.waiver_amount, w.reason,
-              w.granted_by_name, w.created_at, COALESCE(w.is_revoked,false) AS is_revoked
+              w.granted_by_name, w.created_at, COALESCE(w.is_revoked,false) AS is_revoked,
+              w.revoked_by, w.revoked_at, w.revoke_reason
        FROM fee_waivers w JOIN student_fee_ledger l ON l.id = w.ledger_id
        JOIN fee_categories fc ON fc.id = l.fee_category_id
        WHERE w.student_id = $1 AND w.school_id = $2 AND l.academic_year = $3

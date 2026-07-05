@@ -145,9 +145,15 @@ export async function GET(req: NextRequest) {
     ws.addRow([])
     // Waivers
     ws.addRow(['WAIVERS']).font = { bold: true }
-    headerRow(ws, ['Fee Type · Period', 'Type', 'Amount', 'Reason', 'Granted By', 'Status'])
+    headerRow(ws, ['Fee Type · Period', 'Type', 'Amount', 'Reason', 'Granted By', 'Status', 'Revoked By', 'Revoked At', 'Revoke Reason'])
     for (const w of rep.waivers) {
-      const r = ws.addRow([`${w.fee_type} · ${w.period_label}`, w.waiver_type, w.waiver_amount, w.reason, w.granted_by_name || '', w.is_revoked ? 'Revoked' : 'Active'])
+      const r = ws.addRow([
+        `${w.fee_type} · ${w.period_label}`, w.waiver_type, w.waiver_amount, w.reason, w.granted_by_name || '',
+        w.is_revoked ? 'Revoked' : 'Active',
+        w.is_revoked ? (w.revoked_by || '') : '',
+        w.is_revoked && w.revoked_at ? new Date(w.revoked_at).toLocaleString('en-IN') : '',
+        w.is_revoked ? (w.revoke_reason || '') : '',
+      ])
       ws.getCell(r.number, 3).numFmt = fmtMoney
     }
 

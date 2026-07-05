@@ -21,12 +21,6 @@ export async function POST(req: NextRequest) {
 
     const client = await pool.connect()
     try {
-      // Self-heal cancel-tracking columns
-      await client.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancelled_by    TEXT`)
-      await client.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancelled_at    TIMESTAMPTZ`)
-      await client.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancel_reason   TEXT`)
-      await client.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`)
-
       // Fetch the payment (no lock yet — just to resolve school_id for the access check)
       const { rows: [pmtPreview] } = await client.query(
         `SELECT fp.school_id, l.academic_year

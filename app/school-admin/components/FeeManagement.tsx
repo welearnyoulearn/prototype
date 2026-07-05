@@ -222,7 +222,7 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
     const bal = rep.balance as { billed: number; waived: number; net_demand: number; paid: number; balance: number }
     const bills = rep.bills as Array<{ fee_type: string; period_label: string; billed: number; waived: number; paid: number; balance: number; status: string }>
     const pays = rep.payments as Array<{ receipt_number: string; paid_date: string; fee_type: string; period_label: string; amount: number; payment_mode: string; payment_status: string }>
-    const wvs = rep.waivers as Array<{ fee_type: string; period_label: string; waiver_amount: number; reason: string; granted_by_name: string | null; is_revoked: boolean }>
+    const wvs = rep.waivers as Array<{ fee_type: string; period_label: string; waiver_amount: number; reason: string; granted_by_name: string | null; is_revoked: boolean; revoked_by: string | null; revoked_at: string | null; revoke_reason: string | null }>
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Student Fee Report</title>${style}</head><body>${head}
       <h3>Student Profile</h3>
       <table><tr><td><b>Name</b></td><td>${s.name}</td><td><b>Roll No</b></td><td>${s.roll_number}</td><td><b>Class</b></td><td>${s.grade}${s.section || ''}</td></tr>
@@ -236,8 +236,8 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
       <table><thead><tr><th>Receipt</th><th>Date</th><th>Fee · Period</th><th class="r">Amount</th><th>Mode</th><th>Status</th></tr></thead>
       <tbody>${pays.map(p => `<tr><td>${p.receipt_number}</td><td>${p.paid_date}</td><td>${p.fee_type} · ${p.period_label}</td><td class="r">${RUPEE(p.amount)}</td><td>${p.payment_mode}</td><td>${p.payment_status}</td></tr>`).join('') || '<tr><td colspan="6">No payments</td></tr>'}</tbody></table>
       <h3>Waivers</h3>
-      <table><thead><tr><th>Fee · Period</th><th class="r">Amount</th><th>Reason</th><th>Granted By</th><th>Status</th></tr></thead>
-      <tbody>${wvs.map(w => `<tr><td>${w.fee_type} · ${w.period_label}</td><td class="r">${RUPEE(w.waiver_amount)}</td><td>${w.reason}</td><td>${w.granted_by_name || ''}</td><td>${w.is_revoked ? 'Revoked' : 'Active'}</td></tr>`).join('') || '<tr><td colspan="5">No waivers</td></tr>'}</tbody></table>
+      <table><thead><tr><th>Fee · Period</th><th class="r">Amount</th><th>Reason</th><th>Granted By</th><th>Status</th><th>Revoke Detail</th></tr></thead>
+      <tbody>${wvs.map(w => `<tr><td>${w.fee_type} · ${w.period_label}</td><td class="r">${RUPEE(w.waiver_amount)}</td><td>${w.reason}</td><td>${w.granted_by_name || ''}</td><td>${w.is_revoked ? 'Revoked' : 'Active'}</td><td>${w.is_revoked ? `${w.revoked_by || ''} · ${w.revoked_at ? new Date(w.revoked_at).toLocaleString('en-IN') : ''} · ${w.revoke_reason || ''}` : ''}</td></tr>`).join('') || '<tr><td colspan="6">No waivers</td></tr>'}</tbody></table>
       </body></html>`
   }
 

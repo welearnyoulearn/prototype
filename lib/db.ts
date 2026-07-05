@@ -1488,6 +1488,9 @@ async function runIncrementalMigrations() {
   await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS verified_by      TEXT`)
   await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS verified_at      TIMESTAMPTZ`)
   await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS rejection_reason TEXT`)
+  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancelled_by     TEXT`)
+  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancelled_at     TIMESTAMPTZ`)
+  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancel_reason    TEXT`)
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS uq_student_fee_ledger_entry
     ON student_fee_ledger (student_id, fee_category_id, academic_year, period_label)
