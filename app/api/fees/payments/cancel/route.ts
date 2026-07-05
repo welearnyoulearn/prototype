@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { withWatchline } from '@/lib/logger'
+
+async function paymentSchoolIdById(paymentId: unknown): Promise<number | null> {
+  if (!paymentId) return null
+  try {
+    const { rows } = await pool.query(`SELECT school_id FROM fee_payments WHERE id = $1`, [paymentId])
+    return rows[0]?.school_id ?? null
+  } catch { return null }
+}
 
 // POST /api/fees/payments/cancel
 // Cancel (reverse) a completed payment, OR correct it (cancel + re-record with new values).
@@ -11,7 +20,7 @@ import { requireFeeAccess } from '@/lib/auth'
 // done_by is derived server-side from the session.
 //
 // Always: reverses the ledger, soft-marks the payment 'cancelled', records an audit row.
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     const body = await req.json()
     const { payment_id, action = 'cancel', reason } = body
@@ -21,12 +30,6 @@ export async function POST(req: NextRequest) {
 
     const client = await pool.connect()
     try {
-      // Self-heal cancel-tracking columns
-      await client.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancelled_by    TEXT`)
-      await client.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancelled_at    TIMESTAMPTZ`)
-      await client.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancel_reason   TEXT`)
-      await client.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`)
-
       // Fetch the payment (no lock yet — just to resolve school_id for the access check)
       const { rows: [pmtPreview] } = await client.query(
         `SELECT fp.school_id, l.academic_year
@@ -212,3 +215,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const POST = withWatchline(handlePOST, {
+  route: '/api/fees/payments/cancel',
+  getSchoolId: async req => { try { return await paymentSchoolIdById((await req.clone().json())?.payment_id) } catch { return null } },
+})
