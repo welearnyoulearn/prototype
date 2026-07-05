@@ -86,7 +86,7 @@ async function handlePOST(req: NextRequest) {
                status = CASE
                  WHEN COALESCE(waiver_amount,0) + GREATEST(0, amount_paid - $1) >= amount_due THEN 'waived'
                  WHEN GREATEST(0, amount_paid - $1) > 0 THEN 'partial'
-                 WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
+                 WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                  ELSE 'pending'
                END
            WHERE id = $2`,
@@ -166,7 +166,7 @@ async function handlePOST(req: NextRequest) {
                status = CASE
                  WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
                  WHEN LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) > 0 THEN 'partial'
-                 WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
+                 WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                  ELSE 'pending'
                END
            WHERE id = $2`,

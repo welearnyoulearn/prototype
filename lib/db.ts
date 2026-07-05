@@ -1494,6 +1494,45 @@ async function runIncrementalMigrations() {
   await pool.query(`ALTER TABLE fee_waivers  ADD COLUMN IF NOT EXISTS is_revoked    BOOLEAN NOT NULL DEFAULT FALSE`)
   await pool.query(`ALTER TABLE fee_waivers  ADD COLUMN IF NOT EXISTS revoked_by    TEXT`)
   await pool.query(`ALTER TABLE fee_waivers  ADD COLUMN IF NOT EXISTS revoked_at    TIMESTAMPTZ`)
+  // Previously only self-healed inline in categories/route.ts's GET handler, and
+  // duplicated again in year-end/route.ts, year-rollover/route.ts, generate/route.ts —
+  // meaning whichever of those ran first "got lucky"; any other route hit first on a
+  // cold instance would 500 with "column category_type does not exist".
+  await pool.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS category_type TEXT NOT NULL DEFAULT 'fixed'`)
+  // Previously only ever created inline in year-end/route.ts (ENSURE_CLOSE) — other
+  // routes that check whether a year is closed (payments/cancel, ledger/[id]) wrapped
+  // the query in .catch(() => ({rows:[]})), so a missing table silently failed the
+  // "is this year closed" guard open instead of erroring.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_year_close (
+      id             SERIAL PRIMARY KEY,
+      school_id      INTEGER NOT NULL,
+      academic_year  TEXT    NOT NULL,
+      closed_by      TEXT    NOT NULL,
+      closed_at      TIMESTAMPTZ DEFAULT NOW(),
+      carried_count  INTEGER NOT NULL DEFAULT 0,
+      carried_total  NUMERIC(12,2) NOT NULL DEFAULT 0,
+      writeoff_count INTEGER NOT NULL DEFAULT 0,
+      writeoff_total NUMERIC(12,2) NOT NULL DEFAULT 0,
+      open_count     INTEGER NOT NULL DEFAULT 0,
+      open_total     NUMERIC(12,2) NOT NULL DEFAULT 0,
+      is_reopened    BOOLEAN NOT NULL DEFAULT FALSE,
+      reopened_by    TEXT,
+      reopened_at    TIMESTAMPTZ,
+      reopen_reason  TEXT,
+      UNIQUE(school_id, academic_year)
+    )
+  `)
+  // Previously self-healed independently in upi-id/route.ts (x2) and upi-qr/route.ts.
+  await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS upi_id TEXT`)
+  // Already added by the fresh-DB-only migrations[] array above (and thus already
+  // exists on the live DB), but that array never runs against an already-bootstrapped
+  // database — add it here too so a future re-bootstrap scenario can't regress this.
+  await pool.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`)
+  // Previously only self-healed inline in year-end/route.ts, immediately before its
+  // own use in the same request — safe there in isolation, but still outside the
+  // sanctioned migration path.
+  await pool.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS notes TEXT`)
   await pool.query(`ALTER TABLE fee_waivers  ADD COLUMN IF NOT EXISTS revoke_reason TEXT`)
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS uq_student_fee_ledger_entry
