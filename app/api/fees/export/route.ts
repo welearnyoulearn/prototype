@@ -101,7 +101,8 @@ export async function GET(req: NextRequest) {
                   fc.name AS category_name, l.period_label,
                   fp.receipt_number, fp.amount, fp.payment_mode, fp.payment_status,
                   fp.paid_date, fp.transaction_ref, fp.collected_by_name, fp.notes,
-                  fp.cancelled_by, fp.cancel_reason, fp.cancelled_at
+                  fp.cancelled_by, fp.cancel_reason,
+                  to_char(fp.cancelled_at, 'YYYY-MM-DD HH24:MI') AS cancelled_at
            FROM fee_payments fp
            JOIN students s ON s.id = fp.student_id
            JOIN student_fee_ledger l ON l.id = fp.ledger_id

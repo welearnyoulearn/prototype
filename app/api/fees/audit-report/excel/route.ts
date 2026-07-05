@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
     // ── INDIVIDUAL STUDENT ──
     const rep = report as StudentReport
     const ws = wb.addWorksheet('Student Fee Report')
-    ws.columns = [{ width: 22 }, { width: 20 }, { width: 16 }, { width: 14 }, { width: 16 }, { width: 14 }, { width: 18 }]
+    ws.columns = [{ width: 22 }, { width: 20 }, { width: 16 }, { width: 14 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 18 }, { width: 28 }]
     metaBlock(ws, rep.meta, 'INDIVIDUAL STUDENT FEE REPORT')
     // Profile
     ws.addRow(['Student', rep.student.name]); ws.addRow(['Roll No', rep.student.roll_number])
