@@ -671,7 +671,7 @@ export default function FeeManagement({
         setDaysUntilYearEnd(diff)
         setYearEndDate(curYear.end_date)
       } else {
-        setDaysUntilYearEnd(-1)
+        setDaysUntilYearEnd(null)
       }
     }).catch(() => { setAcademicYears([]); setAcademicYear('') })
   }, [schoolId])
@@ -2362,25 +2362,43 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
         </select>
       </div>
 
-      {/* ── 15-day approaching year-end banner ── */}
-      {daysUntilYearEnd !== null && daysUntilYearEnd >= 0 && daysUntilYearEnd <= 15 && !closedYears.has(academicYear) && (
-        <div data-testid="year-end-banner" className="flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-xl px-4 py-3">
-          <span className="text-amber-500 text-lg mt-0.5">⚠</span>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-amber-800">
-              {daysUntilYearEnd === 0
-                ? `Academic year ${academicYear} ends today (${yearEndDate})`
-                : `Academic year ${academicYear} ends in ${daysUntilYearEnd} day${daysUntilYearEnd === 1 ? '' : 's'} — ${yearEndDate}`}
-            </p>
-            <p className="text-xs text-amber-700 mt-0.5">Collect outstanding fees before year-end. You can extend the due date or close the year.</p>
+      {/* ── Approaching / overdue year-end banner ── */}
+      {daysUntilYearEnd !== null && daysUntilYearEnd <= 15 && !closedYears.has(academicYear) && (
+        daysUntilYearEnd < 0 ? (
+          <div data-testid="year-end-banner" className="flex items-start gap-3 bg-red-50 border border-red-300 rounded-xl px-4 py-3">
+            <span className="text-red-500 text-lg mt-0.5">⚠</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-red-800">
+                {`Academic year ${academicYear} ended ${Math.abs(daysUntilYearEnd)} day${Math.abs(daysUntilYearEnd) === 1 ? '' : 's'} ago (${yearEndDate}) — please close it out`}
+              </p>
+              <p className="text-xs text-red-700 mt-0.5">This year is past its end date and still open. Close it out to lock the ledger and roll over balances.</p>
+            </div>
+            <div className="flex gap-2 flex-shrink-0">
+              <button data-testid="banner-extend" onClick={() => setActiveTab('yearend' as Tab)}
+                className="text-xs bg-white border border-red-300 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-50 font-medium">
+                Extend / Close
+              </button>
+            </div>
           </div>
-          <div className="flex gap-2 flex-shrink-0">
-            <button data-testid="banner-extend" onClick={() => setActiveTab('yearend' as Tab)}
-              className="text-xs bg-white border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg hover:bg-amber-50 font-medium">
-              Extend / Close
-            </button>
+        ) : (
+          <div data-testid="year-end-banner" className="flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-xl px-4 py-3">
+            <span className="text-amber-500 text-lg mt-0.5">⚠</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-amber-800">
+                {daysUntilYearEnd === 0
+                  ? `Academic year ${academicYear} ends today (${yearEndDate})`
+                  : `Academic year ${academicYear} ends in ${daysUntilYearEnd} day${daysUntilYearEnd === 1 ? '' : 's'} — ${yearEndDate}`}
+              </p>
+              <p className="text-xs text-amber-700 mt-0.5">Collect outstanding fees before year-end. You can extend the due date or close the year.</p>
+            </div>
+            <div className="flex gap-2 flex-shrink-0">
+              <button data-testid="banner-extend" onClick={() => setActiveTab('yearend' as Tab)}
+                className="text-xs bg-white border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg hover:bg-amber-50 font-medium">
+                Extend / Close
+              </button>
+            </div>
           </div>
-        </div>
+        )
       )}
 
       {/* ── 5-step setup wizard (shown when there are no bills yet) ── */}
