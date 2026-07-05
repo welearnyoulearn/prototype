@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
+import { JWT_SECRET as JWT_SECRET_RAW, COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from '@/lib/auth-constants'
 
 // Combined middleware: auth routing (formerly proxy.ts) + Watchline observability logging.
 // Edge runtime only — cannot use pg, jsonwebtoken, or lib/auth / lib/db.
+// Cookie names and JWT secret come from lib/auth-constants (dependency-free, Edge-safe)
+// so they can never drift out of sync with lib/auth.ts's Node-runtime values again.
 
 export const config = {
   matcher: [
@@ -10,14 +13,7 @@ export const config = {
   ],
 }
 
-// ── Auth constants (must be inline — cannot import lib/auth in Edge) ──────────
-const COOKIE_ADMIN   = 'wlyl_admin_token'
-const COOKIE_TEACHER = 'wlyl_teacher_token'
-const COOKIE_STUDENT = 'wlyl_student_token'
-const COOKIE_PARENT  = 'wlyl_parent_token'
-
-const JWT_SECRET_RAW = process.env.JWT_SECRET || 'wlyl-super-secret-key-change-in-production'
-const JWT_SECRET     = new TextEncoder().encode(JWT_SECRET_RAW)
+const JWT_SECRET = new TextEncoder().encode(JWT_SECRET_RAW)
 
 async function getTokenPayload(token: string): Promise<Record<string, unknown> | null> {
   try {
@@ -88,10 +84,11 @@ function extractSchoolId(req: NextRequest): number | null {
 }
 
 function extractActorRole(req: NextRequest): string | null {
-  if (req.cookies.get(COOKIE_ADMIN))   return 'admin'
-  if (req.cookies.get(COOKIE_TEACHER)) return 'teacher'
-  if (req.cookies.get(COOKIE_STUDENT)) return 'student'
-  if (req.cookies.get(COOKIE_PARENT))  return 'parent'
+  if (req.cookies.get(COOKIE_PLATFORM)) return 'platform_admin'
+  if (req.cookies.get(COOKIE_ADMIN))    return 'admin'
+  if (req.cookies.get(COOKIE_TEACHER))  return 'teacher'
+  if (req.cookies.get(COOKIE_STUDENT))  return 'student'
+  if (req.cookies.get(COOKIE_PARENT))   return 'parent'
   return null
 }
 
@@ -111,7 +108,7 @@ export async function proxy(req: NextRequest) {
       return NextResponse.redirect(new URL('/login?role=platform', req.url))
     }
     if (pathname.startsWith('/platform-admin')) {
-      const token = req.cookies.get(COOKIE_ADMIN)?.value
+      const token = req.cookies.get(COOKIE_PLATFORM)?.value
       const payload = token ? await getTokenPayload(token) : null
       if (!payload || payload.role !== 'platform_admin') {
         return NextResponse.redirect(new URL('/login?role=platform', req.url))
@@ -126,7 +123,7 @@ export async function proxy(req: NextRequest) {
 
   // ── Main domain ───────────────────────────────────────────────────────────
   if (pathname.startsWith('/platform-admin')) {
-    const token = req.cookies.get(COOKIE_ADMIN)?.value
+    const token = req.cookies.get(COOKIE_PLATFORM)?.value
     const payload = token ? await getTokenPayload(token) : null
     if (!payload || payload.role !== 'platform_admin') {
       return NextResponse.redirect(new URL('/admin', req.url))

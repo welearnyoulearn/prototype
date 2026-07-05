@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { verifyPassword, signToken, JWTPayload } from '@/lib/auth'
-import { cookies } from 'next/headers'
+import { verifyPassword, JWTPayload, setAuthCookie, setPlatformAuthCookie } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
 
@@ -58,15 +57,13 @@ export async function POST(req: NextRequest) {
       profileCompleted: user.profile_completed,
     }
 
-    const token = signToken(payload)
-    const cookieStore = await cookies()
-    cookieStore.set('wlyl-auth', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7,
-      path: '/',
-    })
+    // Platform Admin gets its own cookie so logging into School Admin in the
+    // same browser can't silently overwrite/invalidate the Platform Admin session.
+    if (user.role === 'platform_admin') {
+      await setPlatformAuthCookie(payload)
+    } else {
+      await setAuthCookie(payload)
+    }
 
     return NextResponse.json({
       success: true,

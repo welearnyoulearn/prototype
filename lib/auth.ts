@@ -4,18 +4,12 @@ import { randomInt } from 'crypto'
 import { cookies } from 'next/headers'
 import { NextRequest } from 'next/server'
 import pool from './db'
+import { JWT_SECRET, COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from './auth-constants'
 
-if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
-  console.error('[FATAL] JWT_SECRET env var is not set — auth cookies will not work correctly')
-}
-const JWT_SECRET = process.env.JWT_SECRET || 'wlyl-dev-only-secret-not-for-production'
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
 
 // ─── Cookie names ─────────────────────────────────────────────────────────────
-export const COOKIE_ADMIN   = 'wlyl-auth'
-export const COOKIE_TEACHER = 'wlyl-teacher'
-export const COOKIE_STUDENT = 'wlyl-student'
-export const COOKIE_PARENT  = 'wlyl-parent'
+export { COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT }
 
 // ─── JWT Payload types ────────────────────────────────────────────────────────
 export type JWTPayload = {
@@ -123,8 +117,12 @@ async function clearCookie(name: string) {
 // ─── Admin / Platform JWT ─────────────────────────────────────────────────────
 export function signToken(payload: JWTPayload): string         { return sign(payload) }
 export function verifyToken(token: string): JWTPayload | null  { return verify<JWTPayload>(token) }
+// COOKIE_ADMIN is for school-side staff only; Platform Admin uses COOKIE_PLATFORM
+// (see lib/auth-constants.ts) so the two portals can't clobber each other's session.
 export async function setAuthCookie(payload: JWTPayload)       { await setCookie(COOKIE_ADMIN, signToken(payload)) }
 export async function clearAuthCookie()                        { await clearCookie(COOKIE_ADMIN) }
+export async function setPlatformAuthCookie(payload: JWTPayload) { await setCookie(COOKIE_PLATFORM, signToken(payload)) }
+export async function clearPlatformAuthCookie()                  { await clearCookie(COOKIE_PLATFORM) }
 
 export async function getSession(): Promise<JWTPayload | null> {
   const cookieStore = await cookies()
@@ -139,8 +137,15 @@ export function getSessionFromRequest(req: NextRequest): JWTPayload | null {
   return verifyToken(token)
 }
 
+export async function getPlatformSession(): Promise<JWTPayload | null> {
+  const cookieStore = await cookies()
+  const token = cookieStore.get(COOKIE_PLATFORM)?.value
+  if (!token) return null
+  return verifyToken(token)
+}
+
 export async function requirePlatformAdmin(): Promise<JWTPayload | null> {
-  const session = await getSession()
+  const session = await getPlatformSession()
   if (!session || session.role !== 'platform_admin') return null
   return session
 }
@@ -221,17 +226,18 @@ export function getParentSessionFromRequest(req: NextRequest): ParentJWTPayload 
 //   // use access.schoolId (trusted) and access.actor for audit fields
 export async function requireFeeAccess(requestedSchoolId: string | number | null | undefined):
   Promise<{ schoolId: number; role: string; userId: number; actor: string } | null> {
-  const session = await getSession()
-  if (!session) return null
-
-  // Platform admin: full access to any school
-  if (session.role === 'platform_admin') {
-    const sid = requestedSchoolId != null ? Number(requestedSchoolId) : (session.schoolId ?? 0)
+  // Platform admin: full access to any school (own cookie — see COOKIE_PLATFORM)
+  const platformSession = await getPlatformSession()
+  if (platformSession?.role === 'platform_admin') {
+    const sid = requestedSchoolId != null ? Number(requestedSchoolId) : (platformSession.schoolId ?? 0)
     if (!sid) return null
-    return { schoolId: sid, role: 'platform_admin', userId: session.userId, actor: 'Platform Admin' }
+    return { schoolId: sid, role: 'platform_admin', userId: platformSession.userId, actor: 'Platform Admin' }
   }
 
   // School staff (admin, principal, vice_principal): must match their own school
+  const session = await getSession()
+  if (!session) return null
+
   const SCHOOL_ROLES = ['school_admin', 'principal', 'vice_principal']
   if (SCHOOL_ROLES.includes(session.role) && session.schoolId) {
     if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(session.schoolId)) {

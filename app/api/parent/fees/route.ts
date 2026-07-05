@@ -66,7 +66,9 @@ export async function GET(req: NextRequest) {
         [school_id, student_id]
       )
 
-      // Fetch waivers so parent sees the full picture of what was reduced/waived
+      // Fetch waivers so parent sees the full picture of what was reduced/waived —
+      // excludes revoked waivers so a revoked waiver doesn't keep showing as active
+      // and inflating total_waived below, same filter as reports/stats/passbook.
       const { rows: waivers } = await pool.query(
         `SELECT w.id, w.waiver_type, w.waiver_amount, w.reason, w.granted_by_name, w.created_at,
                 fc.name AS category_name, l.period_label, l.amount_due
@@ -74,6 +76,7 @@ export async function GET(req: NextRequest) {
          JOIN student_fee_ledger l ON l.id = w.ledger_id
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE w.school_id = $1 AND w.student_id = $2
+           AND COALESCE(w.is_revoked, FALSE) = FALSE
          ORDER BY w.created_at DESC`,
         [school_id, student_id]
       ).catch(() => ({ rows: [] }))
