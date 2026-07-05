@@ -4,14 +4,6 @@ import { sendFeePaymentConfirmedEmail, sendFeePaymentRejectedEmail } from '@/lib
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
 
-async function paymentSchoolIdById(paymentId: unknown): Promise<number | null> {
-  if (!paymentId) return null
-  try {
-    const { rows } = await pool.query(`SELECT school_id FROM fee_payments WHERE id = $1`, [paymentId])
-    return rows[0]?.school_id ?? null
-  } catch { return null }
-}
-
 // GET /api/fees/payments/verify?school_id=X — list pending_verification payments
 async function handleGET(req: NextRequest) {
   try {
@@ -179,7 +171,6 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
-export const POST = withWatchline(handlePOST, {
-  route: '/api/fees/payments/verify',
-  getSchoolId: async req => { try { return await paymentSchoolIdById((await req.clone().json())?.payment_id) } catch { return null } },
-})
+// No getSchoolId extractor — same reasoning as payments/cancel: avoid a second
+// query competing with the handler's own pool.connect() under a max:1 pool.
+export const POST = withWatchline(handlePOST, { route: '/api/fees/payments/verify' })
