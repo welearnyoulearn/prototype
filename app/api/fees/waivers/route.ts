@@ -215,7 +215,7 @@ async function handlePATCH(req: NextRequest) {
              status = CASE
                WHEN (GREATEST(0, COALESCE(waiver_amount, 0) + $1) + amount_paid) >= amount_due THEN 'waived'
                WHEN (GREATEST(0, COALESCE(waiver_amount, 0) + $1) + amount_paid) > 0           THEN 'partial'
-               WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
+               WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                ELSE 'pending'
              END
          WHERE id = $2`,
@@ -307,7 +307,7 @@ async function handleDELETE(req: NextRequest) {
              status = CASE
                WHEN $1::numeric + $2::numeric >= amount_due THEN (CASE WHEN $1::numeric > 0 THEN 'waived' ELSE 'paid' END)
                WHEN $2::numeric > 0 THEN 'partial'
-               WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
+               WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                ELSE 'pending'
              END
          WHERE id = $3`,

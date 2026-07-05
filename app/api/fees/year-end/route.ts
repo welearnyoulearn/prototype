@@ -3,27 +3,6 @@ import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { gradeOrderSql } from '@/lib/grades'
 
-const ENSURE_CLOSE = `
-  CREATE TABLE IF NOT EXISTS fee_year_close (
-    id            SERIAL PRIMARY KEY,
-    school_id     INTEGER NOT NULL,
-    academic_year TEXT    NOT NULL,
-    closed_by     TEXT    NOT NULL,
-    closed_at     TIMESTAMPTZ DEFAULT NOW(),
-    carried_count INTEGER NOT NULL DEFAULT 0,
-    carried_total NUMERIC(12,2) NOT NULL DEFAULT 0,
-    writeoff_count INTEGER NOT NULL DEFAULT 0,
-    writeoff_total NUMERIC(12,2) NOT NULL DEFAULT 0,
-    open_count    INTEGER NOT NULL DEFAULT 0,
-    open_total    NUMERIC(12,2) NOT NULL DEFAULT 0,
-    is_reopened   BOOLEAN NOT NULL DEFAULT FALSE,
-    reopened_by   TEXT,
-    reopened_at   TIMESTAMPTZ,
-    reopen_reason TEXT,
-    UNIQUE(school_id, academic_year)
-  )
-`
-
 // Returns the start year of an academic-year label like "2025-26" -> 2025
 function startYearOf(label: string): number {
   const [s] = label.split('-')
@@ -49,8 +28,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'school_id and academic_year required' }, { status: 400 })
     }
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-
-    await pool.query(ENSURE_CLOSE)
 
     // Is this year already closed?
     const { rows: [closeRec] } = await pool.query(
@@ -187,10 +164,6 @@ export async function POST(req: NextRequest) {
 
     const client = await pool.connect()
     try {
-      await client.query(ENSURE_CLOSE)
-      await client.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`)
-      await client.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS notes TEXT`)
-
       // ── REOPEN ──
       if (action === 'reopen') {
         await client.query(
@@ -222,7 +195,6 @@ export async function POST(req: NextRequest) {
         const passoutRequested = decisions.some(d => d.decision === 'passout')
         let passoutDuesCatId: number | null = null
         if (passoutRequested) {
-          await client.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS category_type TEXT NOT NULL DEFAULT 'fixed'`)
           const { rows: [pd2] } = await client.query(
             `SELECT id FROM fee_categories WHERE school_id = $1 AND name = 'Passout Dues'`, [school_id]
           )
@@ -256,7 +228,6 @@ export async function POST(req: NextRequest) {
           }
           toYearEndDate = ty.end_date
           // Auto-create the "Previous Year Dues" fee head (one-time) if missing
-          await client.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS category_type TEXT NOT NULL DEFAULT 'fixed'`)
           const { rows: [pd] } = await client.query(
             `SELECT id FROM fee_categories WHERE school_id = $1 AND name = 'Previous Year Dues'`, [school_id]
           )

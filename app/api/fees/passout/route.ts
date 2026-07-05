@@ -21,7 +21,6 @@ export async function GET(req: NextRequest) {
           notes TEXT, UNIQUE(school_id, student_id)
         )
       `).catch(() => {})
-      await pool.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`).catch(() => {})
 
       // Summary stats for the passout panel
       const { rows: [summary] } = await pool.query(

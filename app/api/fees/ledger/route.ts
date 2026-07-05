@@ -60,9 +60,6 @@ async function handleGET(req: NextRequest) {
         ? `EXISTS(SELECT 1 FROM student_fee_ledger_edits e WHERE e.ledger_id = l.id) AS has_edits`
         : `FALSE AS has_edits`
 
-      // Self-heal: add source_academic_year if not yet migrated on this DB
-      await pool.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS source_academic_year VARCHAR(10)`).catch(() => {})
-
       const { rows } = await pool.query(
         `SELECT
            l.*,

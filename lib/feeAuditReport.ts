@@ -41,7 +41,6 @@ export async function buildFeeAuditReport(opts: {
 }): Promise<BulkReport | StudentReport> {
   const { school_id, academic_year, grade, section, student_id, actor } = opts
 
-  await pool.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`).catch(() => {})
   const { rows: [sc] } = await pool.query(`SELECT name FROM schools WHERE id = $1`, [school_id])
   const schoolName = sc?.name || `School #${school_id}`
 

@@ -65,22 +65,6 @@ export async function POST(req: NextRequest) {
 
     const client = await pool.connect()
     try {
-      // Self-heal tables
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS fee_year_close (
-          id SERIAL PRIMARY KEY, school_id INTEGER NOT NULL, academic_year TEXT NOT NULL,
-          closed_by TEXT NOT NULL, closed_at TIMESTAMPTZ DEFAULT NOW(),
-          carried_count INTEGER NOT NULL DEFAULT 0, carried_total NUMERIC(12,2) NOT NULL DEFAULT 0,
-          writeoff_count INTEGER NOT NULL DEFAULT 0, writeoff_total NUMERIC(12,2) NOT NULL DEFAULT 0,
-          open_count INTEGER NOT NULL DEFAULT 0, open_total NUMERIC(12,2) NOT NULL DEFAULT 0,
-          is_reopened BOOLEAN NOT NULL DEFAULT FALSE,
-          reopened_by TEXT, reopened_at TIMESTAMPTZ, reopen_reason TEXT,
-          UNIQUE(school_id, academic_year)
-        )`)
-      await client.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`)
-      await client.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS notes TEXT`)
-      await client.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS category_type TEXT NOT NULL DEFAULT 'fixed'`)
-      await client.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`)
 
       // Guard: already rolled over?
       const { rows: [existing] } = await client.query(
@@ -134,7 +118,6 @@ export async function POST(req: NextRequest) {
       }
 
       // ── STEP 1: Get or create "Previous Year Dues" fee head ──────────────────
-      await client.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS category_type TEXT NOT NULL DEFAULT 'fixed'`)
       let prevDuesCatId: number
       const { rows: [pd] } = await client.query(
         `SELECT id FROM fee_categories WHERE school_id = $1 AND name = 'Previous Year Dues'`, [school_id]
