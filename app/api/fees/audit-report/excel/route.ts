@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { requireFeeAccess } from '@/lib/auth'
 import { buildFeeAuditReport, type BulkReport, type StudentReport, type Meta } from '@/lib/feeAuditReport'
+import { withWatchline } from '@/lib/logger'
 
 // GET /api/fees/audit-report/excel?school_id=X&academic_year=Y[&grade&section][&student_id]
 // Streams a multi-sheet .xlsx audit report.
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
     const school_id     = p.get('school_id')
@@ -172,3 +173,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to build Excel report' }, { status: 500 })
   }
 }
+export const GET = withWatchline(handleGET, { route: '/api/fees/audit-report/excel' })

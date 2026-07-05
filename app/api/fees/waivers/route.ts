@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { withWatchline } from '@/lib/logger'
+
+async function waiverSchoolIdById(id: string | null): Promise<number | null> {
+  if (!id) return null
+  try {
+    const { rows } = await pool.query(`SELECT school_id FROM fee_waivers WHERE id = $1`, [id])
+    return rows[0]?.school_id ?? null
+  } catch { return null }
+}
 
 // GET /api/fees/waivers?school_id=X&student_id=Y
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
     const school_id  = p.get('school_id')
@@ -39,9 +48,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const GET = withWatchline(handleGET, { route: '/api/fees/waivers' })
 
 // POST /api/fees/waivers — grant a waiver and update ledger
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     // Validate before acquiring pool connection
     const { school_id, student_id, ledger_id, waiver_type, waiver_value, reason, granted_by_name: clientActor } = await req.json()
@@ -136,9 +146,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const POST = withWatchline(handlePOST, {
+  route: '/api/fees/waivers',
+  getSchoolId: async req => { try { return (await req.clone().json())?.school_id ?? null } catch { return null } },
+})
 
 // PATCH /api/fees/waivers — correct (edit) an existing waiver: revoke old + create new
-export async function PATCH(req: NextRequest) {
+async function handlePATCH(req: NextRequest) {
   try {
     const { id, new_waiver_amount, reason } = await req.json()
     const newAmt = parseFloat(new_waiver_amount)
@@ -228,7 +242,12 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
-export async function DELETE(req: NextRequest) {
+export const PATCH = withWatchline(handlePATCH, {
+  route: '/api/fees/waivers',
+  getSchoolId: async req => { try { return await waiverSchoolIdById((await req.clone().json())?.id ?? null) } catch { return null } },
+})
+
+async function handleDELETE(req: NextRequest) {
   try {
     const p          = req.nextUrl.searchParams
     const id         = p.get('id')
@@ -313,3 +332,7 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const DELETE = withWatchline(handleDELETE, {
+  route: '/api/fees/waivers',
+  getSchoolId: req => waiverSchoolIdById(req.nextUrl.searchParams.get('id')),
+})

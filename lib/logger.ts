@@ -2,7 +2,7 @@
  * Watchline logger — fire-and-forget inserts into request_logs and error_events.
  * Never awaited by callers; a logging failure never breaks a user request.
  *
- * Usage in an API route:
+ * Manual usage in an API route:
  *   const start = Date.now()
  *   let status = 200
  *   try {
@@ -15,8 +15,13 @@
  *     logRequest({ school_id, route: '/api/fees/stats', method: 'GET', status_code: status,
  *                  duration_ms: Date.now() - start })
  *   }
+ *
+ * Preferred usage — wrap the route with withWatchline() instead of hand-rolling the
+ * above in every handler; see withWatchline() below.
  */
 import pool from './db'
+import { NextRequest, NextResponse, after } from 'next/server'
+import { getSession } from './auth'
 
 // In-memory buffer — drained every FLUSH_INTERVAL ms or when BUFFER_SIZE is hit.
 // This keeps PgBouncer pressure negligible (one bulk INSERT instead of one per request).
@@ -140,14 +145,128 @@ export function isSchoolMonitored(schoolId: number): boolean {
   return _monitoredSchools.has(schoolId)
 }
 
-export function refreshMonitoredSchools(): void {
+export async function refreshMonitoredSchools(): Promise<void> {
   const now = Date.now()
   if (now - _cacheLastRefresh < CACHE_TTL) return
   _cacheLastRefresh = now
-  pool.query(
-    `SELECT school_id FROM school_feature_overrides
-     WHERE feature_key = 'api-monitoring' AND enabled = TRUE`,
-  ).then(({ rows }) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT school_id FROM school_feature_overrides
+       WHERE feature_key = 'api-monitoring' AND enabled = TRUE`,
+    )
     _monitoredSchools = new Set(rows.map((r: { school_id: number }) => r.school_id))
-  }).catch(err => console.error('[Watchline] flag cache refresh failed:', err))
+  } catch (err) {
+    console.error('[Watchline] flag cache refresh failed:', err)
+  }
+}
+
+// ── Route wrapper ─────────────────────────────────────────────────────────────
+// Wraps a route handler so every request is logged with its *real* outcome —
+// unlike the middleware's request log (proxy.ts), which can't see past its own
+// pre-flight pass and always records status_code 200 regardless of what the
+// route actually returns.
+//
+// Most routes already catch their own errors internally and return
+// NextResponse.json({ error }, { status: 500 }) rather than throwing — so this
+// inspects the *returned* response's status rather than relying on a thrown
+// exception ever reaching here (the try/catch below only exists as a backstop
+// for an error that escapes before the route's own try, e.g. a malformed
+// req.json() call).
+//
+// Logging runs inside next/server's after() so it reliably finishes even on
+// Vercel, where a bare fire-and-forget promise can be frozen mid-flight the
+// instant the response is sent.
+//
+// Usage:
+//   export const DELETE = withWatchline(async (req) => { ... }, { route: '/api/fees/waivers' })
+//   export const POST = withWatchline(async (req) => { ... }, {
+//     route: '/api/fees/payments',
+//     getSchoolId: async (req) => (await req.clone().json()).school_id ?? null,
+//   })
+// Rest-param signature (rather than a generic ctx type) so this is structurally
+// assignable to Next's generated route-handler type for both static routes
+// (context arg omitted) and dynamic [id]-style routes (context arg present).
+type RouteHandler = (req: NextRequest, ...rest: unknown[]) => Promise<NextResponse>
+
+export function withWatchline(
+  handler: RouteHandler,
+  opts: {
+    route: string
+    // Resolve the school_id this request belongs to, for monitored-schools gating.
+    // Defaults to the `school_id` query param. Must not consume req's body unless
+    // via req.clone() — the real handler still needs to read the original body.
+    getSchoolId?: (req: NextRequest) => number | null | Promise<number | null>
+  },
+): RouteHandler {
+  return async (req: NextRequest, ...rest: unknown[]): Promise<NextResponse> => {
+    const start = Date.now()
+    const method = req.method
+
+    let response: NextResponse
+    let thrown: unknown = null
+    try {
+      response = await handler(req, ...rest)
+    } catch (err) {
+      thrown = err
+      response = NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    }
+
+    const duration = Date.now() - start
+    const status   = response.status
+
+    // Clone + read the body now (if it's an error) — the original response's
+    // stream must stay intact for the client, and after() runs later, by which
+    // point the response has already started being sent.
+    let errorMessage: string | null = null
+    if (thrown) {
+      errorMessage = thrown instanceof Error ? thrown.message : String(thrown)
+    } else if (status >= 500) {
+      try {
+        const body = await response.clone().json()
+        if (body?.error) errorMessage = String(body.error)
+      } catch { /* not JSON, or already consumed — skip */ }
+    }
+
+    after(async () => {
+      let schoolId: number | null = null
+      try {
+        schoolId = opts.getSchoolId ? await opts.getSchoolId(req) : defaultSchoolIdFromQuery(req)
+      } catch { /* non-critical — proceed without a school_id */ }
+
+      let actorRole: string | null = null
+      try {
+        const session = await getSession()
+        if (session) actorRole = session.role
+      } catch { /* non-critical */ }
+
+      if (errorMessage) {
+        logError({
+          school_id: schoolId,
+          severity:  thrown ? 'critical' : 'error',
+          source:    'api',
+          route:     opts.route,
+          error:     thrown ?? new Error(errorMessage),
+        })
+      }
+
+      if (schoolId != null) {
+        await refreshMonitoredSchools()
+        if (status >= 400 || isSchoolMonitored(schoolId)) {
+          logRequest({
+            school_id: schoolId, route: opts.route, method, status_code: status,
+            duration_ms: duration, actor_role: actorRole,
+            error_message: errorMessage,
+          })
+        }
+      }
+    })
+
+    return response
+  }
+}
+
+function defaultSchoolIdFromQuery(req: NextRequest): number | null {
+  const sid = req.nextUrl.searchParams.get('school_id')
+  const n = Number(sid)
+  return sid && !isNaN(n) ? n : null
 }

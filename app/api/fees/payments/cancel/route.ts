@@ -1,6 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { withWatchline } from '@/lib/logger'
+
+async function paymentSchoolIdById(paymentId: unknown): Promise<number | null> {
+  if (!paymentId) return null
+  try {
+    const { rows } = await pool.query(`SELECT school_id FROM fee_payments WHERE id = $1`, [paymentId])
+    return rows[0]?.school_id ?? null
+  } catch { return null }
+}
 
 // POST /api/fees/payments/cancel
 // Cancel (reverse) a completed payment, OR correct it (cancel + re-record with new values).
@@ -11,7 +20,7 @@ import { requireFeeAccess } from '@/lib/auth'
 // done_by is derived server-side from the session.
 //
 // Always: reverses the ledger, soft-marks the payment 'cancelled', records an audit row.
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     const body = await req.json()
     const { payment_id, action = 'cancel', reason } = body
@@ -206,3 +215,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const POST = withWatchline(handlePOST, {
+  route: '/api/fees/payments/cancel',
+  getSchoolId: async req => { try { return await paymentSchoolIdById((await req.clone().json())?.payment_id) } catch { return null } },
+})

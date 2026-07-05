@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { gradeOrderSql } from '@/lib/grades'
+import { withWatchline } from '@/lib/logger'
 
 function toCSV(rows: Record<string, unknown>[], cols: { key: string; label: string }[]): string {
   const header = cols.map(c => `"${c.label}"`).join(',')
@@ -15,7 +16,7 @@ function toCSV(rows: Record<string, unknown>[], cols: { key: string; label: stri
 }
 
 // GET /api/fees/export?school_id=X&academic_year=Y&type=ledger|payments&grade=Z&status=S
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
     const school_id    = p.get('school_id')
@@ -151,3 +152,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const GET = withWatchline(handleGET, { route: '/api/fees/export' })
