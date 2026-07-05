@@ -246,6 +246,12 @@ export async function DELETE(req: NextRequest) {
 
     const client = await pool.connect()
     try {
+      // Self-heal: ensure soft-delete columns exist (same as GET — DELETE may run before GET on a fresh DB)
+      await client.query(`ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS is_revoked    BOOLEAN     NOT NULL DEFAULT FALSE`)
+      await client.query(`ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoked_by    TEXT`)
+      await client.query(`ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoked_at    TIMESTAMPTZ`)
+      await client.query(`ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoke_reason TEXT`)
+
       const { rows: [w0] } = await client.query(`SELECT school_id, waiver_type FROM fee_waivers WHERE id = $1`, [id])
       if (!w0) return NextResponse.json({ error: 'Waiver not found' }, { status: 404 })
       const access = await requireFeeAccess(w0.school_id)
@@ -257,6 +263,7 @@ export async function DELETE(req: NextRequest) {
       // new year — the same debt would then be collectible in BOTH years at once.
       // This bookkeeping waiver can only be undone by reopening the year itself.
       if (w0.waiver_type === 'carry_forward') {
+        // Note: client released in finally — do NOT return before finally runs
         return NextResponse.json({
           error: 'This waiver was created automatically during year-end closure and cannot be revoked here. Reopen the academic year to undo the closure instead.',
         }, { status: 409 })
