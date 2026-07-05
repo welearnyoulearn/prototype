@@ -677,8 +677,11 @@ function ClassDetail({
       setShowAddStudent(false)
       await loadStudents()
       onClassUpdated({ id: cls.id, student_count: cls.student_count + 1 })
-      setAddStudentMsg({ text: `✓ ${data.name} added to ${cls.grade}-${cls.section}`, ok: true })
-      setTimeout(() => setAddStudentMsg(null), 4000)
+      const msg = data.parent_warning
+        ? `✓ ${data.name} added — ⚠ ${data.parent_warning}`
+        : `✓ ${data.name} added to ${cls.grade}-${cls.section}`
+      setAddStudentMsg({ text: msg, ok: !data.parent_warning })
+      setTimeout(() => setAddStudentMsg(null), data.parent_warning ? 12000 : 4000)
     } catch (err: unknown) {
       setAddStudentMsg({ text: err instanceof Error ? err.message : 'Failed to add student', ok: false })
     } finally { setAddingStudent(false) }

@@ -39,18 +39,20 @@ type LedgerEntry = {
   student_status: string
   category_name: string; period_label: string
   amount_due: number; amount_paid: number; balance: number; waiver_amount: number
-  due_date: string; status: 'pending' | 'paid' | 'partial' | 'overdue' | 'waived'
+  due_date: string; status: 'pending' | 'paid' | 'partial' | 'overdue' | 'waived' | 'settled'
   days_overdue: number; has_edits: boolean
+  source_academic_year: string | null
 }
 
 type FeeStats = {
   summary: {
     total_students: number; total_due: number; total_collected: number; total_waived: number
+    discretionary_waived?: number
     total_outstanding: number; paid_count: number; partial_count: number
     pending_count: number; overdue_count: number; waived_count: number; defaulters_count: number
     students_fully_paid: number; students_partial: number; students_not_paid: number
   }
-  by_category: Array<{ category_name: string; frequency: string; total_due: number; total_collected: number; overdue_count: number }>
+  by_category: Array<{ category_name: string; frequency: string; total_due: number; total_collected: number; total_waived?: number; total_outstanding?: number; overdue_count: number }>
   monthly_trend: Array<{ month: string; collected: number }>
   top_defaulters: Array<{ student_id: number; student_name: string; grade: string; section: string; roll_number: string; outstanding: number; overdue_entries: number }>
   by_payment_mode: Array<{ payment_mode: string; count: number; total: number }>
@@ -72,11 +74,11 @@ type EditRecord = {
 }
 
 type ReportData = {
-  balance: { total_billed: number; total_collected: number; total_outstanding: number; total_waived: number; paid_entries: number; partial_entries: number; unpaid_entries: number; waived_entries: number; total_students: number }
+  balance: { total_billed: number; total_collected: number; total_outstanding: number; total_waived: number; discretionary_waived?: number; paid_entries: number; partial_entries: number; unpaid_entries: number; waived_entries: number; total_students: number }
   monthly: Array<{ month: string; collected: number; payment_count: number; students_paid: number }>
   monthlyDue: Array<{ month: string; billed: number }>
-  byGrade: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; total_waived: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
-  byCategory: Array<{ category_name: string; frequency: string; students: number; total_due: number; total_collected: number; total_waived: number; outstanding: number; paid_count: number; unpaid_count: number }>
+  byGrade: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; total_waived: number; discretionary_waived?: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
+  byCategory: Array<{ category_name: string; frequency: string; students: number; total_due: number; total_collected: number; total_waived: number; discretionary_waived?: number; outstanding: number; paid_count: number; unpaid_count: number }>
   byMode: Array<{ payment_mode: string; count: number; total: number }>
   defaulters: Array<{ student_name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; outstanding: number; overdue_entries: number; unpaid_entries: number }>
 }
@@ -89,6 +91,7 @@ type PaymentRecord = {
   transaction_ref: string | null; notes: string | null
   verified_by: string | null; verified_at: string | null
   rejection_reason: string | null; created_at: string
+  bill_year?: string; ledger_id?: number
 }
 
 type PaySuccess = {
@@ -97,13 +100,20 @@ type PaySuccess = {
   category_name: string; period_label: string; amount_due: number
   payment_mode: string; paid_date: string; collected_by_name: string | null
   transaction_ref: string | null; notes: string | null
+  // Outstanding balance snapshotted at the moment of submission, BEFORE the async
+  // loadLedger() refetch — printing the receipt later reads this instead of the live
+  // `row` state, which can still reflect the pre-payment balance if the admin clicks
+  // Print before the refetch has resolved and re-rendered.
+  outstanding_before?: number
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const GRADES = ['1','2','3','4','5','6','7','8','9','10','11','12']
+const GRADES = ['Nursery','LKG','UKG','1','2','3','4','5','6','7','8','9','10','11','12']
+function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
 
 const GRADE_GROUPS = [
+  { key: 'pre_primary', label: 'Pre-Primary', sub: 'Nursery–UKG', grades: ['Nursery','LKG','UKG'] },
   { key: 'primary',   label: 'Primary',   sub: 'Grade 1–5',   grades: ['1','2','3','4','5'] },
   { key: 'middle',    label: 'Middle',    sub: 'Grade 6–8',   grades: ['6','7','8'] },
   { key: 'secondary', label: 'Secondary', sub: 'Grade 9–10',  grades: ['9','10'] },
@@ -142,19 +152,21 @@ const CATEGORY_SUGGESTIONS = [
 ] as const
 
 const STATUS_COLORS: Record<string, string> = {
-  paid:    'bg-green-100 text-green-700',
-  partial: 'bg-yellow-100 text-yellow-700',
-  pending: 'bg-gray-100 text-gray-600',
-  overdue: 'bg-red-100 text-red-700',
-  waived:  'bg-purple-100 text-purple-700',
+  paid:     'bg-green-100 text-green-700',
+  partial:  'bg-yellow-100 text-yellow-700',
+  pending:  'bg-gray-100 text-gray-600',
+  overdue:  'bg-red-100 text-red-700',
+  waived:   'bg-purple-100 text-purple-700',
+  settled:  'bg-teal-100 text-teal-700',
+  passout:  'bg-indigo-100 text-indigo-700',
 }
 
 function fmt(n: number | string) {
   return `₹${Number(n).toLocaleString('en-IN')}`
 }
 function pct(num: number, den: number) {
-  if (!den) return 0
-  return Math.round((num / den) * 100)
+  if (!den || den < 0) return 0
+  return Math.min(100, Math.round((num / den) * 100))
 }
 function fmtDate(d: string) {
   return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -210,7 +222,7 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
     const bal = rep.balance as { billed: number; waived: number; net_demand: number; paid: number; balance: number }
     const bills = rep.bills as Array<{ fee_type: string; period_label: string; billed: number; waived: number; paid: number; balance: number; status: string }>
     const pays = rep.payments as Array<{ receipt_number: string; paid_date: string; fee_type: string; period_label: string; amount: number; payment_mode: string; payment_status: string }>
-    const wvs = rep.waivers as Array<{ fee_type: string; period_label: string; waiver_amount: number; reason: string; granted_by_name: string | null; is_revoked: boolean }>
+    const wvs = rep.waivers as Array<{ fee_type: string; period_label: string; waiver_amount: number; reason: string; granted_by_name: string | null; is_revoked: boolean; revoked_by: string | null; revoked_at: string | null; revoke_reason: string | null }>
     return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Student Fee Report</title>${style}</head><body>${head}
       <h3>Student Profile</h3>
       <table><tr><td><b>Name</b></td><td>${s.name}</td><td><b>Roll No</b></td><td>${s.roll_number}</td><td><b>Class</b></td><td>${s.grade}${s.section || ''}</td></tr>
@@ -224,8 +236,8 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
       <table><thead><tr><th>Receipt</th><th>Date</th><th>Fee · Period</th><th class="r">Amount</th><th>Mode</th><th>Status</th></tr></thead>
       <tbody>${pays.map(p => `<tr><td>${p.receipt_number}</td><td>${p.paid_date}</td><td>${p.fee_type} · ${p.period_label}</td><td class="r">${RUPEE(p.amount)}</td><td>${p.payment_mode}</td><td>${p.payment_status}</td></tr>`).join('') || '<tr><td colspan="6">No payments</td></tr>'}</tbody></table>
       <h3>Waivers</h3>
-      <table><thead><tr><th>Fee · Period</th><th class="r">Amount</th><th>Reason</th><th>Granted By</th><th>Status</th></tr></thead>
-      <tbody>${wvs.map(w => `<tr><td>${w.fee_type} · ${w.period_label}</td><td class="r">${RUPEE(w.waiver_amount)}</td><td>${w.reason}</td><td>${w.granted_by_name || ''}</td><td>${w.is_revoked ? 'Revoked' : 'Active'}</td></tr>`).join('') || '<tr><td colspan="5">No waivers</td></tr>'}</tbody></table>
+      <table><thead><tr><th>Fee · Period</th><th class="r">Amount</th><th>Reason</th><th>Granted By</th><th>Status</th><th>Revoke Detail</th></tr></thead>
+      <tbody>${wvs.map(w => `<tr><td>${w.fee_type} · ${w.period_label}</td><td class="r">${RUPEE(w.waiver_amount)}</td><td>${w.reason}</td><td>${w.granted_by_name || ''}</td><td>${w.is_revoked ? 'Revoked' : 'Active'}</td><td>${w.is_revoked ? `${w.revoked_by || ''} · ${w.revoked_at ? new Date(w.revoked_at).toLocaleString('en-IN') : ''} · ${w.revoke_reason || ''}` : ''}</td></tr>`).join('') || '<tr><td colspan="6">No waivers</td></tr>'}</tbody></table>
       </body></html>`
   }
 
@@ -267,7 +279,7 @@ export default function FeeManagement({
   schoolId: number
   adminName?: string
 }) {
-  type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'pending' | 'students' | 'reports' | 'yearend'
+  type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'students' | 'reports' | 'yearend'
   const [activeTab, setActiveTab] = useState<Tab>('overview')
 
   const hasOnlinePayments = useFeature('online-payments')
@@ -277,6 +289,12 @@ export default function FeeManagement({
   const [academicYears, setAcademicYears] = useState<string[]>([])
   const [closedYears, setClosedYears]     = useState<Set<string>>(new Set())
 
+
+  // Section-level load errors — keyed by section name, cleared on successful load.
+  // Shown as a banner inside each section so failures are never silent.
+  const [loadErrors, setLoadErrors]   = useState<Record<string, string>>({})
+  const setLoadError   = (key: string, msg: string) => setLoadErrors(prev => ({ ...prev, [key]: msg }))
+  const clearLoadError = (key: string)               => setLoadErrors(prev => { const n = { ...prev }; delete n[key]; return n })
 
   // Overview
   const [stats, setStats]             = useState<FeeStats | null>(null)
@@ -298,8 +316,11 @@ export default function FeeManagement({
   const [structures, setStructures]     = useState<FeeStructure[]>([])
   const [structureLock, setStructureLock] = useState<StructureLock>(null)
   const [amendments, setAmendments]     = useState<Amendment[]>([])
+  // Grades with at least one active student — "all grades must have an amount" only
+  // applies to grades the school actually enrolls, not every grade in the master list
+  // (e.g. a school with no Nursery/LKG/UKG section shouldn't be blocked on those).
+  const [enrolledGrades, setEnrolledGrades] = useState<string[] | null>(null)
   const [editAmounts, setEditAmounts]   = useState<Record<string, string>>({})
-  const [dueDays, setDueDays]           = useState<Record<number, string>>({})
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [newCategory, setNewCategory]   = useState({ name: '', frequency: 'monthly', description: '', category_type: 'fixed' })
   const [savingStructure, setSavingStructure] = useState(false)
@@ -309,6 +330,8 @@ export default function FeeManagement({
   const [deletingCatId, setDeletingCatId] = useState<number | null>(null)
   const [showAmendForm, setShowAmendForm] = useState<{ cat_id: number; grade: string; cat_name: string; current: number } | null>(null)
   const [amendForm, setAmendForm]       = useState({ new_amount: '', reason: '' })
+  const [amendMsg, setAmendMsg]         = useState('')
+  const [amendSaving, setAmendSaving]   = useState(false)
   const [showAmendLog, setShowAmendLog] = useState(false)
 
   // ── Fee Plan (new Tab 2) ──
@@ -355,12 +378,6 @@ export default function FeeManagement({
   const [ledgerStatus, setLedgerStatus] = useState('')
   const [ledgerSearch, setLedgerSearch] = useState('')
 
-  // Ledger inline edit
-  const [deletingId, setDeletingId]   = useState<number | null>(null)
-  const [editingId, setEditingId]     = useState<number | null>(null)
-  const [editForm, setEditForm]       = useState({ new_amount: '', reason: '' })
-  const [editLoading, setEditLoading] = useState(false)
-  const [editError, setEditError]     = useState('')
   const [editHistories, setEditHistories] = useState<Record<number, EditRecord[]>>({})
   const [showHistoryId, setShowHistoryId] = useState<number | null>(null)
   const [paymentHistories, setPaymentHistories] = useState<Record<number, PaymentRecord[]>>({})
@@ -398,6 +415,9 @@ export default function FeeManagement({
   // Generate bills confirmation dialog
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false)
 
+  // Toggle category type (fixed ↔ variable) confirmation dialog
+  const [toggleTypeConfirm, setToggleTypeConfirm] = useState<{ cat: FeeCategory; newType: 'fixed' | 'variable' } | null>(null)
+
   // ── Collection (new Tab 3) ──
   type CollectionView = 'counter' | 'online' | 'defaulters' | 'dayclose'
   const [collectionView, setCollectionView]     = useState<CollectionView>('counter')
@@ -411,11 +431,14 @@ export default function FeeManagement({
   const [counterPmtLoading, setCounterPmtLoading] = useState(false)
   const [showCounterHistory, setShowCounterHistory] = useState(false)
   const [showPassbookModal, setShowPassbookModal] = useState(false)
+  // Synthetic StudentRow for passout students collected from the Overview panel
+  const [passoutOpenStudent, setPassoutOpenStudent] = useState<StudentRow | null>(null)
   // Day close
   type DayCloseData = {
     date: string
     by_mode: Record<string, { count: number; total: number }>
     receipts: { first: string | null; last: string | null; count: number; total: number }
+    payments: Array<{ id: number; student_name: string; grade: string; section: string; fee_head_name: string; period_label: string; amount: number; payment_mode: string; receipt_number: string; collected_by_name: string | null; notes: string | null }>
     already_closed: boolean
   }
   const [dayCloseData, setDayCloseData]         = useState<DayCloseData | null>(null)
@@ -433,19 +456,19 @@ export default function FeeManagement({
   }
   type PassbookYearGroup = {
     academic_year: string; is_current: boolean
-    total_billed: number; total_paid: number; total_waived: number; outstanding: number
+    total_billed: number; total_paid: number; total_waived: number; discretionary_waived?: number; outstanding: number
     entries: LedgerEntry[]
   }
   type PassbookData = {
     student: { id: number; name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; parent_email: string | null }
     current_year: string | null
-    summary: { total_billed: number; total_paid: number; total_waived: number; outstanding: number }
+    summary: { total_billed: number; total_paid: number; total_waived: number; discretionary_waived?: number; outstanding: number }
     timeline: PassbookTimeline[]
     ledger: LedgerEntry[]
     ledger_by_year: PassbookYearGroup[]
     payments: PaymentRecord[]
     pending_payments: PaymentRecord[]
-    waivers: Array<{ id: number; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; fee_head_name: string; period_label: string; bill_year?: string }>
+    waivers: Array<{ id: number; ledger_id: number; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; fee_head_name: string; period_label: string; bill_year?: string; is_revoked?: boolean; revoked_by?: string | null; revoked_at?: string | null; revoke_reason?: string | null }>
     prior_unresolved: PassbookYearGroup[]
   }
   type PassbookSearchResult = { id: number; name: string; roll_number: string; grade: string; section: string; status: string }
@@ -454,10 +477,21 @@ export default function FeeManagement({
   const [pbData, setPbData]                     = useState<PassbookData | null>(null)
   const [pbLoading, setPbLoading]               = useState(false)
   const [pbSection, setPbSection]               = useState<'timeline' | 'bills' | 'payments' | 'waivers'>('bills')
+  // Derived passbook data filtered to the selected academic year
+  const pbYearGroup = pbData?.ledger_by_year.find(y => y.academic_year === academicYear) ?? null
+  const pbSummary   = pbYearGroup
+    ? { total_billed: pbYearGroup.total_billed, total_paid: pbYearGroup.total_paid, total_waived: pbYearGroup.total_waived, discretionary_waived: pbYearGroup.discretionary_waived ?? pbYearGroup.total_waived, outstanding: pbYearGroup.outstanding }
+    : { total_billed: 0, total_paid: 0, total_waived: 0, discretionary_waived: 0, outstanding: 0 }
+  const pbPayments  = pbData?.payments.filter(p => p.bill_year === academicYear) ?? []
+  const pbWaivers   = pbData?.waivers.filter(w => w.bill_year === academicYear) ?? []
+  const pbTimeline  = pbData?.timeline.filter(t => t.academic_year === academicYear) ?? []
+  const pbYearOnly  = pbYearGroup ? [pbYearGroup] : []
   // Full student directory for the Passbook tab (browse + filter)
   const [pbAllStudents, setPbAllStudents]       = useState<PassbookSearchResult[]>([])
   const [pbAllLoading, setPbAllLoading]         = useState(false)
   const [pbGrade, setPbGrade]                   = useState('')
+  const [pbShowRevoked, setPbShowRevoked]       = useState(false)
+  const [pbRevokedWaivers, setPbRevokedWaivers] = useState<PassbookData['waivers']>([])
   // Payment cancel / correct
   const [cancelPmtId, setCancelPmtId]           = useState<number | null>(null)
   const [cancelMode, setCancelMode]             = useState<'cancel' | 'correct'>('cancel')
@@ -465,6 +499,8 @@ export default function FeeManagement({
   const [correctAmount, setCorrectAmount]       = useState('')
   const [cancelBusy, setCancelBusy]             = useState(false)
   const [cancelMsg, setCancelMsg]               = useState('')
+  // ledger balance at the time Cancel/Correct is opened — used to cap corrected amount
+  const [cancelPmtMaxCorrect, setCancelPmtMaxCorrect] = useState<number | null>(null)
   // Waiver revoke / correct
   const [cancelWaiverId, setCancelWaiverId]     = useState<number | null>(null)
   const [cancelWaiverMode, setCancelWaiverMode] = useState<'revoke' | 'correct'>('revoke')
@@ -472,6 +508,8 @@ export default function FeeManagement({
   const [correctWaiverAmount, setCorrectWaiverAmount] = useState('')
   const [cancelWaiverBusy, setCancelWaiverBusy] = useState(false)
   const [cancelWaiverMsg, setCancelWaiverMsg]   = useState('')
+  // max allowed for corrected waiver = ledger balance + current waiver amount
+  const [waiverMaxCorrect, setWaiverMaxCorrect] = useState<number | null>(null)
 
   // Reports tab
   const [reportData, setReportData]             = useState<ReportData | null>(null)
@@ -494,23 +532,91 @@ export default function FeeManagement({
   type YearEndStudent = { student_id: number; student_name: string; roll_number: string; grade: string; section: string; student_status: string; is_leaver: boolean; leaver_reason: string | null; total_unpaid: number; bills: YearEndBill[] }
   type YearEndState = {
     academic_year: string
-    summary: { total_billed: number; total_collected: number; total_waived: number; total_unpaid: number }
+    summary: { total_billed: number; total_collected: number; total_waived: number; discretionary_waived?: number; total_unpaid: number }
     students: YearEndStudent[]
     unpaid_count: number
     target_year: string
     target_year_exists: boolean
     is_closed: boolean
-    close_record: { closed_by: string; closed_at: string; carried_total: number; writeoff_total: number; open_total: number } | null
+    close_record: { closed_by: string; closed_at: string; carried_count?: number; carried_total: number; writeoff_count?: number; writeoff_total: number; open_count?: number; open_total: number } | null
   }
   const [yearEnd, setYearEnd]                   = useState<YearEndState | null>(null)
   const [yearEndLoading, setYearEndLoading]     = useState(false)
   // per-student decision: studentId -> 'carry' | 'writeoff' | 'open'
-  const [yeDecisions, setYeDecisions]           = useState<Record<number, 'carry' | 'writeoff' | 'open'>>({})
+  const [yeDecisions, setYeDecisions]           = useState<Record<number, 'carry' | 'writeoff' | 'open' | 'passout'>>({})
   const [yeReasons, setYeReasons]               = useState<Record<number, string>>({})
   const [yeFilter, setYeFilter]                 = useState<'all' | 'leavers' | 'continuing'>('all')
   const [yeProcessing, setYeProcessing]         = useState(false)
   const [yeMsg, setYeMsg]                        = useState('')
+  const [yeCreateYearLoading, setYeCreateYearLoading] = useState(false)
   const [yeClosing, setYeClosing]               = useState(false)
+  // Reopen year modal
+  const [showReopenModal, setShowReopenModal]   = useState(false)
+  const [reopenReason, setReopenReason]         = useState('')
+  // Close year confirm modal
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false)
+  // Apply decisions confirm modal
+  const [showApplyConfirm, setShowApplyConfirm] = useState(false)
+
+  // Year rollover modal state
+  const [showRolloverModal, setShowRolloverModal] = useState(false)
+  type RolloverPreview = { requires_confirmation: boolean; pending_count: number; pending_total: number; message: string }
+  const [rolloverPreview, setRolloverPreview]   = useState<RolloverPreview | null>(null)
+  const [rolloverLoading, setRolloverLoading]   = useState(false)
+  const [rolloverMsg, setRolloverMsg]           = useState('')
+  const [rolloverDone, setRolloverDone]         = useState(false)
+
+  // Passout ledger panel state
+  type PassoutSummary = {
+    passout_students: number
+    total_billed: number
+    total_collected: number
+    total_waived: number
+    total_outstanding: number
+  }
+  type PassoutStudent = {
+    student_id: number
+    student_name: string
+    roll_number: string
+    grade: string
+    section: string
+    passout_year: string
+    outstanding: number
+    total_collected: number
+  }
+  type RecentCollection = {
+    id: number; student_name: string; amount: number; payment_mode: string
+    paid_date: string; receipt_number: string; period_label: string
+  }
+  const [passoutData, setPassoutData] = useState<{
+    summary: PassoutSummary
+    students: PassoutStudent[]
+    recent_collections: RecentCollection[]
+  } | null>(null)
+  const [passoutLoading, setPassoutLoading] = useState(false)
+
+  // 15-day banner: days until year end (null = not loaded yet, -1 = not applicable)
+  const [daysUntilYearEnd, setDaysUntilYearEnd] = useState<number | null>(null)
+  const [yearEndDate, setYearEndDate]           = useState<string | null>(null)
+  // Carry-forward modal state (when target year doesn't exist)
+  const [showCfModal, setShowCfModal]           = useState(false)
+  const [cfExistingYears, setCfExistingYears]   = useState<{ label: string; start_date: string; end_date: string }[]>([])
+  const [cfSelectedYear, setCfSelectedYear]     = useState('')
+  const [cfCreateMode, setCfCreateMode]         = useState(false)
+  const [cfNewLabel, setCfNewLabel]             = useState('')
+  const [cfNewStart, setCfNewStart]             = useState('')
+  const [cfNewEnd, setCfNewEnd]                 = useState('')
+  const [cfCreating, setCfCreating]             = useState(false)
+  const [cfMsg, setCfMsg]                       = useState('')
+  // First-login wizard: true when school has no academic years at all
+  const [showYearWizard, setShowYearWizard]     = useState(false)
+  const [wizLabel, setWizLabel]                 = useState('')
+  const [wizStart, setWizStart]                 = useState('')
+  const [wizEnd, setWizEnd]                     = useState('')
+  const [wizSaving, setWizSaving]               = useState(false)
+  const [wizMsg, setWizMsg]                     = useState('')
+  // Fee setup wizard: shown after first academic year is created, tracks setup steps
+  const [setupWizardDismissed, setSetupWizardDismissed] = useState(false)
 
   // Amendment impact preview
   const [amendImpact, setAmendImpact]           = useState<number | null>(null)
@@ -542,32 +648,100 @@ export default function FeeManagement({
       fetch(`/api/academic-years?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
       fetch(`/api/fees/year-rollover?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
     ]).then(([current, all, closed]) => {
-      const labels: string[] = Array.isArray(all) ? all.map((y: { label: string }) => y.label) : []
+      const allYears: { label: string; end_date: string }[] = Array.isArray(all) ? all : []
+      const labels: string[] = allYears.map((y) => y.label)
       const cur: string = current?.label ?? labels[0] ?? ''
       setAcademicYears(labels)
       setAcademicYear(cur)
       const closedSet = new Set<string>(Array.isArray(closed) ? closed.map((c: { academic_year: string }) => c.academic_year) : [])
       setClosedYears(closedSet)
+
+      // Show first-login wizard if no academic years exist yet
+      if (labels.length === 0) {
+        setShowYearWizard(true)
+        return
+      }
+
+      // Compute days until current year's end_date for 15-day banner
+      const curYear = allYears.find(y => y.label === cur)
+      if (curYear?.end_date && !closedSet.has(cur)) {
+        const today = new Date(); today.setHours(0, 0, 0, 0)
+        const end = new Date(curYear.end_date); end.setHours(0, 0, 0, 0)
+        const diff = Math.ceil((end.getTime() - today.getTime()) / 86400000)
+        setDaysUntilYearEnd(diff)
+        setYearEndDate(curYear.end_date)
+      } else {
+        setDaysUntilYearEnd(-1)
+      }
     }).catch(() => { setAcademicYears([]); setAcademicYear('') })
   }, [schoolId])
 
   useEffect(() => { loadAcademicYears() }, [loadAcademicYears])
 
   // ── Overview stats ───────────────────────────────────────────────────────────
+  const loadPassout = useCallback(async () => {
+    setPassoutLoading(true)
+    try {
+      const res = await fetch(`/api/fees/passout?school_id=${schoolId}`)
+      if (res.ok) { clearLoadError('passout'); setPassoutData(await res.json()) }
+      else setLoadError('passout', 'Could not load passout dues — try refreshing')
+    } catch { setLoadError('passout', 'Network error — could not load passout dues') }
+    finally { setPassoutLoading(false) }
+  }, [schoolId])
+
+  // Passout collect: load a passout student's open ledger entries, then open the payment form
+  const [passoutCollectLoading, setPassoutCollectLoading] = useState<number | null>(null)
+
+  async function collectPassoutStudent(s: { student_id: number; student_name: string; roll_number: string; grade: string; section: string; outstanding: number }) {
+    setPassoutCollectLoading(s.student_id)
+    try {
+      const res = await fetch(`/api/fees/ledger?school_id=${schoolId}&student_id=${s.student_id}&academic_year=passout`)
+      if (!res.ok) { setPayError('Could not load passout dues — please try again'); setPassoutCollectLoading(null); return }
+      const entries: LedgerEntry[] = await res.json()
+      const open = entries.filter(e => ['pending', 'partial', 'overdue'].includes(e.status))
+      if (open.length === 0) { setPayError('No outstanding dues found for this student'); setPassoutCollectLoading(null); return }
+      // Reuse the existing counter collect flow: set openStudent + collectChecked + switch to collect tab
+      const row: StudentRow = {
+        student_id: s.student_id, student_name: s.student_name, roll_number: s.roll_number,
+        school_roll_number: null, grade: s.grade, section: s.section,
+        email: null, phone: null, parent_name: null, parent_phone: null, parent_email: null,
+        student_status: 'left',
+        total_billed: open.reduce((a, e) => a + Number(e.amount_due), 0),
+        total_paid: 0,
+        outstanding: s.outstanding,
+        open_entries: open, all_entries: entries,
+        has_overdue: open.some(e => e.status === 'overdue'), never_paid: false,
+      }
+      setActiveTab('collect' as Tab)
+      setCollectionView('counter')
+      setOpenStudentId(s.student_id)
+      setCollectChecked(new Set(open.map(e => e.id)))
+      const fullTotal = open.reduce((a, e) => a + Number(e.balance), 0)
+      setPayAmount(fullTotal > 0 ? String(fullTotal) : '')
+      setPayMode('cash'); setPayRef(''); setPayNotes(''); setPayDate(new Date().toISOString().slice(0, 10))
+      setPayError(''); setPaySuccess(null); setShowCollectForm(true)
+      // Inject the passout row into openStudent via ledger search trick — set openStudent directly
+      // openStudent is derived from studentRows which comes from the regular ledger; passout students
+      // won't be there, so we store the synthesised row in a dedicated state slot.
+      setPassoutOpenStudent(row)
+    } catch { setPayError('Network error — could not load passout dues') }
+    setPassoutCollectLoading(null)
+  }
+
   const loadStats = useCallback(async () => {
     if (!academicYear) return
     setStatsLoading(true)
     try {
-      const [statsRes, pmtRes, reportRes] = await Promise.all([
+      const [statsRes, pmtRes] = await Promise.all([
         fetch(`/api/fees/stats?school_id=${schoolId}&academic_year=${academicYear}`),
         fetch(`/api/fees/payments?school_id=${schoolId}`),
-        fetch(`/api/fees/reports?school_id=${schoolId}&academic_year=${academicYear}`),
       ])
       if (statsRes.ok) {
+        clearLoadError('stats')
         const sd = await statsRes.json()
         setStats(sd)
         setGradeStats(Array.isArray(sd.by_class) ? sd.by_class : [])
-      }
+      } else setLoadError('stats', 'Could not load fee summary — try refreshing the page')
       if (pmtRes.ok) {
         const all = await pmtRes.json() as Array<RecentPayment & { payment_status?: string }>
         setRecentPayments(
@@ -576,45 +750,48 @@ export default function FeeManagement({
             .slice(0, 6)
         )
       }
-      // reports endpoint still fetched for backward-compat but class data now comes from stats
-      if (reportRes.ok) {
-        const d = await reportRes.json()
-        if (Array.isArray(d.byGrade) && d.byGrade.length > 0) setGradeStats(d.byGrade)
-      }
-    } catch { /* silent */ }
-    setStatsLoading(false)
+    } catch { setLoadError('stats', 'Network error — fee summary could not be loaded') }
+    finally { setStatsLoading(false) }
   }, [schoolId, academicYear])
 
-  useEffect(() => { if (academicYear) loadStats() }, [loadStats, academicYear])
+  useEffect(() => { if (academicYear) { loadStats(); loadPassout() } }, [loadStats, loadPassout, academicYear])
 
   // ── Setup: categories + structures + lock + amendments ───────────────────────
   const loadSetup = useCallback(async () => {
     if (!academicYear) return
     setSetupLoading(true)
-    const [catRes, strRes, lockRes, amendRes] = await Promise.all([
-      fetch(`/api/fees/categories?school_id=${schoolId}`),
-      fetch(`/api/fees/structures?school_id=${schoolId}&academic_year=${academicYear}`),
-      fetch(`/api/fees/structures/lock?school_id=${schoolId}&academic_year=${academicYear}`),
-      fetch(`/api/fees/structures/amend?school_id=${schoolId}&academic_year=${academicYear}`),
-    ])
-    const cats: FeeCategory[] = catRes.ok ? await catRes.json() : []
-    const strs: FeeStructure[] = strRes.ok ? await strRes.json() : []
-    const lock = lockRes.ok ? await lockRes.json() : null
-    const amends: Amendment[] = amendRes.ok ? await amendRes.json() : []
-    setCategories(cats)
-    setStructures(strs)
-    setStructureLock(lock)
-    setAmendments(amends)
-    const init: Record<string, string> = {}
-    strs.forEach(s => { init[`${s.fee_category_id}_${s.grade}`] = String(s.amount) })
-    setEditAmounts(init)
-    const initDueDays: Record<number, string> = {}
-    strs.forEach(s => { if (!initDueDays[s.fee_category_id]) initDueDays[s.fee_category_id] = String(s.due_day) })
-    setDueDays(initDueDays)
-    setSetupLoading(false)
+    try {
+      const [catRes, strRes, lockRes, amendRes, gradesRes] = await Promise.all([
+        fetch(`/api/fees/categories?school_id=${schoolId}`),
+        fetch(`/api/fees/structures?school_id=${schoolId}&academic_year=${academicYear}`),
+        fetch(`/api/fees/structures/lock?school_id=${schoolId}&academic_year=${academicYear}`),
+        fetch(`/api/fees/structures/amend?school_id=${schoolId}&academic_year=${academicYear}`),
+        fetch(`/api/students?school_id=${schoolId}&grades_only=1`),
+      ])
+      const cats: FeeCategory[] = catRes.ok ? await catRes.json() : []
+      const strs: FeeStructure[] = strRes.ok ? await strRes.json() : []
+      const lock = lockRes.ok ? await lockRes.json() : null
+      const amends: Amendment[] = amendRes.ok ? await amendRes.json() : []
+      const grades: string[] = gradesRes.ok ? await gradesRes.json() : []
+      setCategories(cats)
+      setStructures(strs)
+      setStructureLock(lock)
+      setAmendments(amends)
+      clearLoadError('setup')
+      setEnrolledGrades(grades.length > 0 ? grades : null)
+      const init: Record<string, string> = {}
+      strs.forEach(s => { init[`${s.fee_category_id}_${s.grade}`] = String(s.amount) })
+      setEditAmounts(init)
+    } catch { setLoadError('setup', 'Network error — fee plan could not be loaded') }
+    finally { setSetupLoading(false) }
   }, [schoolId, academicYear])
 
-  useEffect(() => { if (activeTab === 'setup') loadSetup() }, [activeTab, loadSetup])
+  // Load setup on tab switch; also load once on mount (academicYear change) so the
+  // 5-step wizard on the Overview tab shows accurate step state without a tab switch.
+  // The tab-switch effect guards on activeTab==='setup', so the two effects don't
+  // double-fire when the user is already on the setup tab and academicYear changes.
+  useEffect(() => { if (activeTab === 'setup' && academicYear) loadSetup() }, [activeTab, loadSetup, academicYear])
+  useEffect(() => { if (academicYear && activeTab !== 'setup') loadSetup() }, [academicYear]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load the school's UPI ID when Fee Plan opens (once)
   useEffect(() => {
@@ -628,31 +805,41 @@ export default function FeeManagement({
 
   async function saveUpiId() {
     setUpiSaving(true); setUpiMsg('')
-    const r = await fetch('/api/fees/upi-id', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ school_id: schoolId, upi_id: upiId }),
-    })
-    const d = await r.json()
-    setUpiMsg(r.ok ? '✓ UPI ID saved' : (d.error || 'Failed to save'))
+    try {
+      const r = await fetch('/api/fees/upi-id', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, upi_id: upiId }),
+      })
+      const d = await r.json().catch(() => ({}))
+      setUpiMsg(r.ok ? '✓ UPI ID saved' : ((d as { error?: string }).error || 'Failed to save'))
+    } catch { setUpiMsg('Network error — could not save UPI ID') }
     setUpiSaving(false)
   }
 
   const loadReports = useCallback(async () => {
     if (!academicYear) return
     setReportLoading(true)
-    const r = await fetch(`/api/fees/reports?school_id=${schoolId}&academic_year=${academicYear}`)
-    if (r.ok) setReportData(await r.json())
-    setReportLoading(false)
+    try {
+      const r = await fetch(`/api/fees/reports?school_id=${schoolId}&academic_year=${academicYear}`)
+      if (r.ok) { clearLoadError('reports'); setReportData(await r.json()) }
+      else setLoadError('reports', 'Could not load reports — try refreshing')
+    } catch { setLoadError('reports', 'Network error — reports could not be loaded') }
+    finally { setReportLoading(false) }
   }, [schoolId, academicYear])
 
   useEffect(() => { if (activeTab === 'reports' && academicYear) loadReports() }, [activeTab, loadReports, academicYear])
 
-  async function loadAuditLog() {
+  const [auditLogError, setAuditLogError] = useState('')
+
+  async function loadAuditLog(forceRefresh = false) {
     setShowAuditLog(true)
-    if (auditLog.length > 0) return
-    setAuditLoading(true)
-    const r = await fetch(`/api/fees/audit-log?school_id=${schoolId}&academic_year=${academicYear}`)
-    if (r.ok) setAuditLog(await r.json())
+    if (auditLog.length > 0 && !forceRefresh) return
+    setAuditLoading(true); setAuditLogError('')
+    try {
+      const r = await fetch(`/api/fees/audit-log?school_id=${schoolId}&academic_year=${academicYear}`)
+      if (r.ok) setAuditLog(await r.json())
+      else setAuditLogError('Could not load audit log — try refreshing')
+    } catch { setAuditLogError('Network error — audit log could not be loaded') }
     setAuditLoading(false)
   }
 
@@ -703,16 +890,19 @@ export default function FeeManagement({
   const loadYearEnd = useCallback(async () => {
     if (!academicYear) return
     setYearEndLoading(true); setYeMsg('')
-    const r = await fetch(`/api/fees/year-end?school_id=${schoolId}&academic_year=${academicYear}`)
-    if (r.ok) {
-      const d: YearEndState = await r.json()
-      setYearEnd(d)
-      // default every student to 'open' (admin decides each — no auto default action)
-      const init: Record<number, 'carry' | 'writeoff' | 'open'> = {}
-      d.students.forEach(s => { init[s.student_id] = 'open' })
-      setYeDecisions(init)
-    }
-    setYearEndLoading(false)
+    try {
+      const r = await fetch(`/api/fees/year-end?school_id=${schoolId}&academic_year=${academicYear}`)
+      if (r.ok) {
+        clearLoadError('yearend')
+        const d: YearEndState = await r.json()
+        setYearEnd(d)
+        // default every student to 'open' (admin decides each — no auto default action)
+        const init: Record<number, 'carry' | 'writeoff' | 'open'> = {}
+        d.students.forEach(s => { init[s.student_id] = 'open' })
+        setYeDecisions(init)
+      } else setLoadError('yearend', 'Could not load year-end data — try refreshing')
+    } catch { setLoadError('yearend', 'Network error — year-end data could not be loaded') }
+    finally { setYearEndLoading(false) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schoolId, academicYear])
 
@@ -722,16 +912,22 @@ export default function FeeManagement({
   const loadLedger = useCallback(async () => {
     if (!academicYear) return
     setLedgerLoading(true)
-    // Never pass ledgerStatus to API — always load all entries and filter client-side
-    // so chip counts stay accurate regardless of which tab is active
-    const params = new URLSearchParams({ school_id: String(schoolId), academic_year: academicYear })
-    if (ledgerGrade) params.set('grade', ledgerGrade)
-    const r = await fetch(`/api/fees/ledger?${params}`)
-    if (r.ok) setLedger(await r.json())
-    setLedgerLoading(false)
+    try {
+      // Never pass ledgerStatus to API — always load all entries and filter client-side
+      // so chip counts stay accurate regardless of which tab is active
+      const params = new URLSearchParams({ school_id: String(schoolId), academic_year: academicYear })
+      if (ledgerGrade) params.set('grade', ledgerGrade)
+      const r = await fetch(`/api/fees/ledger?${params}`)
+      if (r.ok) { clearLoadError('ledger'); setLedger(await r.json()) }
+      else setLoadError('ledger', 'Could not load ledger — try refreshing')
+    } catch { setLoadError('ledger', 'Network error — ledger could not be loaded') }
+    finally { setLedgerLoading(false) }
   }, [schoolId, academicYear, ledgerGrade])
 
-  useEffect(() => { if (activeTab === 'ledger') loadLedger() }, [activeTab, loadLedger])
+  // Note: the visible "Ledger" nav tab actually uses key 'collect' — see line ~1566 for
+  // the effect that loads ledger data when that tab is active. The 'ledger' Tab value
+  // itself has no render path; kept in the type only for the legacy /api/fees/ledger
+  // direct calls below, not as a real navigable tab.
 
   async function loadEditHistory(ledgerId: number) {
     if (editHistories[ledgerId]) { setShowHistoryId(ledgerId); return }
@@ -754,41 +950,7 @@ export default function FeeManagement({
     }
   }
 
-  async function submitEdit(entry: LedgerEntry) {
-    if (!editForm.new_amount || !editForm.reason) return
-    setEditLoading(true); setEditError('')
-    const r = await fetch(`/api/fees/ledger/${entry.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        school_id: schoolId,
-        new_amount: parseFloat(editForm.new_amount),
-        reason: editForm.reason,
-        changed_by: adminName || 'Admin',
-      }),
-    })
-    const d = await r.json()
-    if (r.ok) {
-      setLedger(prev => prev.map(e => e.id === entry.id
-        ? { ...e, amount_due: d.amount_due, balance: Math.max(0, d.amount_due - (d.waiver_amount ?? e.waiver_amount ?? 0) - d.amount_paid), status: d.status, has_edits: true }
-        : e
-      ))
-      setEditHistories(p => { const next = { ...p }; delete next[entry.id]; return next })
-      setEditingId(null)
-      setEditForm({ new_amount: '', reason: '' })
-    } else {
-      setEditError(d.error || 'Failed to update')
-    }
-    setEditLoading(false)
-  }
-
-  async function deleteEntry(entry: LedgerEntry) {
-    const r = await fetch(`/api/fees/ledger/${entry.id}?school_id=${schoolId}`, { method: 'DELETE' })
-    if (r.ok) {
-      setLedger(prev => prev.filter(e => e.id !== entry.id))
-      setDeletingId(null)
-    }
-  }
+  const [deactivatePromptCatId, setDeactivatePromptCatId] = useState<number | null>(null)
 
   async function deleteCategory(catId: number) {
     const r = await fetch(`/api/fees/categories?id=${catId}`, { method: 'DELETE' })
@@ -798,8 +960,9 @@ export default function FeeManagement({
     } else {
       const d = await r.json()
       if (d.error === 'has_ledger_data') {
-        // Automatically deactivate instead — fee history must be preserved
-        await deactivateCategory(catId, false)
+        // Cannot delete — fee history exists. Ask the admin to confirm deactivation instead.
+        setDeletingCatId(null)
+        setDeactivatePromptCatId(catId)
       }
     }
   }
@@ -892,26 +1055,21 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   })
 
   // ── Collect: search students ─────────────────────────────────────────────────
-  async function searchStudent(q: string) {
+  // Filter from already-loaded ledger state — no extra fetch on each keystroke
+  function searchStudent(q: string) {
     if (!q.trim() || !academicYear) { setCollectEntries([]); return }
-    setCollectLoading(true)
-    const r = await fetch(`/api/fees/ledger?school_id=${schoolId}&academic_year=${academicYear}`)
-    if (r.ok) {
-      const all: LedgerEntry[] = await r.json()
-      const ql = q.trim().toLowerCase()
-      setCollectEntries(
-        all.filter(e =>
-          [
-            e.student_name, e.roll_number,
-            e.school_roll_number != null ? String(e.school_roll_number) : '',
-            e.grade, e.section, e.email, e.phone,
-            e.parent_name, e.parent_phone, e.parent_email,
-          ].some(v => (v || '').toLowerCase().includes(ql))
-          && e.status !== 'paid' && e.status !== 'waived'
-        )
+    const ql = q.trim().toLowerCase()
+    setCollectEntries(
+      ledger.filter(e =>
+        [
+          e.student_name, e.roll_number,
+          e.school_roll_number != null ? String(e.school_roll_number) : '',
+          e.grade, e.section, e.email, e.phone,
+          e.parent_name, e.parent_phone, e.parent_email,
+        ].some(v => (v || '').toLowerCase().includes(ql))
+        && e.status !== 'paid' && e.status !== 'waived'
       )
-    }
-    setCollectLoading(false)
+    )
   }
 
   function openCollect(entry: LedgerEntry) {
@@ -921,44 +1079,22 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     if (activeTab !== 'collect') setActiveTab('collect')
   }
 
-  async function submitPayment() {
-    if (!selectedEntry) return
-    setCollectLoading(true); setPayError('')
-    const r = await fetch('/api/fees/payments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        school_id: schoolId, student_id: selectedEntry.student_id,
-        ledger_id: selectedEntry.id, amount: parseFloat(payAmount),
-        payment_mode: payMode, transaction_ref: payRef || null,
-        collected_by_name: payCollectedBy || null, notes: payNotes || null, paid_date: payDate,
-      }),
-    })
-    const d = await r.json()
-    if (r.ok) {
-      setPaySuccess({
-        receipt_number: d.receipt_number, student_name: d.student_name, amount: d.amount,
-        school_name: d.school_name || '', roll_number: d.roll_number || '',
-        grade: d.grade || '', section: d.section || '', parent_name: d.parent_name || null,
-        category_name: d.category_name || '', period_label: d.period_label || '',
-        amount_due: d.amount_due || d.amount,
-        payment_mode: payMode, paid_date: payDate,
-        collected_by_name: payCollectedBy || null,
-        transaction_ref: payRef || null, notes: payNotes || null,
-      })
-      setSelectedEntry(null); setCollectSearch(''); setCollectEntries([])
-      loadStats()
-      if (activeTab === 'ledger') loadLedger()
-      if (reportData !== null) loadReports()
-      if (yearEnd   !== null) loadYearEnd()
-    } else {
-      setPayError(d.error || 'Payment failed')
-    }
-    setCollectLoading(false)
-  }
-
   async function submitWaiver() {
     if (!selectedEntry) return
+    const balance = Number(selectedEntry.balance)
+    if (waiverForm.waiver_type === 'fixed_amount') {
+      const amt = parseFloat(waiverForm.waiver_value) || 0
+      if (amt > balance + 0.01) {
+        setWaiverError(`Waiver amount ₹${amt.toFixed(2)} exceeds outstanding balance of ₹${balance.toFixed(2)}`)
+        return
+      }
+    } else if (waiverForm.waiver_type === 'percentage') {
+      const pct = parseFloat(waiverForm.waiver_value) || 0
+      if (pct > 100) {
+        setWaiverError('Percentage cannot exceed 100%')
+        return
+      }
+    }
     setWaiverLoading(true); setWaiverError('')
     try {
       const r = await fetch('/api/fees/waivers', {
@@ -1006,23 +1142,30 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
         const key = `${cat.id}_${grade}`
         const val = editAmounts[key]
         if (val && parseFloat(val) > 0)
-          structs.push({ fee_category_id: cat.id, grade, amount: parseFloat(val), due_day: parseInt(dueDays[cat.id] || '10') || 10 })
+          structs.push({ fee_category_id: cat.id, grade, amount: parseFloat(val) })
       }
     }
     const r = await fetch('/api/fees/structures', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, structures: structs, changed_by: adminName || 'Admin' }),
     })
-    setStructureMsg(r.ok ? '✓ Structure saved' : 'Failed to save')
+    if (!r.ok) {
+      const d = await r.json().catch(() => null)
+      setStructureMsg(d?.error || 'Failed to save')
+    } else {
+      setStructureMsg('✓ Structure saved')
+    }
     setSavingStructure(false)
     loadSetup()
   }
 
   async function generateLedger() {
-    // Mandate: all fixed fees must have amounts before generating bills
+    // Mandate: all fixed fees must have amounts for EVERY grade before generating bills
     if (!fixedAmountsComplete()) {
-      const missing = fixedFeesMissingAmounts()
-      setStructureMsg(`⚠ Set amounts for all fixed fees first — missing: ${missing.join(', ')}`)
+      const details = fixedFeeHeads()
+        .filter(c => !feeHasAmounts(c.id, c.category_type))
+        .map(c => `${c.name} (missing: ${feeGradesMissingAmounts(c.id).map(gradeLabel).join(', ')})`)
+      setStructureMsg(`⚠ Set amounts for all grades on every fixed fee first — ${details.join(' · ')}`)
       return
     }
     // Show confirmation with due-day summary before running
@@ -1095,23 +1238,45 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     for (const grade of GRADES) {
       const val = editAmounts[`${cat.id}_${grade}`]
       if (val && parseFloat(val) > 0)
-        structs.push({ fee_category_id: cat.id, grade, amount: parseFloat(val), due_day: parseInt(dueDays[cat.id] || '10') || 10 })
+        structs.push({ fee_category_id: cat.id, grade, amount: parseFloat(val) })
     }
     const r = await fetch('/api/fees/structures', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, structures: structs, changed_by: adminName || 'Admin' }),
     })
-    setStructureMsg(r.ok ? `✓ Amounts saved for ${cat.name}` : 'Failed to save')
+    if (!r.ok) {
+      const d = await r.json().catch(() => null)
+      setStructureMsg(d?.error || 'Failed to save')
+    } else {
+      setStructureMsg(`✓ Amounts saved for ${cat.name}`)
+    }
     setSavingStructure(false)
     loadSetup()
   }
 
   // Whether a fee head has any amount configured
+  // Grades the "every grade must have an amount" mandate actually applies to: grades
+  // with enrolled students if known, otherwise every grade in the master list (e.g.
+  // before any students have been onboarded yet, so setup isn't blocked on that).
+  function gradesToValidate(): string[] {
+    return enrolledGrades && enrolledGrades.length > 0
+      ? GRADES.filter(g => enrolledGrades.includes(g))
+      : GRADES
+  }
   function feeHasAmounts(catId: number, type: string): boolean {
     if (type === 'variable') {
       return structures.some(s => s.fee_category_id === catId && Number(s.amount) > 0)
     }
-    return GRADES.some(g => parseFloat(editAmounts[`${catId}_${g}`] || '0') > 0)
+    // ALL enrolled grades must have an amount, not just one — otherwise "Generate Bills"
+    // silently skips every grade left at 0 with no warning, contradicting the stated
+    // mandate that every fixed fee head must be fully configured before bills can be
+    // generated. Grades with no enrolled students (e.g. a school with no Nursery
+    // section) are excluded so setup isn't blocked on grades that don't apply.
+    return gradesToValidate().every(g => parseFloat(editAmounts[`${catId}_${g}`] || '0') > 0)
+  }
+  // Which specific grades are still missing an amount for a fixed fee head
+  function feeGradesMissingAmounts(catId: number): string[] {
+    return gradesToValidate().filter(g => !(parseFloat(editAmounts[`${catId}_${g}`] || '0') > 0))
   }
 
   // Whether bills are generated for this fee head
@@ -1152,34 +1317,44 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, action: 'lock', locked_by: adminName || 'Admin' }),
     })
     if (r.ok) loadSetup()
+    else { const d = await r.json().catch(() => ({})); setStructureMsg(d.error || 'Failed to lock fee plan') }
     setLockingStructure(false)
   }
 
   async function unlockStructure() {
     setLockingStructure(true)
-    await fetch('/api/fees/structures/lock', {
+    const r = await fetch('/api/fees/structures/lock', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, action: 'unlock', locked_by: adminName || 'Admin' }),
     })
-    loadSetup()
+    if (!r.ok) { const d = await r.json().catch(() => ({})); setStructureMsg(d.error || 'Failed to unlock fee plan') }
+    else loadSetup()
     setLockingStructure(false)
   }
 
   async function submitAmendment() {
     if (!showAmendForm || !amendForm.new_amount || !amendForm.reason) return
-    const r = await fetch('/api/fees/structures/amend', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        school_id: schoolId, academic_year: academicYear,
-        fee_category_id: showAmendForm.cat_id, grade: showAmendForm.grade,
-        new_amount: parseFloat(amendForm.new_amount), reason: amendForm.reason,
-        changed_by: adminName || 'Admin',
-      }),
-    })
-    if (r.ok) {
-      setShowAmendForm(null); setAmendForm({ new_amount: '', reason: '' })
-      loadSetup()
-    }
+    setAmendSaving(true); setAmendMsg('')
+    try {
+      const r = await fetch('/api/fees/structures/amend', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId, academic_year: academicYear,
+          fee_category_id: showAmendForm.cat_id, grade: showAmendForm.grade,
+          new_amount: parseFloat(amendForm.new_amount), reason: amendForm.reason,
+          changed_by: adminName || 'Admin',
+        }),
+      })
+      if (r.ok) {
+        setShowAmendForm(null); setAmendForm({ new_amount: '', reason: '' })
+        // Amending updates amount_due on already-generated unpaid/partial bills, so the
+        // Overview tab's billed/outstanding/collection-% figures go stale without this.
+        loadSetup(); loadStats()
+      } else {
+        const d = await r.json().catch(() => null)
+        setAmendMsg(d?.error || 'Failed to amend amount')
+      }
+    } finally { setAmendSaving(false) }
   }
 
   // ── Applicability tab ────────────────────────────────────────────────────────
@@ -1197,8 +1372,10 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
           init[`${a.student_id}:${a.fee_category_id}`] = String(a.amount)
         })
         setApplAmounts(init)
+      } else {
+        setApplMsg('Could not load variable fee assignments — try refreshing')
       }
-    } catch { /* silent */ }
+    } catch { setApplMsg('Network error — variable fee assignments could not be loaded') }
     setApplLoading(false)
   }
 
@@ -1219,9 +1396,13 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     const d = await r.json()
     if (r.ok) {
       setApplMsg(`✓ Saved — ${d.upserted} assignments${d.ledgerUpdated > 0 ? `, ${d.ledgerUpdated} ledger entries updated` : ''}`)
+      // Variable-fee assignments can change amount_due on existing bills (ledgerUpdated),
+      // so the Overview tab's totals would otherwise stay stale until a tab switch.
+      loadStats()
     } else {
       setApplMsg(d.error || 'Failed to save')
     }
+
     setApplSaving(false)
   }
 
@@ -1276,32 +1457,51 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     setVgSaving(false)
   }
 
-  async function toggleCategoryType(cat: FeeCategory) {
+  function toggleCategoryType(cat: FeeCategory) {
     const newType = cat.category_type === 'fixed' ? 'variable' : 'fixed'
-    await fetch(`/api/fees/categories?id=${cat.id}`, {
+    setToggleTypeConfirm({ cat, newType })
+  }
+
+  async function confirmToggleCategoryType() {
+    if (!toggleTypeConfirm) return
+    const { cat, newType } = toggleTypeConfirm
+    setToggleTypeConfirm(null)
+    const r = await fetch(`/api/fees/categories?id=${cat.id}`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ category_type: newType, changed_by: adminName || 'Admin' }),
     })
+    if (!r.ok) {
+      const d = await r.json().catch(() => null)
+      setStructureMsg(d?.error || 'Failed to change fee type')
+      return
+    }
     setCategories(prev => prev.map(c => c.id === cat.id ? { ...c, category_type: newType } : c))
   }
+
+  const [structHistError, setStructHistError]   = useState('')
 
   async function loadAssignHistory(studentId: number, catId: number) {
     const key = `${studentId}:${catId}`
     if (assignHistoryKey === key) { setAssignHistoryKey(null); return }
     setAssignHistoryKey(key); setAssignHistLoading(true)
     if (!assignHistories[key]) {
-      const r = await fetch(`/api/fees/assignment-history?school_id=${schoolId}&student_id=${studentId}&fee_category_id=${catId}&academic_year=${academicYear}`)
-      if (r.ok) { const rows = await r.json(); setAssignHistories(p => ({ ...p, [key]: rows })) }
+      try {
+        const r = await fetch(`/api/fees/assignment-history?school_id=${schoolId}&student_id=${studentId}&fee_category_id=${catId}&academic_year=${academicYear}`)
+        if (r.ok) { const rows = await r.json(); setAssignHistories(p => ({ ...p, [key]: rows })) }
+      } catch { /* history panel stays empty on error — non-critical */ }
     }
     setAssignHistLoading(false)
   }
 
   async function loadStructHistory(catId: number) {
     if (structHistCatId === catId) { setStructHistCatId(null); return }
-    setStructHistCatId(catId); setStructHistLoading(true)
+    setStructHistCatId(catId); setStructHistLoading(true); setStructHistError('')
     if (!structHistories[catId]) {
-      const r = await fetch(`/api/fees/structure-history?school_id=${schoolId}&fee_category_id=${catId}&academic_year=${academicYear}`)
-      if (r.ok) { const rows = await r.json(); setStructHistories(p => ({ ...p, [catId]: rows })) }
+      try {
+        const r = await fetch(`/api/fees/structure-history?school_id=${schoolId}&fee_category_id=${catId}&academic_year=${academicYear}`)
+        if (r.ok) { const rows = await r.json(); setStructHistories(p => ({ ...p, [catId]: rows })) }
+        else setStructHistError('Could not load structure history')
+      } catch { setStructHistError('Network error') }
     }
     setStructHistLoading(false)
   }
@@ -1310,26 +1510,29 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     if (catChangelogId === catId) { setCatChangelogId(null); return }
     setCatChangelogId(catId); setCatChangelogLoading(true)
     if (!catChangelogs[catId]) {
-      const r = await fetch(`/api/fees/category-changelog?school_id=${schoolId}&category_id=${catId}`)
-      if (r.ok) { const rows = await r.json(); setCatChangelogs(p => ({ ...p, [catId]: rows })) }
+      try {
+        const r = await fetch(`/api/fees/category-changelog?school_id=${schoolId}&category_id=${catId}`)
+        if (r.ok) { const rows = await r.json(); setCatChangelogs(p => ({ ...p, [catId]: rows })) }
+      } catch { /* changelog panel stays empty on error — non-critical */ }
     }
     setCatChangelogLoading(false)
   }
 
-  async function applyYearEndDecisions() {
+  async function applyYearEndDecisions(overrideTargetYear?: string) {
     if (!yearEnd) return
-    // Build decisions only for students who have a non-'open' decision (open = no-op leave as is)
+    // Build decisions only for students who have an actionable (non-'open') decision
     const decisions = yearEnd.students
       .map(s => ({ student_id: s.student_id, decision: yeDecisions[s.student_id] || 'open', reason: yeReasons[s.student_id] }))
-      .filter(d => d.decision === 'carry' || d.decision === 'writeoff')
-    if (decisions.length === 0) { setYeMsg('No carry-forward or write-off decisions selected.'); return }
+      .filter(d => d.decision === 'carry' || d.decision === 'writeoff' || d.decision === 'passout')
+    if (decisions.length === 0) { setYeMsg('No carry-forward, write-off, or passout decisions selected.'); return }
 
     // Guard on client too: leavers cannot carry
     const badLeaver = yearEnd.students.find(s => s.is_leaver && yeDecisions[s.student_id] === 'carry')
-    if (badLeaver) { setYeMsg(`${badLeaver.student_name} is leaving — cannot carry forward. Choose Write Off or Leave Open.`); return }
+    if (badLeaver) { setYeMsg(`${badLeaver.student_name} is leaving — cannot carry forward. Choose Passout, Write Off, or Leave Open.`); return }
 
-    if (decisions.some(d => d.decision === 'carry') && !yearEnd.target_year_exists) {
-      setYeMsg(`Academic year ${yearEnd.target_year} must be created before carrying forward.`); return
+    const targetYear = overrideTargetYear ?? yearEnd.target_year
+    if (decisions.some(d => d.decision === 'carry') && !overrideTargetYear && !yearEnd.target_year_exists) {
+      openCfModal(); return
     }
 
     setYeProcessing(true); setYeMsg('')
@@ -1337,13 +1540,15 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'apply', school_id: schoolId, from_year: academicYear,
-        to_year: yearEnd.target_year, done_by: adminName || 'Admin', decisions,
+        to_year: targetYear, done_by: adminName || 'Admin', decisions,
       }),
     })
     const d = await r.json()
     if (r.ok) {
-      setYeMsg(`✓ Applied — ${d.carried.count} carried (${fmt(d.carried.total)}), ${d.writeoff.count} written off (${fmt(d.writeoff.total)})`)
-      loadYearEnd()
+      const passoutPart = d.passout?.count > 0 ? `, ${d.passout.count} to passout ledger (${fmt(d.passout.total)})` : ''
+      setYeMsg(`✓ Applied — ${d.carried.count} carried (${fmt(d.carried.total)}), ${d.writeoff.count} written off (${fmt(d.writeoff.total)})${passoutPart}`)
+      loadYearEnd(); loadStats(); loadLedger()
+      if (d.passout?.count > 0) loadPassout()
     } else {
       setYeMsg(d.error || 'Failed to apply')
     }
@@ -1361,26 +1566,114 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     setYeClosing(false)
     if (r.ok) {
       loadYearEnd()
-      // BUG 14: prompt admin to generate fee ledger for the new year
-      const nextYear = yearEnd?.target_year
-      if (nextYear && window.confirm(`Year ${academicYear} is now closed.\n\nDo you want to go to the Setup tab to generate fee ledger for ${nextYear}?`)) {
-        setActiveTab('setup' as Tab)
-      }
+    }
+  }
+
+  // Two-phase year rollover: phase 1 = preview pending dues, phase 2 = confirm → execute
+  async function startRollover() {
+    setRolloverLoading(true); setRolloverMsg(''); setRolloverPreview(null); setRolloverDone(false)
+    const r = await fetch('/api/fees/year-rollover', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId, from_year: academicYear }),
+    })
+    const d = await r.json()
+    setRolloverLoading(false)
+    if (d.requires_confirmation) {
+      setRolloverPreview(d)
+    } else if (r.ok) {
+      // No pending dues — rolled over immediately
+      setRolloverDone(true)
+      setRolloverMsg(`✓ Rolled over to ${d.to_year} — ${d.dues_carried} student${d.dues_carried !== 1 ? 's' : ''} carried (${fmt(d.dues_amount)})`)
+      loadYearEnd(); loadStats(); loadAcademicYears(); loadLedger()
+    } else {
+      setRolloverMsg(d.error || 'Rollover failed')
+    }
+  }
+
+  async function confirmRollover() {
+    setRolloverLoading(true); setRolloverMsg('')
+    const r = await fetch('/api/fees/year-rollover', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId, from_year: academicYear, confirmed: true }),
+    })
+    const d = await r.json()
+    setRolloverLoading(false)
+    if (r.ok) {
+      setRolloverDone(true)
+      setRolloverPreview(null)
+      setRolloverMsg(`✓ Rolled over to ${d.to_year} — ${d.dues_carried} student${d.dues_carried !== 1 ? 's' : ''} carried (${fmt(d.dues_amount)})`)
+      loadYearEnd(); loadStats(); loadAcademicYears(); loadLedger()
+    } else {
+      setRolloverMsg(d.error || 'Rollover failed')
     }
   }
 
   async function reopenYear() {
-    const reason = window.prompt('Reason for reopening this closed year? (logged permanently)')
-    if (!reason) return
+    if (!reopenReason.trim()) return
+    setShowReopenModal(false)
     setYeClosing(true); setYeMsg('')
     const r = await fetch('/api/fees/year-end', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'reopen', school_id: schoolId, from_year: academicYear, done_by: adminName || 'Admin', reason }),
+      body: JSON.stringify({ action: 'reopen', school_id: schoolId, from_year: academicYear, done_by: adminName || 'Admin', reason: reopenReason }),
     })
     const d = await r.json()
     setYeMsg(r.ok ? '✓ Year reopened — edits allowed again' : (d.error || 'Failed'))
+    setReopenReason('')
     setYeClosing(false)
     if (r.ok) loadYearEnd()
+  }
+
+  // ── First-login year wizard: create the school's first academic year ────────────
+  async function createFirstYear() {
+    if (!wizLabel.trim() || !wizStart || !wizEnd) { setWizMsg('All fields are required'); return }
+    setWizSaving(true); setWizMsg('')
+    const r = await fetch('/api/academic-years', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId, label: wizLabel.trim(), start_date: wizStart, end_date: wizEnd, set_current: true }),
+    })
+    const d = await r.json()
+    if (r.ok) {
+      setShowYearWizard(false)
+      loadAcademicYears()
+    } else {
+      setWizMsg(d.error || 'Failed to create year')
+    }
+    setWizSaving(false)
+  }
+
+  // ── Carry-forward modal: open it and load existing years ────────────────────────
+  async function openCfModal() {
+    setCfMsg(''); setCfCreateMode(false); setCfSelectedYear(''); setShowCfModal(true)
+    try {
+      const r = await fetch(`/api/academic-years?school_id=${schoolId}`)
+      if (r.ok) {
+        const all = await r.json()
+        setCfExistingYears(Array.isArray(all) ? all : [])
+      } else {
+        setCfMsg('Could not load existing academic years — you can still create a new one below')
+      }
+    } catch { setCfMsg('Network error — could not load existing academic years') }
+  }
+
+  async function createYearInCfModal() {
+    if (!cfNewLabel.trim() || !cfNewStart || !cfNewEnd) { setCfMsg('All fields required'); return }
+    setCfCreating(true); setCfMsg('')
+    const r = await fetch('/api/academic-years', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId, label: cfNewLabel.trim(), start_date: cfNewStart, end_date: cfNewEnd }),
+    })
+    const d = await r.json()
+    if (r.ok) {
+      const all = await fetch(`/api/academic-years?school_id=${schoolId}`).then(x => x.ok ? x.json() : [])
+      setCfExistingYears(Array.isArray(all) ? all : [])
+      setCfSelectedYear(cfNewLabel.trim())
+      setCfCreateMode(false)
+      setCfNewLabel(''); setCfNewStart(''); setCfNewEnd('')
+      loadAcademicYears()
+    } else {
+      setCfMsg(d.error || 'Failed')
+    }
+    setCfCreating(false)
   }
 
   // Year-end view helpers
@@ -1419,7 +1712,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 <div class="sumbox">
   <div><div class="l">Total Billed</div><div class="v">₹${Number(s.total_billed).toLocaleString('en-IN')}</div></div>
   <div><div class="l">Collected</div><div class="v">₹${Number(s.total_collected).toLocaleString('en-IN')}</div></div>
-  <div><div class="l">Waived</div><div class="v">₹${Number(s.total_waived).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Waived</div><div class="v">₹${Number(s.discretionary_waived ?? s.total_waived).toLocaleString('en-IN')}</div></div>
   <div><div class="l">Unpaid</div><div class="v">₹${Number(s.total_unpaid).toLocaleString('en-IN')}</div></div>
 </div>
 <p style="font-size:12px;color:#555">Resolution plan: ${carryN} carry forward · ${woN} write off · ${openN} left open</p>
@@ -1440,14 +1733,19 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   }
 
   // ── Pending verifications ────────────────────────────────────────────────────
+  const [pendingError, setPendingError] = useState('')
+
   const loadPending = useCallback(async () => {
-    setPendingLoading(true)
-    const r = await fetch(`/api/fees/payments/verify?school_id=${schoolId}`)
-    if (r.ok) setPendingPayments(await r.json())
+    setPendingLoading(true); setPendingError('')
+    try {
+      const r = await fetch(`/api/fees/payments/verify?school_id=${schoolId}`)
+      if (r.ok) setPendingPayments(await r.json())
+      else setPendingError('Could not load pending verifications — try refreshing')
+    } catch { setPendingError('Network error — pending verifications could not be loaded') }
     setPendingLoading(false)
   }, [schoolId])
 
-  useEffect(() => { if (activeTab === 'pending') loadPending() }, [activeTab, loadPending])
+  useEffect(() => { if (activeTab === 'collect') loadPending() }, [activeTab, loadPending])
 
   async function verifyPayment(paymentId: number, action: 'approve' | 'reject') {
     setVerifyingId(paymentId); setVerifyMsg('')
@@ -1546,6 +1844,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
   const openStudent = collectionFiltered.find(r => r.student_id === openStudentId)
     || studentRows.find(r => r.student_id === openStudentId)
+    || (passoutOpenStudent?.student_id === openStudentId ? passoutOpenStudent : undefined)
 
   // Total of currently-checked entries in the collect form
   const checkedTotal = openStudent
@@ -1554,7 +1853,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
   function toggleStudent(id: number) {
     if (openStudentId === id) {
-      setOpenStudentId(null); setShowCollectForm(false); setShowCounterHistory(false)
+      setOpenStudentId(null); setShowCollectForm(false); setShowCounterHistory(false); setPassoutOpenStudent(null)
       // Scroll the row back into view after collapsing
       setTimeout(() => {
         document.getElementById(`student-row-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -1571,12 +1870,15 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     }, 50)
   }
 
+  const [counterPmtError, setCounterPmtError] = useState('')
+
   async function loadCounterPayments(studentId: number) {
-    setShowCounterHistory(true); setCounterPmtLoading(true)
+    setShowCounterHistory(true); setCounterPmtLoading(true); setCounterPmtError('')
     try {
       const r = await fetch(`/api/fees/payments?school_id=${schoolId}&student_id=${studentId}`)
       if (r.ok) setCounterPayments(await r.json())
-    } catch { /* silent */ }
+      else setCounterPmtError('Could not load payment history')
+    } catch { setCounterPmtError('Network error — payment history could not be loaded') }
     setCounterPmtLoading(false)
   }
 
@@ -1623,9 +1925,11 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
         payment_mode: payMode, paid_date: payDate,
         collected_by_name: payCollectedBy || null,
         transaction_ref: payRef || null, notes: payNotes || null,
+        outstanding_before: openStudent.outstanding,
       })
       setShowCollectForm(false)
-      loadLedger(); loadStats()
+      setPassoutOpenStudent(null)
+      loadLedger(); loadStats(); loadPassout()
       if (reportData !== null) loadReports()
       if (yearEnd   !== null) loadYearEnd()
     } else {
@@ -1671,7 +1975,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   ${paid.collected_by_name ? `<div><div class="lbl">Collected By</div><div class="val">${paid.collected_by_name}</div></div>` : ''}
 </div>
 ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><div class="val">${paid.notes}</div></div>` : ''}
-<div class="ftr">Balance after this payment: ₹${Number(Math.max(0, row.outstanding - paid.amount)).toLocaleString('en-IN')} &nbsp;·&nbsp; Generated on ${new Date().toLocaleString('en-IN')} &nbsp;·&nbsp; Computer-generated receipt.</div>
+<div class="ftr">Balance after this payment: ₹${Number(Math.max(0, (paid.outstanding_before ?? row.outstanding) - paid.amount)).toLocaleString('en-IN')} &nbsp;·&nbsp; Generated on ${new Date().toLocaleString('en-IN')} &nbsp;·&nbsp; Computer-generated receipt.</div>
 </body></html>`
     const win = window.open('', '_blank', 'width=800,height=650')
     if (win) { win.document.write(html); win.document.close(); win.print() }
@@ -1733,9 +2037,11 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
     setPbLoading(false)
   }
 
-  function openCancel(paymentId: number) {
+  function openCancel(paymentId: number, pmtAmount: number, ledgerBalance: number) {
     setCancelPmtId(paymentId); setCancelMode('cancel')
     setCancelReason(''); setCorrectAmount(''); setCancelMsg('')
+    // max correctable = what's already free on the ledger + the amount being reversed
+    setCancelPmtMaxCorrect(ledgerBalance + pmtAmount)
   }
 
   // origin: 'passbook' refreshes the passbook; 'counter' refreshes ledger + counter payments
@@ -1743,6 +2049,9 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
     if (!cancelPmtId) return
     if (!cancelReason.trim()) { setCancelMsg('Reason is required.'); return }
     if (cancelMode === 'correct' && !(parseFloat(correctAmount) > 0)) { setCancelMsg('Enter a valid corrected amount.'); return }
+    if (cancelMode === 'correct' && cancelPmtMaxCorrect !== null && parseFloat(correctAmount) > cancelPmtMaxCorrect + 0.01) {
+      setCancelMsg(`Amount cannot exceed ₹${cancelPmtMaxCorrect.toFixed(2)} (balance remaining on this bill)`); return
+    }
     setCancelBusy(true); setCancelMsg('')
     const r = await fetch('/api/fees/payments/cancel', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1758,8 +2067,11 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
         ? `✓ Corrected — new receipt ${d.new_receipt}`
         : `✓ Payment cancelled (₹${d.reversed_amount} reversed)`)
       setCancelPmtId(null)
+      // Clear cached payment history so stale data doesn't show on re-open
+      setPaymentHistories({})
       // Always refresh the school-wide figures (Overview, class-wise, reports-on-open)
       loadStats()
+      if (reportData !== null) loadReports()
       if (origin === 'passbook' && pbData) {
         loadPassbook(pbData.student.id)
       } else if (origin === 'counter') {
@@ -1778,6 +2090,9 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
     if (cancelWaiverMode === 'correct' && !(parseFloat(correctWaiverAmount) > 0)) {
       setCancelWaiverMsg('Enter a valid corrected amount.'); return
     }
+    if (cancelWaiverMode === 'correct' && waiverMaxCorrect !== null && parseFloat(correctWaiverAmount) > waiverMaxCorrect + 0.01) {
+      setCancelWaiverMsg(`Amount cannot exceed ₹${waiverMaxCorrect.toFixed(2)} (balance on this bill)`); return
+    }
     setCancelWaiverBusy(true); setCancelWaiverMsg('')
     try {
       let r: Response
@@ -1794,7 +2109,10 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
       if (r.ok) {
         setCancelWaiverMsg(cancelWaiverMode === 'correct' ? '✓ Waiver corrected' : '✓ Waiver revoked')
         setCancelWaiverId(null)
+        loadStats()
+        loadLedger()
         if (pbData) loadPassbook(pbData.student.id)
+        if (reportData !== null) loadReports()
       } else {
         setCancelWaiverMsg(d.error || 'Failed')
       }
@@ -1882,7 +2200,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
 <div class="sumbox">
   <div><div class="l">Total Billed</div><div class="v">₹${Number(pbData.summary.total_billed).toLocaleString('en-IN')}</div></div>
   <div><div class="l">Paid</div><div class="v">₹${Number(pbData.summary.total_paid).toLocaleString('en-IN')}</div></div>
-  <div><div class="l">Waived</div><div class="v">₹${Number(pbData.summary.total_waived).toLocaleString('en-IN')}</div></div>
+  <div><div class="l">Waived</div><div class="v">₹${Number(pbData.summary.discretionary_waived ?? pbData.summary.total_waived).toLocaleString('en-IN')}</div></div>
   <div><div class="l">Outstanding</div><div class="v">₹${Number(pbData.summary.outstanding).toLocaleString('en-IN')}</div></div>
 </div>
 <table><thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Charge</th><th style="text-align:right">Paid</th><th style="text-align:right">Balance</th></tr></thead>
@@ -1893,10 +2211,135 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
     if (win) { win.document.write(html); win.document.close(); win.print() }
   }
 
+  // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+  function LoadErrorBanner({ sectionKey, onRetry }: { sectionKey: string; onRetry: () => void }) {
+    const msg = loadErrors[sectionKey]
+    if (!msg) return null
+    return (
+      <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="flex-shrink-0"><path d="M8 2L1.5 13.5h13L8 2z" stroke="#DC2626" strokeWidth="1.5" strokeLinejoin="round"/><path d="M8 7v3M8 11.5v.5" stroke="#DC2626" strokeWidth="1.5" strokeLinecap="round"/></svg>
+        <span className="flex-1">{msg}</span>
+        <button onClick={onRetry} className="text-xs font-semibold text-red-700 underline underline-offset-2 hover:text-red-900">Retry</button>
+      </div>
+    )
+  }
+
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-6">
+
+      {/* ── First-login academic year gate ── */}
+      {showYearWizard && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 text-xl font-bold">1</div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Create your Academic Year</h2>
+                <p className="text-sm text-gray-500">Required before using any school features</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-600 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              Every fee, attendance, and exam record is tied to an academic year. Set yours up now to get started.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Year Label (e.g. 2025-26)</label>
+                <input data-testid="wizard-year-label" value={wizLabel} onChange={e => setWizLabel(e.target.value)}
+                  placeholder="2025-26" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Start Date</label>
+                  <input data-testid="wizard-start-date" type="date" value={wizStart} onChange={e => setWizStart(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">End Date</label>
+                  <input data-testid="wizard-end-date" type="date" value={wizEnd} onChange={e => setWizEnd(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+              </div>
+              {wizMsg && <p className="text-sm text-red-600">{wizMsg}</p>}
+              <button data-testid="wizard-create-year" onClick={createFirstYear} disabled={wizSaving}
+                className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium text-sm hover:bg-blue-700 disabled:opacity-50">
+                {wizSaving ? 'Creating…' : 'Create Academic Year & Continue'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Carry-forward modal (target year missing) ── */}
+      {showCfModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-gray-900">Select Target Academic Year for Carry Forward</h2>
+              <button onClick={() => setShowCfModal(false)} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
+            </div>
+            <p className="text-sm text-gray-600">The next year <strong>{yearEnd?.target_year}</strong> doesn&apos;t exist yet. Select an existing year or create a new one to carry unpaid dues into.</p>
+
+            {!cfCreateMode ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Select Year</label>
+                  <select data-testid="cf-year-select" value={cfSelectedYear} onChange={e => setCfSelectedYear(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">— Choose a year —</option>
+                    {cfExistingYears.filter(y => y.label !== academicYear).map(y => (
+                      <option key={y.label} value={y.label}>{y.label} ({y.start_date?.slice(0,10)} → {y.end_date?.slice(0,10)})</option>
+                    ))}
+                  </select>
+                </div>
+                <button onClick={() => setCfCreateMode(true)} className="text-sm text-blue-600 hover:underline">+ Create new academic year instead</button>
+                {cfMsg && <p className="text-sm text-red-600">{cfMsg}</p>}
+                <div className="flex gap-2 pt-1">
+                  <button onClick={() => setShowCfModal(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
+                  <button data-testid="cf-confirm" disabled={!cfSelectedYear} onClick={() => {
+                    if (!yearEnd) return
+                    setShowCfModal(false)
+                    applyYearEndDecisions(cfSelectedYear)
+                  }} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
+                    Confirm & Carry Forward
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Year Label (e.g. 2026-27)</label>
+                  <input data-testid="cf-new-label" value={cfNewLabel} onChange={e => setCfNewLabel(e.target.value)}
+                    placeholder="2026-27" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Start Date</label>
+                    <input data-testid="cf-new-start" type="date" value={cfNewStart} onChange={e => setCfNewStart(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">End Date</label>
+                    <input data-testid="cf-new-end" type="date" value={cfNewEnd} onChange={e => setCfNewEnd(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </div>
+                {cfMsg && <p className="text-sm text-red-600">{cfMsg}</p>}
+                <div className="flex gap-2">
+                  <button onClick={() => setCfCreateMode(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50">Back</button>
+                  <button data-testid="cf-create-year" onClick={createYearInCfModal} disabled={cfCreating}
+                    className="flex-1 bg-green-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50">
+                    {cfCreating ? 'Creating…' : 'Create Year'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -1919,6 +2362,75 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
         </select>
       </div>
 
+      {/* ── 15-day approaching year-end banner ── */}
+      {daysUntilYearEnd !== null && daysUntilYearEnd >= 0 && daysUntilYearEnd <= 15 && !closedYears.has(academicYear) && (
+        <div data-testid="year-end-banner" className="flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-xl px-4 py-3">
+          <span className="text-amber-500 text-lg mt-0.5">⚠</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800">
+              {daysUntilYearEnd === 0
+                ? `Academic year ${academicYear} ends today (${yearEndDate})`
+                : `Academic year ${academicYear} ends in ${daysUntilYearEnd} day${daysUntilYearEnd === 1 ? '' : 's'} — ${yearEndDate}`}
+            </p>
+            <p className="text-xs text-amber-700 mt-0.5">Collect outstanding fees before year-end. You can extend the due date or close the year.</p>
+          </div>
+          <div className="flex gap-2 flex-shrink-0">
+            <button data-testid="banner-extend" onClick={() => setActiveTab('yearend' as Tab)}
+              className="text-xs bg-white border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg hover:bg-amber-50 font-medium">
+              Extend / Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── 5-step setup wizard (shown when there are no bills yet) ── */}
+      {!setupWizardDismissed && academicYear && !closedYears.has(academicYear) && (
+        (() => {
+          const step1Done = true // year exists
+          const step2Done = categories.filter(c => c.is_active !== false).length > 0
+          const step3Done = fixedAmountsComplete()
+          const step4Done = (stats?.summary?.total_due ?? 0) > 0
+          const step5Done = !!structureLock
+          const allDone = step1Done && step2Done && step3Done && step4Done && step5Done
+          if (allDone) return null
+          const steps = [
+            { n: 1, label: 'Academic Year', done: step1Done, tab: null as Tab | null },
+            { n: 2, label: 'Fee Heads',     done: step2Done, tab: 'setup' as Tab },
+            { n: 3, label: 'Set Amounts',   done: step3Done, tab: 'setup' as Tab },
+            { n: 4, label: 'Generate Bills', done: step4Done, tab: 'setup' as Tab },
+            { n: 5, label: 'Lock Plan',     done: step5Done, tab: 'setup' as Tab },
+          ]
+          const nextStep = steps.find(s => !s.done)
+          return (
+            <div data-testid="setup-wizard" className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-semibold text-blue-800">Fee Setup — {nextStep ? `Step ${nextStep.n} of 5: ${nextStep.label}` : 'Almost done!'}</p>
+                <button onClick={() => setSetupWizardDismissed(true)} className="text-xs text-blue-400 hover:text-blue-600">Dismiss</button>
+              </div>
+              <div className="flex items-center gap-1">
+                {steps.map((s, i) => (
+                  <div key={s.n} className="flex items-center gap-1 flex-1">
+                    <div className={`flex items-center gap-1.5 flex-1 ${s.tab && !s.done ? 'cursor-pointer' : ''}`}
+                      onClick={() => { if (s.tab && !s.done) setActiveTab(s.tab) }}>
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                        s.done ? 'bg-green-500 text-white' : s.n === (nextStep?.n ?? 0) ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-500'
+                      }`}>{s.done ? '✓' : s.n}</div>
+                      <span className={`text-xs hidden sm:inline ${s.done ? 'text-green-700 line-through' : s.n === (nextStep?.n ?? 0) ? 'text-blue-700 font-medium' : 'text-gray-400'}`}>{s.label}</span>
+                    </div>
+                    {i < steps.length - 1 && <div className={`h-0.5 flex-1 mx-1 ${s.done ? 'bg-green-400' : 'bg-gray-200'}`} />}
+                  </div>
+                ))}
+              </div>
+              {nextStep?.tab && (
+                <button onClick={() => setActiveTab(nextStep.tab!)} className="mt-3 text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">
+                  Go to {nextStep.label} →
+                </button>
+              )}
+            </div>
+          )
+        })()
+      )}
+
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-200 flex-wrap">
         {([
@@ -1931,6 +2443,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
         ] as const).map(t => (
           <button
             key={t.key}
+            data-testid={`tab-${t.key}`}
             onClick={() => setActiveTab(t.key as Tab)}
             className={`px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors ${
               activeTab === t.key
@@ -1949,15 +2462,18 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       {activeTab === 'overview' && (
         <div className="space-y-5">
 
+          <LoadErrorBanner sectionKey="stats"   onRetry={loadStats} />
+          <LoadErrorBanner sectionKey="passout" onRetry={loadPassout} />
+
           {/* ── Action Required ── */}
           {(() => {
-            const actions: Array<{ msg: string; tab: Tab; color: string }> = []
+            const actions: Array<{ msg: string; tab: Tab; color: string; subView?: 'online' }> = []
             if (pendingPayments.length > 0)
-              actions.push({ msg: `${pendingPayments.length} online payment${pendingPayments.length > 1 ? 's' : ''} waiting for your verification`, tab: 'pending' as const, color: 'text-red-700 bg-red-50 border-red-200' })
+              actions.push({ msg: `${pendingPayments.length} online payment${pendingPayments.length > 1 ? 's' : ''} waiting for your verification`, tab: 'collect' as const, subView: 'online', color: 'text-red-700 bg-red-50 border-red-200' })
             if (stats && stats.summary.overdue_count > 20)
-              actions.push({ msg: `${stats.summary.overdue_count} overdue entries — follow up with parents`, tab: 'ledger' as const, color: 'text-orange-700 bg-orange-50 border-orange-200' })
+              actions.push({ msg: `${stats.summary.overdue_count} overdue entries — follow up with parents`, tab: 'collect' as const, color: 'text-orange-700 bg-orange-50 border-orange-200' })
             if (stats && stats.summary.defaulters_count > 0)
-              actions.push({ msg: `${stats.summary.defaulters_count} students have made zero payment this year`, tab: 'ledger' as const, color: 'text-amber-700 bg-amber-50 border-amber-200' })
+              actions.push({ msg: `${stats.summary.defaulters_count} students have made zero payment this year`, tab: 'collect' as const, color: 'text-amber-700 bg-amber-50 border-amber-200' })
             // Warn if the immediately preceding year (older, higher index since array is DESC) is not closed
             if (academicYears.length > 1) {
               const idx = academicYears.indexOf(academicYear)
@@ -1976,7 +2492,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <div key={i} className="flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50">
                       <p className="text-sm text-gray-700">{a.msg}</p>
                       <button
-                        onClick={() => setActiveTab(a.tab)}
+                        onClick={() => { setActiveTab(a.tab); if (a.subView === 'online') setCollectionView('online') }}
                         className="text-xs font-semibold text-blue-600 hover:text-blue-800 ml-4 flex-shrink-0"
                       >
                         View →
@@ -2005,7 +2521,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 {[
                   { label: 'Total Billed',  value: stats.summary.total_due,                                                                    sub: `${stats.summary.total_students} students`,           border: 'border-gray-100',   text: 'text-gray-900',   sub_color: 'text-gray-400' },
                   { label: 'Collected',     value: stats.summary.total_collected,    sub: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}% of net demand`, border: 'border-green-100',  text: 'text-green-700',  sub_color: 'text-green-500' },
-                  { label: 'Waived',        value: stats.summary.total_waived,                                                                  sub: `${stats.summary.waived_count} entries waived`,       border: 'border-purple-100', text: 'text-purple-700', sub_color: 'text-purple-400' },
+                  { label: 'Waived',        value: stats.summary.discretionary_waived ?? stats.summary.total_waived,                            sub: `${stats.summary.waived_count} entries waived`,       border: 'border-purple-100', text: 'text-purple-700', sub_color: 'text-purple-400' },
                   { label: 'Outstanding',   value: stats.summary.total_outstanding,                                                             sub: `${stats.summary.overdue_count} overdue entries`,     border: 'border-red-100',    text: 'text-red-600',    sub_color: 'text-red-400' },
                   { label: 'Zero Payers',   value: stats.summary.defaulters_count,                                                              sub: 'students with no payment or waiver',                 border: 'border-orange-100', text: 'text-orange-600', sub_color: 'text-orange-400', isCount: true },
                 ].map(card => (
@@ -2049,12 +2565,16 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               {/* ── Class-wise Analysis ── */}
               {gradeStats.length > 0 && (() => {
                 const label = (g: GradeStat) => g.section ? `${g.grade}-${g.section}` : `Grade ${g.grade}`
-                const withRate = gradeStats.map(g => ({ ...g, rate: pct(Number(g.total_collected), Number(g.total_due)), label: label(g) }))
+                // Net of waivers — matches the Reports tab's class-wise collection % and the
+                // overall progress bar above, so the same data doesn't show two different
+                // percentages on different screens.
+                const withRate = gradeStats.map(g => ({ ...g, rate: pct(Number(g.total_collected), Number(g.total_due) - Number(g.total_waived ?? 0)), label: label(g) }))
                 const ranked = [...withRate].filter(g => Number(g.total_due) > 0).sort((a, b) => b.rate - a.rate)
                 const best = ranked[0]
                 const worst = ranked[ranked.length - 1]
                 const totDue = gradeStats.reduce((s, g) => s + Number(g.total_due), 0)
                 const totCol = gradeStats.reduce((s, g) => s + Number(g.total_collected), 0)
+                const totWaivedAll = gradeStats.reduce((s, g) => s + Number(g.total_waived ?? 0), 0)
                 const totStu = gradeStats.reduce((s, g) => s + Number(g.students), 0)
                 const totDef = gradeStats.reduce((s, g) => s + Number(g.defaulter_students || 0), 0)
                 return (
@@ -2094,7 +2614,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         <p className="text-xs text-gray-400">collected</p>
                       </div>
                       <div className="bg-amber-50 border border-amber-100 rounded-lg px-3 py-2.5">
-                        <p className="text-[10px] text-amber-600 uppercase font-semibold tracking-wide">Defaulters</p>
+                        <p className="text-[10px] text-amber-600 uppercase font-semibold tracking-wide">Pending Payments</p>
                         <p className="text-sm font-bold text-amber-700 mt-0.5">{totDef} <span className="text-xs font-normal text-amber-500">of {totStu}</span></p>
                         <p className="text-xs text-amber-500">students owe</p>
                       </div>
@@ -2157,7 +2677,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                             <td className="pt-2.5 text-right text-green-700">{fmt(totCol)}</td>
                             <td className="pt-2.5 text-right text-red-700">{fmt(gradeStats.reduce((s, g) => s + Number(g.outstanding), 0))}</td>
                             <td className="pt-2.5 pl-4">
-                              <span className="text-xs font-bold text-blue-600">{pct(totCol, totDue)}% overall</span>
+                              <span className="text-xs font-bold text-blue-600">{pct(totCol, totDue - totWaivedAll)}% overall</span>
                             </td>
                           </tr>
                         </tfoot>
@@ -2179,7 +2699,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <div className="space-y-4">
                       {stats.by_category.map(cat => {
                         const collected = Number(cat.total_collected)
-                        const due = Number(cat.total_due)
+                        const due = Number(cat.total_due) - Number(cat.total_waived ?? 0)
                         const p = pct(collected, due)
                         const color = p >= 80 ? 'bg-green-500' : p >= 50 ? 'bg-yellow-400' : 'bg-red-400'
                         return (
@@ -2197,9 +2717,14 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                             <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
                               <div className={`${color} h-full rounded-full transition-all`} style={{ width: `${p}%` }} />
                             </div>
-                            {cat.overdue_count > 0 && (
-                              <p className="text-[10px] text-red-500 mt-0.5">{cat.overdue_count} overdue entries</p>
-                            )}
+                            <div className="flex items-center gap-3 mt-0.5">
+                              {cat.total_outstanding != null && cat.total_outstanding > 0 && (
+                                <p className="text-[10px] text-red-500">Outstanding: {fmt(cat.total_outstanding)}</p>
+                              )}
+                              {cat.overdue_count > 0 && (
+                                <p className="text-[10px] text-orange-500">{cat.overdue_count} overdue</p>
+                              )}
+                            </div>
                           </div>
                         )
                       })}
@@ -2207,15 +2732,15 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   )}
                 </div>
 
-                {/* Right column: Top Defaulters + Recent Payments */}
+                {/* Right column: Highest Pending + Recent Payments */}
                 <div className="space-y-4">
 
-                  {/* Top Defaulters */}
+                  {/* Highest Pending */}
                   <div className="bg-white rounded-xl border border-gray-100 p-5">
                     <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-semibold text-gray-700">Top Defaulters</h3>
+                      <h3 className="text-sm font-semibold text-gray-700">Highest Pending</h3>
                       <button
-                        onClick={() => setActiveTab('ledger')}
+                        onClick={() => setActiveTab('collect')}
                         className="text-xs text-blue-600 hover:text-blue-800"
                       >
                         View all →
@@ -2226,7 +2751,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
                           <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                         </div>
-                        <p className="text-sm text-green-600 font-medium">No defaulters — great!</p>
+                        <p className="text-sm text-green-600 font-medium">No pending payments — great!</p>
                       </div>
                     ) : (
                       <div className="space-y-3">
@@ -2295,6 +2820,78 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       </div>
                     </div>
                   )}
+
+                  {/* Passout Students Pending Bills */}
+                  {passoutData && passoutData.summary.passout_students > 0 && (
+                    <div className="bg-white rounded-xl border border-indigo-100 p-5">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <h3 className="text-sm font-semibold text-indigo-700">Passout Students — Pending Bills</h3>
+                          <p className="text-xs text-gray-400 mt-0.5">{passoutData.summary.passout_students} student{passoutData.summary.passout_students > 1 ? 's' : ''} · open ledger</p>
+                        </div>
+                        <button
+                          onClick={loadPassout}
+                          disabled={passoutLoading}
+                          className="text-xs text-indigo-600 hover:text-indigo-800"
+                        >
+                          {passoutLoading ? '…' : '↻ Refresh'}
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-4 gap-2 mb-3">
+                        <div className="bg-indigo-50 rounded-lg px-3 py-2 text-center">
+                          <p className="text-xs text-indigo-500 mb-0.5">Outstanding</p>
+                          <p className="text-sm font-bold text-indigo-700">{fmt(passoutData.summary.total_outstanding)}</p>
+                        </div>
+                        <div className="bg-green-50 rounded-lg px-3 py-2 text-center">
+                          <p className="text-xs text-green-500 mb-0.5">Collected</p>
+                          <p className="text-sm font-bold text-green-700">{fmt(passoutData.summary.total_collected)}</p>
+                        </div>
+                        {passoutData.summary.total_waived > 0 && (
+                          <div className="bg-purple-50 rounded-lg px-3 py-2 text-center">
+                            <p className="text-xs text-purple-500 mb-0.5">Waived</p>
+                            <p className="text-sm font-bold text-purple-700">{fmt(passoutData.summary.total_waived)}</p>
+                          </div>
+                        )}
+                        <div className={`bg-gray-50 rounded-lg px-3 py-2 text-center ${passoutData.summary.total_waived > 0 ? '' : 'col-span-2'}`}>
+                          <p className="text-xs text-gray-400 mb-0.5">Net Pending</p>
+                          <p className="text-sm font-bold text-gray-700">{fmt(passoutData.summary.total_outstanding - passoutData.summary.total_collected)}</p>
+                        </div>
+                      </div>
+                      {passoutData.students.length > 0 && (
+                        <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                          {passoutData.students.map(s => (
+                            <div key={s.student_id} className="flex items-center justify-between py-1 gap-2">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-medium text-gray-800 truncate">{s.student_name}</p>
+                                <p className="text-[10px] text-gray-400">Gr.{s.grade}{s.section} · Batch {s.passout_year}</p>
+                              </div>
+                              <p className="text-xs font-bold text-red-600 flex-shrink-0">{fmt(s.outstanding)}</p>
+                              <button
+                                data-testid={`btn-passout-collect-${s.student_id}`}
+                                onClick={() => collectPassoutStudent(s)}
+                                disabled={passoutCollectLoading === s.student_id}
+                                className="flex-shrink-0 text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded font-medium hover:bg-indigo-700 disabled:opacity-50">
+                                {passoutCollectLoading === s.student_id ? '…' : 'Collect'}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {passoutData.recent_collections.length > 0 && (
+                        <div className="mt-3 border-t border-gray-100 pt-3">
+                          <p className="text-xs font-semibold text-gray-500 mb-2">Recent Collections</p>
+                          <div className="space-y-1.5">
+                            {passoutData.recent_collections.slice(0, 3).map(c => (
+                              <div key={c.id} className="flex items-center justify-between">
+                                <p className="text-xs text-gray-600 truncate flex-1">{c.student_name} · {c.period_label}</p>
+                                <p className="text-xs font-bold text-green-600 flex-shrink-0 ml-2">{fmt(c.amount)}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </>
@@ -2321,6 +2918,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       {/* ═══ FEE PLAN ════════════════════════════════════════════════════════════ */}
       {activeTab === 'setup' && (
         <div className="space-y-5">
+
+          <LoadErrorBanner sectionKey="setup" onRetry={loadSetup} />
 
           {setupLoading && (
             <div className="space-y-4 animate-pulse">
@@ -2454,7 +3053,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <button onClick={() => setShowAmendLog(p => !p)} className="text-xs text-amber-700 border border-amber-300 px-3 py-1.5 rounded-lg hover:bg-amber-100">
                     {showAmendLog ? 'Hide' : 'View'} Amendments ({amendments.length})
                   </button>
-                  <button onClick={unlockStructure} disabled={lockingStructure} className="text-xs text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50 disabled:opacity-50">
+                  <button data-testid="btn-unlock-plan" onClick={unlockStructure} disabled={lockingStructure} className="text-xs text-red-600 border border-red-200 px-3 py-1.5 rounded-lg hover:bg-red-50 disabled:opacity-50">
                     {lockingStructure ? 'Unlocking…' : 'Unlock'}
                   </button>
                 </div>
@@ -2509,11 +3108,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               )}
               {!structureLock && (
                 <>
-                  <button onClick={() => { setShowAddFee(true); setAddFeeStep(1) }}
+                  <button data-testid="btn-add-fee-head" onClick={() => { setShowAddFee(true); setAddFeeStep(1) }}
                     className="text-sm border border-blue-200 text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-lg font-medium">
                     + Add Fee Head
                   </button>
-                  <button onClick={generateLedger}
+                  <button data-testid="btn-generate-bills" onClick={generateLedger}
                     disabled={generatingLedger || categories.length === 0 || !fixedAmountsComplete()}
                     title={!fixedAmountsComplete() ? `Set amounts for all fixed fees first${fixedFeesMissingAmounts().length ? ': ' + fixedFeesMissingAmounts().join(', ') : ''}` : 'Generate bills for all students'}
                     className="text-sm bg-green-600 text-white hover:bg-green-700 px-4 py-2 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed">
@@ -2559,7 +3158,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <select value={vgGrade} onChange={e => { setVgGrade(e.target.value); setVgStudents([]); setVgCategories([]); setVgMsg('') }}
                     className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
                     <option value="">Select grade…</option>
-                    {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                    {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                   </select>
                   <select value={vgSection} onChange={e => setVgSection(e.target.value)}
                     className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
@@ -2678,7 +3277,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 const generated = feeBillsGenerated(cat)
                 const catStat = stats?.by_category.find(c => c.category_name === cat.name)
                 const collected = catStat ? Number(catStat.total_collected) : 0
-                const due = catStat ? Number(catStat.total_due) : 0
+                const due = catStat ? Number(catStat.total_due) - Number(catStat.total_waived ?? 0) : 0
                 const collPct = pct(collected, due)
                 return (
                   <div key={cat.id} className={`bg-white rounded-xl border p-5 shadow-sm ${!cat.is_active ? 'border-gray-200 opacity-60' : 'border-gray-200'}`}>
@@ -2749,6 +3348,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       <div className="mt-3 bg-indigo-50 rounded-lg p-2 text-[10px] max-h-40 overflow-y-auto">
                         <p className="font-semibold text-indigo-700 mb-1 uppercase tracking-wide">Amount Change History</p>
                         {structHistLoading ? <p className="text-indigo-400">Loading…</p> :
+                          structHistError ? <p className="text-red-500 text-[10px]">{structHistError}</p> :
                           !(structHistories[cat.id]?.length) ? <p className="text-gray-400 italic">No changes recorded yet.</p> : (
                           <div className="space-y-1">
                             {structHistories[cat.id].map(h => (
@@ -2777,7 +3377,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                 onChange={e => { setApplGrade(e.target.value); setApplStudents([]); setApplCategories([]); setApplAmounts({}); setApplMsg('') }}
                                 className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
                                 <option value="">Select grade…</option>
-                                {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                                {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                               </select>
                               <button onClick={() => loadApplicability(applGrade)} disabled={!applGrade || applLoading}
                                 className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
@@ -2821,10 +3421,12 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                 </div>
                                 <div className="flex items-center justify-between">
                                   {applMsg && <span className={`text-xs ${applMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{applMsg}</span>}
-                                  <button onClick={saveApplicability} disabled={applSaving}
-                                    className="ml-auto text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg font-medium disabled:opacity-50">
-                                    {applSaving ? 'Saving…' : 'Save Amounts'}
-                                  </button>
+                                  <div className="ml-auto flex items-center gap-3">
+                                    <button onClick={() => saveApplicability()} disabled={applSaving}
+                                      className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg font-medium disabled:opacity-50">
+                                      {applSaving ? 'Saving…' : 'Save Amounts'}
+                                    </button>
+                                  </div>
                                 </div>
                                 <p className="text-[10px] text-gray-400">Tip: leave blank = student is not charged this fee.</p>
                               </>
@@ -2870,7 +3472,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                               <div className="grid grid-cols-4 gap-2">
                                 {GRADES.map(g => (
                                   <div key={g} className="flex items-center gap-1">
-                                    <span className="text-[10px] text-gray-400 w-8">Gr.{g}</span>
+                                    <span className="text-[10px] text-gray-400 w-10 shrink-0">{/^\d+$/.test(g) ? `Gr.${g}` : g}</span>
                                     <input type="number" min="0" placeholder="0"
                                       value={editAmounts[`${cat.id}_${g}`] || ''}
                                       onKeyDown={blockNonNumericKeys}
@@ -2908,7 +3510,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     : 'Generate bills first — the plan can only be locked after bills are generated.'}
                 </p>
               </div>
-              <button onClick={lockStructure} disabled={lockingStructure || !anyBillsGenerated()}
+              <button data-testid="btn-lock-plan" onClick={lockStructure} disabled={lockingStructure || !anyBillsGenerated()}
                 title={!anyBillsGenerated() ? 'Generate bills before locking' : 'Lock the fee plan'}
                 className="text-sm bg-blue-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
                 {lockingStructure ? 'Locking…' : '🔒 Lock Fee Plan'}
@@ -2921,44 +3523,37 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-4" onClick={() => setShowGenerateConfirm(false)}>
               <div className="bg-white rounded-2xl w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
                 <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-                  <p className="font-semibold text-gray-800">Confirm Due Dates Before Generating Bills</p>
+                  <p className="font-semibold text-gray-800">Confirm — Generate Bills</p>
                   <button onClick={() => setShowGenerateConfirm(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
                 </div>
                 <div className="p-5 space-y-3">
-                  <p className="text-sm text-gray-500">Bills will be generated with the following due dates. Check each one before continuing.</p>
+                  <p className="text-sm text-gray-500">
+                    Bills will be generated for academic year <strong>{academicYear}</strong>. Every fee head, regardless of frequency,
+                    becomes due on the academic year&apos;s end date.
+                  </p>
                   <div className="border border-gray-100 rounded-xl overflow-hidden">
                     <table className="w-full text-sm">
                       <thead className="bg-gray-50">
                         <tr className="text-xs text-gray-500 border-b border-gray-100">
                           <th className="text-left px-4 py-2 font-semibold">Fee Head</th>
                           <th className="text-left px-4 py-2 font-semibold">Frequency</th>
-                          <th className="text-center px-4 py-2 font-semibold">Due Day</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
-                        {categories.filter(c => c.is_active).map(cat => {
-                          const day = parseInt(dueDays[cat.id] || '10') || 10
-                          const isDefault = !dueDays[cat.id] || dueDays[cat.id] === '10'
-                          return (
-                            <tr key={cat.id} className="hover:bg-gray-50/60">
-                              <td className="px-4 py-2.5 font-medium text-gray-800">{cat.name}</td>
-                              <td className="px-4 py-2.5 text-gray-500">{FREQ_LABEL[cat.frequency]}</td>
-                              <td className="px-4 py-2.5 text-center">
-                                <span className={`font-semibold ${isDefault ? 'text-amber-600' : 'text-gray-800'}`}>{day}</span>
-                                {isDefault && <span className="ml-1 text-[10px] text-amber-500">(default)</span>}
-                              </td>
-                            </tr>
-                          )
-                        })}
+                        {categories.filter(c => c.is_active).map(cat => (
+                          <tr key={cat.id} className="hover:bg-gray-50/60">
+                            <td className="px-4 py-2.5 font-medium text-gray-800">{cat.name}</td>
+                            <td className="px-4 py-2.5 text-gray-500">{FREQ_LABEL[cat.frequency]}</td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>
-                  <p className="text-xs text-amber-600">⚠ Dates marked <strong>default</strong> were not explicitly set. Go back to change them on the fee head card before generating.</p>
                 </div>
                 <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between">
                   <button onClick={() => setShowGenerateConfirm(false)}
                     className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2">
-                    ← Go back & edit
+                    ← Go back
                   </button>
                   <button onClick={confirmGenerateLedger}
                     className="text-sm bg-green-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-green-700">
@@ -2996,6 +3591,12 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         <label className="text-xs font-medium text-gray-600">Or type a custom name</label>
                         <input type="text" placeholder="e.g. Smart Class Fee" value={newCategory.name}
                           onChange={e => setNewCategory(p => ({ ...p, name: e.target.value }))}
+                          className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-gray-600">Description <span className="text-gray-400">(optional)</span></label>
+                        <input type="text" placeholder="e.g. Monthly smart class infrastructure charge" value={newCategory.description}
+                          onChange={e => setNewCategory(p => ({ ...p, description: e.target.value }))}
                           className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500" />
                       </div>
                     </div>
@@ -3072,6 +3673,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       {activeTab === 'collect' && (
         <div className="space-y-4">
 
+          <LoadErrorBanner sectionKey="ledger" onRetry={loadLedger} />
+
           {/* Online payments alert banner — only when feature enabled */}
           {hasOnlinePayments && pendingPayments.length > 0 && collectionView !== 'online' && (
             <button onClick={() => setCollectionView('online')}
@@ -3089,7 +3692,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             {([
               { key: 'counter',    label: 'Daily Counter', show: true },
               { key: 'online',     label: pendingPayments.length > 0 ? `Online (${pendingPayments.length})` : 'Online', show: hasOnlinePayments },
-              { key: 'defaulters', label: 'Defaulters',    show: true },
+              { key: 'defaulters', label: 'Pending Payments', show: true },
               { key: 'dayclose',   label: 'Day Close',     show: true },
             ] as const).filter(v => v.show).map(v => (
               <button key={v.key} onClick={() => setCollectionView(v.key)}
@@ -3106,15 +3709,15 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             <div className="space-y-4">
               {/* Filters */}
               <div className="flex items-center gap-3">
-                <input type="text" placeholder="Search name, roll, grade, phone, parent…" value={ledgerSearch}
+                <input data-testid="input-ledger-search" type="text" placeholder="Search name, roll, grade, phone, parent…" value={ledgerSearch}
                   onChange={e => setLedgerSearch(e.target.value)}
                   className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                <select value={ledgerGrade} onChange={e => setLedgerGrade(e.target.value)}
+                <select data-testid="select-ledger-grade" value={ledgerGrade} onChange={e => setLedgerGrade(e.target.value)}
                   className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
                   <option value="">All Grades</option>
-                  {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                  {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                 </select>
-                <button onClick={loadLedger} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Refresh</button>
+                <button data-testid="btn-refresh-ledger" onClick={loadLedger} className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">Refresh</button>
                 <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download
                   className="text-sm border border-gray-200 text-gray-600 px-3 py-2 rounded-lg hover:bg-gray-50">Export</a>
               </div>
@@ -3149,7 +3752,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 grid grid-cols-12 gap-2 text-xs font-semibold text-gray-500">
                     <div className="col-span-4">Student</div>
                     <div className="col-span-2 text-right">Billed</div>
-                    <div className="col-span-2 text-right">Paid</div>
+                    <div className="col-span-2 text-right">Paid+Waived</div>
                     <div className="col-span-2 text-right">Outstanding</div>
                     <div className="col-span-2 text-center">Action</div>
                   </div>
@@ -3252,6 +3855,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                   <div className="relative mt-1">
                                     <span className="absolute left-3 top-2.5 text-gray-400 text-sm">₹</span>
                                     <input
+                                      data-testid="input-pay-amount"
                                       type="number" min="0" step="0.01" inputMode="decimal" value={payAmount}
                                       onKeyDown={blockNonNumericKeys}
                                       onChange={e => setPayAmount(sanitizeMoney(e.target.value))}
@@ -3316,6 +3920,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                 )}
                                 <div className="flex gap-2">
                                   <button
+                                    data-testid="btn-review-payment"
                                     onClick={() => setShowPayConfirm(true)}
                                     disabled={collectLoading || !(parseFloat(payAmount) > 0) || parseFloat(payAmount) > checkedTotal + 0.01}
                                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2">
@@ -3323,6 +3928,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                     Review & Confirm
                                   </button>
                                   <button
+                                    data-testid="btn-grant-waiver"
                                     onClick={() => { setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
                                     className="px-3 py-2.5 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium whitespace-nowrap">
                                     Grant Waiver
@@ -3383,7 +3989,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                         <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Payments</p>
                                         <button onClick={() => { setShowCounterHistory(false); setCancelPmtId(null) }} className="text-xs text-gray-400 hover:text-gray-600">Hide</button>
                                       </div>
-                                      {counterPmtLoading ? (
+                                      {counterPmtError ? (
+                                        <p className="text-xs text-red-500">{counterPmtError}</p>
+                                      ) : counterPmtLoading ? (
                                         <p className="text-xs text-gray-400">Loading…</p>
                                       ) : counterPayments.length === 0 ? (
                                         <p className="text-xs text-gray-400 italic">No payments recorded yet.</p>
@@ -3405,8 +4013,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                                   cancelPmtId === p.id ? (
                                                     <button onClick={() => setCancelPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
                                                   ) : (
-                                                    <button onClick={() => openCancel(p.id)}
-                                                      className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
+                                                    <button onClick={() => {
+                                                      const le = row.all_entries.find(e => e.id === p.ledger_id)
+                                                      openCancel(p.id, Number(p.amount), le ? Number(le.balance) : 0)
+                                                    }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
                                                   )
                                                 ) : (
                                                   <span className="text-[10px] bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-medium capitalize">{p.payment_status.replace('_', ' ')}</span>
@@ -3428,10 +4038,16 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                                       : <>⚠ Cancels {p.receipt_number} ({fmt(p.amount)}) and issues a new receipt for <strong>{correctAmount ? fmt(parseFloat(correctAmount) || 0) : '₹0'}</strong>. Net change: {fmt((parseFloat(correctAmount) || 0) - Number(p.amount))}.</>}
                                                   </div>
                                                   {cancelMode === 'correct' && (
-                                                    <input type="number" min="0" inputMode="decimal" value={correctAmount}
-                                                      onKeyDown={blockNonNumericKeys}
-                                                      onChange={e => setCorrectAmount(sanitizeMoney(e.target.value))}
-                                                      placeholder="Correct amount" className="w-40 border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                                    <div>
+                                                      <input type="number" min="0" inputMode="decimal" value={correctAmount}
+                                                        onKeyDown={blockNonNumericKeys}
+                                                        onChange={e => setCorrectAmount(sanitizeMoney(e.target.value))}
+                                                        placeholder={cancelPmtMaxCorrect !== null ? `max ₹${cancelPmtMaxCorrect.toFixed(2)}` : 'Correct amount'}
+                                                        className={`w-44 border rounded-lg px-3 py-1.5 text-sm ${cancelPmtMaxCorrect !== null && parseFloat(correctAmount) > cancelPmtMaxCorrect + 0.01 ? 'border-red-400 bg-red-50' : 'border-gray-200'}`} />
+                                                      {cancelPmtMaxCorrect !== null && parseFloat(correctAmount) > cancelPmtMaxCorrect + 0.01 && (
+                                                        <p className="text-xs text-red-600 mt-1">Exceeds max of ₹{cancelPmtMaxCorrect.toFixed(2)}</p>
+                                                      )}
+                                                    </div>
                                                   )}
                                                   <input type="text" placeholder="Reason (required — recorded in audit log)"
                                                     value={cancelReason} onChange={e => setCancelReason(e.target.value)}
@@ -3471,7 +4087,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-base font-semibold text-gray-800">Online Payments — Pending Verification</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Check your school's UPI/bank statement, then approve or reject. Parent is notified by email.</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Check your school&apos;s UPI/bank statement, then approve or reject. Parent is notified by email.</p>
                 </div>
                 <button onClick={loadPending} className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Refresh</button>
               </div>
@@ -3480,9 +4096,12 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <div className={`text-sm px-4 py-3 rounded-lg ${verifyMsg.startsWith('✓') ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-600 border border-red-200'}`}>{verifyMsg}</div>
               )}
 
+              {pendingError && (
+                <div className="text-sm px-4 py-3 rounded-lg bg-red-50 text-red-600 border border-red-200">{pendingError}</div>
+              )}
               {pendingLoading ? (
                 <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-sm text-gray-400">Loading…</div>
-              ) : pendingPayments.length === 0 ? (
+              ) : !pendingError && pendingPayments.length === 0 ? (
                 <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
                   <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <svg className="w-7 h-7 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
@@ -3537,20 +4156,20 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             </div>
           )}
 
-          {/* ─── DEFAULTERS ─── */}
+          {/* ─── PENDING PAYMENTS ─── */}
           {collectionView === 'defaulters' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold text-gray-800">Defaulters — Outstanding Dues</h3>
+                <h3 className="text-base font-semibold text-gray-800">Pending Payments — Outstanding Dues</h3>
                 <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&outstanding=1`} download
-                  className="text-sm border border-red-200 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50">Export Defaulters</a>
+                  className="text-sm border border-red-200 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50">Export Pending Payments</a>
               </div>
               {(() => {
                 const defaulters = studentRows.filter(r => r.outstanding > 0).sort((a, b) => b.outstanding - a.outstanding)
                 if (ledgerLoading) return <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-sm text-gray-400">Loading…</div>
                 if (defaulters.length === 0) return (
                   <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-                    <p className="text-green-700 font-medium">No defaulters — all dues cleared!</p>
+                    <p className="text-green-700 font-medium">No pending payments — all dues cleared!</p>
                   </div>
                 )
                 return (
@@ -3604,7 +4223,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-base font-semibold text-gray-800">Day Close — End of Day Reconciliation</h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Review the day's collections and verify cash in hand. Closing locks the day's record.</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Review the day&apos;s collections and verify cash in hand. Closing locks the day&apos;s record.</p>
                 </div>
                 <input type="date" value={dayCloseDate} onChange={e => setDayCloseDate(e.target.value)}
                   className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white" />
@@ -3652,6 +4271,42 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     )}
                   </div>
 
+                  {/* Transaction list */}
+                  {dayCloseData.payments.length > 0 && (
+                    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                      <div className="px-4 py-3 border-b border-gray-100">
+                        <p className="text-sm font-semibold text-gray-700">Transactions ({dayCloseData.payments.length})</p>
+                      </div>
+                      <div className="overflow-x-auto max-h-64">
+                        <table className="w-full text-sm">
+                          <thead className="sticky top-0 bg-gray-50">
+                            <tr className="text-xs text-gray-500 border-b border-gray-100">
+                              <th className="text-left px-4 py-2 font-semibold">Receipt</th>
+                              <th className="text-left px-4 py-2 font-semibold">Student</th>
+                              <th className="text-left px-4 py-2 font-semibold">Fee Head</th>
+                              <th className="text-left px-4 py-2 font-semibold">Mode</th>
+                              <th className="text-right px-4 py-2 font-semibold">Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dayCloseData.payments.map(p => (
+                              <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
+                                <td className="px-4 py-2 font-mono text-xs text-indigo-600">{p.receipt_number}</td>
+                                <td className="px-4 py-2 text-gray-700">
+                                  {p.student_name}
+                                  <span className="text-gray-400 ml-1 text-xs">{p.grade}{p.section ? `-${p.section}` : ''}</span>
+                                </td>
+                                <td className="px-4 py-2 text-gray-500 text-xs">{p.fee_head_name} · {p.period_label}</td>
+                                <td className="px-4 py-2 capitalize text-gray-500 text-xs">{p.payment_mode}</td>
+                                <td className="px-4 py-2 text-right font-medium text-gray-800">{fmt(p.amount)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Cash verification */}
                   <div className="bg-white rounded-xl border border-gray-100 p-5">
                     <p className="text-sm font-semibold text-gray-700 mb-3">Cash Verification</p>
@@ -3690,9 +4345,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <p className={`text-sm font-medium ${dayCloseMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{dayCloseMsg}</p>
                   )}
                   <div className="flex justify-end gap-2">
-                    <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=payments&date=${new Date().toISOString().slice(0,10)}`} download
+                    <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=payments&date=${dayCloseDate}`} download
                       className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">Export Day Report</a>
-                    <button onClick={submitDayClose} disabled={dayCloseSubmitting || dayCloseData.receipts.count === 0}
+                    <button data-testid="btn-submit-dayclose" onClick={submitDayClose} disabled={dayCloseSubmitting || dayCloseData.receipts.count === 0}
                       className="text-sm bg-blue-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
                       {dayCloseSubmitting ? 'Closing…' : dayCloseData.already_closed ? 'Update Day Close' : 'Submit Day Close'}
                     </button>
@@ -3721,7 +4376,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <select value={pbGrade} onChange={e => setPbGrade(e.target.value)}
                   className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
                   <option value="">All Grades</option>
-                  {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                  {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                 </select>
                 <input type="text" placeholder="Search name or roll number…" value={pbSearch}
                   onChange={e => setPbSearch(e.target.value)}
@@ -3743,7 +4398,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <div className="px-3 py-2 bg-gray-50 border-b border-gray-100 text-xs text-gray-500">{list.length} student{list.length !== 1 ? 's' : ''}</div>
                     <div className="divide-y divide-gray-50 max-h-[480px] overflow-y-auto">
                       {list.map(s => (
-                        <button key={s.id} onClick={() => loadPassbook(s.id)}
+                        <button key={s.id} data-testid={`student-row-${s.id}`} onClick={() => loadPassbook(s.id)}
                           className="w-full text-left px-4 py-2.5 hover:bg-blue-50 flex items-center justify-between group">
                           <span className="flex items-center gap-2">
                             <span className="text-sm font-medium text-gray-800">{s.name}</span>
@@ -3790,10 +4445,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 </div>
                 <div className="grid grid-cols-4 gap-3 mt-4">
                   {[
-                    { l: 'Total Billed', v: pbData.summary.total_billed, c: 'text-gray-900' },
-                    { l: 'Paid',         v: pbData.summary.total_paid,    c: 'text-green-700' },
-                    { l: 'Waived',       v: pbData.summary.total_waived,  c: 'text-purple-700' },
-                    { l: 'Outstanding',  v: pbData.summary.outstanding,   c: 'text-red-600' },
+                    { l: 'Total Billed', v: pbSummary.total_billed, c: 'text-gray-900' },
+                    { l: 'Paid',         v: pbSummary.total_paid,    c: 'text-green-700' },
+                    { l: 'Waived',       v: pbSummary.discretionary_waived,  c: 'text-purple-700' },
+                    { l: 'Outstanding',  v: pbSummary.outstanding,   c: 'text-red-600' },
                   ].map(s => (
                     <div key={s.l} className="bg-gray-50 rounded-lg px-3 py-2.5 text-center">
                       <p className="text-xs text-gray-400">{s.l}</p>
@@ -3806,9 +4461,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               {/* Section switcher */}
               <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
                 {([
-                  { key: 'bills',    label: `Bills (${pbData.ledger.length})` },
-                  { key: 'payments', label: `Payments (${pbData.payments.length})` },
-                  { key: 'waivers',  label: `Waivers (${pbData.waivers.length})` },
+                  { key: 'bills',    label: `Bills (${pbYearOnly.reduce((s, y) => s + y.entries.length, 0)})` },
+                  { key: 'payments', label: `Payments (${pbPayments.length})` },
+                  { key: 'waivers',  label: `Waivers (${pbWaivers.length})` },
                   { key: 'timeline', label: 'Full Timeline' },
                 ] as const).map(v => (
                   <button key={v.key} onClick={() => setPbSection(v.key)}
@@ -3835,9 +4490,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     </div>
                   )}
 
-                  {pbData.ledger_by_year.length === 0 ? (
-                    <div className="bg-white rounded-xl border border-gray-100 p-8 text-center text-sm text-gray-400">No bills recorded.</div>
-                  ) : pbData.ledger_by_year.map(yearGroup => (
+                  {pbYearOnly.length === 0 ? (
+                    <div className="bg-white rounded-xl border border-gray-100 p-8 text-center text-sm text-gray-400">No bills recorded for {academicYear}.</div>
+                  ) : pbYearOnly.map(yearGroup => (
                     <div key={yearGroup.academic_year} className={`bg-white rounded-xl border overflow-hidden ${yearGroup.is_current ? 'border-blue-200' : 'border-gray-100'}`}>
                       {/* Year header */}
                       <div className={`px-4 py-2.5 flex items-center justify-between ${yearGroup.is_current ? 'bg-blue-50 border-b border-blue-100' : 'bg-gray-50 border-b border-gray-100'}`}>
@@ -3858,7 +4513,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         <div className="flex items-center gap-4 text-xs text-gray-500">
                           <span>Billed <span className="font-semibold text-gray-700">{fmt(yearGroup.total_billed)}</span></span>
                           <span>Paid <span className="font-semibold text-green-700">{fmt(yearGroup.total_paid)}</span></span>
-                          {yearGroup.total_waived > 0 && <span>Waived <span className="font-semibold text-purple-700">{fmt(yearGroup.total_waived)}</span></span>}
+                          {(yearGroup.discretionary_waived ?? yearGroup.total_waived) > 0 && <span>Waived <span className="font-semibold text-purple-700">{fmt(yearGroup.discretionary_waived ?? yearGroup.total_waived)}</span></span>}
                           <span>Outstanding <span className={`font-bold ${yearGroup.outstanding > 0 ? 'text-red-600' : 'text-green-600'}`}>{fmt(yearGroup.outstanding)}</span></span>
                         </div>
                       </div>
@@ -3878,7 +4533,12 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         <tbody>
                           {yearGroup.entries.map(e => (
                             <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
-                              <td className="px-4 py-2.5 text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></td>
+                              <td className="px-4 py-2.5 text-gray-700">
+                                {e.category_name} · <span className="text-gray-400">{e.period_label}</span>
+                                {e.source_academic_year && (
+                                  <span className="ml-2 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-medium" title={`Carried from ${e.source_academic_year}`}>↩ {e.source_academic_year}</span>
+                                )}
+                              </td>
                               <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
                               <td className="px-4 py-2.5 text-right text-green-600">{fmt(e.amount_paid)}</td>
                               <td className="px-4 py-2.5 text-right text-purple-600">{Number(e.waiver_amount) > 0 ? fmt(e.waiver_amount) : '—'}</td>
@@ -3919,8 +4579,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     </div>
                   )}
                   <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                    {pbData.payments.length === 0 ? (
-                      <p className="text-sm text-gray-400 p-8 text-center">No payments recorded.</p>
+                    {pbPayments.length === 0 ? (
+                      <p className="text-sm text-gray-400 p-8 text-center">No payments recorded for {academicYear}.</p>
                     ) : (
                       <table className="w-full text-sm">
                         <thead>
@@ -3934,7 +4594,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                           </tr>
                         </thead>
                         <tbody>
-                          {pbData.payments.map(p => {
+                          {pbPayments.map(p => {
                             const isCancelled = p.payment_status === 'cancelled'
                             return (
                             <Fragment key={p.id}>
@@ -3951,8 +4611,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                     ) : cancelPmtId === p.id ? (
                                       <button onClick={() => setCancelPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
                                     ) : (
-                                      <button onClick={() => openCancel(p.id)}
-                                        className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
+                                      <button onClick={() => {
+                                        const le = pbData?.ledger.find(e => e.id === p.ledger_id)
+                                        openCancel(p.id, Number(p.amount), le ? Number(le.balance) : 0)
+                                      }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
                                     )}
                                     <button onClick={() => printPassbookReceipt(p)} title="Print receipt"
                                       className="text-xs border border-indigo-200 text-indigo-600 px-2.5 py-1 rounded-lg hover:bg-indigo-50">🖨 Print</button>
@@ -3981,11 +4643,16 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
 
                                       {cancelMode === 'correct' && (
                                         <div>
-                                          <label className="text-xs font-medium text-gray-600">Corrected amount (₹)</label>
+                                          <label className="text-xs font-medium text-gray-600">
+                                            Corrected amount (₹){cancelPmtMaxCorrect !== null && <span className="ml-1 text-gray-400 font-normal">— max ₹{cancelPmtMaxCorrect.toFixed(2)}</span>}
+                                          </label>
                                           <input type="number" min="0" inputMode="decimal" value={correctAmount}
                                             onKeyDown={blockNonNumericKeys}
                                             onChange={e => setCorrectAmount(sanitizeMoney(e.target.value))}
-                                            className="mt-1 w-40 border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                            className={`mt-1 w-40 border rounded-lg px-3 py-1.5 text-sm ${cancelPmtMaxCorrect !== null && parseFloat(correctAmount) > cancelPmtMaxCorrect + 0.01 ? 'border-red-400 bg-red-50' : 'border-gray-200'}`} />
+                                          {cancelPmtMaxCorrect !== null && parseFloat(correctAmount) > cancelPmtMaxCorrect + 0.01 && (
+                                            <p className="text-xs text-red-600 mt-1">Exceeds maximum of ₹{cancelPmtMaxCorrect.toFixed(2)}</p>
+                                          )}
                                         </div>
                                       )}
                                       <div>
@@ -4018,30 +4685,57 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               {/* Waivers */}
               {pbSection === 'waivers' && (
                 <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                  {pbData.waivers.length === 0 ? (
-                    <p className="text-sm text-gray-400 p-8 text-center">No waivers granted to this student.</p>
+                  <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-gray-700">Waivers — {academicYear}</p>
+                    <button onClick={async () => {
+                      if (!pbShowRevoked && pbData && pbRevokedWaivers.length === 0) {
+                        const r = await fetch(`/api/fees/waivers?school_id=${schoolId}&student_id=${pbData.student.id}&show_revoked=1`)
+                        if (r.ok) setPbRevokedWaivers((await r.json()).filter((w: PassbookData['waivers'][0]) => w.is_revoked))
+                      }
+                      setPbShowRevoked(v => !v)
+                    }}
+                      className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-colors ${pbShowRevoked ? 'bg-red-50 text-red-600 border-red-200' : 'text-gray-400 border-gray-200 hover:bg-gray-50'}`}>
+                      {pbShowRevoked ? 'Hide Revoked' : 'Show Revoked'}
+                    </button>
+                  </div>
+                  {(() => {
+                    const activeWaivers = pbWaivers
+                    const allWaivers = pbShowRevoked
+                      ? [...activeWaivers, ...pbRevokedWaivers.filter(r => r.bill_year === academicYear)].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                      : activeWaivers
+                    return allWaivers.length === 0 ? (
+                    <p className="text-sm text-gray-400 p-8 text-center">No waivers granted for {academicYear}.</p>
                   ) : (
                     <div className="divide-y divide-gray-50">
-                      {pbData.waivers.map(w => (
-                        <div key={w.id} className="px-4 py-3">
+                      {allWaivers.map(w => (
+                        <div key={w.id} className={`px-4 py-3 ${w.is_revoked ? 'opacity-50' : ''}`}>
                           <div className="flex items-center justify-between">
                             <div>
-                              <p className="text-sm font-medium text-gray-800">{w.fee_head_name} · {w.period_label}</p>
+                              <div className="flex items-center gap-2">
+                                <p className={`text-sm font-medium ${w.is_revoked ? 'line-through text-gray-400' : 'text-gray-800'}`}>{w.fee_head_name} · {w.period_label}</p>
+                                {w.is_revoked && <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">Revoked</span>}
+                              </div>
                               <p className="text-xs text-gray-400">{w.reason}{w.granted_by_name ? ` · by ${w.granted_by_name}` : ''} · {fmtDate(w.created_at)}</p>
+                              {w.is_revoked && w.revoke_reason && (
+                                <p className="text-xs text-red-400 mt-0.5">Revoke reason: {w.revoke_reason}{w.revoked_by ? ` · by ${w.revoked_by}` : ''}</p>
+                              )}
                             </div>
                             <div className="flex items-center gap-3">
                               <div className="text-right">
-                                <p className="text-sm font-bold text-purple-700">−{fmt(w.waiver_amount)}</p>
+                                <p className={`text-sm font-bold ${w.is_revoked ? 'text-gray-300 line-through' : 'text-purple-700'}`}>−{fmt(w.waiver_amount)}</p>
                                 <p className="text-[10px] text-purple-400 capitalize">{w.waiver_type.replace('_', ' ')}</p>
                               </div>
-                              {cancelWaiverId === w.id
+                              {!w.is_revoked && (cancelWaiverId === w.id
                                 ? <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
-                                : <button onClick={() => { setCancelWaiverId(w.id); setCancelWaiverMode('revoke'); setCancelWaiverReason(''); setCorrectWaiverAmount(String(w.waiver_amount)); setCancelWaiverMsg('') }}
-                                    className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
-                              }
+                                : <button onClick={() => {
+                                    const le = pbData?.ledger.find(e => e.id === w.ledger_id)
+                                    setCancelWaiverId(w.id); setCancelWaiverMode('revoke'); setCancelWaiverReason(''); setCorrectWaiverAmount(String(w.waiver_amount)); setCancelWaiverMsg('')
+                                    setWaiverMaxCorrect(le ? Number(le.balance) + Number(w.waiver_amount) : null)
+                                  }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
+                              )}
                             </div>
                           </div>
-                          {cancelWaiverId === w.id && (
+                          {!w.is_revoked && cancelWaiverId === w.id && (
                             <div className="mt-3 pt-3 border-t border-amber-100 bg-amber-50 -mx-4 -mb-3 px-4 pb-3 rounded-b-xl space-y-2">
                               <div className="flex gap-2">
                                 <button onClick={() => setCancelWaiverMode('revoke')}
@@ -4055,9 +4749,14 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                   : <>Revokes current waiver and records a new one with the corrected amount.</>}
                               </div>
                               {cancelWaiverMode === 'correct' && (
-                                <input type="number" min="0" value={correctWaiverAmount} onChange={e => setCorrectWaiverAmount(e.target.value)}
-                                  placeholder="Corrected waiver amount (₹)"
-                                  className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                <div>
+                                  <input type="number" min="0" value={correctWaiverAmount} onChange={e => setCorrectWaiverAmount(e.target.value)}
+                                    placeholder={waiverMaxCorrect !== null ? `max ₹${waiverMaxCorrect.toFixed(2)}` : 'Corrected waiver amount (₹)'}
+                                    className={`w-full border rounded-lg px-3 py-1.5 text-sm ${waiverMaxCorrect !== null && parseFloat(correctWaiverAmount) > waiverMaxCorrect + 0.01 ? 'border-red-400 bg-red-50' : 'border-gray-200'}`} />
+                                  {waiverMaxCorrect !== null && parseFloat(correctWaiverAmount) > waiverMaxCorrect + 0.01 && (
+                                    <p className="text-xs text-red-600 mt-1">Exceeds max of ₹{waiverMaxCorrect.toFixed(2)}</p>
+                                  )}
+                                </div>
                               )}
                               <input type="text" value={cancelWaiverReason} onChange={e => setCancelWaiverReason(e.target.value)}
                                 placeholder="Reason (required)" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
@@ -4074,7 +4773,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         </div>
                       ))}
                     </div>
-                  )}
+                  )
+                  })()}
                 </div>
               )}
 
@@ -4085,8 +4785,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <p className="text-sm font-semibold text-gray-700">Complete Financial Timeline</p>
                     <p className="text-xs text-gray-400">Every charge, payment, waiver and revision — chronological with running balance.</p>
                   </div>
-                  {pbData.timeline.length === 0 ? (
-                    <p className="text-sm text-gray-400 p-8 text-center">No activity yet.</p>
+                  {pbTimeline.length === 0 ? (
+                    <p className="text-sm text-gray-400 p-8 text-center">No activity for {academicYear}.</p>
                   ) : (
                     <table className="w-full text-sm">
                       <thead>
@@ -4100,7 +4800,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         </tr>
                       </thead>
                       <tbody>
-                        {pbData.timeline.map((t, i) => {
+                        {pbTimeline.map((t, i) => {
                           const icon = t.type === 'bill' ? '📌' : t.type === 'payment' ? '💸' : t.type === 'waiver' ? '🎁' : '✏️'
                           return (
                             <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
@@ -4129,6 +4829,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       {/* ═══ REPORTS ═════════════════════════════════════════════════════════════ */}
       {activeTab === 'reports' && (
         <div className="space-y-5">
+          <LoadErrorBanner sectionKey="reports" onRetry={loadReports} />
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-base font-semibold text-gray-800">Annual Financial Report — {academicYear}</h2>
@@ -4155,7 +4856,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <>
                   <select value={arGrade} onChange={e => setArGrade(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
                     <option value="">Grade…</option>
-                    {GRADES.map(g => <option key={g} value={g}>Grade {g}</option>)}
+                    {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
                   </select>
                   <select value={arSection} onChange={e => setArSection(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
                     <option value="all">All sections</option>
@@ -4214,7 +4915,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   { label: 'Total Billed',      val: reportData.balance.total_billed,      color: 'text-gray-800',  bg: 'bg-white' },
                   { label: 'Total Collected',   val: reportData.balance.total_collected,   color: 'text-green-700', bg: 'bg-green-50' },
                   { label: 'Total Outstanding', val: reportData.balance.total_outstanding, color: 'text-red-600',   bg: 'bg-red-50' },
-                  { label: 'Total Waived',      val: reportData.balance.total_waived,      color: 'text-purple-700',bg: 'bg-purple-50' },
+                  { label: 'Total Waived',      val: reportData.balance.discretionary_waived ?? reportData.balance.total_waived, color: 'text-purple-700',bg: 'bg-purple-50' },
                 ].map(s => (
                   <div key={s.label} className={`${s.bg} rounded-xl border border-gray-100 p-4`}>
                     <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">{s.label}</p>
@@ -4231,17 +4932,21 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <div className="space-y-3">
                     {reportData.byGrade.map(g => {
                       const netDemand = Number(g.total_due) - Number(g.total_waived ?? 0)
-                      const pct = netDemand > 0 ? Math.round((Number(g.total_collected) / netDemand) * 100) : 0
+                      const gradePct = pct(Number(g.total_collected), netDemand)
                       const cls = g.section ? `${g.grade}-${g.section}` : `Grade ${g.grade}`
+                      const discWaived = Number(g.discretionary_waived ?? 0)
                       return (
                         <div key={cls}>
                           <div className="flex justify-between text-xs mb-1">
                             <span className="font-medium text-gray-700">{cls} <span className="text-gray-400">({g.students} students)</span></span>
-                            <span className="text-gray-500">{fmt(g.total_collected)} / {fmt(g.total_due)} <span className="font-bold text-blue-600">{pct}%</span></span>
+                            <span className="text-gray-500">{fmt(g.total_collected)} / {fmt(g.total_due)} <span className="font-bold text-blue-600">{gradePct}%</span></span>
                           </div>
                           <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                            <div className="bg-blue-500 h-full rounded-full" style={{ width: `${pct}%` }} />
+                            <div className="bg-blue-500 h-full rounded-full" style={{ width: `${gradePct}%` }} />
                           </div>
+                          {discWaived > 0 && (
+                            <p className="text-[10px] text-purple-500 mt-0.5">Waived: {fmt(discWaived)}</p>
+                          )}
                         </div>
                       )
                     })}
@@ -4265,6 +4970,46 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 </div>
               </div>
 
+              {/* Month-wise billed vs collected */}
+              {reportData.monthly.length > 0 && (
+                <div className="bg-white rounded-xl border border-gray-100 p-5">
+                  <h3 className="text-sm font-semibold text-gray-700 mb-4">Month-wise Billed vs Collected</h3>
+                  <div className="space-y-2">
+                    {(() => {
+                      const dueMap = new Map(reportData.monthlyDue.map(d => [d.month, d.billed]))
+                      const allMonths = Array.from(new Set([...reportData.monthly.map(m => m.month), ...reportData.monthlyDue.map(d => d.month)])).sort()
+                      const maxVal = Math.max(...allMonths.map(m => Math.max(dueMap.get(m) ?? 0, reportData.monthly.find(x => x.month === m)?.collected ?? 0)), 1)
+                      return allMonths.map(month => {
+                        const billed    = dueMap.get(month) ?? 0
+                        const collected = reportData.monthly.find(x => x.month === month)?.collected ?? 0
+                        const billedPct    = Math.round((billed    / maxVal) * 100)
+                        const collectedPct = Math.round((collected / maxVal) * 100)
+                        const label = new Date(month + '-01').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' })
+                        return (
+                          <div key={month}>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="font-medium text-gray-600">{label}</span>
+                              <span className="text-gray-400">
+                                Billed <span className="text-gray-700 font-semibold">{fmt(billed)}</span>
+                                {' · '}Collected <span className="text-green-600 font-semibold">{fmt(collected)}</span>
+                              </span>
+                            </div>
+                            <div className="relative h-2 bg-gray-100 rounded-full overflow-hidden">
+                              <div className="absolute inset-y-0 left-0 bg-blue-100 rounded-full" style={{ width: `${billedPct}%` }} />
+                              <div className="absolute inset-y-0 left-0 bg-green-500 rounded-full" style={{ width: `${collectedPct}%` }} />
+                            </div>
+                          </div>
+                        )
+                      })
+                    })()}
+                  </div>
+                  <div className="flex gap-4 mt-3 text-xs text-gray-400">
+                    <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-full bg-blue-100 inline-block" />Billed</span>
+                    <span className="flex items-center gap-1"><span className="w-3 h-2 rounded-full bg-green-500 inline-block" />Collected</span>
+                  </div>
+                </div>
+              )}
+
               {/* Category-wise summary */}
               <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                 <div className="px-4 py-3 border-b border-gray-100">
@@ -4287,11 +5032,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         <tr key={c.category_name} className="border-b border-gray-50 hover:bg-gray-50">
                           <td className="px-4 py-2.5">
                             <p className="font-medium text-gray-800">{c.category_name}</p>
-                            <p className="text-xs text-gray-400 capitalize">{c.frequency}</p>
+                            <p className="text-xs text-gray-400 capitalize">{c.frequency} · {c.students} students</p>
                           </td>
                           <td className="px-4 py-2.5 text-right text-gray-700">{fmt(c.total_due)}</td>
                           <td className="px-4 py-2.5 text-right text-green-600 font-medium">{fmt(c.total_collected)}</td>
-                          <td className="px-4 py-2.5 text-right text-purple-600">{Number(c.total_waived) > 0 ? fmt(c.total_waived) : '—'}</td>
+                          <td className="px-4 py-2.5 text-right text-purple-600">{Number(c.discretionary_waived ?? c.total_waived) > 0 ? fmt(c.discretionary_waived ?? c.total_waived) : '—'}</td>
                           <td className="px-4 py-2.5 text-right text-red-600 font-medium">{fmt(c.outstanding)}</td>
                           <td className="px-4 py-2.5 text-center text-xs">
                             <span className="text-green-600">{c.paid_count} paid</span>
@@ -4305,14 +5050,14 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 </div>
               </div>
 
-              {/* Defaulters list */}
+              {/* Pending payments list */}
               {reportData.defaulters.length > 0 && (
                 <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                   <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                    <p className="text-sm font-semibold text-gray-700">Fee Defaulters — {reportData.defaulters.length} students</p>
+                    <p className="text-sm font-semibold text-gray-700">Pending Payments — {reportData.defaulters.length} students</p>
                     <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&outstanding=1`} download
                       className="text-xs text-red-600 border border-red-200 px-2.5 py-1 rounded-lg hover:bg-red-50">
-                      Export Defaulters
+                      Export Pending Payments
                     </a>
                   </div>
                   <div className="overflow-x-auto max-h-80">
@@ -4358,17 +5103,23 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <a href={`/api/fees/audit-log?school_id=${schoolId}&academic_year=${academicYear}&format=csv&generated_by=${encodeURIComponent(adminName || 'Admin')}&limit=5000`} download
                       className="text-sm border border-gray-800 text-gray-800 px-3 py-1.5 rounded-lg hover:bg-gray-100">⬇ Export Audit (CSV)</a>
                     {!showAuditLog ? (
-                      <button onClick={loadAuditLog}
+                      <button onClick={() => loadAuditLog()}
                         className="text-sm bg-gray-800 text-white px-4 py-1.5 rounded-lg hover:bg-gray-900">View Audit Log</button>
                     ) : (
-                      <button onClick={() => setShowAuditLog(false)}
-                        className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Hide</button>
+                      <>
+                        <button onClick={() => loadAuditLog(true)}
+                          className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Refresh</button>
+                        <button onClick={() => setShowAuditLog(false)}
+                          className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Hide</button>
+                      </>
                     )}
                   </div>
                 </div>
                 {showAuditLog && (
                   auditLoading ? (
                     <p className="text-sm text-gray-400 p-8 text-center">Loading audit log…</p>
+                  ) : auditLogError ? (
+                    <p className="text-sm text-red-500 p-8 text-center">{auditLogError}</p>
                   ) : auditLog.length === 0 ? (
                     <p className="text-sm text-gray-400 p-8 text-center">No financial actions recorded yet.</p>
                   ) : (
@@ -4421,6 +5172,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       {/* ═══ YEAR-END ════════════════════════════════════════════════════════════ */}
       {activeTab === 'yearend' && (
         <div className="space-y-5">
+          <LoadErrorBanner sectionKey="yearend" onRetry={loadYearEnd} />
           <div>
             <h2 className="text-base font-semibold text-gray-800">Year-End Closure — {academicYear}</h2>
             <p className="text-xs text-gray-400 mt-0.5">Review the year, then roll over to the next — all dues carry forward automatically, students are promoted.</p>
@@ -4444,15 +5196,30 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         Closed by {yearEnd.close_record?.closed_by} on {yearEnd.close_record ? fmtDate(yearEnd.close_record.closed_at) : ''}
                         {' '}· Ledger and payments are locked.
                       </p>
+                      {yearEnd.close_record && (
+                        <div className="flex gap-4 mt-2 text-xs text-gray-400">
+                          {(yearEnd.close_record.carried_count ?? 0) > 0 && (
+                            <span>{yearEnd.close_record.carried_count} carried ({fmt(yearEnd.close_record.carried_total)})</span>
+                          )}
+                          {(yearEnd.close_record.writeoff_count ?? 0) > 0 && (
+                            <span>{yearEnd.close_record.writeoff_count} written off ({fmt(yearEnd.close_record.writeoff_total)})</span>
+                          )}
+                          {(yearEnd.close_record.open_count ?? 0) > 0 && (
+                            <span>{yearEnd.close_record.open_count} left open ({fmt(yearEnd.close_record.open_total)})</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <button onClick={reopenYear} disabled={yeClosing}
+                      <button onClick={() => { setReopenReason(''); setShowReopenModal(true) }} disabled={yeClosing}
                         className="text-xs bg-gray-600 text-white px-3 py-1.5 rounded-lg hover:bg-gray-500 disabled:opacity-50">
                         {yeClosing ? 'Working…' : 'Reopen'}
                       </button>
-                      <button onClick={() => alert('Go to Year Rollover in the sidebar to start the new academic year.')}
+                      <button
+                        data-testid="btn-start-rollover"
+                        onClick={() => { setShowRolloverModal(true); setRolloverPreview(null); setRolloverMsg(''); setRolloverDone(false) }}
                         className="text-xs bg-green-500 text-white px-4 py-1.5 rounded-lg font-semibold hover:bg-green-400">
-                        Go to Year Rollover →
+                        Start Year Rollover →
                       </button>
                     </div>
                   </div>
@@ -4466,7 +5233,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   {[
                     { l: 'Total Billed', v: yearEnd.summary.total_billed,    c: 'text-gray-900' },
                     { l: 'Collected',    v: yearEnd.summary.total_collected, c: 'text-green-700' },
-                    { l: 'Waived',       v: yearEnd.summary.total_waived,    c: 'text-purple-700' },
+                    { l: 'Waived',       v: yearEnd.summary.discretionary_waived ?? yearEnd.summary.total_waived, c: 'text-purple-700' },
                     { l: 'Still Unpaid', v: yearEnd.summary.total_unpaid,    c: 'text-red-600' },
                   ].map(s => (
                     <div key={s.l} className="bg-gray-50 rounded-lg px-3 py-2.5 text-center">
@@ -4541,10 +5308,18 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                     <button
                                       onClick={() => !s.is_leaver && setYeDecisions(p => ({ ...p, [s.student_id]: 'carry' }))}
                                       disabled={s.is_leaver}
-                                      title={s.is_leaver ? 'Leavers cannot carry forward' : ''}
+                                      title={s.is_leaver ? 'Leavers cannot carry forward — use Passout instead' : ''}
                                       className={`px-2.5 py-1 transition-colors ${decision === 'carry' ? 'bg-blue-600 text-white' : s.is_leaver ? 'bg-gray-50 text-gray-300 cursor-not-allowed' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
                                       Carry
                                     </button>
+                                    {s.is_leaver && (
+                                      <button
+                                        onClick={() => setYeDecisions(p => ({ ...p, [s.student_id]: 'passout' }))}
+                                        title="Move unpaid dues to the always-open Passout Ledger"
+                                        className={`px-2.5 py-1 border-l border-gray-200 transition-colors ${decision === 'passout' ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-500 hover:bg-indigo-50'}`}>
+                                        Passout
+                                      </button>
+                                    )}
                                     <button
                                       onClick={() => setYeDecisions(p => ({ ...p, [s.student_id]: 'writeoff' }))}
                                       className={`px-2.5 py-1 border-l border-gray-200 transition-colors ${decision === 'writeoff' ? 'bg-red-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
@@ -4582,7 +5357,33 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         {yearEnd.target_year_exists ? (
                           <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">✓ Year exists</span>
                         ) : (
-                          <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">⚠ Not created yet — create it in Academic Calendar before carrying forward</span>
+                          <>
+                            <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">⚠ Not created yet</span>
+                            <button
+                              disabled={yeCreateYearLoading}
+                              onClick={async () => {
+                                const startNum = parseInt(startYearLabel(yearEnd.target_year))
+                                if (isNaN(startNum)) return
+                                setYeCreateYearLoading(true)
+                                const r = await fetch('/api/academic-years', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    school_id: schoolId,
+                                    label: yearEnd.target_year,
+                                    start_date: `${startNum}-04-01`,
+                                    end_date: `${startNum + 1}-03-31`,
+                                    set_current: false,
+                                  }),
+                                })
+                                setYeCreateYearLoading(false)
+                                if (r.ok) { loadYearEnd(); loadAcademicYears() }
+                                else { const e = await r.json(); setYeMsg(e.error || 'Failed to create year') }
+                              }}
+                              className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
+                              {yeCreateYearLoading ? 'Creating…' : `Create ${yearEnd.target_year}`}
+                            </button>
+                          </>
                         )}
                       </div>
                       <p className="text-xs text-gray-400">
@@ -4590,13 +5391,19 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       </p>
                       {yeMsg && <p className={`text-sm font-medium ${yeMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{yeMsg}</p>}
                       {(() => {
-                        const carryN = Object.values(yeDecisions).filter(d => d === 'carry').length
-                        const woN = Object.values(yeDecisions).filter(d => d === 'writeoff').length
-                        const total = carryN + woN
+                        const carryN   = Object.values(yeDecisions).filter(d => d === 'carry').length
+                        const woN      = Object.values(yeDecisions).filter(d => d === 'writeoff').length
+                        const passoutN = Object.values(yeDecisions).filter(d => d === 'passout').length
+                        const total    = carryN + woN + passoutN
+                        const label    = [
+                          carryN   > 0 ? `${carryN} carry`   : '',
+                          woN      > 0 ? `${woN} write off`  : '',
+                          passoutN > 0 ? `${passoutN} passout` : '',
+                        ].filter(Boolean).join(', ')
                         return (
-                          <button onClick={applyYearEndDecisions} disabled={yeProcessing || total === 0}
+                          <button data-testid="btn-apply-yearend" onClick={() => setShowApplyConfirm(true)} disabled={yeProcessing || total === 0}
                             className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
-                            {yeProcessing ? 'Applying…' : `Apply Decisions (${carryN} carry, ${woN} write off)`}
+                            {yeProcessing ? 'Applying…' : `Apply Decisions (${label || 'none'})`}
                           </button>
                         )
                       })()}
@@ -4618,7 +5425,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">🖨 Print Statement</button>
                     <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download
                       className="text-sm border border-gray-200 text-gray-600 px-4 py-2 rounded-lg hover:bg-gray-50">Export Ledger CSV</a>
-                    <button onClick={() => { if (window.confirm(`Close ${academicYear}? This locks the year. You can reopen later if needed.`)) closeYear() }}
+                    <button data-testid="btn-close-year" onClick={() => setShowCloseConfirm(true)}
                       disabled={yeClosing}
                       className="ml-auto text-sm bg-gray-800 text-white px-5 py-2 rounded-lg font-medium hover:bg-gray-900 disabled:opacity-50">
                       {yeClosing ? 'Closing…' : `🔒 Close Financial Year ${academicYear}`}
@@ -4632,6 +5439,224 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       )}
 
 
+
+      {/* ══ Year Rollover Modal ═════════════════════════════════════════════════ */}
+      {showRolloverModal && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={e => { if (e.target === e.currentTarget && !rolloverLoading) setShowRolloverModal(false) }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-bold text-gray-900">Year Rollover — {academicYear}</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Creates next academic year and carries forward unpaid dues</p>
+              </div>
+              {!rolloverLoading && (
+                <button onClick={() => setShowRolloverModal(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+              )}
+            </div>
+
+            {!rolloverPreview && !rolloverDone && !rolloverMsg && (
+              <div className="space-y-3">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 space-y-1.5">
+                  <p className="font-semibold">What this does:</p>
+                  <ul className="list-disc list-inside space-y-1 text-xs">
+                    <li>Creates the next academic year and sets it as current</li>
+                    <li>Carries all remaining unpaid dues forward as &quot;Previous Year Dues&quot;</li>
+                    <li>Grade 12 students and leavers are excluded from auto-carry</li>
+                  </ul>
+                </div>
+                <p className="text-xs text-gray-500">This is irreversible. Make sure all year-end decisions (carry / write-off / passout) are applied first.</p>
+                <button
+                  data-testid="btn-rollover-preview"
+                  onClick={startRollover}
+                  disabled={rolloverLoading}
+                  className="w-full bg-green-600 text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-green-700 disabled:opacity-50">
+                  {rolloverLoading ? 'Checking…' : 'Check & Start Rollover'}
+                </button>
+              </div>
+            )}
+
+            {rolloverPreview && !rolloverDone && (
+              <div className="space-y-4">
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                  <p className="text-sm font-semibold text-blue-800 mb-1">Pending dues will be carried forward</p>
+                  <p className="text-xs text-blue-700">{rolloverPreview.pending_count} ledger entries · {fmt(rolloverPreview.pending_total)} will become &quot;Previous Year Dues&quot; in the new year</p>
+                </div>
+                <p className="text-xs text-gray-500">Confirm to proceed. This cannot be undone without reopening the year.</p>
+                {rolloverMsg && <p className="text-sm text-red-600">{rolloverMsg}</p>}
+                <div className="flex gap-2">
+                  <button onClick={() => { setRolloverPreview(null) }} disabled={rolloverLoading}
+                    className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50 disabled:opacity-50">
+                    Cancel
+                  </button>
+                  <button
+                    data-testid="btn-rollover-confirm"
+                    onClick={confirmRollover}
+                    disabled={rolloverLoading}
+                    className="flex-1 bg-green-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-green-700 disabled:opacity-50">
+                    {rolloverLoading ? 'Rolling over…' : `Confirm — Carry ${rolloverPreview.pending_count} entries`}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {(rolloverDone || (rolloverMsg && !rolloverPreview)) && (
+              <div className="space-y-4">
+                <p className={`text-sm font-medium ${rolloverMsg.startsWith('✓') ? 'text-green-700' : 'text-red-600'}`}>{rolloverMsg}</p>
+                {rolloverDone && (
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800">
+                    Rollover complete. The new academic year is now active. Go to the Setup tab to generate fee bills for the new year.
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <button onClick={() => setShowRolloverModal(false)}
+                    className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">
+                    Close
+                  </button>
+                  {rolloverDone && (
+                    <button onClick={() => { setShowRolloverModal(false); setActiveTab('setup' as Tab) }}
+                      className="flex-1 bg-blue-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-blue-700">
+                      Go to Setup →
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ Reopen Year Modal ════════════════════════════════════════════════════ */}
+      {showReopenModal && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowReopenModal(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div>
+              <p className="text-base font-bold text-gray-900">Reopen {academicYear}?</p>
+              <p className="text-xs text-gray-400 mt-1">This unlocks the year for edits. The reason is logged permanently.</p>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Reason (required)</label>
+              <input autoFocus type="text" value={reopenReason} onChange={e => setReopenReason(e.target.value)}
+                placeholder="e.g. Correction of waiver entry"
+                className="w-full mt-1 border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-400" />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setShowReopenModal(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
+              <button onClick={reopenYear} disabled={!reopenReason.trim() || yeClosing}
+                className="flex-1 bg-amber-500 text-white py-2 rounded-xl text-sm font-semibold hover:bg-amber-600 disabled:opacity-50">
+                {yeClosing ? 'Reopening…' : 'Confirm Reopen'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Close Year Confirm Modal ══════════════════════════════════════════════ */}
+      {showCloseConfirm && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowCloseConfirm(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div>
+              <p className="text-base font-bold text-gray-900">Close {academicYear}?</p>
+              <p className="text-sm text-gray-500 mt-1">This locks the year — no new payments or waivers can be added. You can reopen it later if needed.</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setShowCloseConfirm(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
+              <button onClick={() => { setShowCloseConfirm(false); closeYear() }} disabled={yeClosing}
+                className="flex-1 bg-gray-800 text-white py-2 rounded-xl text-sm font-semibold hover:bg-gray-700 disabled:opacity-50">
+                {yeClosing ? 'Closing…' : `Close ${academicYear}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Apply Year-End Decisions Confirm Modal ════════════════════════════════ */}
+      {showApplyConfirm && yearEnd && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={() => setShowApplyConfirm(false)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div>
+              <p className="text-base font-bold text-gray-900">Apply Year-End Decisions?</p>
+              <p className="text-xs text-gray-400 mt-1">This action modifies student ledgers and cannot be undone without reopening the year.</p>
+            </div>
+            <div className="bg-gray-50 rounded-xl px-4 py-3 space-y-1 text-sm">
+              {(() => {
+                const carryN   = Object.values(yeDecisions).filter(d => d === 'carry').length
+                const woN      = Object.values(yeDecisions).filter(d => d === 'writeoff').length
+                const passoutN = Object.values(yeDecisions).filter(d => d === 'passout').length
+                return <>
+                  {carryN   > 0 && <p className="text-blue-700"><strong>{carryN}</strong> student{carryN !== 1 ? 's' : ''} — carry dues to {yearEnd.target_year}</p>}
+                  {woN      > 0 && <p className="text-red-600"><strong>{woN}</strong> student{woN !== 1 ? 's' : ''} — write off outstanding dues</p>}
+                  {passoutN > 0 && <p className="text-indigo-700"><strong>{passoutN}</strong> student{passoutN !== 1 ? 's' : ''} — move to passout ledger</p>}
+                </>
+              })()}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setShowApplyConfirm(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">Cancel</button>
+              <button onClick={() => { setShowApplyConfirm(false); applyYearEndDecisions() }} disabled={yeProcessing}
+                className="flex-1 bg-blue-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
+                {yeProcessing ? 'Applying…' : 'Confirm & Apply'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ Deactivate Category Instead of Delete ═══════════════════════════════ */}
+      {deactivatePromptCatId !== null && (() => {
+        const cat = categories.find(c => c.id === deactivatePromptCatId)
+        return (
+          <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+            onClick={() => setDeactivatePromptCatId(null)}>
+            <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+              <div>
+                <p className="text-base font-bold text-gray-900">Cannot Delete — Fee Records Exist</p>
+                <p className="text-sm text-gray-500 mt-1">
+                  <span className="font-semibold">{cat?.name ?? 'This category'}</span> has fee history that must be preserved.
+                  You can deactivate it instead — it will be hidden from new bills but all existing records are kept.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button data-testid="deactivate-prompt-cancel" onClick={() => setDeactivatePromptCatId(null)}
+                  className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">
+                  Cancel
+                </button>
+                <button data-testid="deactivate-prompt-confirm" onClick={() => { setDeactivatePromptCatId(null); if (deactivatePromptCatId) deactivateCategory(deactivatePromptCatId, false) }}
+                  className="flex-1 bg-amber-500 text-white py-2 rounded-xl text-sm font-semibold hover:bg-amber-600">
+                  Deactivate Instead
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ══ Toggle Category Type Confirm ════════════════════════════════════════ */}
+      {toggleTypeConfirm && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={() => setToggleTypeConfirm(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <div>
+              <p className="text-base font-bold text-gray-900">Switch fee type?</p>
+              <p className="text-sm text-gray-500 mt-1">
+                Switch <span className="font-semibold">{toggleTypeConfirm.cat.name}</span> from{' '}
+                <span className="font-semibold">{toggleTypeConfirm.cat.category_type === 'fixed' ? 'Fixed' : 'Variable'}</span> to{' '}
+                <span className="font-semibold">{toggleTypeConfirm.newType === 'fixed' ? 'Fixed' : 'Variable'}</span>?
+                This only works if no bills have been generated for this fee yet.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button data-testid="toggle-type-cancel" onClick={() => setToggleTypeConfirm(null)}
+                className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">
+                Cancel
+              </button>
+              <button data-testid="toggle-type-confirm" onClick={confirmToggleCategoryType}
+                className="flex-1 bg-indigo-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-indigo-700">
+                Switch Type
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ══ Passbook Modal ══════════════════════════════════════════════════════ */}
       {showPassbookModal && (
@@ -4672,10 +5697,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             {pbData && (
               <div className="grid grid-cols-4 gap-3 px-5 py-3 bg-gray-50 border-b border-gray-100 flex-shrink-0">
                 {[
-                  { l: 'Total Billed', v: pbData.summary.total_billed, c: 'text-gray-800' },
-                  { l: 'Paid',         v: pbData.summary.total_paid,    c: 'text-green-700' },
-                  { l: 'Waived',       v: pbData.summary.total_waived,  c: 'text-purple-700' },
-                  { l: 'Outstanding',  v: pbData.summary.outstanding,   c: 'text-red-600' },
+                  { l: 'Total Billed', v: pbSummary.total_billed, c: 'text-gray-800' },
+                  { l: 'Paid',         v: pbSummary.total_paid,    c: 'text-green-700' },
+                  { l: 'Waived',       v: pbSummary.discretionary_waived,  c: 'text-purple-700' },
+                  { l: 'Outstanding',  v: pbSummary.outstanding,   c: 'text-red-600' },
                 ].map(s => (
                   <div key={s.l} className="text-center">
                     <p className="text-[10px] text-gray-400 uppercase tracking-wide">{s.l}</p>
@@ -4689,9 +5714,9 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             {pbData && (
               <div className="flex gap-1 px-5 py-2 border-b border-gray-100 bg-white flex-shrink-0">
                 {([
-                  { key: 'bills',    label: `Bills (${pbData.ledger.length})` },
-                  { key: 'payments', label: `Payments (${pbData.payments.length})` },
-                  { key: 'waivers',  label: `Waivers (${pbData.waivers.length})` },
+                  { key: 'bills',    label: `Bills (${pbYearOnly.reduce((s, y) => s + y.entries.length, 0)})` },
+                  { key: 'payments', label: `Payments (${pbPayments.length})` },
+                  { key: 'waivers',  label: `Waivers (${pbWaivers.length})` },
                   { key: 'timeline', label: 'Timeline' },
                 ] as const).map(v => (
                   <button key={v.key} onClick={() => setPbSection(v.key)}
@@ -4717,40 +5742,67 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 <>
                   {/* Bills */}
                   {pbSection === 'bills' && (
-                    <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                      {pbData.ledger.length === 0
-                        ? <p className="text-sm text-gray-400 p-8 text-center">No bills recorded.</p>
-                        : (
-                          <table className="w-full text-sm">
-                            <thead className="bg-gray-50 border-b border-gray-100">
-                              <tr>
-                                <th className="text-left px-4 py-2 font-semibold text-gray-500 text-xs">Fee</th>
-                                <th className="text-right px-4 py-2 font-semibold text-gray-500 text-xs">Billed</th>
-                                <th className="text-right px-4 py-2 font-semibold text-gray-500 text-xs">Paid</th>
-                                <th className="text-left px-4 py-2 font-semibold text-gray-500 text-xs">Status</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-50">
-                              {pbData.ledger.map(e => (
-                                <tr key={e.id} className="hover:bg-gray-50">
-                                  <td className="px-4 py-2.5 text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></td>
-                                  <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
-                                  <td className="px-4 py-2.5 text-right text-green-600">{fmt(e.amount_paid)}</td>
-                                  <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full capitalize font-medium ${STATUS_COLORS[e.status as keyof typeof STATUS_COLORS] || ''}`}>{e.status}</span></td>
+                    <div className="space-y-3">
+                      {pbData.prior_unresolved.length > 0 && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-3">
+                          <svg className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                          <div>
+                            <p className="text-xs font-semibold text-amber-700">Prior Year Dues Unresolved</p>
+                            <p className="text-xs text-amber-600 mt-0.5">
+                              {pbData.prior_unresolved.map(y => `${y.academic_year}: ${fmt(y.outstanding)} outstanding`).join(' · ')}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                      {!pbData || pbData.ledger_by_year.length === 0
+                        ? <div className="bg-white rounded-xl border border-gray-100 p-8 text-center text-sm text-gray-400">No bills recorded.</div>
+                        : pbData.ledger_by_year.map(yearGroup => (
+                          <div key={yearGroup.academic_year} className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                            <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                              <span className="text-xs font-bold text-gray-600">{yearGroup.academic_year}</span>
+                              <div className="flex gap-3 text-xs text-gray-400">
+                                <span>Billed <span className="font-semibold text-gray-700">{fmt(yearGroup.total_billed)}</span></span>
+                                <span>Paid <span className="font-semibold text-green-600">{fmt(yearGroup.total_paid)}</span></span>
+                                {yearGroup.outstanding > 0 && <span>Due <span className="font-semibold text-red-600">{fmt(yearGroup.outstanding)}</span></span>}
+                              </div>
+                            </div>
+                            <table className="w-full text-sm">
+                              <thead className="bg-gray-50 border-b border-gray-100">
+                                <tr>
+                                  <th className="text-left px-4 py-2 font-semibold text-gray-500 text-xs">Fee</th>
+                                  <th className="text-right px-4 py-2 font-semibold text-gray-500 text-xs">Billed</th>
+                                  <th className="text-right px-4 py-2 font-semibold text-gray-500 text-xs">Paid</th>
+                                  <th className="text-left px-4 py-2 font-semibold text-gray-500 text-xs">Status</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        )}
+                              </thead>
+                              <tbody className="divide-y divide-gray-50">
+                                {yearGroup.entries.map(e => (
+                                  <tr key={e.id} className="hover:bg-gray-50">
+                                    <td className="px-4 py-2.5 text-gray-700">
+                                      {e.category_name} · <span className="text-gray-400">{e.period_label}</span>
+                                      {e.source_academic_year && (
+                                        <span className="ml-2 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-medium" title={`Carried from ${e.source_academic_year}`}>↩ {e.source_academic_year}</span>
+                                      )}
+                                    </td>
+                                    <td className="px-4 py-2.5 text-right text-gray-700">{fmt(e.amount_due)}</td>
+                                    <td className="px-4 py-2.5 text-right text-green-600">{fmt(e.amount_paid)}</td>
+                                    <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full capitalize font-medium ${STATUS_COLORS[e.status as keyof typeof STATUS_COLORS] || ''}`}>{e.status}</span></td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ))
+                      }
                     </div>
                   )}
 
                   {/* Payments */}
                   {pbSection === 'payments' && (
                     <div className="space-y-3">
-                      {pbData.payments.length === 0
-                        ? <p className="text-sm text-gray-400 text-center py-8">No payments recorded.</p>
-                        : pbData.payments.map(p => {
+                      {pbPayments.length === 0
+                        ? <p className="text-sm text-gray-400 text-center py-8">No payments recorded for {academicYear}.</p>
+                        : pbPayments.map(p => {
                           const isCancelled = p.payment_status === 'cancelled'
                           return (
                             <Fragment key={p.id}>
@@ -4775,8 +5827,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                         className="text-xs border border-gray-200 text-gray-500 px-2.5 py-1 rounded-lg hover:bg-gray-50">🖨</button>
                                       {cancelPmtId === p.id
                                         ? <button onClick={() => setCancelPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600 px-2">Close</button>
-                                        : <button onClick={() => openCancel(p.id)}
-                                            className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
+                                        : <button onClick={() => {
+                                            const le = pbData?.ledger.find(e => e.id === p.ledger_id)
+                                            openCancel(p.id, Number(p.amount), le ? Number(le.balance) : 0)
+                                          }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
                                       }
                                     </div>
                                   )}
@@ -4824,10 +5878,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   {/* Waivers */}
                   {pbSection === 'waivers' && (
                     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                      {pbData.waivers.length === 0
-                        ? <p className="text-sm text-gray-400 p-8 text-center">No waivers granted.</p>
+                      {pbWaivers.length === 0
+                        ? <p className="text-sm text-gray-400 p-8 text-center">No waivers granted for {academicYear}.</p>
                         : <div className="divide-y divide-gray-50">
-                            {pbData.waivers.map(w => (
+                            {pbWaivers.map(w => (
                               <div key={w.id} className="px-4 py-3">
                                 <div className="flex items-center justify-between">
                                   <div>
@@ -4838,8 +5892,12 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                     <p className="text-sm font-bold text-purple-700">{fmt((w as { waiver_amount?: number }).waiver_amount || 0)}</p>
                                     {cancelWaiverId === w.id
                                       ? <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
-                                      : <button onClick={() => { setCancelWaiverId(w.id); setCancelWaiverMode('revoke'); setCancelWaiverReason(''); setCorrectWaiverAmount(String((w as { waiver_amount?: number }).waiver_amount || 0)); setCancelWaiverMsg('') }}
-                                          className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
+                                      : <button onClick={() => {
+                                          const ww = w as { id: number; ledger_id?: number; waiver_amount?: number }
+                                          const le = pbData?.ledger.find(e => e.id === ww.ledger_id)
+                                          setCancelWaiverId(ww.id); setCancelWaiverMode('revoke'); setCancelWaiverReason(''); setCorrectWaiverAmount(String(ww.waiver_amount || 0)); setCancelWaiverMsg('')
+                                          setWaiverMaxCorrect(le ? Number(le.balance) + Number(ww.waiver_amount || 0) : null)
+                                        }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
                                     }
                                   </div>
                                 </div>
@@ -4857,9 +5915,14 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                         : <>Revokes current waiver and records a new one with the corrected amount.</>}
                                     </div>
                                     {cancelWaiverMode === 'correct' && (
-                                      <input type="number" min="0" value={correctWaiverAmount} onChange={e => setCorrectWaiverAmount(e.target.value)}
-                                        placeholder="Corrected waiver amount (₹)"
-                                        className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
+                                      <div>
+                                        <input type="number" min="0" value={correctWaiverAmount} onChange={e => setCorrectWaiverAmount(e.target.value)}
+                                          placeholder={waiverMaxCorrect !== null ? `max ₹${waiverMaxCorrect.toFixed(2)}` : 'Corrected waiver amount (₹)'}
+                                          className={`w-full border rounded-lg px-3 py-1.5 text-sm ${waiverMaxCorrect !== null && parseFloat(correctWaiverAmount) > waiverMaxCorrect + 0.01 ? 'border-red-400 bg-red-50' : 'border-gray-200'}`} />
+                                        {waiverMaxCorrect !== null && parseFloat(correctWaiverAmount) > waiverMaxCorrect + 0.01 && (
+                                          <p className="text-xs text-red-600 mt-1">Exceeds max of ₹{waiverMaxCorrect.toFixed(2)}</p>
+                                        )}
+                                      </div>
                                     )}
                                     <input type="text" value={cancelWaiverReason} onChange={e => setCancelWaiverReason(e.target.value)}
                                       placeholder="Reason (required)" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
@@ -4883,10 +5946,10 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   {/* Timeline */}
                   {pbSection === 'timeline' && (
                     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                      {pbData.timeline.length === 0
-                        ? <p className="text-sm text-gray-400 p-8 text-center">No activity recorded.</p>
+                      {pbTimeline.length === 0
+                        ? <p className="text-sm text-gray-400 p-8 text-center">No activity for {academicYear}.</p>
                         : <div className="divide-y divide-gray-50">
-                            {pbData.timeline.map((t, i) => (
+                            {pbTimeline.map((t, i) => (
                               <div key={i} className="px-4 py-3 flex items-start gap-3">
                                 <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${(t as { type?: string }).type === 'payment' ? 'bg-green-500' : (t as { type?: string }).type === 'waiver' ? 'bg-purple-500' : 'bg-gray-300'}`} />
                                 <div className="min-w-0 flex-1">
@@ -5005,6 +6068,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                 ← Edit
               </button>
               <button
+                data-testid="btn-confirm-payment"
                 onClick={() => { setShowPayConfirm(false); submitCounterPayment() }}
                 disabled={collectLoading}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-blue-200">
@@ -5165,6 +6229,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   Cancel
                 </button>
                 <button
+                  data-testid="btn-submit-waiver"
                   onClick={submitWaiver}
                   disabled={waiverLoading || !waiverForm.reason.trim() || (waiverForm.waiver_type !== 'full' && !waiverForm.waiver_value)}
                   className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-purple-200">

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { gradeOrderSql } from '@/lib/grades'
+import { withWatchline } from '@/lib/logger'
 
 // GET /api/fees/stats?school_id=X&academic_year=2025-26
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
     const school_id    = p.get('school_id')
@@ -68,14 +70,31 @@ export async function GET(req: NextRequest) {
         [school_id, academic_year]
       )
 
-      // Collection by category
+      // Discretionary waivers only (scholarships, hardship, etc.) — excludes the
+      // 'carry_forward' waiver_type used internally to zero out an old year's balance
+      // during year-end/rollover, so "Total Waived" reflects actual concessions granted,
+      // not administrative bookkeeping from closing out unpaid dues.
+      const { rows: [discretionary] } = await pool.query(
+        `SELECT COALESCE(SUM(w.waiver_amount), 0) AS total
+         FROM fee_waivers w
+         JOIN student_fee_ledger l ON l.id = w.ledger_id
+         WHERE w.school_id = $1 AND l.academic_year = $2
+           AND COALESCE(w.is_revoked, FALSE) = FALSE
+           AND w.waiver_type != 'carry_forward'`,
+        [school_id, academic_year]
+      ).catch(() => ({ rows: [{ total: summary.total_waived }] }))
+      summary.discretionary_waived = discretionary.total
+
+      // Collection by category — discretionary_waived computed from fee_waivers
+      // (separate query to avoid multiplying total_due/collected when joining waivers)
       const { rows: by_category } = await pool.query(
         `SELECT fc.name AS category_name, fc.frequency,
                 COALESCE(SUM(l.amount_due), 0)                                                             AS total_due,
                 COALESCE(SUM(l.amount_paid), 0)                                                            AS total_collected,
                 COALESCE(SUM(COALESCE(l.waiver_amount, 0)), 0)                                             AS total_waived,
                 COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)), 0)  AS total_outstanding,
-                COUNT(*) FILTER (WHERE l.status = 'overdue') AS overdue_count
+                COUNT(*) FILTER (WHERE l.status = 'overdue') AS overdue_count,
+                fc.id AS fee_category_id
          FROM student_fee_ledger l
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE l.school_id = $1 AND l.academic_year = $2
@@ -83,8 +102,24 @@ export async function GET(req: NextRequest) {
          ORDER BY total_due DESC`,
         [school_id, academic_year]
       )
+      // Discretionary waivers per category (excludes carry_forward bookkeeping)
+      const { rows: discByCat } = await pool.query(
+        `SELECT fc.id AS fee_category_id, COALESCE(SUM(w.waiver_amount), 0) AS total
+         FROM fee_waivers w
+         JOIN student_fee_ledger l ON l.id = w.ledger_id
+         JOIN fee_categories fc ON fc.id = l.fee_category_id
+         WHERE l.school_id = $1 AND l.academic_year = $2
+           AND COALESCE(w.is_revoked, FALSE) = FALSE
+           AND w.waiver_type != 'carry_forward'
+         GROUP BY fc.id`,
+        [school_id, academic_year]
+      ).catch(() => ({ rows: [] as Array<{fee_category_id: number; total: string}> }))
+      const discCatMap = new Map(discByCat.map((r: {fee_category_id: number; total: string}) => [r.fee_category_id, r.total]))
+      for (const c of by_category) c.discretionary_waived = discCatMap.get(c.fee_category_id) ?? '0'
 
-      // Monthly collection trend (last 12 months of payments)
+      // Monthly collection trend — scoped to the selected academic year (Apr → Mar)
+      const [ayStartStr] = academic_year.split('-')
+      const ayStart = parseInt(ayStartStr)
       const { rows: monthly_trend } = await pool.query(
         `SELECT TO_CHAR(fp.paid_date, 'Mon YYYY') AS month,
                 DATE_TRUNC('month', fp.paid_date) AS month_start,
@@ -92,13 +127,16 @@ export async function GET(req: NextRequest) {
          FROM fee_payments fp
          WHERE fp.school_id = $1
            AND fp.payment_status = 'completed'
-           AND fp.paid_date >= CURRENT_DATE - INTERVAL '12 months'
+           AND fp.paid_date >= ($2 || '-04-01')::date
+           AND fp.paid_date <  (($3)::text || '-04-01')::date
          GROUP BY month, month_start
          ORDER BY month_start`,
-        [school_id]
+        [school_id, ayStart, ayStart + 1]
       )
 
-      // Top defaulters
+      // Top defaulters — outstanding balance > 0 regardless of status, so partially-paid
+      // students aren't silently excluded (they still owe money). Matches the Defaulters
+      // CSV export's definition.
       const { rows: top_defaulters } = await pool.query(
         `SELECT s.id AS student_id, s.name AS student_name, s.grade, s.section, s.roll_number,
                 SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0)) AS outstanding,
@@ -106,7 +144,7 @@ export async function GET(req: NextRequest) {
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
          WHERE l.school_id = $1 AND l.academic_year = $2
-           AND l.status IN ('overdue','pending')
+           AND l.status NOT IN ('paid', 'waived')
            AND GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) > 0
          GROUP BY s.id, s.name, s.grade, s.section, s.roll_number
          ORDER BY outstanding DESC
@@ -146,7 +184,7 @@ export async function GET(req: NextRequest) {
                 COUNT(*) FILTER (WHERE s_out > 0)  AS defaulter_students
          FROM per_student
          GROUP BY grade, section
-         ORDER BY grade::int NULLS LAST, section`,
+         ORDER BY ${gradeOrderSql('grade')}, section`,
         [school_id, academic_year]
       )
 
@@ -177,3 +215,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const GET = withWatchline(handleGET, { route: '/api/fees/stats' })

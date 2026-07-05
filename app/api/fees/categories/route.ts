@@ -83,10 +83,31 @@ export async function PUT(req: NextRequest) {
       const { rows: [current] } = await client.query(
         `SELECT school_id, name, frequency, is_active, category_type FROM fee_categories WHERE id = $1`, [id]
       )
-      if (!current) { client.release(); return NextResponse.json({ error: 'Category not found' }, { status: 404 }) }
+      if (!current) return NextResponse.json({ error: 'Category not found' }, { status: 404 })
       const access = await requireFeeAccess(current.school_id)
-      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const changed_by = clientActor || access.actor
+
+      // Switching fixed<->variable or changing frequency after bills already exist for this
+      // category silently desyncs billing: generate/route.ts filters fixed structures by
+      // category_type and computes periods from frequency, so changing either mid-year means
+      // future "Generate Bills" runs stop matching/dedupe against the bills already created,
+      // producing missed or duplicate bills with no warning. Block both once any bill exists.
+      if ((category_type !== undefined && category_type !== null && category_type !== current.category_type)
+        || (frequency !== undefined && frequency !== null && frequency !== current.frequency)) {
+        const { rows: [{ cnt }] } = await client.query(
+          `SELECT COUNT(*) AS cnt FROM student_fee_ledger WHERE fee_category_id = $1`, [id]
+        )
+        if (parseInt(cnt) > 0) {
+          const field = category_type !== current.category_type ? 'type (fixed/variable)' : 'frequency'
+          return NextResponse.json({
+            error: `Cannot change this fee's ${field} — bills already exist for it. Create a new fee category instead.`,
+          }, { status: 409 })
+        }
+      }
+
+      // Wrap UPDATE + changelog inserts in a transaction so partial failures don't leave inconsistent state
+      await client.query('BEGIN')
 
       const { rows: [row] } = await client.query(
         `UPDATE fee_categories SET
@@ -100,27 +121,29 @@ export async function PUT(req: NextRequest) {
       )
 
       // Log each field that changed
-      if (current) {
-        const checks = [
-          { field: 'name',          old: current.name,          newVal: name },
-          { field: 'frequency',     old: current.frequency,     newVal: frequency },
-          { field: 'is_active',     old: String(current.is_active), newVal: is_active != null ? String(is_active) : undefined },
-          { field: 'category_type', old: current.category_type, newVal: category_type },
-        ]
-        for (const c of checks) {
-          if (c.newVal !== undefined && c.newVal !== null && String(c.old) !== String(c.newVal)) {
-            await client.query(
-              `INSERT INTO fee_category_changelog (school_id, category_id, field_changed, old_value, new_value, changed_by)
-               VALUES ($1, $2, $3, $4, $5, $6)`,
-              [current.school_id, id, c.field, String(c.old), String(c.newVal), changed_by]
-            )
-          }
+      const checks = [
+        { field: 'name',          old: current.name,          newVal: name },
+        { field: 'frequency',     old: current.frequency,     newVal: frequency },
+        { field: 'is_active',     old: String(current.is_active), newVal: is_active != null ? String(is_active) : undefined },
+        { field: 'category_type', old: current.category_type, newVal: category_type },
+      ]
+      for (const c of checks) {
+        if (c.newVal !== undefined && c.newVal !== null && String(c.old) !== String(c.newVal)) {
+          await client.query(
+            `INSERT INTO fee_category_changelog (school_id, category_id, field_changed, old_value, new_value, changed_by)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [current.school_id, id, c.field, String(c.old), String(c.newVal), changed_by]
+          )
         }
       }
 
+      await client.query('COMMIT')
       return NextResponse.json(row)
-    } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
-    finally { client.release() }
+    } catch (e) {
+      await client.query('ROLLBACK').catch(() => {})
+      console.error(e)
+      return NextResponse.json({ error: 'Failed' }, { status: 500 })
+    } finally { client.release() }
 } catch (err: unknown) {
     console.error('[API]', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -137,8 +160,8 @@ export async function DELETE(req: NextRequest) {
     const client = await pool.connect()
     try {
       const { rows: [cat] } = await client.query(`SELECT school_id FROM fee_categories WHERE id = $1`, [id])
-      if (!cat) { client.release(); return NextResponse.json({ error: 'Category not found' }, { status: 404 }) }
-      if (!await requireFeeAccess(cat.school_id)) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      if (!cat) return NextResponse.json({ error: 'Category not found' }, { status: 404 })
+      if (!await requireFeeAccess(cat.school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       await client.query('BEGIN')
       const { rows: [{ cnt }] } = await client.query(
         `SELECT COUNT(*) AS cnt FROM student_fee_ledger WHERE fee_category_id = $1`, [id]

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { withWatchline } from '@/lib/logger'
 
 // GET /api/fees/payments?school_id=X&student_id=Y&ledger_id=Z
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
     const school_id  = p.get('school_id')
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const GET = withWatchline(handleGET, { route: '/api/fees/payments' })
 
 // POST /api/fees/payments
 //
@@ -48,7 +50,7 @@ export async function GET(req: NextRequest) {
 //   Server allocates total_amount across ledger_ids in order (oldest first).
 //   All allocations share one receipt_number.
 //
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     // ── Parse and validate BEFORE acquiring a pool connection ──────────────────
     const body = await req.json()
@@ -189,6 +191,16 @@ export async function POST(req: NextRequest) {
           [ledger_ids, school_id]
         )
 
+        const totalBalance = entries.reduce((sum, e) => sum + parseFloat(String(e.balance)), 0)
+        const totalAmount = parseFloat(String(total_amount))
+        if (totalAmount > totalBalance + 0.001) {
+          await client.query('ROLLBACK')
+          const msg = totalBalance <= 0
+            ? 'These fees have already been paid by another user. Please refresh and try again.'
+            : `Amount exceeds total balance due (₹${totalBalance.toFixed(2)}). Another payment may have been recorded simultaneously — please refresh.`
+          return NextResponse.json({ error: msg }, { status: 400 })
+        }
+
         let remaining = parseFloat(String(total_amount))
 
         for (const entry of entries) {
@@ -269,3 +281,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const POST = withWatchline(handlePOST, {
+  route: '/api/fees/payments',
+  getSchoolId: async req => { try { return (await req.clone().json())?.school_id ?? null } catch { return null } },
+})

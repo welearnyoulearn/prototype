@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { gradeOrderSql } from '@/lib/grades'
 
 const ENSURE_CLOSE = `
   CREATE TABLE IF NOT EXISTS fee_year_close (
@@ -69,6 +70,19 @@ export async function GET(req: NextRequest) {
       [school_id, academic_year]
     )
 
+    // Discretionary waivers only — excludes 'carry_forward' bookkeeping waivers, in case
+    // this year itself already contains a carried-forward "Previous Year Dues" bill that
+    // was later waived again. Same computation used on Overview/Reports/Passbook.
+    const { rows: [discretionary] } = await pool.query(
+      `SELECT COALESCE(SUM(w.waiver_amount), 0) AS total
+       FROM fee_waivers w
+       JOIN student_fee_ledger l ON l.id = w.ledger_id
+       WHERE w.school_id = $1 AND l.academic_year = $2
+         AND COALESCE(w.is_revoked, FALSE) = FALSE
+         AND w.waiver_type != 'carry_forward'`,
+      [school_id, academic_year]
+    ).catch(() => ({ rows: [{ total: summary.total_waived }] }))
+
     // Unpaid bills grouped by student, with leaver detection
     const { rows: bills } = await pool.query(
       `SELECT l.id, l.student_id, l.fee_category_id, l.period_label,
@@ -84,7 +98,7 @@ export async function GET(req: NextRequest) {
        WHERE l.school_id = $1 AND l.academic_year = $2
          AND l.status IN ('pending', 'overdue', 'partial')
          AND GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) > 0
-       ORDER BY s.grade::int NULLS LAST, s.section, s.name, l.due_date`,
+       ORDER BY ${gradeOrderSql('s.grade')}, s.section, s.name, l.due_date`,
       [school_id, academic_year]
     )
 
@@ -137,6 +151,7 @@ export async function GET(req: NextRequest) {
         total_billed:    parseFloat(summary.total_billed),
         total_collected: parseFloat(summary.total_collected),
         total_waived:    parseFloat(summary.total_waived),
+        discretionary_waived: parseFloat(discretionary.total),
         total_unpaid:    parseFloat(summary.total_unpaid),
       },
       students,
@@ -203,19 +218,43 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ error: 'decisions array required' }, { status: 400 })
         }
 
+        // Prepare "Passout Dues" fee head for any passout decisions
+        const passoutRequested = decisions.some(d => d.decision === 'passout')
+        let passoutDuesCatId: number | null = null
+        if (passoutRequested) {
+          await client.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS category_type TEXT NOT NULL DEFAULT 'fixed'`)
+          const { rows: [pd2] } = await client.query(
+            `SELECT id FROM fee_categories WHERE school_id = $1 AND name = 'Passout Dues'`, [school_id]
+          )
+          if (pd2) {
+            passoutDuesCatId = pd2.id
+            await client.query(`UPDATE fee_categories SET is_active = TRUE WHERE id = $1`, [pd2.id])
+          } else {
+            const { rows: [created2] } = await client.query(
+              `INSERT INTO fee_categories (school_id, name, description, frequency, category_type, is_active)
+               VALUES ($1, 'Passout Dues', 'Pending dues for graduating/leaving students', 'one_time', 'fixed', TRUE)
+               RETURNING id`,
+              [school_id]
+            )
+            passoutDuesCatId = created2.id
+          }
+        }
+
         // For carry-forward, verify the target year exists and prepare the "Previous Year Dues" head
         const carryRequested = decisions.some(d => d.decision === 'carry')
         let prevDuesCatId: number | null = null
+        let toYearEndDate: string | null = null
         if (carryRequested) {
           if (!to_year) {
             return NextResponse.json({ error: 'to_year required for carry-forward' }, { status: 400 })
           }
           const { rows: [ty] } = await client.query(
-            `SELECT label FROM academic_years WHERE school_id = $1 AND label = $2`, [school_id, to_year]
+            `SELECT label, end_date FROM academic_years WHERE school_id = $1 AND label = $2`, [school_id, to_year]
           )
           if (!ty) {
             return NextResponse.json({ error: `Academic year ${to_year} does not exist. Create it first.` }, { status: 400 })
           }
+          toYearEndDate = ty.end_date
           // Auto-create the "Previous Year Dues" fee head (one-time) if missing
           await client.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS category_type TEXT NOT NULL DEFAULT 'fixed'`)
           const { rows: [pd] } = await client.query(
@@ -240,6 +279,16 @@ export async function POST(req: NextRequest) {
         let carriedCount = 0, carriedTotal = 0
         let writeoffCount = 0, writeoffTotal = 0
         let openCount = 0, openTotal = 0
+        let passoutCount = 0, passoutTotal = 0
+
+        // Ensure passout_students table exists (created in migration but guard here too)
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS passout_students (
+            id SERIAL PRIMARY KEY, school_id INTEGER NOT NULL, student_id INTEGER NOT NULL,
+            passout_year TEXT NOT NULL, moved_by TEXT NOT NULL, moved_at TIMESTAMPTZ DEFAULT NOW(),
+            notes TEXT, UNIQUE(school_id, student_id)
+          )
+        `).catch(() => {})
 
         for (const d of decisions) {
           // Fetch this student's unpaid bills in from_year (with leaver status)
@@ -281,26 +330,29 @@ export async function POST(req: NextRequest) {
             await client.query(
               `INSERT INTO student_fee_ledger
                  (school_id, student_id, fee_category_id, fee_structure_id, academic_year,
-                  period_label, amount_due, due_date, status, notes)
-               VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, 'pending', $8)
+                  period_label, amount_due, due_date, status, notes, source_academic_year)
+               VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, 'pending', $8, $9)
                ON CONFLICT (student_id, fee_category_id, academic_year, period_label) DO UPDATE
-                 SET amount_due = EXCLUDED.amount_due, notes = EXCLUDED.notes`,
+                 SET amount_due = EXCLUDED.amount_due, notes = EXCLUDED.notes,
+                     source_academic_year = EXCLUDED.source_academic_year`,
               [school_id, d.student_id, prevDuesCatId, to_year, periodLabel,
-               studentBalance, `${startYearOf(to_year)}-04-30`,
-               `Carried from ${from_year}: ${note}`]
+               studentBalance, toYearEndDate,
+               `Carried from ${from_year}: ${note}`, from_year]
             )
-            // Close out the original bills (mark as carried = waived in source year, with record)
+            // Close out the original bills in source year.
+            // 'settled' = some cash was collected before carry; 'waived' = nothing paid at all.
             for (const b of studentBills) {
+              const newStatus = parseFloat(b.amount_paid) > 0 ? 'settled' : 'waived'
               await client.query(
                 `UPDATE student_fee_ledger
-                 SET status = 'waived',
-                     waiver_amount = COALESCE(waiver_amount,0) + $1
-                 WHERE id = $2`,
-                [parseFloat(b.balance), b.id]
+                 SET status = $1,
+                     waiver_amount = COALESCE(waiver_amount,0) + $2
+                 WHERE id = $3`,
+                [newStatus, parseFloat(b.balance), b.id]
               )
               await client.query(
                 `INSERT INTO fee_waivers (school_id, student_id, ledger_id, waiver_type, waiver_amount, reason, granted_by_name)
-                 VALUES ($1, $2, $3, 'full', $4, $5, $6)`,
+                 VALUES ($1, $2, $3, 'carry_forward', $4, $5, $6)`,
                 [school_id, d.student_id, b.id, parseFloat(b.balance),
                  `Carried forward to ${to_year}`, done_by]
               )
@@ -310,12 +362,13 @@ export async function POST(req: NextRequest) {
 
           if (d.decision === 'writeoff') {
             for (const b of studentBills) {
+              const newStatus = parseFloat(b.amount_paid) > 0 ? 'settled' : 'waived'
               await client.query(
                 `UPDATE student_fee_ledger
-                 SET status = 'waived',
-                     waiver_amount = COALESCE(waiver_amount,0) + $1
-                 WHERE id = $2`,
-                [parseFloat(b.balance), b.id]
+                 SET status = $1,
+                     waiver_amount = COALESCE(waiver_amount,0) + $2
+                 WHERE id = $3`,
+                [newStatus, parseFloat(b.balance), b.id]
               )
               await client.query(
                 `INSERT INTO fee_waivers (school_id, student_id, ledger_id, waiver_type, waiver_amount, reason, granted_by_name)
@@ -326,14 +379,84 @@ export async function POST(req: NextRequest) {
             }
             writeoffCount++; writeoffTotal += studentBalance
           }
+
+          if (d.decision === 'passout') {
+            if (!passoutDuesCatId) {
+              await client.query('ROLLBACK')
+              return NextResponse.json({ error: 'Passout fee head could not be created' }, { status: 500 })
+            }
+            // Passout: move unpaid dues to the always-open passout ledger
+            // (academic_year = 'passout') so they survive year-close without
+            // polluting the closed year's stats or the next year's carry-forward.
+            for (const b of studentBills) {
+              const periodLabel = `Passout Dues (${from_year})`
+              await client.query(
+                `INSERT INTO student_fee_ledger
+                   (school_id, student_id, fee_category_id, fee_structure_id, academic_year,
+                    period_label, amount_due, due_date, status, notes,
+                    source_academic_year, source_ledger_id)
+                 VALUES ($1, $2, $3, NULL, 'passout', $4, $5, CURRENT_DATE + INTERVAL '1 year',
+                         'pending', $6, $7, $8)
+                 ON CONFLICT (student_id, fee_category_id, academic_year, period_label)
+                 DO UPDATE SET amount_due = student_fee_ledger.amount_due + EXCLUDED.amount_due,
+                               notes = EXCLUDED.notes`,
+                [school_id, d.student_id, passoutDuesCatId, periodLabel,
+                 parseFloat(b.balance),
+                 `Passout carry from ${from_year}: ${b.period_label}`,
+                 from_year, b.id]
+              )
+              // Close original bill — 'settled' if partial cash, else 'waived'
+              const newStatus = parseFloat(b.amount_paid) > 0 ? 'settled' : 'waived'
+              await client.query(
+                `UPDATE student_fee_ledger
+                 SET status = $1, waiver_amount = COALESCE(waiver_amount,0) + $2
+                 WHERE id = $3`,
+                [newStatus, parseFloat(b.balance), b.id]
+              )
+              await client.query(
+                `INSERT INTO fee_waivers (school_id, student_id, ledger_id, waiver_type, waiver_amount, reason, granted_by_name)
+                 VALUES ($1, $2, $3, 'carry_forward', $4, $5, $6)`,
+                [school_id, d.student_id, b.id, parseFloat(b.balance),
+                 `Moved to passout ledger from ${from_year}`, done_by]
+              )
+            }
+            // Register student as passout
+            await client.query(
+              `INSERT INTO passout_students (school_id, student_id, passout_year, moved_by, notes)
+               VALUES ($1, $2, $3, $4, $5)
+               ON CONFLICT (school_id, student_id) DO UPDATE
+                 SET passout_year = EXCLUDED.passout_year, moved_by = EXCLUDED.moved_by, moved_at = NOW()`,
+              [school_id, d.student_id, from_year, done_by, d.reason || null]
+            )
+            passoutCount++; passoutTotal += studentBalance
+          }
         }
 
         await client.query('COMMIT')
+
+        // M-18: persist apply counts into fee_year_close so the year-close banner
+        // can show carry/writeoff/passout totals even before the year is formally closed
+        await client.query(
+          `INSERT INTO fee_year_close
+             (school_id, academic_year, closed_by, carried_count, carried_total,
+              writeoff_count, writeoff_total, open_count, open_total, is_reopened)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE)
+           ON CONFLICT (school_id, academic_year) DO UPDATE
+             SET carried_count  = $4, carried_total  = $5,
+                 writeoff_count = $6, writeoff_total = $7,
+                 open_count     = $8, open_total     = $9`,
+          [school_id, from_year, done_by,
+           carriedCount, carriedTotal,
+           writeoffCount, writeoffTotal,
+           openCount, openTotal]
+        ).catch(e => console.warn('[year-end apply] fee_year_close upsert skipped:', e))
+
         return NextResponse.json({
           applied: true,
           carried: { count: carriedCount, total: carriedTotal },
           writeoff: { count: writeoffCount, total: writeoffTotal },
           open: { count: openCount, total: openTotal },
+          passout: { count: passoutCount, total: passoutTotal },
         })
       }
 
