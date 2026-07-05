@@ -10,17 +10,6 @@ export async function GET(req: NextRequest) {
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
-      await pool.query(`
-        CREATE TABLE IF NOT EXISTS fee_year_close (
-          id SERIAL PRIMARY KEY, school_id INTEGER NOT NULL, academic_year TEXT NOT NULL,
-          closed_by TEXT NOT NULL, closed_at TIMESTAMPTZ DEFAULT NOW(),
-          carried_count INTEGER NOT NULL DEFAULT 0, carried_total NUMERIC(12,2) NOT NULL DEFAULT 0,
-          writeoff_count INTEGER NOT NULL DEFAULT 0, writeoff_total NUMERIC(12,2) NOT NULL DEFAULT 0,
-          open_count INTEGER NOT NULL DEFAULT 0, open_total NUMERIC(12,2) NOT NULL DEFAULT 0,
-          is_reopened BOOLEAN NOT NULL DEFAULT FALSE,
-          reopened_by TEXT, reopened_at TIMESTAMPTZ, reopen_reason TEXT,
-          UNIQUE(school_id, academic_year)
-        )`)
       const { rows } = await pool.query(
         `SELECT academic_year, closed_at, closed_by, is_reopened
          FROM fee_year_close
