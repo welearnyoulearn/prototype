@@ -104,7 +104,9 @@ async function handlePOST(req: NextRequest) {
     // ── Acquire connection only after validation passes ─────────────────────────
     const client = await pool.connect()
     try {
-      // Guard: block payments against a closed academic year
+      // Guard: block payments against a closed academic year — fee_year_close is
+      // guaranteed to exist (see lib/db.ts), so a query error here is a real failure,
+      // not a missing table; let it propagate rather than silently failing this open.
       const guardIds = isMulti ? ledger_ids : (ledger_id ? [ledger_id] : [])
       if (guardIds.length > 0) {
         const { rows: [locked] } = await client.query(
@@ -113,7 +115,7 @@ async function handlePOST(req: NextRequest) {
            JOIN fee_year_close yc ON yc.school_id = l.school_id AND yc.academic_year = l.academic_year AND yc.is_reopened = FALSE
            WHERE l.id = ANY($1) LIMIT 1`,
           [guardIds]
-        ).catch(() => ({ rows: [] }))
+        )
         if (locked) {
           return NextResponse.json({ error: 'This academic year is closed. Reopen it to record payments.' }, { status: 409 })
         }
