@@ -3,14 +3,6 @@ import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
 
-async function paymentSchoolIdById(paymentId: unknown): Promise<number | null> {
-  if (!paymentId) return null
-  try {
-    const { rows } = await pool.query(`SELECT school_id FROM fee_payments WHERE id = $1`, [paymentId])
-    return rows[0]?.school_id ?? null
-  } catch { return null }
-}
-
 // POST /api/fees/payments/cancel
 // Cancel (reverse) a completed payment, OR correct it (cancel + re-record with new values).
 // Body:
@@ -215,7 +207,7 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
-export const POST = withWatchline(handlePOST, {
-  route: '/api/fees/payments/cancel',
-  getSchoolId: async req => { try { return await paymentSchoolIdById((await req.clone().json())?.payment_id) } catch { return null } },
-})
+// No getSchoolId extractor — resolving it would need a second query beyond the
+// handler's own pool.connect() lookup, adding avoidable contention on a max:1
+// connection pool. Errors/requests here log without a school_id instead.
+export const POST = withWatchline(handlePOST, { route: '/api/fees/payments/cancel' })
