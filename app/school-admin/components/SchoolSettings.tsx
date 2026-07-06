@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { getBoardLabels } from '@/lib/board-syllabus/data'
 import { ALL_FEATURES, CATEGORY_ORDER } from '@/lib/features'
@@ -115,6 +115,28 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const [yearForm, setYearForm]   = useState({ label: '', start_date: '', end_date: '', set_current: false })
   const [yearSaving, setYearSaving] = useState(false)
   const [switchingYear, setSwitchingYear] = useState<number | null>(null)
+
+  // Edit confirmation: warning + password, shown before PUT when bills exist for the year
+  const [yearConfirm, setYearConfirm] = useState<{
+    impact: { will_become_overdue: number; will_revert_to_pending: number; has_bills: boolean }
+  } | null>(null)
+  const [yearConfirmPassword, setYearConfirmPassword] = useState('')
+  const [yearConfirmError, setYearConfirmError] = useState('')
+  const [yearConfirmSaving, setYearConfirmSaving] = useState(false)
+
+  // Read-only history of past date edits, per year
+  type YearSnapshot = {
+    id: number; old_start_date: string; old_end_date: string
+    new_start_date: string; new_end_date: string
+    status_summary: Record<string, number>; bill_count: number
+    changed_by: string; changed_at: string
+  }
+  const [historyYearId, setHistoryYearId] = useState<number | null>(null)
+  const [historySnapshots, setHistorySnapshots] = useState<YearSnapshot[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const historyRequestIdRef = useRef(0) // guards against a stale History fetch overwriting a newer one
+  const impactAbortRef = useRef<AbortController | null>(null)
+  const saveAbortRef   = useRef<AbortController | null>(null)
 
   // ── Plan & features ────────────────────────────────────────────────────────
   const [subscription, setSubscription] = useState<Subscription | null>(null)
@@ -245,6 +267,9 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     setEditingYear(null)
     setShowAddYear(true)
     setYearsMsg(null)
+    // Discard any pending edit-confirmation state from a previous, different year.
+    impactAbortRef.current?.abort()
+    setYearConfirm(null); setYearConfirmPassword(''); setYearConfirmError('')
   }
 
   function openEditYear(y: AcademicYear) {
@@ -252,6 +277,19 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     setYearForm({ label: y.label, start_date: y.start_date, end_date: y.end_date, set_current: y.is_current })
     setShowAddYear(false)
     setYearsMsg(null)
+    // Discard any pending edit-confirmation state from a previous, different year —
+    // otherwise a stale impact-check response for the old year could pop the
+    // confirmation modal up against this new year (see gap analysis #7).
+    impactAbortRef.current?.abort()
+    setYearConfirm(null); setYearConfirmPassword(''); setYearConfirmError('')
+  }
+
+  function cancelEditYear() {
+    impactAbortRef.current?.abort()
+    saveAbortRef.current?.abort()
+    setEditingYear(null); setYearsMsg(null)
+    setYearConfirm(null); setYearConfirmPassword(''); setYearConfirmError('')
+    setYearSaving(false); setYearConfirmSaving(false)
   }
 
   async function saveYear() {
@@ -261,6 +299,40 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     if (yearForm.start_date >= yearForm.end_date) {
       setYearsMsg({ text: 'Start date must be before end date', ok: false }); return
     }
+
+    if (editingYear) {
+      // No-op edit (nothing actually changed) — skip the impact-check/password flow entirely.
+      if (yearForm.label === editingYear.label
+        && yearForm.start_date === editingYear.start_date
+        && yearForm.end_date === editingYear.end_date) {
+        setYearsMsg({ text: 'No changes to save', ok: true })
+        setEditingYear(null)
+        return
+      }
+
+      // Editing dates on an existing year — check impact, then require password confirmation.
+      const controller = new AbortController()
+      impactAbortRef.current = controller
+      setYearSaving(true); setYearsMsg(null)
+      try {
+        const r = await fetch(
+          `/api/academic-years?id=${editingYear.id}&school_id=${schoolId}&impact=1&new_end_date=${yearForm.end_date}`,
+          { signal: controller.signal }
+        )
+        if (!r.ok) {
+          setYearsMsg({ text: 'Could not check the impact of this change — please try again', ok: false })
+          return
+        }
+        const impact = await r.json()
+        setYearConfirmPassword(''); setYearConfirmError('')
+        setYearConfirm({ impact })
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === 'AbortError') return // cancelled — no error message needed
+        setYearsMsg({ text: 'Could not check the impact of this change — please try again', ok: false })
+      } finally { setYearSaving(false) }
+      return
+    }
+
     setYearSaving(true); setYearsMsg(null)
     try {
       const r = await fetch('/api/academic-years', {
@@ -273,7 +345,55 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       setShowAddYear(false)
       setEditingYear(null)
       loadYears()
+    } catch {
+      setYearsMsg({ text: 'Failed to create academic year — please try again', ok: false })
     } finally { setYearSaving(false) }
+  }
+
+  async function confirmSaveYear() {
+    if (!editingYear) return
+    if (!yearConfirmPassword) { setYearConfirmError('Password is required'); return }
+    const controller = new AbortController()
+    saveAbortRef.current = controller
+    setYearConfirmSaving(true); setYearConfirmError('')
+    try {
+      const r = await fetch(`/api/academic-years?id=${editingYear.id}&school_id=${schoolId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          label: yearForm.label, start_date: yearForm.start_date, end_date: yearForm.end_date,
+          password: yearConfirmPassword,
+        }),
+        signal: controller.signal,
+      })
+      const d = await r.json().catch(() => null)
+      if (!d) { setYearConfirmError('Something went wrong — please try again'); return }
+      if (!r.ok) { setYearConfirmError(d.error || 'Failed to save changes'); return }
+      setYearConfirm(null); setYearConfirmPassword('')
+      setEditingYear(null)
+      setYearsMsg({
+        text: d.snapshot_created
+          ? `✓ "${d.year.label}" updated — previous dates saved to History`
+          : `✓ "${d.year.label}" updated`,
+        ok: true,
+      })
+      loadYears()
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') return // cancelled — no error message needed
+      setYearConfirmError('Something went wrong — please try again')
+    } finally { setYearConfirmSaving(false) }
+  }
+
+  async function loadYearHistory(yearId: number) {
+    if (historyYearId === yearId) { setHistoryYearId(null); return } // toggle closed
+    historyRequestIdRef.current += 1
+    const requestId = historyRequestIdRef.current
+    setHistoryYearId(yearId); setHistoryLoading(true); setHistorySnapshots([])
+    try {
+      const r = await fetch(`/api/academic-years/${yearId}/history?school_id=${schoolId}`)
+      if (r.ok && historyRequestIdRef.current === requestId) setHistorySnapshots(await r.json())
+    } finally {
+      if (historyRequestIdRef.current === requestId) setHistoryLoading(false)
+    }
   }
 
   async function switchYear(id: number, label: string) {
@@ -655,8 +775,9 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Label</label>
-                  <input value={yearForm.label} onChange={e => setYearForm(f => ({ ...f, label: e.target.value }))}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+                  <input value={yearForm.label} disabled
+                    title="Label can't be changed once a year is in use — create a new year instead"
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50 text-gray-400 cursor-not-allowed" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Start Date</label>
@@ -674,7 +795,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                   className="px-5 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50">
                   {yearSaving ? 'Saving…' : 'Save Changes'}
                 </button>
-                <button onClick={() => { setEditingYear(null); setYearsMsg(null) }}
+                <button onClick={cancelEditYear}
                   className="px-5 py-2 border border-gray-200 text-gray-600 text-sm rounded-lg hover:bg-gray-50">
                   Cancel
                 </button>
@@ -693,39 +814,143 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
           ) : (
             <div className="space-y-2">
               {years.map(y => (
-                <div key={y.id} className={`bg-white border rounded-xl px-5 py-4 flex items-center gap-4 ${y.is_current ? 'border-indigo-300 shadow-sm shadow-indigo-100' : 'border-gray-100'}`}>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="font-bold text-gray-800">{y.label}</p>
-                      {y.is_current && (
-                        <span className="text-[10px] font-bold bg-indigo-600 text-white px-2 py-0.5 rounded-full">ACTIVE</span>
+                <div key={y.id} className={`bg-white border rounded-xl overflow-hidden ${y.is_current ? 'border-indigo-300 shadow-sm shadow-indigo-100' : 'border-gray-100'}`}>
+                  <div className="px-5 py-4 flex items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-gray-800">{y.label}</p>
+                        {y.is_current && (
+                          <span className="text-[10px] font-bold bg-indigo-600 text-white px-2 py-0.5 rounded-full">ACTIVE</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {new Date(y.start_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        {' → '}
+                        {new Date(y.end_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        {y.student_snapshot_count > 0 && ` · ${y.student_snapshot_count} students enrolled`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {!y.is_current && (
+                        <button
+                          onClick={() => switchYear(y.id, y.label)}
+                          disabled={switchingYear === y.id}
+                          className="text-xs px-3 py-1.5 border border-indigo-200 text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium disabled:opacity-50">
+                          {switchingYear === y.id ? 'Switching…' : 'Set Active'}
+                        </button>
+                      )}
+                      <button onClick={() => loadYearHistory(y.id)}
+                        className="text-xs px-3 py-1.5 border border-gray-200 text-gray-600 hover:bg-gray-50 rounded-lg font-medium">
+                        {historyYearId === y.id ? 'Hide History' : 'History'}
+                      </button>
+                      <button onClick={() => openEditYear(y)}
+                        className="text-xs px-3 py-1.5 border border-gray-200 text-gray-600 hover:bg-gray-50 rounded-lg font-medium">
+                        Edit
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* ── Read-only history of past date edits ── */}
+                  {historyYearId === y.id && (
+                    <div className="border-t border-gray-100 bg-gray-50 px-5 py-4">
+                      {historyLoading ? (
+                        <p className="text-xs text-gray-400">Loading history…</p>
+                      ) : historySnapshots.length === 0 ? (
+                        <p className="text-xs text-gray-400">No date changes recorded for this year yet.</p>
+                      ) : (
+                        <div className="space-y-3">
+                          {historySnapshots.map(snap => (
+                            <div key={snap.id} className="bg-white border border-gray-200 rounded-lg p-3 text-xs">
+                              <p className="text-gray-500">
+                                Historical record — not editable. Changed by <span className="font-medium text-gray-700">{snap.changed_by}</span> on{' '}
+                                {new Date(snap.changed_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                              </p>
+                              <p className="text-gray-700 mt-1">
+                                Dates changed: <span className="font-mono">{snap.old_start_date} → {snap.old_end_date}</span>
+                                {' '}became{' '}
+                                <span className="font-mono">{snap.new_start_date} → {snap.new_end_date}</span>
+                              </p>
+                              <p className="text-gray-500 mt-1">
+                                {snap.bill_count} bill{snap.bill_count !== 1 ? 's' : ''} captured at time of change
+                                {Object.entries(snap.status_summary).length > 0 && (
+                                  <> — {Object.entries(snap.status_summary).map(([status, count]) => `${count} ${status}`).join(', ')}</>
+                                )}
+                              </p>
+                              <div className="flex gap-2 mt-2">
+                                <a href={`/api/academic-years/${y.id}/snapshot-export?school_id=${schoolId}&snapshot_id=${snap.id}&type=ledger`} download
+                                  className="text-indigo-600 hover:underline">⬇ Export Ledger (old data)</a>
+                                <a href={`/api/academic-years/${y.id}/snapshot-export?school_id=${schoolId}&snapshot_id=${snap.id}&type=defaulters`} download
+                                  className="text-indigo-600 hover:underline">⬇ Export Defaulters (old data)</a>
+                              </div>
+                            </div>
+                          ))}
+                          <p className="text-[11px] text-gray-400">
+                            Payments and audit records aren&apos;t affected by date changes — see the Payments/Audit tabs in Fee Management for the full live history.
+                          </p>
+                        </div>
                       )}
                     </div>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {new Date(y.start_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                      {' → '}
-                      {new Date(y.end_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                      {y.student_snapshot_count > 0 && ` · ${y.student_snapshot_count} students enrolled`}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {!y.is_current && (
-                      <button
-                        onClick={() => switchYear(y.id, y.label)}
-                        disabled={switchingYear === y.id}
-                        className="text-xs px-3 py-1.5 border border-indigo-200 text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium disabled:opacity-50">
-                        {switchingYear === y.id ? 'Switching…' : 'Set Active'}
-                      </button>
-                    )}
-                    <button onClick={() => openEditYear(y)}
-                      className="text-xs px-3 py-1.5 border border-gray-200 text-gray-600 hover:bg-gray-50 rounded-lg font-medium">
-                      Edit
-                    </button>
-                  </div>
+                  )}
                 </div>
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ══ Edit-year confirmation: warning + password ══════════════════════════ */}
+      {yearConfirm && editingYear && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+            <div className="bg-amber-50 border-b border-amber-100 px-6 py-5">
+              <h3 className="font-bold text-gray-900 text-base">Confirm Date Change — {editingYear.label}</h3>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <p className="text-sm text-gray-600">
+                Changing these dates affects which bills are currently marked overdue across the system.
+              </p>
+              {(yearConfirm.impact.will_become_overdue > 0 || yearConfirm.impact.will_revert_to_pending > 0) ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-sm text-amber-800">
+                  {yearConfirm.impact.will_become_overdue > 0 && (
+                    <p>⚠ {yearConfirm.impact.will_become_overdue} pending bill{yearConfirm.impact.will_become_overdue !== 1 ? 's' : ''} will become <strong>overdue</strong>.</p>
+                  )}
+                  {yearConfirm.impact.will_revert_to_pending > 0 && (
+                    <p>⚠ {yearConfirm.impact.will_revert_to_pending} overdue bill{yearConfirm.impact.will_revert_to_pending !== 1 ? 's' : ''} will revert to <strong>pending</strong>.</p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400">No bills will change overdue status with these new dates.</p>
+              )}
+              {yearConfirm.impact.has_bills && (
+                <p className="text-sm text-gray-600">
+                  The current state of all bills for this year will be saved to History before the change is applied.
+                </p>
+              )}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Enter your password to confirm</label>
+                <input type="password" value={yearConfirmPassword}
+                  onChange={e => { setYearConfirmPassword(e.target.value); setYearConfirmError('') }}
+                  onKeyDown={e => { if (e.key === 'Enter') confirmSaveYear() }}
+                  autoFocus
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+                {yearConfirmError && <p className="text-xs text-red-600 mt-1">{yearConfirmError}</p>}
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => {
+                    saveAbortRef.current?.abort()
+                    setYearConfirm(null); setYearConfirmPassword(''); setYearConfirmError(''); setYearConfirmSaving(false)
+                  }}
+                  className="flex-1 border border-gray-200 text-gray-600 hover:bg-gray-50 py-2.5 rounded-xl text-sm font-medium transition-colors">
+                  Cancel
+                </button>
+                <button onClick={confirmSaveYear} disabled={yearConfirmSaving}
+                  className="flex-1 bg-amber-600 hover:bg-amber-700 text-white py-2.5 rounded-xl text-sm font-medium transition-colors disabled:opacity-50">
+                  {yearConfirmSaving ? 'Saving…' : 'Confirm & Save'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

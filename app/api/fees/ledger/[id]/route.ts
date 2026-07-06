@@ -110,12 +110,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         return NextResponse.json({ error: 'Ledger entry not found' }, { status: 404 })
       }
 
-      // Block edits on a closed academic year
+      // Block edits on a closed academic year — fee_year_close is guaranteed to exist
+      // (see lib/db.ts), so a query error here is a real failure, not a missing table;
+      // let it propagate to the outer catch rather than silently failing this guard open.
       const { rows: [locked] } = await client.query(
         `SELECT 1 FROM fee_year_close
          WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
         [school_id, entry.academic_year]
-      ).catch(() => ({ rows: [] }))
+      )
       if (locked) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to edit amounts.' }, { status: 409 })
@@ -151,7 +153,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
              status = CASE
                WHEN COALESCE(waiver_amount,0) + amount_paid >= $1  THEN 'paid'
                WHEN amount_paid > 0 AND amount_paid < $1            THEN 'partial'
-               WHEN $1 > 0 AND EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
+               WHEN $1 > 0 AND EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                ELSE 'pending'
              END
          WHERE id = $2

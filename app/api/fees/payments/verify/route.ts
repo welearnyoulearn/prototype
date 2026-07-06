@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { sendFeePaymentConfirmedEmail, sendFeePaymentRejectedEmail } from '@/lib/email'
 import { requireFeeAccess } from '@/lib/auth'
+import { withWatchline } from '@/lib/logger'
 
 // GET /api/fees/payments/verify?school_id=X — list pending_verification payments
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
@@ -29,10 +30,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const GET = withWatchline(handleGET, { route: '/api/fees/payments/verify' })
 
 // POST /api/fees/payments/verify — approve or reject a pending payment
 // Body: { payment_id, action: 'approve'|'reject', verified_by, rejection_reason? }
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     const client = await pool.connect()
     try {
@@ -46,14 +48,6 @@ export async function POST(req: NextRequest) {
       const access = await requireFeeAccess(pmtRow.school_id)
       if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
       const verified_by = clientActor || access.actor
-
-      // Ensure audit columns exist (idempotent — safe to call every time)
-      await client.query(`
-        ALTER TABLE fee_payments
-          ADD COLUMN IF NOT EXISTS verified_by      TEXT,
-          ADD COLUMN IF NOT EXISTS verified_at      TIMESTAMPTZ,
-          ADD COLUMN IF NOT EXISTS rejection_reason TEXT
-      `)
 
       await client.query('BEGIN')
 
@@ -177,3 +171,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+// No getSchoolId extractor — same reasoning as payments/cancel: avoid a second
+// query competing with the handler's own pool.connect() under a max:1 pool.
+export const POST = withWatchline(handlePOST, { route: '/api/fees/payments/verify' })

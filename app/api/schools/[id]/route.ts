@@ -47,8 +47,6 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         return NextResponse.json(r.rows[0])
       }
 
-      await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS upi_id TEXT`)
-
       const result = await pool.query(
         `UPDATE schools SET
           name           = COALESCE($1,  name),

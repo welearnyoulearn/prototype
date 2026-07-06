@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { withWatchline } from '@/lib/logger'
 
 // GET /api/fees/payments?school_id=X&student_id=Y&ledger_id=Z
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
     const school_id  = p.get('school_id')
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const GET = withWatchline(handleGET, { route: '/api/fees/payments' })
 
 // POST /api/fees/payments
 //
@@ -48,7 +50,7 @@ export async function GET(req: NextRequest) {
 //   Server allocates total_amount across ledger_ids in order (oldest first).
 //   All allocations share one receipt_number.
 //
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     // ── Parse and validate BEFORE acquiring a pool connection ──────────────────
     const body = await req.json()
@@ -102,7 +104,9 @@ export async function POST(req: NextRequest) {
     // ── Acquire connection only after validation passes ─────────────────────────
     const client = await pool.connect()
     try {
-      // Guard: block payments against a closed academic year
+      // Guard: block payments against a closed academic year — fee_year_close is
+      // guaranteed to exist (see lib/db.ts), so a query error here is a real failure,
+      // not a missing table; let it propagate rather than silently failing this open.
       const guardIds = isMulti ? ledger_ids : (ledger_id ? [ledger_id] : [])
       if (guardIds.length > 0) {
         const { rows: [locked] } = await client.query(
@@ -111,7 +115,7 @@ export async function POST(req: NextRequest) {
            JOIN fee_year_close yc ON yc.school_id = l.school_id AND yc.academic_year = l.academic_year AND yc.is_reopened = FALSE
            WHERE l.id = ANY($1) LIMIT 1`,
           [guardIds]
-        ).catch(() => ({ rows: [] }))
+        )
         if (locked) {
           return NextResponse.json({ error: 'This academic year is closed. Reopen it to record payments.' }, { status: 409 })
         }
@@ -188,6 +192,16 @@ export async function POST(req: NextRequest) {
            FOR UPDATE`,
           [ledger_ids, school_id]
         )
+
+        const totalBalance = entries.reduce((sum, e) => sum + parseFloat(String(e.balance)), 0)
+        const totalAmount = parseFloat(String(total_amount))
+        if (totalAmount > totalBalance + 0.001) {
+          await client.query('ROLLBACK')
+          const msg = totalBalance <= 0
+            ? 'These fees have already been paid by another user. Please refresh and try again.'
+            : `Amount exceeds total balance due (₹${totalBalance.toFixed(2)}). Another payment may have been recorded simultaneously — please refresh.`
+          return NextResponse.json({ error: msg }, { status: 400 })
+        }
 
         let remaining = parseFloat(String(total_amount))
 
@@ -269,3 +283,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const POST = withWatchline(handlePOST, {
+  route: '/api/fees/payments',
+  getSchoolId: async req => { try { return (await req.clone().json())?.school_id ?? null } catch { return null } },
+})

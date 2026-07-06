@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireFeeAccess } from '@/lib/auth'
 import { buildFeeAuditReport } from '@/lib/feeAuditReport'
+import { withWatchline } from '@/lib/logger'
 
 // GET /api/fees/audit-report?school_id=X&academic_year=Y[&grade=G&section=S][&student_id=N]
 // Returns the structured Fee Audit Report (JSON). Excel/PDF routes reuse the same builder.
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
     const school_id     = p.get('school_id')
@@ -28,3 +29,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to build audit report' }, { status: 500 })
   }
 }
+export const GET = withWatchline(handleGET, { route: '/api/fees/audit-report' })

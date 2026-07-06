@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { requireFeeAccess } from '@/lib/auth'
 import { buildFeeAuditReport, type BulkReport, type StudentReport, type Meta } from '@/lib/feeAuditReport'
+import { withWatchline } from '@/lib/logger'
 
 // GET /api/fees/audit-report/excel?school_id=X&academic_year=Y[&grade&section][&student_id]
 // Streams a multi-sheet .xlsx audit report.
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
     const school_id     = p.get('school_id')
@@ -115,7 +116,7 @@ export async function GET(req: NextRequest) {
     // ── INDIVIDUAL STUDENT ──
     const rep = report as StudentReport
     const ws = wb.addWorksheet('Student Fee Report')
-    ws.columns = [{ width: 22 }, { width: 20 }, { width: 16 }, { width: 14 }, { width: 16 }, { width: 14 }, { width: 18 }]
+    ws.columns = [{ width: 22 }, { width: 20 }, { width: 16 }, { width: 14 }, { width: 16 }, { width: 14 }, { width: 18 }, { width: 18 }, { width: 28 }]
     metaBlock(ws, rep.meta, 'INDIVIDUAL STUDENT FEE REPORT')
     // Profile
     ws.addRow(['Student', rep.student.name]); ws.addRow(['Roll No', rep.student.roll_number])
@@ -145,9 +146,15 @@ export async function GET(req: NextRequest) {
     ws.addRow([])
     // Waivers
     ws.addRow(['WAIVERS']).font = { bold: true }
-    headerRow(ws, ['Fee Type · Period', 'Type', 'Amount', 'Reason', 'Granted By', 'Status'])
+    headerRow(ws, ['Fee Type · Period', 'Type', 'Amount', 'Reason', 'Granted By', 'Status', 'Revoked By', 'Revoked At', 'Revoke Reason'])
     for (const w of rep.waivers) {
-      const r = ws.addRow([`${w.fee_type} · ${w.period_label}`, w.waiver_type, w.waiver_amount, w.reason, w.granted_by_name || '', w.is_revoked ? 'Revoked' : 'Active'])
+      const r = ws.addRow([
+        `${w.fee_type} · ${w.period_label}`, w.waiver_type, w.waiver_amount, w.reason, w.granted_by_name || '',
+        w.is_revoked ? 'Revoked' : 'Active',
+        w.is_revoked ? (w.revoked_by || '') : '',
+        w.is_revoked && w.revoked_at ? new Date(w.revoked_at).toLocaleString('en-IN') : '',
+        w.is_revoked ? (w.revoke_reason || '') : '',
+      ])
       ws.getCell(r.number, 3).numFmt = fmtMoney
     }
 
@@ -166,3 +173,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Failed to build Excel report' }, { status: 500 })
   }
 }
+export const GET = withWatchline(handleGET, { route: '/api/fees/audit-report/excel' })
