@@ -9,11 +9,6 @@ export async function GET(req: NextRequest) {
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
-      // Self-heal: rename applicability_type → category_type if needed, add if missing
-      await pool.query(`
-        ALTER TABLE fee_categories
-          ADD COLUMN IF NOT EXISTS category_type TEXT NOT NULL DEFAULT 'fixed'
-      `)
       const { rows } = await pool.query(
         `SELECT fc.*,
                 COUNT(DISTINCT fs.id)  AS structure_count,

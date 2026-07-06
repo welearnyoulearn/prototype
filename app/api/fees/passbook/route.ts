@@ -17,10 +17,6 @@ export async function GET(req: NextRequest) {
   if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
-    // Self-heal optional columns
-    await pool.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`).catch(() => {})
-    await pool.query(`ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS is_revoked BOOLEAN NOT NULL DEFAULT FALSE`).catch(() => {})
-
     // 1. Student info
     const { rows: [student] } = await pool.query(
       `SELECT id, school_id, name, roll_number, grade, section,

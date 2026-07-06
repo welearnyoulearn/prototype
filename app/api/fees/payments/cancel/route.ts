@@ -36,11 +36,13 @@ async function handlePOST(req: NextRequest) {
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const done_by = access.actor
 
-      // Block if the academic year is closed
+      // Block if the academic year is closed — fee_year_close is guaranteed to exist
+      // (see lib/db.ts), so a query error here is a real failure, not a missing table;
+      // let it propagate to the outer catch rather than silently failing this guard open.
       const { rows: [locked] } = await client.query(
         `SELECT 1 FROM fee_year_close WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
         [pmtPreview.school_id, pmtPreview.academic_year]
-      ).catch(() => ({ rows: [] }))
+      )
       if (locked) {
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to cancel/correct payments.' }, { status: 409 })
       }
@@ -86,7 +88,7 @@ async function handlePOST(req: NextRequest) {
                status = CASE
                  WHEN COALESCE(waiver_amount,0) + GREATEST(0, amount_paid - $1) >= amount_due THEN 'waived'
                  WHEN GREATEST(0, amount_paid - $1) > 0 THEN 'partial'
-                 WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
+                 WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                  ELSE 'pending'
                END
            WHERE id = $2`,
@@ -166,7 +168,7 @@ async function handlePOST(req: NextRequest) {
                status = CASE
                  WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
                  WHEN LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) > 0 THEN 'partial'
-                 WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
+                 WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                  ELSE 'pending'
                END
            WHERE id = $2`,
