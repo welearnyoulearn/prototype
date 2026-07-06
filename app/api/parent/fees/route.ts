@@ -15,16 +15,37 @@ export async function GET(req: NextRequest) {
     ).then(r => r.rows[0]?.label ?? '2025-26').catch(() => '2025-26')
 
     try {
-      // Auto-mark overdue for this student only (targeted, not full table scan)
+      // Auto-mark overdue for this student only (targeted, not full table scan).
+      // A bill only becomes overdue once its academic year has ended — matches the
+      // rule used everywhere else (generate.ts, stats.ts) — not merely once its
+      // due_date has passed, since due_date alone no longer distinguishes "this
+      // month's installment" from "the whole year is over."
       await pool.query(
-        `UPDATE student_fee_ledger SET status = 'overdue'
-         WHERE school_id = $1 AND student_id = $2 AND status = 'pending' AND due_date < CURRENT_DATE`,
+        `UPDATE student_fee_ledger l SET status = 'overdue'
+         WHERE l.school_id = $1 AND l.student_id = $2 AND l.status = 'pending'
+           AND EXISTS (
+             SELECT 1 FROM academic_years ay
+             WHERE ay.school_id = l.school_id AND ay.label = l.academic_year
+               AND ay.end_date < CURRENT_DATE
+           )`,
+        [school_id, student_id]
+      )
+      // Symmetric revert — if an admin reopens/extends a year after a bill was marked
+      // overdue, this student's view shouldn't stay stuck showing Overdue forever.
+      await pool.query(
+        `UPDATE student_fee_ledger l SET status = 'pending'
+         WHERE l.school_id = $1 AND l.student_id = $2 AND l.status = 'overdue'
+           AND EXISTS (
+             SELECT 1 FROM academic_years ay
+             WHERE ay.school_id = l.school_id AND ay.label = l.academic_year
+               AND ay.end_date >= CURRENT_DATE
+           )`,
         [school_id, student_id]
       )
 
       const { rows: ledger } = await pool.query(
         `SELECT l.*, fc.name AS category_name, fc.frequency,
-                (l.amount_due - l.amount_paid) AS balance
+                 (l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid) AS balance
          FROM student_fee_ledger l
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE l.school_id = $1 AND l.student_id = $2 AND l.academic_year = $3
@@ -45,7 +66,9 @@ export async function GET(req: NextRequest) {
         [school_id, student_id]
       )
 
-      // Fetch waivers so parent sees the full picture of what was reduced/waived
+      // Fetch waivers so parent sees the full picture of what was reduced/waived —
+      // excludes revoked waivers so a revoked waiver doesn't keep showing as active
+      // and inflating total_waived below, same filter as reports/stats/passbook.
       const { rows: waivers } = await pool.query(
         `SELECT w.id, w.waiver_type, w.waiver_amount, w.reason, w.granted_by_name, w.created_at,
                 fc.name AS category_name, l.period_label, l.amount_due
@@ -53,6 +76,7 @@ export async function GET(req: NextRequest) {
          JOIN student_fee_ledger l ON l.id = w.ledger_id
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE w.school_id = $1 AND w.student_id = $2
+           AND COALESCE(w.is_revoked, FALSE) = FALSE
          ORDER BY w.created_at DESC`,
         [school_id, student_id]
       ).catch(() => ({ rows: [] }))
@@ -108,17 +132,42 @@ export async function POST(req: NextRequest) {
       const createdPayments = []
 
       if (!isMulti) {
-        // BUG 11/12 fix: verify ledger_id belongs to this student before inserting
-        const { rows: [ledgerCheck] } = await client.query(
-          `SELECT id FROM student_fee_ledger
+        // Verify ledger_id belongs to this student, lock the row, and validate the
+        // amount against the true balance (amount_due - waiver_amount - amount_paid)
+        // — mirrors the admin payments route's excess-payment guard.
+        const { rows: [ledgerRow] } = await client.query(
+          `SELECT amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount
+           FROM student_fee_ledger
            WHERE id = $1 AND school_id = $2 AND student_id = $3
-             AND status NOT IN ('paid', 'waived')`,
+             AND status NOT IN ('paid', 'waived')
+           FOR UPDATE`,
           [ledger_id, school_id, student_id]
         )
-        if (!ledgerCheck) {
+        if (!ledgerRow) {
           await client.query('ROLLBACK')
-          client.release()
           return NextResponse.json({ error: 'Ledger entry not found or not payable' }, { status: 404 })
+        }
+        // Also count amounts already submitted and awaiting admin verification against
+        // this same bill — amount_paid only reflects approved payments, so without this
+        // a parent could submit twice (e.g. after a network hiccup) before either gets
+        // verified, and an admin approving both later would overstate day-close totals
+        // even though the ledger itself stays correctly capped.
+        const { rows: [pendingRow] } = await client.query(
+          `SELECT COALESCE(SUM(amount), 0) AS pending_total
+           FROM fee_payments
+           WHERE ledger_id = $1 AND payment_status = 'pending_verification'`,
+          [ledger_id]
+        )
+        const alreadyPending = parseFloat(pendingRow.pending_total)
+        const balance = parseFloat(ledgerRow.amount_due) - parseFloat(ledgerRow.waiver_amount) - parseFloat(ledgerRow.amount_paid) - alreadyPending
+        if (payAmount > balance + 0.001) {
+          await client.query('ROLLBACK')
+          const msg = balance <= 0
+            ? alreadyPending > 0
+              ? 'A payment for this fee is already awaiting verification. Please wait for it to be processed.'
+              : 'This fee has already been paid. Please refresh and try again.'
+            : `Amount exceeds balance due (₹${balance.toFixed(2)}).`
+          return NextResponse.json({ error: msg }, { status: 400 })
         }
 
         // Single ledger entry
@@ -132,15 +181,37 @@ export async function POST(req: NextRequest) {
         )
         createdPayments.push(payment)
       } else {
-        // Multi-entry FIFO — fetch entries in due-date order
+        // Multi-entry FIFO — fetch entries in due-date order, locked against concurrent submissions
         const { rows: entries } = await client.query(
-          `SELECT id, amount_due, amount_paid, (amount_due - amount_paid) AS balance
+          `SELECT id, amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount,
+                  GREATEST(amount_due - COALESCE(waiver_amount, 0) - amount_paid, 0) AS balance
            FROM student_fee_ledger
            WHERE id = ANY($1) AND school_id = $2 AND student_id = $3
              AND status NOT IN ('paid', 'waived')
-           ORDER BY due_date ASC`,
+           ORDER BY due_date ASC
+           FOR UPDATE`,
           [ledger_ids, school_id, student_id]
         )
+
+        // Subtract amounts already submitted and awaiting verification on these same
+        // bills — see the matching comment in the single-entry branch above.
+        const { rows: [pendingRow] } = await client.query(
+          `SELECT COALESCE(SUM(amount), 0) AS pending_total
+           FROM fee_payments
+           WHERE ledger_id = ANY($1) AND payment_status = 'pending_verification'`,
+          [ledger_ids]
+        )
+        const alreadyPending = parseFloat(pendingRow.pending_total)
+        const totalBalance = entries.reduce((sum, e) => sum + parseFloat(String(e.balance)), 0) - alreadyPending
+        if (payAmount > totalBalance + 0.001) {
+          await client.query('ROLLBACK')
+          const msg = totalBalance <= 0
+            ? alreadyPending > 0
+              ? 'A payment for these fees is already awaiting verification. Please wait for it to be processed.'
+              : 'These fees have already been paid. Please refresh and try again.'
+            : `Amount exceeds total balance due (₹${totalBalance.toFixed(2)}).`
+          return NextResponse.json({ error: msg }, { status: 400 })
+        }
 
         let remaining = payAmount
         for (const entry of entries) {
@@ -148,7 +219,7 @@ export async function POST(req: NextRequest) {
           const balance = parseFloat(String(entry.balance))
           if (balance <= 0) continue
           const remainingPaise = Math.round(remaining * 100)
-          const balancePaise   = Math.round(parseFloat(String(entry.balance)) * 100)
+          const balancePaise   = Math.round(balance * 100)
           const allocatePaise  = Math.min(remainingPaise, balancePaise)
           const allocate = allocatePaise / 100
           remaining = (remainingPaise - allocatePaise) / 100

@@ -1,4 +1,5 @@
 import pool from '@/lib/db'
+import { gradeOrderSql } from '@/lib/grades'
 
 // Shared builder for the Fee Audit Report — used by the JSON, Excel and PDF routes.
 // Every money section uses the reconcilable model:
@@ -28,7 +29,7 @@ export type StudentReport = {
   balance: Money
   bills: { fee_type: string; period_label: string; billed: number; waived: number; paid: number; balance: number; due_date: string; status: string }[]
   payments: { receipt_number: string; amount: number; payment_mode: string; payment_status: string; paid_date: string; transaction_ref: string | null; collected_by_name: string | null; notes: string | null; fee_type: string; period_label: string }[]
-  waivers: { fee_type: string; period_label: string; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; is_revoked: boolean }[]
+  waivers: { fee_type: string; period_label: string; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; is_revoked: boolean; revoked_by: string | null; revoked_at: string | null; revoke_reason: string | null }[]
 }
 
 function money(billed: number, waived: number, paid: number): Money {
@@ -40,7 +41,6 @@ export async function buildFeeAuditReport(opts: {
 }): Promise<BulkReport | StudentReport> {
   const { school_id, academic_year, grade, section, student_id, actor } = opts
 
-  await pool.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`).catch(() => {})
   const { rows: [sc] } = await pool.query(`SELECT name FROM schools WHERE id = $1`, [school_id])
   const schoolName = sc?.name || `School #${school_id}`
 
@@ -64,7 +64,7 @@ export async function buildFeeAuditReport(opts: {
     const { rows: bills } = await pool.query(
       `SELECT fc.name AS fee_type, l.period_label, l.amount_due AS billed,
               COALESCE(l.waiver_amount,0) AS waived, l.amount_paid AS paid,
-              (l.amount_due - l.amount_paid) AS balance, l.due_date, l.status
+              GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) AS balance, l.due_date, l.status
        FROM student_fee_ledger l JOIN fee_categories fc ON fc.id = l.fee_category_id
        JOIN students s ON s.id = l.student_id
        WHERE ${WHERE} ORDER BY fc.name, l.due_date`, vals
@@ -80,7 +80,8 @@ export async function buildFeeAuditReport(opts: {
     )
     const { rows: waivers } = await pool.query(
       `SELECT fc.name AS fee_type, l.period_label, w.waiver_type, w.waiver_amount, w.reason,
-              w.granted_by_name, w.created_at, COALESCE(w.is_revoked,false) AS is_revoked
+              w.granted_by_name, w.created_at, COALESCE(w.is_revoked,false) AS is_revoked,
+              w.revoked_by, w.revoked_at, w.revoke_reason
        FROM fee_waivers w JOIN student_fee_ledger l ON l.id = w.ledger_id
        JOIN fee_categories fc ON fc.id = l.fee_category_id
        WHERE w.student_id = $1 AND w.school_id = $2 AND l.academic_year = $3
@@ -126,7 +127,7 @@ export async function buildFeeAuditReport(opts: {
             COALESCE(SUM(l.amount_paid),0) AS paid
      FROM student_fee_ledger l JOIN fee_categories fc ON fc.id = l.fee_category_id
      JOIN students s ON s.id = l.student_id WHERE ${WHERE}
-     GROUP BY s.grade, s.section, fc.name ORDER BY s.grade::int NULLS LAST, s.section, fc.name`, vals
+     GROUP BY s.grade, s.section, fc.name ORDER BY ${gradeOrderSql('s.grade')}, s.section, fc.name`, vals
   )
   const by_class = byClass.map(r => ({
     class: r.section ? `${r.grade}-${r.section}` : `Grade ${r.grade}`, fee_type: r.fee_type,
@@ -135,7 +136,8 @@ export async function buildFeeAuditReport(opts: {
 
   // Student-wise, broken down per fee type, with a subtotal row per student.
   const { rows: byStudent } = await pool.query(
-    `SELECT s.id AS sid, s.name AS student, s.grade, COALESCE(s.section,'') AS section, s.roll_number,
+    `SELECT s.id AS sid, s.name AS student, s.grade, COALESCE(s.section,'') AS section,
+            COALESCE(s.school_roll_number::text, '') AS roll_number,
             s.parent_name, s.parent_phone,
             fc.name AS fee_type,
             COALESCE(SUM(l.amount_due),0) AS billed, COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived,
@@ -144,8 +146,8 @@ export async function buildFeeAuditReport(opts: {
      JOIN students s ON s.id = l.student_id
      JOIN fee_categories fc ON fc.id = l.fee_category_id
      WHERE ${WHERE}
-     GROUP BY s.id, s.name, s.grade, s.section, s.roll_number, s.parent_name, s.parent_phone, fc.name
-     ORDER BY s.grade::int NULLS LAST, s.section, s.name, fc.name`, vals
+     GROUP BY s.id, s.name, s.grade, s.section, s.school_roll_number, s.parent_name, s.parent_phone, fc.name
+     ORDER BY ${gradeOrderSql('s.grade')}, s.section, s.name, fc.name`, vals
   )
   const by_student: BulkReport['by_student'] = []
   let curSid: number | null = null
@@ -173,8 +175,14 @@ export async function buildFeeAuditReport(opts: {
   // Change log
   type LogRow = { type: string; detail: string; user: string; at: string; amount: number | null }
   const log: LogRow[] = []
-  const gParams = (extra: unknown[] = []) => grade ? [school_id, academic_year, grade, ...extra] : [school_id, academic_year, ...extra]
-  const gClause = grade ? 'AND s.grade = $3' : ''
+  // Mirrors the same grade+section scoping used for the numeric tables above (WHERE/cond) —
+  // previously this only filtered by grade, so a single-section report's Change Log
+  // leaked payments/waivers/edits from other sections of the same grade.
+  const gFilterParams: unknown[] = [school_id, academic_year]
+  let gClause = ''
+  if (grade) { gFilterParams.push(grade); gClause += ` AND st.grade = $${gFilterParams.length}` }
+  if (section && section !== 'all') { gFilterParams.push(section); gClause += ` AND st.section = $${gFilterParams.length}` }
+  const gParams = (extra: unknown[] = []) => [...gFilterParams, ...extra]
 
   async function tableExists(t: string) { return (await pool.query(`SELECT to_regclass($1) AS t`, [t])).rows[0].t != null }
 
@@ -196,7 +204,6 @@ export async function buildFeeAuditReport(opts: {
       `SELECT e.old_amount, e.new_amount, e.reason, e.changed_by, e.changed_at, st.name AS student_name, fc.name AS fee_type
        FROM student_fee_ledger_edits e JOIN student_fee_ledger l ON l.id = e.ledger_id
        JOIN students st ON st.id = e.student_id JOIN fee_categories fc ON fc.id = l.fee_category_id
-       JOIN students s ON s.id = e.student_id
        WHERE e.school_id = $1 AND l.academic_year = $2 ${gClause} ORDER BY e.changed_at`, gParams()
     ).catch(() => ({ rows: [] }))
     for (const r of rows) log.push({
@@ -210,7 +217,6 @@ export async function buildFeeAuditReport(opts: {
               w.revoked_by, w.revoked_at, w.revoke_reason, st.name AS student_name, fc.name AS fee_type
        FROM fee_waivers w JOIN student_fee_ledger l ON l.id = w.ledger_id
        JOIN students st ON st.id = w.student_id JOIN fee_categories fc ON fc.id = l.fee_category_id
-       JOIN students s ON s.id = w.student_id
        WHERE w.school_id = $1 AND l.academic_year = $2 ${gClause} ORDER BY w.created_at`, gParams()
     ).catch(() => ({ rows: [] }))
     for (const r of rows) {
@@ -224,7 +230,6 @@ export async function buildFeeAuditReport(opts: {
               fp.cancelled_by, fp.cancel_reason, fp.created_at, fp.cancelled_at, st.name AS student_name, fc.name AS fee_type
        FROM fee_payments fp JOIN student_fee_ledger l ON l.id = fp.ledger_id
        JOIN students st ON st.id = fp.student_id JOIN fee_categories fc ON fc.id = l.fee_category_id
-       JOIN students s ON s.id = fp.student_id
        WHERE fp.school_id = $1 AND l.academic_year = $2 AND fp.payment_status IN ('completed','cancelled') ${gClause}
        ORDER BY fp.created_at`, gParams()
     ).catch(() => ({ rows: [] }))

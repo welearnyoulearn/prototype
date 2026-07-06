@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
+import AppLoader from '@/app/components/AppLoader'
 import { CURRICULA } from '@/lib/curricula'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -218,11 +219,7 @@ export default function ClassDetailPage() {
 
   const inp = 'border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300'
 
-  if (loading) return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="w-6 h-6 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
-    </div>
-  )
+  if (loading) return <AppLoader message="Loading class details" sub="Please wait…" />
 
   if (error) return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4">

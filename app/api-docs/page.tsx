@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 export default function ApiDocsPage() {
@@ -70,7 +71,7 @@ export default function ApiDocsPage() {
           <h1>WLYL API Documentation</h1>
           <p>We Learn You Learn — School Management Platform</p>
         </div>
-        <a href="/" data-testid="api-docs-home-link">← Back to Home</a>
+        <Link href="/" data-testid="api-docs-home-link">← Back to Home</Link>
       </div>
       <div id="swagger-ui" ref={containerRef} data-testid="swagger-ui-container" />
     </>

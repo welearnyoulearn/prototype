@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { verifyPassword, setStudentAuthCookie, StudentJWTPayload } from '@/lib/auth'
+import { verifyPassword, setStudentAuthCookie, StudentJWTPayload, schoolHasFeature } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
   try {
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
 
     const student = result.rows[0]
 
-    if (!student.password_hash) {
+    if (!student.password_hash || !(await schoolHasFeature(student.school_id, 'student-portal'))) {
       return NextResponse.json({ error: 'Account not activated. Please contact your school admin.' }, { status: 401 })
     }
 

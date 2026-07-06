@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { verifyPassword, signToken, JWTPayload } from '@/lib/auth'
-import { cookies } from 'next/headers'
+import { verifyPassword, JWTPayload, setAuthCookie, setPlatformAuthCookie } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
 
@@ -30,6 +29,17 @@ export async function POST(req: NextRequest) {
     }
 
     const user = result.rows[0]
+
+    // This endpoint is for school portal only — reject other roles
+    const SCHOOL_ROLES = ['school_admin', 'principal', 'vice_principal', 'platform_admin']
+    if (!SCHOOL_ROLES.includes(user.role)) {
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
+    }
+
+    if (user.status === 'inactive') {
+      return NextResponse.json({ error: 'This account has been deactivated. Contact your school administrator.' }, { status: 403 })
+    }
+
     const valid = await verifyPassword(password, user.password_hash)
     if (!valid) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
@@ -47,15 +57,13 @@ export async function POST(req: NextRequest) {
       profileCompleted: user.profile_completed,
     }
 
-    const token = signToken(payload)
-    const cookieStore = await cookies()
-    cookieStore.set('wlyl-auth', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7,
-      path: '/',
-    })
+    // Platform Admin gets its own cookie so logging into School Admin in the
+    // same browser can't silently overwrite/invalidate the Platform Admin session.
+    if (user.role === 'platform_admin') {
+      await setPlatformAuthCookie(payload)
+    } else {
+      await setAuthCookie(payload)
+    }
 
     return NextResponse.json({
       success: true,

@@ -61,11 +61,42 @@ export async function POST(req: NextRequest) {
       const schoolId = school_id || session.schoolId
       if (!schoolId) return NextResponse.json({ error: 'School ID required' }, { status: 400 })
 
+      // Check staff limit — skip silently if staff_limit column not yet migrated
+      try {
+        const { rows: [sub] } = await pool.query(
+          `SELECT ss.tier, pp.staff_limit
+           FROM school_subscriptions ss
+           LEFT JOIN plan_pricing pp ON pp.tier = ss.tier
+           WHERE ss.school_id = $1`,
+          [schoolId]
+        )
+        const staffLimit: number | null = sub?.staff_limit ?? null
+        if (staffLimit !== null) {
+          const { rows: [{ cnt }] } = await pool.query(
+            `SELECT COUNT(*) AS cnt FROM users WHERE school_id = $1 AND role = ANY($2) AND status = 'active'`,
+            [schoolId, SCHOOL_ROLES]
+          )
+          if (parseInt(cnt) >= staffLimit) {
+            return NextResponse.json(
+              { error: `Staff account limit reached (${staffLimit} accounts allowed on your plan). Upgrade your plan to add more.` },
+              { status: 403 }
+            )
+          }
+        }
+      } catch { /* column not yet migrated — allow creation */ }
+
+      // Check for existing email — within same school or globally (unique constraint on email)
       const existing = await pool.query(
-        `SELECT id FROM users WHERE LOWER(email) = LOWER($1)`, [email.trim()]
+        `SELECT id, school_id FROM users WHERE LOWER(email) = LOWER($1)`,
+        [email.trim()]
       )
       if (existing.rows.length > 0) {
-        return NextResponse.json({ error: 'An account with this email already exists' }, { status: 409 })
+        const sameSchool = existing.rows[0].school_id === schoolId
+        if (sameSchool) {
+          return NextResponse.json({ error: 'This email is already registered for an account in your school.' }, { status: 409 })
+        } else {
+          return NextResponse.json({ error: 'This email is already in use by another school. Please use a different email address.' }, { status: 409 })
+        }
       }
 
       const tempPassword = generateTempPassword(10)
@@ -106,6 +137,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to create staff account' }, { status: 500 })
     }
 } catch (err: unknown) {
+    console.error('[API]', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+// PATCH — reactivate a staff account
+export async function PATCH(req: NextRequest) {
+  try {
+    const session = await getSession()
+    if (!session || session.role !== 'school_admin') {
+      return NextResponse.json({ error: 'Only school admin can reactivate accounts' }, { status: 403 })
+    }
+    try {
+      const { id } = await req.json()
+      await pool.query(
+        `UPDATE users SET status = 'active' WHERE id = $1 AND school_id = $2`,
+        [id, session.schoolId]
+      )
+      return NextResponse.json({ success: true })
+    } catch (error) {
+      console.error('[school-admin/staff-accounts PATCH]', error)
+      return NextResponse.json({ error: 'Failed to reactivate account' }, { status: 500 })
+    }
+  } catch (err: unknown) {
     console.error('[API]', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
