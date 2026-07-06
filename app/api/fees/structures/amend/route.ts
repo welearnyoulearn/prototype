@@ -13,11 +13,14 @@ export async function POST(req: NextRequest) {
       const body = await req.json()
       const { school_id, academic_year, fee_category_id, grade, new_amount, reason, changed_by: clientActor, effective_from } = body
       const access = await requireFeeAccess(school_id)
-      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const changed_by = clientActor || access.actor
 
       if (!school_id || !academic_year || !fee_category_id || !grade || new_amount == null || !reason) {
         return NextResponse.json({ error: 'school_id, academic_year, fee_category_id, grade, new_amount, reason required' }, { status: 400 })
+      }
+      if (!(parseFloat(new_amount) >= 0)) {
+        return NextResponse.json({ error: 'Amount must be zero or greater' }, { status: 400 })
       }
 
       await client.query('BEGIN')
@@ -64,10 +67,21 @@ export async function POST(req: NextRequest) {
       // Fetch affected ledger entries before updating (for audit)
       // Includes partial entries — amount_due must reflect the new structure for all unpaid/partial students
       const { rows: affected } = await client.query(
-        `SELECT id, student_id, amount_due FROM student_fee_ledger
+        `SELECT id, student_id, amount_due, amount_paid FROM student_fee_ledger
          WHERE fee_structure_id = $1 AND status IN ('pending', 'overdue', 'partial')`,
         [current.id]
       )
+
+      // Block a reduction that would leave any student's amount_paid exceeding the new
+      // amount_due — that's an impossible state (paid more than is owed) and needs a
+      // separate refund/credit decision, not a silent ledger overwrite.
+      const overpaidCount = affected.filter(r => parseFloat(r.amount_paid) > parseFloat(new_amount) + 0.01).length
+      if (overpaidCount > 0) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({
+          error: `${overpaidCount} student(s) have already paid more than ₹${new_amount} toward this fee — reducing the amount this far isn't supported here. Use payment correction/refund for those students first.`,
+        }, { status: 409 })
+      }
 
       // Update pending/overdue/partial ledger entries; re-check paid status after new amount applies
       const { rowCount } = await client.query(

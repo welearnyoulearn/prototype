@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { gradeOrderSql } from '@/lib/grades'
+import { withWatchline } from '@/lib/logger'
 
 // GET /api/fees/ledger?school_id=X&academic_year=2025-26&grade=8&status=overdue&student_id=Y
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
     const school_id    = p.get('school_id')
@@ -76,7 +78,7 @@ export async function GET(req: NextRequest) {
          JOIN students s ON s.id = l.student_id
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE ${conditions.join(' AND ')}
-         ORDER BY l.due_date, s.grade, s.section, s.school_roll_number NULLS LAST, s.name`,
+         ORDER BY l.due_date, ${gradeOrderSql('s.grade')}, s.section, s.school_roll_number NULLS LAST, s.name`,
         values
       )
       return NextResponse.json(rows)
@@ -86,3 +88,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const GET = withWatchline(handleGET, { route: '/api/fees/ledger' })

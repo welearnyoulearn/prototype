@@ -204,6 +204,35 @@ export async function GET(req: NextRequest) {
       } catch { /* skip */ }
     }
 
+    // 7. Year closures / rollovers — the most consequential financial-state-changing
+    // operations (promotes every student, locks a year's books, bulk-creates carry-
+    // forward bills), previously only inferable indirectly from a cluster of waiver
+    // entries with a 'Carried forward to...' reason and no top-level record of their own.
+    if (await tableExists('fee_year_close')) {
+      try {
+        const { rows: closures } = await pool.query(
+          `SELECT academic_year, closed_by, closed_at, carried_count, carried_total,
+                  writeoff_count, writeoff_total, is_reopened, reopened_by, reopened_at, reopen_reason
+           FROM fee_year_close
+           WHERE school_id = $1 ${academic_year ? 'AND academic_year = $2' : ''}
+           ORDER BY closed_at DESC LIMIT $${academic_year ? 3 : 2}`,
+          academic_year ? [school_id, academic_year, limit] : [school_id, limit]
+        )
+        for (const c of closures) {
+          rows.push({ at: c.closed_at, who: c.closed_by,
+            action: 'Academic year closed',
+            detail: `${c.academic_year} · ${c.carried_count} bill(s) carried forward (₹${c.carried_total})${Number(c.writeoff_count) > 0 ? ` · ${c.writeoff_count} written off (₹${c.writeoff_total})` : ''}`,
+            amount: parseFloat(c.carried_total) })
+          if (c.is_reopened) {
+            rows.push({ at: c.reopened_at || c.closed_at, who: c.reopened_by || 'Admin',
+              action: 'Academic year reopened',
+              detail: `${c.academic_year}${c.reopen_reason ? ` · ${c.reopen_reason}` : ''}`,
+              amount: null })
+          }
+        }
+      } catch { /* skip */ }
+    }
+
     // Sort all by time desc, cap at limit
     rows.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
     const capped = rows.slice(0, limit)

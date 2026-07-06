@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Playwright trace/report output — large vendor JS files cause ESLint OOM
+    "test-results/**",
+    "playwright-report/**",
+    // Claude agent worktree copies — not part of the project source
+    ".claude/**",
   ]),
 ]);
 

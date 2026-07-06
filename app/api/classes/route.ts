@@ -3,6 +3,7 @@ import pool from '@/lib/db'
 import { getSubjectsForGrade } from '@/lib/curricula'
 import { matchTeacher } from '@/lib/matchTeacher'
 import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
+import { gradeOrderSql } from '@/lib/grades'
 
 export async function GET(req: NextRequest) {
   try {
@@ -19,8 +20,8 @@ export async function GET(req: NextRequest) {
       const studentStatus = removed ? 'inactive' : 'active'
       const deletedFilter = removed ? 'IS NOT NULL' : 'IS NULL'
       const orderBy = removed
-        ? `c.deleted_at DESC, (NULLIF(regexp_replace(c.grade,'[^0-9]','','g'),''))::int NULLS LAST, c.section`
-        : `(NULLIF(regexp_replace(c.grade,'[^0-9]','','g'),''))::int NULLS LAST, c.section`
+        ? `c.deleted_at DESC, ${gradeOrderSql('c.grade')}, c.section`
+        : `${gradeOrderSql('c.grade')}, c.section`
 
       const result = await pool.query(
         `SELECT c.*, t.name AS class_teacher_name,
