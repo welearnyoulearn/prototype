@@ -305,8 +305,8 @@ async function handleDELETE(req: NextRequest) {
          SET waiver_amount = $1,
              amount_paid   = $2,
              status = CASE
-               WHEN $1 + $2 >= amount_due THEN (CASE WHEN $1 > 0 THEN 'waived' ELSE 'paid' END)
-               WHEN $2 > 0 THEN 'partial'
+               WHEN $1::numeric + $2::numeric >= amount_due THEN (CASE WHEN $1::numeric > 0 THEN 'waived' ELSE 'paid' END)
+               WHEN $2::numeric > 0 THEN 'partial'
                WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                ELSE 'pending'
              END
