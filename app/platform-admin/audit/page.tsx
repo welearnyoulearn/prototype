@@ -20,6 +20,7 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   delete_school:       { label: 'Deleted School',       color: 'bg-red-100 text-red-700' },
   update_subscription: { label: 'Changed Plan',         color: 'bg-purple-100 text-purple-700' },
   reset_password:      { label: 'Reset Password',       color: 'bg-amber-100 text-amber-700' },
+  backfill_portal_access: { label: 'Activated Portal Access', color: 'bg-teal-100 text-teal-700' },
 }
 
 function formatDetails(action: string, details: Record<string, unknown>): string {
@@ -31,6 +32,13 @@ function formatDetails(action: string, details: Record<string, unknown>): string
   }
   if (action === 'create_school') {
     return `${details.type || ''}${details.city ? ` · ${details.city}` : ''}`
+  }
+  if (action === 'backfill_portal_access') {
+    const parts = [
+      details.students_credentialed ? `${details.students_credentialed} student(s)` : '',
+      details.parents_credentialed ? `${details.parents_credentialed} parent(s)` : '',
+    ].filter(Boolean)
+    return `${parts.join(', ') || 'no pending accounts'}${details.actor_label ? ` · by ${details.actor_label}` : ''}`
   }
   return ''
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import AppLoader from '../components/AppLoader'
 import StudentDashboard from './components/StudentDashboard'
 import StudentTasks from './components/StudentTasks'
 import StudentDoubts from './components/StudentDoubts'
@@ -99,24 +100,7 @@ export default function StudentPortal() {
     router.push('/student/login')
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4 anim-scale-in">
-          <div className="w-16 h-16 rounded-2xl bg-orange-500 flex items-center justify-center shadow-xl shadow-orange-200 anim-float">
-            <span className="text-white text-2xl font-black">W</span>
-          </div>
-          <div className="flex gap-1.5">
-            {[0, 1, 2].map(i => (
-              <div key={i} className="w-2.5 h-2.5 rounded-full bg-orange-400 animate-bounce"
-                style={{ animationDelay: `${i * 0.15}s` }} />
-            ))}
-          </div>
-          <p className="text-gray-400 text-sm font-medium tracking-wide">Loading your portal…</p>
-        </div>
-      </div>
-    )
-  }
+  if (loading) return <AppLoader message="Loading your portal" sub="Fetching your courses and progress…" />
 
   if (!student) return null
 

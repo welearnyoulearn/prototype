@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireSchoolAdmin } from '@/lib/auth'
+import { gradeOrderSql } from '@/lib/grades'
 
 export async function GET(req: NextRequest) {
   try {
@@ -72,7 +73,7 @@ export async function GET(req: NextRequest) {
           LEFT JOIN attendance a ON a.class_id = c.id AND a.date = $2::date AND a.school_id = $1
           WHERE c.school_id = $1
           GROUP BY c.id, c.grade, c.section
-          ORDER BY (NULLIF(regexp_replace(c.grade,'[^0-9]','','g'),''))::int NULLS LAST, c.section
+          ORDER BY ${gradeOrderSql('c.grade')}, c.section
         `, [school_id, date])
       : null
 
@@ -114,7 +115,7 @@ export async function GET(req: NextRequest) {
           LEFT JOIN no_teacher_slots nt ON nt.class_id = c.id
           LEFT JOIN tt_exists        te ON te.class_id = c.id
           WHERE c.school_id = $1
-          ORDER BY (NULLIF(regexp_replace(c.grade,'[^0-9]','','g'),''))::int NULLS LAST, c.section
+          ORDER BY ${gradeOrderSql('c.grade')}, c.section
         `, [school_id])
       : null
 
@@ -137,7 +138,7 @@ export async function GET(req: NextRequest) {
       ? pool.query(`
           SELECT
             COUNT(*) FILTER (WHERE status='overdue')::int AS overdue_count,
-            COALESCE(SUM(amount_due - amount_paid) FILTER (WHERE status IN ('pending','overdue','partial')), 0) AS total_outstanding
+            COALESCE(SUM(amount_due - amount_paid - COALESCE(waiver_amount, 0)) FILTER (WHERE status IN ('pending','overdue','partial')), 0) AS total_outstanding
           FROM student_fee_ledger
           WHERE school_id=$1 AND academic_year=$2
         `, [school_id, year])

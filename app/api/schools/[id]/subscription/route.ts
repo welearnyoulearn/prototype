@@ -6,8 +6,22 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   try {
     const { id } = await params
     try {
-      const result = await pool.query('SELECT * FROM school_subscriptions WHERE school_id = $1', [id])
-      if (result.rows.length === 0) return NextResponse.json({ school_id: parseInt(id), tier: 'none' })
+      // Try to join staff_limit — column may not exist until migration runs
+      let result
+      try {
+        result = await pool.query(
+          `SELECT ss.*, pp.staff_limit
+           FROM school_subscriptions ss
+           LEFT JOIN plan_pricing pp ON pp.tier = ss.tier
+           WHERE ss.school_id = $1`,
+          [id]
+        )
+      } catch {
+        result = await pool.query(`SELECT * FROM school_subscriptions WHERE school_id = $1`, [id])
+      }
+      if (result.rows.length === 0) {
+        return NextResponse.json({ school_id: parseInt(id), tier: 'none', staff_limit: null })
+      }
       return NextResponse.json(result.rows[0])
     } catch (error) {
       console.error(error)

@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useEffect, useCallback } from 'react'
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { parseCSV } from '@/lib/parseCSV'
 
 type Props = { schoolId: number; onRefresh?: () => void }
@@ -11,6 +11,7 @@ type StudentRow = {
 }
 
 type StudentCredential = {
+  student_id: number
   name: string; grade: string; section: string; school_roll_number: number | null
   login: string; temp_password: string
 }
@@ -21,9 +22,19 @@ type ParentCredential = {
 
 type OnboardingResult = {
   inserted: number
+  skipped: { row: number; name: string; reason: string }[]
   students: { id: number; roll_number: string; name: string }[]
   errors: { row: number; message: string }[]
   credentials: { students: StudentCredential[]; parents: ParentCredential[] }
+  studentPortalEnabled?: boolean
+  parentPortalEnabled?: boolean
+}
+
+type DupCheckMatch = {
+  row: number
+  name: string
+  reason: 'roll_number' | 'phone' | 'name+parent_phone'
+  matched_student: { id: number; name: string; created_at: string }
 }
 
 const EMPTY_ROW: StudentRow = { last_name: '', first_name: '', email: '', grade: '', section: '', parent_name: '', parent_phone: '', parent_email: '', phone: '', school_roll_number: '' }
@@ -32,6 +43,10 @@ const CSV_EXAMPLE = `1,Mehta,Arjun,arjun@student.com,10,A,Suresh Mehta,987654321
 2,Patel,Priya,,10,A,Ramesh Patel,9876543211,,`
 
 const STAFF_CSV_MARKERS = ['department', 'qualification', 'staff_type', 'subject', 'employee_id', 'teaches_grades']
+
+function rollKey(grade: string, section: string, roll: string): string {
+  return `${grade.trim().toLowerCase()}|${section.trim().toLowerCase()}|${roll.trim()}`
+}
 
 function downloadTemplate() {
   const a = document.createElement('a')
@@ -60,6 +75,8 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
   const [filterGrade, setFilterGrade] = useState('')
   const [filterSection, setFilterSection] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [checking, setChecking] = useState(false)
+  const [submitCount, setSubmitCount] = useState(0)
   const [result, setResult] = useState<OnboardingResult | null>(null)
   const [showCredentials, setShowCredentials] = useState(false)
   const [dupRollError, setDupRollError] = useState('')
@@ -69,7 +86,50 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
   const [copiedAll, setCopiedAll] = useState(false)
   const [resetingId, setResetingId] = useState<number | null>(null)
   const [resetResults, setResetResults] = useState<Record<number, { password: string; error?: string }>>({})
+  const [dupPreview, setDupPreview] = useState<{ existing: DupCheckMatch[]; new_count: number; existing_count: number } | null>(null)
+  const [showDupPreview, setShowDupPreview] = useState(false)
+  const [pendingStudents, setPendingStudents] = useState<{ name: string; grade?: string; section?: string; school_roll_number?: number; phone?: string; parent_phone?: string; email?: string; parent_name?: string; parent_email?: string }[] | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const [existingRollKeys, setExistingRollKeys] = useState<Set<string>>(new Set())
+
+  const [portalStatus, setPortalStatus] = useState<{ studentPortalEnabled: boolean; parentPortalEnabled: boolean; pendingCount: number } | null>(null)
+  const [backfilling, setBackfilling] = useState(false)
+  const [showBackfillConfirm, setShowBackfillConfirm] = useState(false)
+
+  const fetchPortalStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/school-admin/students/backfill-portal?school_id=${schoolId}`)
+      if (res.ok) setPortalStatus(await res.json())
+    } catch { /* non-critical */ }
+  }, [schoolId])
+
+  async function handleBackfillPortal() {
+    if (!portalStatus) return
+    setShowBackfillConfirm(false)
+    const target = portalStatus.studentPortalEnabled && portalStatus.parentPortalEnabled ? 'both'
+      : portalStatus.studentPortalEnabled ? 'student' : 'parent'
+    setBackfilling(true); setError('')
+    try {
+      const res = await fetch('/api/school-admin/students/backfill-portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, target }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setResult({
+        inserted: 0, skipped: [], students: [], errors: [],
+        credentials: data.credentials,
+        studentPortalEnabled: portalStatus.studentPortalEnabled,
+        parentPortalEnabled: portalStatus.parentPortalEnabled,
+      })
+      setShowCredentials(true)
+      await fetchPortalStatus()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to activate portal access')
+    } finally { setBackfilling(false) }
+  }
 
   const fetchStudentCount = useCallback(async () => {
     try {
@@ -78,7 +138,23 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     } catch { /* non-critical */ }
   }, [schoolId])
 
-  useEffect(() => { fetchStudentCount() }, [fetchStudentCount])
+  const fetchExistingRolls = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/students?school_id=${schoolId}`)
+      if (!res.ok) return
+      const list: { grade: string | null; section: string | null; school_roll_number: number | null; status?: string }[] = await res.json()
+      const keys = new Set<string>()
+      for (const s of list) {
+        if (s.status === 'inactive') continue
+        if (s.school_roll_number != null && s.grade) {
+          keys.add(rollKey(s.grade, s.section ?? '', String(s.school_roll_number)))
+        }
+      }
+      setExistingRollKeys(keys)
+    } catch { /* non-critical */ }
+  }, [schoolId])
+
+  useEffect(() => { fetchStudentCount(); fetchExistingRolls(); fetchPortalStatus() }, [fetchStudentCount, fetchExistingRolls, fetchPortalStatus])
 
   function updateRow(index: number, field: keyof StudentRow, value: string) {
     setRows(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r))
@@ -131,6 +207,54 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     e.target.value = ''
   }
 
+  function buildStudentsPayload(valid: StudentRow[]) {
+    return valid.map(({ last_name, first_name, ...rest }) => ({
+      ...rest,
+      name: `${last_name} ${first_name}`.trim(),
+      school_roll_number: rest.school_roll_number.trim() ? parseInt(rest.school_roll_number.trim()) : undefined,
+    }))
+  }
+
+  async function doSubmit(students: typeof pendingStudents) {
+    if (!students) return
+    setSubmitCount(students.length)
+    setSubmitting(true); setError(''); setResult(null); setCsvWarn(''); setDupRollError('')
+    try {
+      const res = await fetch('/api/students/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, students }),
+      })
+      const data: OnboardingResult & { error?: string } = await res.json()
+      if (res.status === 409) { setDupRollError(data.error || 'Duplicate roll number'); return }
+      if (!res.ok) throw new Error(data.error)
+
+      setResult(data)
+      setResetResults({})
+
+      if (data.inserted > 0) {
+        setShowCredentials(true)
+        setRows([{ ...EMPTY_ROW }])
+        fetchStudentCount()
+        fetchExistingRolls()
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      } else {
+        setShowCredentials(false)
+        const msg = data.errors.length > 0
+          ? data.errors.map(e => `Row ${e.row}: ${e.message}`).join(' · ')
+          : data.skipped?.length > 0
+            ? `All ${data.skipped.length} students already exist`
+            : 'No students were enrolled'
+        setError(msg)
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to enroll students')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   async function handleSubmit() {
     const valid = rows.filter(r => r.last_name.trim() || r.first_name.trim())
     if (valid.length === 0) { setError('At least one student name is required'); return }
@@ -150,48 +274,44 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     })
     if (missing.length > 0) { setError(missing.join(' · ')); return }
 
-    // Duplicate roll check within batch
     const rollMap = new Map<string, number>()
     let dupFound = false
+    const dupErrors: string[] = []
     for (let i = 0; i < valid.length; i++) {
       const r = valid[i]
       const key = `${r.grade.trim()}|${r.section.trim()}|${r.school_roll_number.trim()}`
       if (rollMap.has(key)) {
-        missing.push(`Row ${i + 1}: Roll No ${r.school_roll_number} duplicated with Row ${rollMap.get(key)! + 1} in Grade ${r.grade} Section ${r.section}`)
+        dupErrors.push(`Row ${i + 1}: Roll No ${r.school_roll_number} duplicated with Row ${rollMap.get(key)! + 1} in Grade ${r.grade} Section ${r.section}`)
         dupFound = true
       } else { rollMap.set(key, i) }
     }
-    if (dupFound) { setError(missing.join(' · ')); return }
+    if (dupFound) { setError(dupErrors.join(' · ')); return }
 
-    const students = valid.map(({ last_name, first_name, ...rest }) => ({
-      ...rest, name: `${last_name} ${first_name}`.trim(),
-      school_roll_number: parseInt(rest.school_roll_number.trim()),
-    }))
+    const students = buildStudentsPayload(valid)
+    setPendingStudents(students)
 
-    setSubmitting(true); setError(''); setResult(null); setCsvWarn(''); setDupRollError('')
+    setChecking(true)
     try {
-      const res = await fetch('/api/students/bulk', {
+      const res = await fetch('/api/students/check-duplicates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ school_id: schoolId, students }),
       })
       const data = await res.json()
-      if (res.status === 409) { setDupRollError(data.error || 'Duplicate roll number'); return }
-      if (!res.ok) throw new Error(data.error)
-      setResult(data)
-      setShowCredentials(true)
-      setRows([{ ...EMPTY_ROW }])
-      setResetResults({})
-      fetchStudentCount()
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to enroll students')
+      if (data.existing_count > 0) {
+        setDupPreview(data)
+        setShowDupPreview(true)
+      } else {
+        await doSubmit(students)
+      }
+    } catch {
+      await doSubmit(students)
     } finally {
-      setSubmitting(false)
+      setChecking(false)
     }
   }
 
-  async function handleResetCredentials(studentId: number, studentName: string) {
+  async function handleResetCredentials(studentId: number) {
     setResetingId(studentId)
     try {
       const res = await fetch(`/api/students/${studentId}/reset-credentials`, { method: 'POST' })
@@ -214,7 +334,36 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
 
   const inputCls = 'w-full border border-gray-200 rounded px-2 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-green-300'
 
+  const rowDupWarnings = useMemo(() => {
+    const warnings: string[] = rows.map(() => '')
+    const batchFirstSeen = new Map<string, number>()
+    rows.forEach((r, i) => {
+      const roll = r.school_roll_number.trim()
+      if (!roll || !r.grade.trim()) return
+      if (!/^\d+$/.test(roll) || parseInt(roll) <= 0) return
+      const key = rollKey(r.grade, r.section, roll)
+      if (existingRollKeys.has(key)) {
+        warnings[i] = `Roll No ${roll} already exists in Grade ${r.grade}${r.section.trim() ? ` Section ${r.section}` : ''}`
+        return
+      }
+      if (batchFirstSeen.has(key)) {
+        warnings[i] = `Roll No ${roll} duplicated with row ${batchFirstSeen.get(key)! + 1}`
+      } else {
+        batchFirstSeen.set(key, i)
+      }
+    })
+    return warnings
+  }, [rows, existingRollKeys])
+
+  const hasRowDupes = rowDupWarnings.some(w => w !== '')
   const hasCredentials = result && (result.credentials.students.length > 0 || result.credentials.parents.length > 0)
+
+  function reasonLabel(reason: string) {
+    if (reason === 'roll_number') return 'Same roll number'
+    if (reason === 'name+parent_phone') return 'Same name + parent phone'
+    if (reason === 'phone') return 'Same phone'
+    return reason
+  }
 
   return (
     <div>
@@ -235,6 +384,13 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
           )}
         </div>
         <div className="flex gap-2">
+          {portalStatus && portalStatus.pendingCount > 0 && (portalStatus.studentPortalEnabled || portalStatus.parentPortalEnabled) && (
+            <button onClick={() => setShowBackfillConfirm(true)} disabled={backfilling}
+              data-testid="activate-portal-access-btn"
+              className="flex items-center gap-2 px-3 py-1.5 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 transition-colors disabled:opacity-50">
+              {backfilling ? 'Activating…' : `Activate Portal Access (${portalStatus.pendingCount})`}
+            </button>
+          )}
           {hasCredentials && (
             <button onClick={() => setShowCredentials(true)}
               data-testid="view-credentials-btn"
@@ -303,12 +459,70 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
         </div>
       )}
 
-      {/* Success banner (compact — credentials are in modal) */}
+      {/* Duplicate preview modal */}
+      {showDupPreview && dupPreview && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+            <div className="px-6 py-5 border-b border-gray-200">
+              <h3 className="text-lg font-bold text-gray-900">Students Already Exist</h3>
+              <div className="flex gap-4 mt-3">
+                <div className="flex-1 bg-green-50 rounded-xl px-4 py-3 text-center">
+                  <p className="text-2xl font-black text-green-600">{dupPreview.new_count}</p>
+                  <p className="text-xs text-green-700 font-medium mt-0.5">New</p>
+                </div>
+                <div className="flex-1 bg-amber-50 rounded-xl px-4 py-3 text-center">
+                  <p className="text-2xl font-black text-amber-600">{dupPreview.existing_count}</p>
+                  <p className="text-xs text-amber-700 font-medium mt-0.5">Already Exist</p>
+                </div>
+                <div className="flex-1 bg-gray-50 rounded-xl px-4 py-3 text-center">
+                  <p className="text-2xl font-black text-gray-600">{dupPreview.new_count + dupPreview.existing_count}</p>
+                  <p className="text-xs text-gray-500 font-medium mt-0.5">Total Detected</p>
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 max-h-64 overflow-y-auto">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Already in system ({dupPreview.existing_count})</p>
+              <div className="space-y-1.5">
+                {dupPreview.existing.map((m, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs bg-amber-50 rounded-lg px-3 py-2">
+                    <span className="font-medium text-gray-800">Row {m.row}: {m.name}</span>
+                    <span className="text-amber-600 ml-2">{reasonLabel(m.reason)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl text-xs text-gray-500">
+              Duplicates will be skipped automatically — only new students will be enrolled.
+            </div>
+            <div className="px-6 py-4 flex gap-3 justify-end">
+              <button
+                data-testid="cancel-dup-preview-btn"
+                onClick={() => { setShowDupPreview(false); setPendingStudents(null) }}
+                className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                data-testid="upload-new-only-btn"
+                onClick={async () => { setShowDupPreview(false); await doSubmit(pendingStudents) }}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium">
+                Upload Only New ({dupPreview.new_count})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success banner */}
       {result && !showCredentials && (
         <div className="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="font-medium">✓ {result.inserted} student{result.inserted !== 1 ? 's' : ''} enrolled</p>
+              {result.skipped?.length > 0 && (
+                <p className="text-amber-600 text-xs mt-1">
+                  {result.skipped.length} skipped — already exist
+                </p>
+              )}
               {result.errors.length > 0 && (
                 <div className="mt-1 space-y-0.5">
                   {result.errors.map((e, i) => <p key={i} className="text-orange-600 text-xs">Row {e.row}: {e.message}</p>)}
@@ -350,7 +564,24 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
             </div>
 
             <div className="px-6 py-4 space-y-6">
-              {/* Student credentials */}
+              {result.skipped?.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                  <p className="text-sm font-semibold text-amber-800 mb-1">
+                    {result.skipped.length} student{result.skipped.length !== 1 ? 's' : ''} skipped — already exist
+                  </p>
+                  <div className="space-y-0.5 max-h-28 overflow-y-auto">
+                    {result.skipped.map((s, i) => (
+                      <p key={i} className="text-xs text-amber-700">Row {s.row}: {s.name} — {s.reason}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {result.studentPortalEnabled === false ? (
+                <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-600">
+                  Student portal is not enabled for this school — students were added to the roster without logins.
+                </div>
+              ) : (
               <div>
                 <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                   <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs flex items-center justify-center font-bold">S</span>
@@ -369,8 +600,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {result.credentials.students.map((s, idx) => {
-                        const stu = result.students[idx]
-                        const resetResult = stu ? resetResults[stu.id] : undefined
+                        const resetResult = resetResults[s.student_id]
                         return (
                           <tr key={idx} className="hover:bg-gray-50">
                             <td className="px-3 py-2.5 font-medium text-gray-900">{s.name}</td>
@@ -396,15 +626,13 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                               )}
                             </td>
                             <td className="px-3 py-2.5">
-                              {stu && (
-                                <button
-                                  data-testid={`reset-student-${stu.id}`}
-                                  onClick={() => handleResetCredentials(stu.id, s.name)}
-                                  disabled={resetingId === stu.id}
-                                  className="text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50">
-                                  {resetingId === stu.id ? 'Resetting…' : 'Reset'}
-                                </button>
-                              )}
+                              <button
+                                data-testid={`reset-student-${s.student_id}`}
+                                onClick={() => handleResetCredentials(s.student_id)}
+                                disabled={resetingId === s.student_id}
+                                className="text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-50">
+                                {resetingId === s.student_id ? 'Resetting…' : 'Reset'}
+                              </button>
                             </td>
                           </tr>
                         )
@@ -413,9 +641,13 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                   </table>
                 </div>
               </div>
+              )}
 
-              {/* Parent credentials */}
-              {result.credentials.parents.length > 0 && (
+              {result.parentPortalEnabled === false ? (
+                <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-600">
+                  Parent portal is not enabled for this school — no parent accounts were created.
+                </div>
+              ) : result.credentials.parents.length > 0 && (
                 <div>
                   <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                     <span className="w-5 h-5 rounded-full bg-teal-100 text-teal-600 text-xs flex items-center justify-center font-bold">P</span>
@@ -463,6 +695,34 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 className="bg-gray-900 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
                 Done
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Backfill Confirmation Popup ── */}
+      {showBackfillConfirm && portalStatus && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="bg-teal-50 border-b border-teal-100 px-6 py-5">
+              <h3 className="font-bold text-gray-900 text-base">Activate Portal Access?</h3>
+            </div>
+            <div className="px-6 py-5">
+              <p className="text-sm text-gray-600">
+                This will generate new login credentials for <strong>{portalStatus.pendingCount}</strong> existing
+                student{portalStatus.pendingCount !== 1 ? 's' : ''} (and any linked parents) who don&apos;t have one yet,
+                and send welcome emails where an email address is on file. This cannot be undone.
+              </p>
+              <div className="flex gap-3 mt-5">
+                <button onClick={() => setShowBackfillConfirm(false)} data-testid="backfill-confirm-cancel"
+                  className="flex-1 border border-gray-200 text-gray-600 hover:bg-gray-50 py-2.5 rounded-xl text-sm font-medium transition-colors">
+                  Cancel
+                </button>
+                <button onClick={handleBackfillPortal} data-testid="backfill-confirm-confirm"
+                  className="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-medium transition-colors">
+                  Activate
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -527,10 +787,18 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                   {rows.map((row, i) => (
                     <tr key={i} className="hover:bg-gray-50">
                       <td className="px-3 py-2 text-gray-400">{i + 1}</td>
-                      <td className="px-3 py-2 bg-amber-50/50">
-                        <input className={`${inputCls} ${!row.school_roll_number.trim() ? 'border-amber-300' : ''}`}
+                      <td className="px-3 py-2 bg-amber-50/50 align-top">
+                        <input
+                          className={`${inputCls} ${rowDupWarnings[i] ? 'border-red-400 ring-1 ring-red-300' : !row.school_roll_number.trim() ? 'border-amber-300' : ''}`}
                           placeholder="1" type="number" min="1" value={row.school_roll_number}
+                          aria-invalid={!!rowDupWarnings[i]}
+                          data-testid={`roll-input-${i}`}
                           onChange={e => updateRow(i, 'school_roll_number', e.target.value)} />
+                        {rowDupWarnings[i] && (
+                          <p data-testid={`roll-dup-warning-${i}`} className="mt-1 text-[10px] leading-tight text-red-600">
+                            {rowDupWarnings[i]}
+                          </p>
+                        )}
                       </td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="Last name" value={row.last_name} onChange={e => updateRow(i, 'last_name', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="First name" value={row.first_name} onChange={e => updateRow(i, 'first_name', e.target.value)} /></td>
@@ -557,19 +825,49 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
               <p className="text-xs text-gray-400">Student/Parent Email optional — credentials sent by email if provided, else share manually</p>
               <p className="text-xs text-amber-600">Roll No unique within Grade + Section</p>
             </div>
+            {error && (
+              <div className="px-4 py-2 bg-red-50 border-t border-red-200 text-red-700 text-xs flex items-start justify-between gap-3">
+                <span>{error}</span>
+                <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 shrink-0">✕</button>
+              </div>
+            )}
             <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
               <button onClick={addRow} className="text-sm text-green-600 hover:text-green-800 font-medium">+ Add Row</button>
               <div className="flex items-center gap-3">
+                {hasRowDupes && (
+                  <span className="text-xs text-red-600 font-medium">Fix duplicate roll numbers before enrolling</span>
+                )}
                 <span className="text-xs text-gray-400">{rows.filter(r => r.last_name.trim() || r.first_name.trim()).length} of {rows.length} rows ready</span>
-                <button onClick={handleSubmit} disabled={submitting || rows.every(r => !r.last_name.trim() && !r.first_name.trim())}
+                <button onClick={handleSubmit} disabled={submitting || checking || hasRowDupes || rows.every(r => !r.last_name.trim() && !r.first_name.trim())}
                   data-testid="enroll-students-btn"
                   className="bg-green-600 hover:bg-green-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
-                  {submitting ? 'Enrolling...' : 'Enroll Students'}
+                  {checking ? 'Checking...' : submitting ? 'Enrolling...' : 'Enroll Students'}
                 </button>
               </div>
             </div>
           </div>
         </>
+      )}
+
+      {(submitting || checking) && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl px-10 py-8 flex flex-col items-center gap-5 min-w-[280px]">
+            <svg className="w-10 h-10 animate-spin text-green-600" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <div className="text-center">
+              <p className="text-base font-bold text-gray-800">{checking ? 'Checking for duplicates…' : 'Enrolling students…'}</p>
+              {submitting && <p className="text-sm text-gray-500 mt-1">Processing {submitCount} student{submitCount !== 1 ? 's' : ''}, please wait</p>}
+            </div>
+            {submitting && (
+              <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                <div className="h-2 rounded-full bg-green-500 animate-pulse w-3/4" />
+              </div>
+            )}
+            <p className="text-xs text-gray-400">Do not close or refresh this page</p>
+          </div>
+        </div>
       )}
     </div>
   )

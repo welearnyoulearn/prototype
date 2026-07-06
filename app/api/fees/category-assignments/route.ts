@@ -196,9 +196,9 @@ export async function POST(req: NextRequest) {
           `UPDATE student_fee_ledger
            SET amount_due = $1,
                status = CASE
-                 WHEN amount_paid >= $1                     THEN 'paid'
-                 WHEN amount_paid > 0 AND amount_paid < $1 THEN 'partial'
-                 WHEN $1 > 0 AND due_date < CURRENT_DATE   THEN 'overdue'
+                 WHEN COALESCE(waiver_amount,0) + amount_paid >= $1  THEN 'paid'
+                 WHEN amount_paid > 0 AND amount_paid < $1           THEN 'partial'
+                 WHEN $1 > 0 AND EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                  ELSE 'pending'
                END
            WHERE school_id = $2 AND student_id = $3 AND fee_category_id = $4
