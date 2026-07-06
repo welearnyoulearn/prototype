@@ -6,9 +6,14 @@ import { Pool, types } from 'pg'
 // instead of "2026-03-31", causing a persistent one-day-behind display bug.
 types.setTypeParser(types.builtins.DATE, (val: string) => val)
 
-// Auto-detect local vs Supabase: skip SSL for localhost connections
+// Auto-detect local vs Supabase: skip SSL for localhost connections.
+// Must check PGHOST too, not just DATABASE_URL — a local Postgres install typically
+// has SSL disabled, and forcing it on (the old unconditional behavior below) fails
+// with "The server does not support SSL connections".
 const dbUrl = process.env.DATABASE_URL ?? ''
+const pgHost = process.env.PGHOST ?? ''
 const isLocal = dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1')
+  || pgHost === 'localhost' || pgHost === '127.0.0.1'
 // Vercel serverless: each function instance is isolated — 1 connection is enough,
 // keeps us well under Supabase PgBouncer's session-mode pool_size limit.
 const isVercel = process.env.VERCEL === '1'
@@ -22,10 +27,10 @@ const poolConfig = (process.env.PGHOST)
       database: process.env.PGDATABASE ?? 'postgres',
       user:     process.env.PGUSER,
       password: process.env.PGPASSWORD,
-      ssl: { rejectUnauthorized: false },
-      max: 1,
-      idleTimeoutMillis: 10000,
-      connectionTimeoutMillis: 10000,
+      ssl: isLocal ? false as const : { rejectUnauthorized: false },
+      max: isLocal ? 10 : 1,
+      idleTimeoutMillis: isLocal ? 30000 : 10000,
+      connectionTimeoutMillis: isLocal ? 5000 : 10000,
     }
   : {
       connectionString: dbUrl,
