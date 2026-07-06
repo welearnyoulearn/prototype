@@ -82,6 +82,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'school_id, label, start_date, end_date required' }, { status: 400 })
     }
 
+    // Same order check the PUT (edit) handler already enforces — gives a clean error
+    // instead of a raw chk_academic_years_date_order constraint violation.
+    if (start_date >= end_date) {
+      return NextResponse.json({ error: 'Start date must be before end date' }, { status: 400 })
+    }
+
+    // Catch dates that are individually valid (start < end) but don't correspond to
+    // the label at all — e.g. label "2027-28" with dates left at whatever a blank
+    // date picker happened to default to. A label like "YYYY-YY" implies the year
+    // should start in YYYY; allow some slack for schools with non-standard calendars
+    // but reject anything wildly off (the bug this guards against was off by a full
+    // calendar year).
+    const labelYear = parseInt(label.trim().slice(0, 4))
+    const startYear = parseInt(String(start_date).slice(0, 4))
+    if (!isNaN(labelYear) && !isNaN(startYear) && Math.abs(startYear - labelYear) > 1) {
+      return NextResponse.json({
+        error: `Start date (${start_date}) doesn't match academic year label "${label}" — check for a typo in the dates.`
+      }, { status: 400 })
+    }
+
     const client = await pool.connect()
     try {
       await client.query('BEGIN')

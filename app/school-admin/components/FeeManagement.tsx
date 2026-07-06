@@ -274,10 +274,11 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
 import dynamic from 'next/dynamic'
 
 export default function FeeManagement({
-  schoolId, adminName
+  schoolId, adminName, onNavigate
 }: {
   schoolId: number
   adminName?: string
+  onNavigate?: (key: string) => void
 }) {
   type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'students' | 'reports' | 'yearend'
   const [activeTab, setActiveTab] = useState<Tab>('overview')
@@ -287,6 +288,10 @@ export default function FeeManagement({
   // Shared
   const [academicYear, setAcademicYear]   = useState('')
   const [academicYears, setAcademicYears] = useState<string[]>([])
+  // The school's actual is_current year — distinct from `academicYear`, which the
+  // dropdown can freely change to browse a different year's ledger/reports. The
+  // year-end banner must always describe THIS year, not whatever's being browsed.
+  const [actualCurrentYear, setActualCurrentYear] = useState('')
   const [closedYears, setClosedYears]     = useState<Set<string>>(new Set())
 
 
@@ -653,6 +658,7 @@ export default function FeeManagement({
       const cur: string = current?.label ?? labels[0] ?? ''
       setAcademicYears(labels)
       setAcademicYear(cur)
+      setActualCurrentYear(cur)
       const closedSet = new Set<string>(Array.isArray(closed) ? closed.map((c: { academic_year: string }) => c.academic_year) : [])
       setClosedYears(closedSet)
 
@@ -2249,7 +2255,17 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Year Label (e.g. 2025-26)</label>
-                <input data-testid="wizard-year-label" value={wizLabel} onChange={e => setWizLabel(e.target.value)}
+                <input data-testid="wizard-year-label" value={wizLabel} onChange={e => {
+                  const val = e.target.value
+                  setWizLabel(val)
+                  // Prefill Apr 1 – Mar 31 from the label — see the matching comment on
+                  // the carry-forward modal's year-label input for why this matters.
+                  const startNum = parseInt(startYearLabel(val))
+                  if (!wizStart && !wizEnd && !isNaN(startNum) && String(startNum).length === 4) {
+                    setWizStart(`${startNum}-04-01`)
+                    setWizEnd(`${startNum + 1}-03-31`)
+                  }
+                }}
                   placeholder="2025-26" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -2313,7 +2329,18 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               <div className="space-y-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Year Label (e.g. 2026-27)</label>
-                  <input data-testid="cf-new-label" value={cfNewLabel} onChange={e => setCfNewLabel(e.target.value)}
+                  <input data-testid="cf-new-label" value={cfNewLabel} onChange={e => {
+                    const val = e.target.value
+                    setCfNewLabel(val)
+                    // Prefill Apr 1 – Mar 31 from the label so the date pickers don't sit
+                    // blank (which is how a mismatched year/date bug like "2027-28 ending
+                    // 2026-07-04" got entered) — only if the user hasn't typed dates yet.
+                    const startNum = parseInt(startYearLabel(val))
+                    if (!cfNewStart && !cfNewEnd && !isNaN(startNum) && String(startNum).length === 4) {
+                      setCfNewStart(`${startNum}-04-01`)
+                      setCfNewEnd(`${startNum + 1}-03-31`)
+                    }
+                  }}
                     placeholder="2026-27" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -2364,19 +2391,23 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
         </select>
       </div>
 
-      {/* ── Approaching / overdue year-end banner ── */}
-      {daysUntilYearEnd !== null && daysUntilYearEnd <= 15 && !closedYears.has(academicYear) && (
+      {/* ── Approaching / overdue year-end banner ──
+          Always describes actualCurrentYear (the school's real is_current year), never
+          `academicYear` — that state is just whatever the dropdown is browsing, and
+          switching it to inspect a different year must not make the banner claim that
+          OTHER year is the one ending/overdue. */}
+      {daysUntilYearEnd !== null && daysUntilYearEnd <= 15 && !closedYears.has(actualCurrentYear) && (
         daysUntilYearEnd < 0 ? (
           <div data-testid="year-end-banner" className="flex items-start gap-3 bg-red-50 border border-red-300 rounded-xl px-4 py-3">
             <span className="text-red-500 text-lg mt-0.5">⚠</span>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-red-800">
-                {`Academic year ${academicYear} ended ${Math.abs(daysUntilYearEnd)} day${Math.abs(daysUntilYearEnd) === 1 ? '' : 's'} ago (${yearEndDate}) — please close it out`}
+                {`Academic year ${actualCurrentYear} ended ${Math.abs(daysUntilYearEnd)} day${Math.abs(daysUntilYearEnd) === 1 ? '' : 's'} ago (${yearEndDate}) — please close it out`}
               </p>
               <p className="text-xs text-red-700 mt-0.5">This year is past its end date and still open. Close it out to lock the ledger and roll over balances.</p>
             </div>
             <div className="flex gap-2 flex-shrink-0">
-              <button data-testid="banner-extend" onClick={() => setActiveTab('yearend' as Tab)}
+              <button data-testid="banner-extend" onClick={() => { setAcademicYear(actualCurrentYear); setActiveTab('yearend' as Tab) }}
                 className="text-xs bg-white border border-red-300 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-50 font-medium">
                 Extend / Close
               </button>
@@ -2388,13 +2419,13 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             <div className="flex-1 min-w-0">
               <p className="text-sm font-semibold text-amber-800">
                 {daysUntilYearEnd === 0
-                  ? `Academic year ${academicYear} ends today (${yearEndDate})`
-                  : `Academic year ${academicYear} ends in ${daysUntilYearEnd} day${daysUntilYearEnd === 1 ? '' : 's'} — ${yearEndDate}`}
+                  ? `Academic year ${actualCurrentYear} ends today (${yearEndDate})`
+                  : `Academic year ${actualCurrentYear} ends in ${daysUntilYearEnd} day${daysUntilYearEnd === 1 ? '' : 's'} — ${yearEndDate}`}
               </p>
               <p className="text-xs text-amber-700 mt-0.5">Collect outstanding fees before year-end. You can extend the due date or close the year.</p>
             </div>
             <div className="flex gap-2 flex-shrink-0">
-              <button data-testid="banner-extend" onClick={() => setActiveTab('yearend' as Tab)}
+              <button data-testid="banner-extend" onClick={() => { setAcademicYear(actualCurrentYear); setActiveTab('yearend' as Tab) }}
                 className="text-xs bg-white border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg hover:bg-amber-50 font-medium">
                 Extend / Close
               </button>
@@ -5485,6 +5516,17 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     <li>Grade 12 students and leavers are excluded from auto-carry</li>
                   </ul>
                 </div>
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800 space-y-1">
+                  <p className="font-semibold">This does NOT promote students to their next grade/section.</p>
+                  <p className="text-xs">Fee rollover and grade promotion are separate steps. Use the <strong>Year Rollover</strong> tool (in the sidebar, under Tools) to promote students — otherwise they&apos;ll stay in their old grade for the new year even though their fees carried forward.</p>
+                  {onNavigate && (
+                    <button
+                      onClick={() => { setShowRolloverModal(false); onNavigate('year-rollover') }}
+                      className="text-xs font-semibold text-red-700 underline hover:text-red-900">
+                      Open Year Rollover (grade promotion) →
+                    </button>
+                  )}
+                </div>
                 <p className="text-xs text-gray-500">This is irreversible. Make sure all year-end decisions (carry / write-off / passout) are applied first.</p>
                 <button
                   data-testid="btn-rollover-preview"
@@ -5528,11 +5570,23 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     Rollover complete. The new academic year is now active. Go to the Setup tab to generate fee bills for the new year.
                   </div>
                 )}
+                {rolloverDone && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800">
+                    <p className="font-semibold">Don&apos;t forget: students still need to be promoted to their next grade/section.</p>
+                    <p className="text-xs mt-0.5">This rollover only carried forward fees — it did not touch grades. Use Year Rollover (sidebar, under Tools) to promote students.</p>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <button onClick={() => setShowRolloverModal(false)}
                     className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">
                     Close
                   </button>
+                  {rolloverDone && onNavigate && (
+                    <button onClick={() => { setShowRolloverModal(false); onNavigate('year-rollover') }}
+                      className="flex-1 bg-red-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-red-700">
+                      Promote Students →
+                    </button>
+                  )}
                   {rolloverDone && (
                     <button onClick={() => { setShowRolloverModal(false); setActiveTab('setup' as Tab) }}
                       className="flex-1 bg-blue-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-blue-700">
