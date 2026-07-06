@@ -18,11 +18,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  // Fetch school's UPI ID (self-healing column)
+  // Fetch school's UPI ID
   let upiId: string | null = null
   let schoolName = 'School'
   try {
-    await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS upi_id TEXT`)
     const { rows: [sc] } = await pool.query(
       `SELECT name, upi_id FROM schools WHERE id = $1`, [school_id]
     )

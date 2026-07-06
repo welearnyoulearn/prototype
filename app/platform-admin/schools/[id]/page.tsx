@@ -68,15 +68,57 @@ export default function SchoolDetailPage() {
   const [resetting, setResetting]   = useState(false)
   const [resetCreds, setResetCreds] = useState<{ code: string; pass: string } | null>(null)
 
+  // Portal access overrides (student-portal / parent-portal)
+  const [portalOverrides, setPortalOverrides] = useState<Record<string, boolean>>({})
+  const [savingPortal, setSavingPortal] = useState<string | null>(null)
+  const [savedPortal, setSavedPortal] = useState<string | null>(null)
+  const [portalConfirm, setPortalConfirm] = useState<{ key: string; label: string; enabled: boolean } | null>(null)
+
+  // Portal backfill (activate access for students who never got a login)
+  const [portalPending, setPortalPending] = useState<{ studentPortalEnabled: boolean; parentPortalEnabled: boolean; pendingCount: number } | null>(null)
+  const [backfilling, setBackfilling] = useState(false)
+  const [showBackfillConfirm, setShowBackfillConfirm] = useState(false)
+  const [backfillResult, setBackfillResult] = useState<{ backfilled: number; credentials: { students: unknown[]; parents: unknown[] } } | null>(null)
+
+  async function fetchPortalPending() {
+    try {
+      const res = await fetch(`/api/school-admin/students/backfill-portal?school_id=${schoolId}`)
+      if (res.ok) setPortalPending(await res.json())
+    } catch { /* non-critical */ }
+  }
+
+  async function handleBackfillPortal() {
+    if (!portalPending) return
+    setShowBackfillConfirm(false)
+    const target = portalPending.studentPortalEnabled && portalPending.parentPortalEnabled ? 'both'
+      : portalPending.studentPortalEnabled ? 'student' : 'parent'
+    setBackfilling(true); setError('')
+    try {
+      const res = await fetch('/api/school-admin/students/backfill-portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: Number(schoolId), target }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setBackfillResult(data)
+      await fetchPortalPending()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to activate portal access')
+    } finally { setBackfilling(false) }
+  }
+
   useEffect(() => {
     async function load() {
       try {
-        const [schoolRes, featRes] = await Promise.all([
+        const [schoolRes, featRes, overridesRes] = await Promise.all([
           fetch(`/api/schools/${schoolId}`),
           fetch('/api/platform/features'),
+          fetch(`/api/platform/schools/${schoolId}/feature-overrides`),
         ])
         const schoolData = await schoolRes.json()
         const featData   = await featRes.json()
+        const overridesData = await overridesRes.json().catch(() => ({ overrides: {} }))
 
         if (!schoolRes.ok) throw new Error(schoolData.error)
 
@@ -93,6 +135,7 @@ export default function SchoolDetailPage() {
           setFeatures(featData.features)
           setMatrix(featData.matrix)
         }
+        if (overridesRes.ok) setPortalOverrides(overridesData.overrides || {})
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : 'Failed to load school')
       } finally {
@@ -101,7 +144,8 @@ export default function SchoolDetailPage() {
       }
     }
     load()
-  }, [schoolId])
+    fetchPortalPending()
+  }, [schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSaveSub() {
     setSavingSub(true); setSavedSub(false); setError('')
@@ -121,6 +165,32 @@ export default function SchoolDetailPage() {
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally { setSavingSub(false) }
+  }
+
+  async function handlePortalToggle(featureKey: string, enabled: boolean) {
+    setSavingPortal(featureKey); setSavedPortal(null); setError('')
+    try {
+      const res = await fetch(`/api/platform/schools/${schoolId}/feature-overrides`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feature_key: featureKey, enabled }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setPortalOverrides(o => ({ ...o, [featureKey]: enabled }))
+      setSavedPortal(featureKey)
+      setTimeout(() => setSavedPortal(null), 3000)
+      fetchPortalPending()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to save portal access')
+    } finally { setSavingPortal(null) }
+  }
+
+  function confirmPortalToggle() {
+    if (!portalConfirm) return
+    const { key, enabled } = portalConfirm
+    setPortalConfirm(null)
+    handlePortalToggle(key, enabled)
   }
 
   async function handleSaveEdit() {
@@ -458,6 +528,58 @@ export default function SchoolDetailPage() {
           </div>
         </div>
 
+        {/* ── Portal Access ────────────────────────────────────────────────── */}
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100">
+            <h2 className="font-semibold text-gray-900">Portal Access</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Controls whether onboarding students creates student/parent logins for this school.
+              Roster data (names, grades, fees) is unaffected — only login credentials are gated.
+            </p>
+          </div>
+          <div className="px-6 py-5 space-y-4">
+            {[
+              { key: 'student-portal', label: 'Student Portal Access' },
+              { key: 'parent-portal',  label: 'Parent Portal Access' },
+            ].map(({ key, label }) => {
+              const enabled = portalOverrides[key] !== false // default true unless explicitly overridden off
+              return (
+                <div key={key} className="flex items-center justify-between">
+                  <span className="text-sm text-gray-800">{label}</span>
+                  <div className="flex items-center gap-3">
+                    {savedPortal === key && <span className="text-green-600 text-xs font-medium">✓ Saved</span>}
+                    <button
+                      onClick={() => setPortalConfirm({ key, label, enabled: !enabled })}
+                      disabled={savingPortal === key}
+                      data-testid={`portal-toggle-${key}`}
+                      className={`relative w-11 h-6 rounded-full transition-colors disabled:opacity-50 ${enabled ? 'bg-purple-600' : 'bg-gray-300'}`}
+                    >
+                      <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${enabled ? 'translate-x-5' : ''}`} />
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+
+            {portalPending && portalPending.pendingCount > 0 && (portalPending.studentPortalEnabled || portalPending.parentPortalEnabled) && (
+              <div className="pt-3 border-t border-gray-100 flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-800">{portalPending.pendingCount} student{portalPending.pendingCount !== 1 ? 's' : ''} missing a login</p>
+                  <p className="text-xs text-gray-400 mt-0.5">Onboarded while the portal was disabled, or before this feature existed.</p>
+                </div>
+                <button onClick={() => setShowBackfillConfirm(true)} disabled={backfilling}
+                  data-testid="platform-activate-portal-access-btn"
+                  className="flex-shrink-0 ml-4 text-sm px-4 py-2 rounded-lg bg-teal-600 hover:bg-teal-700 text-white font-medium transition-colors disabled:opacity-50">
+                  {backfilling ? 'Activating…' : 'Activate Portal Access'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Watchline ────────────────────────────────────────────────────── */}
+        <WatchlineCard schoolId={schoolId} schoolName={school?.name ?? ''} />
+
         {/* ── Danger Zone ──────────────────────────────────────────────────── */}
         <div className="bg-white rounded-xl border border-red-200 overflow-hidden">
           <div className="px-6 py-4 border-b border-red-100 bg-red-50">
@@ -559,6 +681,223 @@ export default function SchoolDetailPage() {
           </div>
         </div>
       )}
+
+      {/* ── Portal Toggle Confirmation Popup ── */}
+      {portalConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className={`px-6 py-5 border-b ${portalConfirm.enabled ? 'bg-purple-50 border-purple-100' : 'bg-amber-50 border-amber-100'}`}>
+              <h3 className="font-bold text-gray-900 text-base">
+                {portalConfirm.enabled ? 'Enable' : 'Disable'} {portalConfirm.label}?
+              </h3>
+            </div>
+            <div className="px-6 py-5">
+              <p className="text-sm text-gray-600">
+                {portalConfirm.enabled
+                  ? `Students/parents onboarded going forward will get logins. Existing students missing one can be activated here, or by the school via "Activate Portal Access" on their onboarding screen.`
+                  : `Existing logins will stop working immediately, and no new logins will be created on onboarding. Passwords are not deleted — re-enabling restores access instantly.`}
+              </p>
+              <div className="flex gap-3 mt-5">
+                <button onClick={() => setPortalConfirm(null)} data-testid="portal-confirm-cancel"
+                  className="flex-1 border border-gray-200 text-gray-600 hover:bg-gray-50 py-2.5 rounded-xl text-sm font-medium transition-colors">
+                  Cancel
+                </button>
+                <button onClick={confirmPortalToggle} data-testid="portal-confirm-confirm"
+                  className={`flex-1 text-white py-2.5 rounded-xl text-sm font-medium transition-colors ${portalConfirm.enabled ? 'bg-purple-600 hover:bg-purple-700' : 'bg-amber-600 hover:bg-amber-700'}`}>
+                  {portalConfirm.enabled ? 'Enable' : 'Disable'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Backfill Confirmation Popup ── */}
+      {showBackfillConfirm && portalPending && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="bg-teal-50 border-b border-teal-100 px-6 py-5">
+              <h3 className="font-bold text-gray-900 text-base">Activate Portal Access?</h3>
+            </div>
+            <div className="px-6 py-5">
+              <p className="text-sm text-gray-600">
+                This will generate new login credentials for <strong>{portalPending.pendingCount}</strong> existing
+                student{portalPending.pendingCount !== 1 ? 's' : ''} (and any linked parents) who don&apos;t have one yet,
+                and send welcome emails where an email address is on file. This cannot be undone.
+              </p>
+              <div className="flex gap-3 mt-5">
+                <button onClick={() => setShowBackfillConfirm(false)} data-testid="platform-backfill-confirm-cancel"
+                  className="flex-1 border border-gray-200 text-gray-600 hover:bg-gray-50 py-2.5 rounded-xl text-sm font-medium transition-colors">
+                  Cancel
+                </button>
+                <button onClick={handleBackfillPortal} data-testid="platform-backfill-confirm-confirm"
+                  className="flex-1 bg-teal-600 hover:bg-teal-700 text-white py-2.5 rounded-xl text-sm font-medium transition-colors">
+                  Activate
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Backfill Result Summary ── */}
+      {backfillResult && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden">
+            <div className="bg-teal-600 px-6 py-5 rounded-t-2xl">
+              <h3 className="text-white font-bold text-lg">Portal Access Activated</h3>
+            </div>
+            <div className="px-6 py-5">
+              <p className="text-sm text-gray-600">
+                Generated logins for <strong>{backfillResult.credentials.students.length}</strong> student{backfillResult.credentials.students.length !== 1 ? 's' : ''}
+                {backfillResult.credentials.parents.length > 0 && <> and <strong>{backfillResult.credentials.parents.length}</strong> parent{backfillResult.credentials.parents.length !== 1 ? 's' : ''}</>}.
+                Welcome emails were sent where an email address was on file.
+              </p>
+              <p className="text-xs text-gray-400 mt-3 bg-gray-50 rounded-lg px-3 py-2">
+                Individual credentials aren&apos;t shown here — the school admin can view/reset them from the student onboarding screen.
+              </p>
+              <button onClick={() => setBackfillResult(null)}
+                className="w-full mt-4 bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-xl text-sm font-medium transition-colors">
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Watchline card ────────────────────────────────────────────────────────────
+function WatchlineCard({ schoolId, schoolName }: { schoolId: string; schoolName: string }) {
+  const [enabled, setEnabled]   = useState(false)
+  const [saving, setSaving]     = useState(false)
+  const [saved, setSaved]       = useState(false)
+  const [recentErrors, setRecentErrors] = useState<Array<{
+    id: number; severity: string; error_message: string; route: string | null; created_at: string
+  }>>([])
+  const [errLoading, setErrLoading] = useState(true)
+
+  useEffect(() => {
+    // Load current override state
+    fetch(`/api/platform/schools/${schoolId}/feature-overrides`)
+      .then(r => r.ok ? r.json() : { overrides: {} })
+      .then(d => setEnabled(d.overrides['api-monitoring'] === true))
+      .catch(() => {})
+
+    // Load recent errors for this school (always shown regardless of toggle)
+    fetch(`/api/platform/watchline?type=error&school_id=${schoolId}&page=0`)
+      .then(r => r.ok ? r.json() : { rows: [] })
+      .then(d => setRecentErrors((d.rows || []).slice(0, 5)))
+      .catch(() => {})
+      .finally(() => setErrLoading(false))
+  }, [schoolId])
+
+  async function toggleMonitoring() {
+    setSaving(true); setSaved(false)
+    const nextEnabled = !enabled
+    try {
+      const res = await fetch(`/api/platform/schools/${schoolId}/feature-overrides`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feature_key: 'api-monitoring', enabled: nextEnabled }),
+      })
+      if (res.ok) { setEnabled(nextEnabled); setSaved(true); setTimeout(() => setSaved(false), 3000) }
+    } finally { setSaving(false) }
+  }
+
+  const SEV: Record<string, string> = {
+    info: 'bg-blue-100 text-blue-700', warn: 'bg-amber-100 text-amber-700',
+    error: 'bg-red-100 text-red-700', critical: 'bg-red-700 text-white',
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="font-semibold text-gray-900">Watchline</h2>
+            {enabled && (
+              <span className="inline-flex items-center gap-1 text-xs text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full">
+                <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
+                Monitoring active
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-gray-500 mt-0.5">
+            API request monitoring for {schoolName}. Errors are always captured; request logs require monitoring to be on.
+          </p>
+        </div>
+        <a href={`/platform-admin/logs?school_id=${schoolId}`}
+          className="text-xs text-gray-400 hover:text-gray-700 underline underline-offset-2 flex-shrink-0 ml-4">
+          View logs →
+        </a>
+      </div>
+      <div className="px-6 py-5 space-y-4">
+        {/* Toggle */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-gray-800">Request monitoring</p>
+            <p className="text-xs text-gray-400 mt-0.5">Captures route, latency, and actor for every API call from this school</p>
+          </div>
+          <div className="flex items-center gap-3">
+            {saved && <span className="text-green-600 text-xs font-medium">✓ Saved</span>}
+            <button onClick={toggleMonitoring} disabled={saving}
+              data-testid="watchline-toggle"
+              className={`relative w-11 h-6 rounded-full transition-colors disabled:opacity-50 ${enabled ? 'bg-teal-500' : 'bg-gray-300'}`}>
+              <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${enabled ? 'translate-x-5' : ''}`} />
+            </button>
+          </div>
+        </div>
+
+        {/* Recent errors */}
+        <div className="border-t border-gray-100 pt-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Recent errors</p>
+            <a href={`/platform-admin/logs?school_id=${schoolId}&type=error`}
+              className="text-xs text-gray-400 hover:text-gray-700 underline underline-offset-2">
+              View all →
+            </a>
+          </div>
+          {errLoading ? (
+            <p className="text-xs text-gray-400">Loading…</p>
+          ) : recentErrors.length === 0 ? (
+            <p className="text-xs text-gray-400">No errors recorded for this school.</p>
+          ) : (
+            <div className="space-y-2">
+              {recentErrors.map(e => (
+                <div key={e.id} className="flex items-start gap-2 text-xs">
+                  <span className={`flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${SEV[e.severity] || 'bg-gray-100 text-gray-600'}`}>
+                    {e.severity}
+                  </span>
+                  <span className="text-gray-700 truncate flex-1" title={e.error_message}>{e.error_message}</span>
+                  <span className="flex-shrink-0 text-gray-300 font-mono">
+                    {new Date(e.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Download link */}
+        <div className="border-t border-gray-100 pt-4 flex gap-3">
+          <a href={`/api/platform/watchline?school_id=${schoolId}&type=request&export=csv`}
+            className="text-xs text-gray-500 hover:text-gray-800 underline underline-offset-2">
+            Download requests CSV
+          </a>
+          <span className="text-gray-200">·</span>
+          <a href={`/api/platform/watchline?school_id=${schoolId}&type=error&export=csv`}
+            className="text-xs text-gray-500 hover:text-gray-800 underline underline-offset-2">
+            Download errors CSV
+          </a>
+          <span className="text-gray-200">·</span>
+          <a href={`/api/platform/watchline?school_id=${schoolId}&type=error&export=json`}
+            className="text-xs text-gray-500 hover:text-gray-800 underline underline-offset-2">
+            JSON
+          </a>
+        </div>
+      </div>
     </div>
   )
 }

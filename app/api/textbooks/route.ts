@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import path from 'path'
 import fs from 'fs/promises'
+import { gradeOrderSql } from '@/lib/grades'
 
 const UPLOAD_DIR = path.join(process.cwd(), 'textbook_uploads')
 const CHUNK_SIZE = 1500   // chars per chunk
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
                FROM textbook_library WHERE school_id=$1`
       const args: (string | number)[] = [school_id]
       if (grade) { q += ` AND grade=$2`; args.push(grade) }
-      q += ` ORDER BY grade::int ASC NULLS LAST, subject ASC, uploaded_at DESC`
+      q += ` ORDER BY ${gradeOrderSql('grade')}, subject ASC, uploaded_at DESC`
       const { rows } = await pool.query(q, args)
       return NextResponse.json(rows)
     } catch (err) {

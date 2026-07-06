@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Staff limits per tier — wrapped separately so a missing column doesn't break the whole response
-    let staffLimits: Record<string, number | null> = {}
+    const staffLimits: Record<string, number | null> = {}
     try {
       const limitsRes = await pool.query(`SELECT tier, staff_limit FROM plan_pricing WHERE tier IN ('basic','standard','premium','none')`)
       for (const row of limitsRes.rows) {
