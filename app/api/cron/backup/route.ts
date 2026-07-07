@@ -13,19 +13,28 @@ import pool from '@/lib/db'
 import { r2Config, LATEST_KEY } from '@/lib/r2'
 import { checkCronAuth, listTables, backupKeyFor } from '@/lib/backup'
 
-// POST /api/cron/backup
+// GET/POST /api/cron/backup
 // Daily data-only backup of every public table to Cloudflare R2 as gzipped
 // JSON Lines. Rows are streamed table-by-table through gzip into a multipart
 // upload, so memory stays flat regardless of DB size. Also overwrites
 // db/latest.json and prunes to the newest 14 backups.
 // Auth: Authorization: Bearer $CRON_SECRET (Vercel Cron sends this automatically).
+// GET is what Vercel Cron actually invokes; POST is kept for manual triggering.
 export const maxDuration = 300
 export const dynamic = 'force-dynamic'
 
 const KEEP = 14 // retention: newest N backups (fits R2's 10 GB free tier)
 const DELETE_BATCH = 1000 // S3/R2 DeleteObjects hard limit
 
+export async function GET(req: NextRequest) {
+  return runBackup(req)
+}
+
 export async function POST(req: NextRequest) {
+  return runBackup(req)
+}
+
+async function runBackup(req: NextRequest) {
   const unauthorized = checkCronAuth(req)
   if (unauthorized) {
     const msg = unauthorized === 503 ? 'CRON_SECRET not configured' : 'Unauthorized'
