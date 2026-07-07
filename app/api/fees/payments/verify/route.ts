@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { sendFeePaymentConfirmedEmail, sendFeePaymentRejectedEmail } from '@/lib/email'
 import { requireFeeAccess } from '@/lib/auth'
+import { withWatchline } from '@/lib/logger'
 
 // GET /api/fees/payments/verify?school_id=X — list pending_verification payments
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
@@ -13,7 +14,7 @@ export async function GET(req: NextRequest) {
       const { rows } = await pool.query(
         `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section,
                 fc.name AS category_name, l.period_label, l.amount_due, l.amount_paid,
-                (l.amount_due - l.amount_paid) AS ledger_balance
+                GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS ledger_balance
          FROM fee_payments fp
          JOIN students s ON s.id = fp.student_id
          JOIN student_fee_ledger l ON l.id = fp.ledger_id
@@ -29,10 +30,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const GET = withWatchline(handleGET, { route: '/api/fees/payments/verify' })
 
 // POST /api/fees/payments/verify — approve or reject a pending payment
 // Body: { payment_id, action: 'approve'|'reject', verified_by, rejection_reason? }
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     const client = await pool.connect()
     try {
@@ -46,14 +48,6 @@ export async function POST(req: NextRequest) {
       const access = await requireFeeAccess(pmtRow.school_id)
       if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
       const verified_by = clientActor || access.actor
-
-      // Ensure audit columns exist (idempotent — safe to call every time)
-      await client.query(`
-        ALTER TABLE fee_payments
-          ADD COLUMN IF NOT EXISTS verified_by      TEXT,
-          ADD COLUMN IF NOT EXISTS verified_at      TIMESTAMPTZ,
-          ADD COLUMN IF NOT EXISTS rejection_reason TEXT
-      `)
 
       await client.query('BEGIN')
 
@@ -75,13 +69,13 @@ export async function POST(req: NextRequest) {
           [verified_by, payment_id]
         )
 
-        // Update ledger: amount_paid += payment.amount
+        // Update ledger: amount_paid += payment.amount (waiver_amount already applied separately)
         await client.query(
           `UPDATE student_fee_ledger
-           SET amount_paid = LEAST(amount_due, amount_paid + $1),
+           SET amount_paid = LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1),
                status = CASE
-                 WHEN LEAST(amount_due, amount_paid + $1) >= amount_due THEN 'paid'
-                 WHEN amount_paid + $1 > 0                              THEN 'partial'
+                 WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
+                 WHEN amount_paid + $1 > 0 THEN 'partial'
                  ELSE status
                END
            WHERE id = $2`,
@@ -177,3 +171,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+// No getSchoolId extractor — same reasoning as payments/cancel: avoid a second
+// query competing with the handler's own pool.connect() under a max:1 pool.
+export const POST = withWatchline(handlePOST, { route: '/api/fees/payments/verify' })

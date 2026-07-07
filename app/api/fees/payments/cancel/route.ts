@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { withWatchline } from '@/lib/logger'
 
 // POST /api/fees/payments/cancel
 // Cancel (reverse) a completed payment, OR correct it (cancel + re-record with new values).
@@ -11,7 +12,7 @@ import { requireFeeAccess } from '@/lib/auth'
 // done_by is derived server-side from the session.
 //
 // Always: reverses the ledger, soft-marks the payment 'cancelled', records an audit row.
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
     const body = await req.json()
     const { payment_id, action = 'cancel', reason } = body
@@ -21,39 +22,52 @@ export async function POST(req: NextRequest) {
 
     const client = await pool.connect()
     try {
-      // Self-heal cancel-tracking columns
-      await client.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancelled_by    TEXT`)
-      await client.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancelled_at    TIMESTAMPTZ`)
-      await client.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancel_reason   TEXT`)
-      await client.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`)
-
-      // Fetch the payment
-      const { rows: [pmt] } = await client.query(
-        `SELECT fp.*, l.academic_year, l.amount_due, l.amount_paid AS ledger_paid
+      // Fetch the payment (no lock yet — just to resolve school_id for the access check)
+      const { rows: [pmtPreview] } = await client.query(
+        `SELECT fp.school_id, l.academic_year
          FROM fee_payments fp
          JOIN student_fee_ledger l ON l.id = fp.ledger_id
          WHERE fp.id = $1`,
         [payment_id]
       )
-      if (!pmt) { client.release(); return NextResponse.json({ error: 'Payment not found' }, { status: 404 }) }
+      if (!pmtPreview) return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
       // Verify the caller owns this payment's school (school-admin only)
-      const access = await requireFeeAccess(pmt.school_id)
-      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
+      const access = await requireFeeAccess(pmtPreview.school_id)
+      if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const done_by = access.actor
-      if (pmt.payment_status === 'cancelled') {
-        return NextResponse.json({ error: 'Payment already cancelled' }, { status: 409 })
-      }
 
-      // Block if the academic year is closed
+      // Block if the academic year is closed — fee_year_close is guaranteed to exist
+      // (see lib/db.ts), so a query error here is a real failure, not a missing table;
+      // let it propagate to the outer catch rather than silently failing this guard open.
       const { rows: [locked] } = await client.query(
         `SELECT 1 FROM fee_year_close WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
-        [pmt.school_id, pmt.academic_year]
-      ).catch(() => ({ rows: [] }))
+        [pmtPreview.school_id, pmtPreview.academic_year]
+      )
       if (locked) {
         return NextResponse.json({ error: 'This academic year is closed. Reopen it to cancel/correct payments.' }, { status: 409 })
       }
 
       await client.query('BEGIN')
+
+      // Re-fetch WITH a row lock now that we're inside the transaction, so two
+      // concurrent cancel/correct requests for the same payment can't both pass
+      // the "already cancelled" check and both reverse the ledger.
+      const { rows: [pmt] } = await client.query(
+        `SELECT fp.*, l.academic_year, l.amount_due, l.amount_paid AS ledger_paid
+         FROM fee_payments fp
+         JOIN student_fee_ledger l ON l.id = fp.ledger_id
+         WHERE fp.id = $1
+         FOR UPDATE OF fp`,
+        [payment_id]
+      )
+      if (!pmt) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
+      }
+      if (pmt.payment_status === 'cancelled') {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Payment already cancelled' }, { status: 409 })
+      }
 
       const wasCompleted = pmt.payment_status === 'completed'
       const origAmount = parseFloat(pmt.amount)
@@ -72,9 +86,10 @@ export async function POST(req: NextRequest) {
           `UPDATE student_fee_ledger
            SET amount_paid = GREATEST(0, amount_paid - $1),
                status = CASE
-                 WHEN GREATEST(0, amount_paid - $1) <= 0                              THEN (CASE WHEN due_date < CURRENT_DATE THEN 'overdue' ELSE 'pending' END)
-                 WHEN GREATEST(0, amount_paid - $1) < amount_due                      THEN 'partial'
-                 ELSE 'paid'
+                 WHEN COALESCE(waiver_amount,0) + GREATEST(0, amount_paid - $1) >= amount_due THEN 'waived'
+                 WHEN GREATEST(0, amount_paid - $1) > 0 THEN 'partial'
+                 WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
+                 ELSE 'pending'
                END
            WHERE id = $2`,
           [origAmount, pmt.ledger_id]
@@ -115,30 +130,19 @@ export async function POST(req: NextRequest) {
 
         // Current ledger state (after the reversal above)
         const { rows: [lg] } = await client.query(
-          `SELECT amount_due, amount_paid, due_date FROM student_fee_ledger WHERE id = $1`, [pmt.ledger_id]
+          `SELECT amount_due, amount_paid, waiver_amount, due_date FROM student_fee_ledger WHERE id = $1 FOR UPDATE`, [pmt.ledger_id]
         )
-        const amountDue = parseFloat(lg.amount_due)
-        const alreadyPaid = parseFloat(lg.amount_paid)        // other payments still on this bill
-        const requiredDue = alreadyPaid + newAmount           // bill must cover all real payments
+        const amountDue   = parseFloat(lg.amount_due)
+        const waiverAmt   = parseFloat(lg.waiver_amount ?? '0')
+        const alreadyPaid = parseFloat(lg.amount_paid)   // other payments still on this bill after reversal
+        const effectiveDue = amountDue - waiverAmt        // max collectable (bill minus any waiver)
 
-        // If the corrected payment makes total paid exceed the bill, raise the bill amount_due
-        // to absorb it (admin is allowed to push the generated bill up or down). Logged as an edit.
-        let billAdjusted = false
-        if (requiredDue > amountDue + 0.01) {
-          await client.query(`
-            CREATE TABLE IF NOT EXISTS student_fee_ledger_edits (
-              id SERIAL PRIMARY KEY, ledger_id INTEGER NOT NULL, school_id INTEGER NOT NULL,
-              student_id INTEGER NOT NULL, old_amount NUMERIC(10,2) NOT NULL, new_amount NUMERIC(10,2) NOT NULL,
-              reason TEXT NOT NULL, changed_by TEXT NOT NULL, changed_at TIMESTAMPTZ DEFAULT NOW()
-            )`)
-          await client.query(
-            `INSERT INTO student_fee_ledger_edits (ledger_id, school_id, student_id, old_amount, new_amount, reason, changed_by)
-             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-            [pmt.ledger_id, pmt.school_id, pmt.student_id, amountDue, requiredDue,
-             `Auto-adjusted via payment correction of ${pmt.receipt_number}: ${reason}`, done_by]
-          )
-          await client.query(`UPDATE student_fee_ledger SET amount_due = $1 WHERE id = $2`, [requiredDue, pmt.ledger_id])
-          billAdjusted = true
+        // Reject if the corrected amount would exceed the remaining balance
+        if (alreadyPaid + newAmount > effectiveDue + 0.01) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({
+            error: `Corrected amount ₹${newAmount} exceeds balance of ₹${Math.max(0, effectiveDue - alreadyPaid).toFixed(2)} remaining on this bill`
+          }, { status: 400 })
         }
 
         const { rows: [seq] } = await client.query(`SELECT nextval('receipt_number_seq') AS n`)
@@ -157,14 +161,14 @@ export async function POST(req: NextRequest) {
         )
         newPaymentId = created.id
 
-        // Apply the new payment and recompute status against the (possibly adjusted) due
+        // Apply the new payment with a safety cap so amount_paid never exceeds amount_due - waiver_amount
         await client.query(
           `UPDATE student_fee_ledger
-           SET amount_paid = amount_paid + $1,
+           SET amount_paid = LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1),
                status = CASE
-                 WHEN amount_paid + $1 >= amount_due THEN 'paid'
-                 WHEN amount_paid + $1 > 0           THEN 'partial'
-                 WHEN due_date < CURRENT_DATE        THEN 'overdue'
+                 WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
+                 WHEN LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) > 0 THEN 'partial'
+                 WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                  ELSE 'pending'
                END
            WHERE id = $2`,
@@ -176,7 +180,7 @@ export async function POST(req: NextRequest) {
              (school_id, payment_id, ledger_id, student_id, action, old_amount, new_amount, old_mode, new_mode, reason, done_by, new_receipt_number)
            VALUES ($1,$2,$3,$4,'correct',$5,$6,$7,$8,$9,$10,$11)`,
           [pmt.school_id, payment_id, pmt.ledger_id, pmt.student_id, origAmount, newAmount, pmt.payment_mode, newMode,
-           billAdjusted ? `${reason} (bill raised to ₹${requiredDue})` : reason, done_by, newReceipt]
+           reason, done_by, newReceipt]
         )
       } else {
         // cancel only
@@ -205,3 +209,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+// No getSchoolId extractor — resolving it would need a second query beyond the
+// handler's own pool.connect() lookup, adding avoidable contention on a max:1
+// connection pool. Errors/requests here log without a school_id instead.
+export const POST = withWatchline(handlePOST, { route: '/api/fees/payments/cancel' })

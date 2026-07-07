@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { withWatchline } from '@/lib/logger'
 
 // GET /api/fees/payments?school_id=X&student_id=Y&ledger_id=Z
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
     const school_id  = p.get('school_id')
@@ -37,6 +38,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const GET = withWatchline(handleGET, { route: '/api/fees/payments' })
 
 // POST /api/fees/payments
 //
@@ -48,50 +50,63 @@ export async function GET(req: NextRequest) {
 //   Server allocates total_amount across ledger_ids in order (oldest first).
 //   All allocations share one receipt_number.
 //
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   try {
+    // ── Parse and validate BEFORE acquiring a pool connection ──────────────────
+    const body = await req.json()
+    const {
+      school_id, student_id,
+      ledger_id,               // single-entry mode
+      ledger_ids,              // multi-entry mode (array)
+      amount,                  // single-entry
+      total_amount,            // multi-entry total
+      payment_mode, transaction_ref,
+      collected_by_name: clientCollector, notes, paid_date,
+      payment_status = 'completed',
+    } = body
+
+    const access = await requireFeeAccess(school_id)
+    if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const collected_by_name = clientCollector || access.actor
+
+    if (!school_id || !student_id || !payment_mode) {
+      return NextResponse.json({ error: 'school_id, student_id, payment_mode required' }, { status: 400 })
+    }
+
+    if (paid_date !== undefined && paid_date !== null) {
+      const dateRe = /^\d{4}-\d{2}-\d{2}$/
+      if (!dateRe.test(paid_date)) {
+        return NextResponse.json({ error: 'paid_date must be YYYY-MM-DD' }, { status: 400 })
+      }
+      const d = new Date(paid_date)
+      const now = new Date()
+      const minDate = new Date('2000-01-01')
+      if (isNaN(d.getTime()) || d > now || d < minDate) {
+        return NextResponse.json({ error: 'paid_date must be a valid past date' }, { status: 400 })
+      }
+    }
+
+    const isMulti = Array.isArray(ledger_ids) && ledger_ids.length > 0
+
+    if (!isMulti && (!ledger_id || !amount)) {
+      return NextResponse.json({ error: 'Single mode: ledger_id and amount required' }, { status: 400 })
+    }
+    if (isMulti && !total_amount) {
+      return NextResponse.json({ error: 'Multi mode: total_amount required' }, { status: 400 })
+    }
+
+    // #13 — Reject zero or negative amounts before touching the DB
+    const amountToCheck = isMulti ? parseFloat(String(total_amount)) : parseFloat(String(amount))
+    if (!(amountToCheck > 0)) {
+      return NextResponse.json({ error: 'Amount must be greater than 0' }, { status: 400 })
+    }
+
+    // ── Acquire connection only after validation passes ─────────────────────────
     const client = await pool.connect()
     try {
-      const body = await req.json()
-      const {
-        school_id, student_id,
-        ledger_id,               // single-entry mode
-        ledger_ids,              // multi-entry mode (array)
-        amount,                  // single-entry
-        total_amount,            // multi-entry total
-        payment_mode, transaction_ref,
-        collected_by_name: clientCollector, notes, paid_date,
-        payment_status = 'completed',
-      } = body
-
-      const access = await requireFeeAccess(school_id)
-      if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
-      // Trust the session for the collector identity (fall back to provided name only as display)
-      const collected_by_name = clientCollector || access.actor
-
-      if (!school_id || !student_id || !payment_mode) {
-        return NextResponse.json({ error: 'school_id, student_id, payment_mode required' }, { status: 400 })
-      }
-
-      // BUG 5: Validate paid_date format and range
-      if (paid_date !== undefined && paid_date !== null) {
-        const dateRe = /^\d{4}-\d{2}-\d{2}$/
-        if (!dateRe.test(paid_date)) {
-          client.release()
-          return NextResponse.json({ error: 'paid_date must be YYYY-MM-DD' }, { status: 400 })
-        }
-        const d = new Date(paid_date)
-        const now = new Date()
-        const minDate = new Date('2000-01-01')
-        if (isNaN(d.getTime()) || d > now || d < minDate) {
-          client.release()
-          return NextResponse.json({ error: 'paid_date must be a valid past date' }, { status: 400 })
-        }
-      }
-
-      const isMulti = Array.isArray(ledger_ids) && ledger_ids.length > 0
-
-      // Guard: block payments against a closed academic year
+      // Guard: block payments against a closed academic year — fee_year_close is
+      // guaranteed to exist (see lib/db.ts), so a query error here is a real failure,
+      // not a missing table; let it propagate rather than silently failing this open.
       const guardIds = isMulti ? ledger_ids : (ledger_id ? [ledger_id] : [])
       if (guardIds.length > 0) {
         const { rows: [locked] } = await client.query(
@@ -100,18 +115,10 @@ export async function POST(req: NextRequest) {
            JOIN fee_year_close yc ON yc.school_id = l.school_id AND yc.academic_year = l.academic_year AND yc.is_reopened = FALSE
            WHERE l.id = ANY($1) LIMIT 1`,
           [guardIds]
-        ).catch(() => ({ rows: [] }))
+        )
         if (locked) {
-          client.release()
           return NextResponse.json({ error: 'This academic year is closed. Reopen it to record payments.' }, { status: 409 })
         }
-      }
-
-      if (!isMulti && (!ledger_id || !amount)) {
-        return NextResponse.json({ error: 'Single mode: ledger_id and amount required' }, { status: 400 })
-      }
-      if (isMulti && !total_amount) {
-        return NextResponse.json({ error: 'Multi mode: total_amount required' }, { status: 400 })
       }
 
       await client.query('BEGIN')
@@ -127,21 +134,22 @@ export async function POST(req: NextRequest) {
       if (!isMulti) {
         // ── Single-entry mode (offline admin collection) ──────────────────────────
 
-        // BUG 6: Guard against overpayment
+        // #15 — FOR UPDATE locks the row so concurrent cashiers queue instead of double-paying
         const { rows: [ledgerRow] } = await client.query(
-          `SELECT amount_due, amount_paid FROM student_fee_ledger WHERE id = $1 AND school_id = $2`,
+          `SELECT amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount FROM student_fee_ledger WHERE id = $1 AND school_id = $2 FOR UPDATE`,
           [ledger_id, school_id]
         )
         if (!ledgerRow) {
           await client.query('ROLLBACK')
-          client.release()
           return NextResponse.json({ error: 'Ledger entry not found' }, { status: 404 })
         }
-        const balance = parseFloat(ledgerRow.amount_due) - parseFloat(ledgerRow.amount_paid)
+        const balance = parseFloat(ledgerRow.amount_due) - parseFloat(ledgerRow.waiver_amount) - parseFloat(ledgerRow.amount_paid)
         if (parseFloat(String(amount)) > balance + 0.001) {
           await client.query('ROLLBACK')
-          client.release()
-          return NextResponse.json({ error: `Amount exceeds balance due (₹${balance.toFixed(2)})` }, { status: 400 })
+          const msg = balance <= 0
+            ? 'This fee has already been paid by another user. Please refresh and try again.'
+            : `Amount exceeds balance due (₹${balance.toFixed(2)}). Another payment may have been recorded simultaneously — please refresh.`
+          return NextResponse.json({ error: msg }, { status: 400 })
         }
 
         const { rows: [payment] } = await client.query(
@@ -158,10 +166,10 @@ export async function POST(req: NextRequest) {
         if (payment_status === 'completed') {
           await client.query(
             `UPDATE student_fee_ledger
-             SET amount_paid = LEAST(amount_due, amount_paid + $1),
+             SET amount_paid = LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1),
                  status = CASE
-                   WHEN LEAST(amount_due, amount_paid + $1) >= amount_due THEN 'paid'
-                   WHEN amount_paid + $1 > 0                              THEN 'partial'
+                   WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
+                   WHEN amount_paid + $1 > 0 THEN 'partial'
                    ELSE status
                  END
              WHERE id = $2`,
@@ -173,15 +181,27 @@ export async function POST(req: NextRequest) {
       } else {
         // ── Multi-entry FIFO mode ─────────────────────────────────────────────────
         // Fetch ledger entries in FIFO order (oldest due_date first)
+        // #15 — FOR UPDATE locks all selected rows so concurrent cashiers queue
         const { rows: entries } = await client.query(
-          `SELECT id, amount_due, amount_paid, status,
-                  (amount_due - amount_paid) AS balance
+          `SELECT id, amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount, status,
+                  GREATEST(amount_due - COALESCE(waiver_amount, 0) - amount_paid, 0) AS balance
            FROM student_fee_ledger
            WHERE id = ANY($1) AND school_id = $2
              AND status NOT IN ('paid', 'waived')
-           ORDER BY due_date ASC`,
+           ORDER BY due_date ASC
+           FOR UPDATE`,
           [ledger_ids, school_id]
         )
+
+        const totalBalance = entries.reduce((sum, e) => sum + parseFloat(String(e.balance)), 0)
+        const totalAmount = parseFloat(String(total_amount))
+        if (totalAmount > totalBalance + 0.001) {
+          await client.query('ROLLBACK')
+          const msg = totalBalance <= 0
+            ? 'These fees have already been paid by another user. Please refresh and try again.'
+            : `Amount exceeds total balance due (₹${totalBalance.toFixed(2)}). Another payment may have been recorded simultaneously — please refresh.`
+          return NextResponse.json({ error: msg }, { status: 400 })
+        }
 
         let remaining = parseFloat(String(total_amount))
 
@@ -211,10 +231,10 @@ export async function POST(req: NextRequest) {
           if (payment_status === 'completed') {
             await client.query(
               `UPDATE student_fee_ledger
-               SET amount_paid = LEAST(amount_due, amount_paid + $1),
+               SET amount_paid = LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1),
                    status = CASE
-                     WHEN LEAST(amount_due, amount_paid + $1) >= amount_due THEN 'paid'
-                     WHEN amount_paid + $1 > 0                              THEN 'partial'
+                     WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
+                     WHEN amount_paid + $1 > 0 THEN 'partial'
                      ELSE status
                    END
                WHERE id = $2`,
@@ -224,12 +244,17 @@ export async function POST(req: NextRequest) {
 
           createdPayments.push(payment)
         }
+
+        if (createdPayments.length === 0) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'This fee has already been paid by another user. Please refresh and try again.' }, { status: 400 })
+        }
       }
 
       await client.query('COMMIT')
 
       // Return enriched response for receipt display
-      const { rows: [full] } = await pool.query(
+      const { rows: [full] } = await client.query(
         `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section, s.parent_name,
                 fc.name AS category_name, l.period_label, l.amount_due,
                 sc.name AS school_name
@@ -258,3 +283,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const POST = withWatchline(handlePOST, {
+  route: '/api/fees/payments',
+  getSchoolId: async req => { try { return (await req.clone().json())?.school_id ?? null } catch { return null } },
+})

@@ -14,6 +14,18 @@ export async function POST(req: NextRequest) {
       }
       if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
+      // Every bill's due_date is the academic year's own end_date — not a per-category
+      // due-day. All bills for a year (monthly, quarterly, or annual) become due at once,
+      // at year-end.
+      const { rows: [yearRow] } = await pool.query(
+        `SELECT end_date FROM academic_years WHERE school_id = $1 AND label = $2`,
+        [school_id, academic_year]
+      )
+      if (!yearRow) {
+        return NextResponse.json({ error: `Academic year ${academic_year} not found. Create it first.` }, { status: 400 })
+      }
+      const dueDate: string = yearRow.end_date
+
       // Get fee structures (fixed categories only — variable handled via assignments)
       const { rows: structures } = await pool.query(
         `SELECT fs.*, fc.name AS category_name, fc.frequency,
@@ -26,7 +38,7 @@ export async function POST(req: NextRequest) {
       )
 
       // Get variable category assignments for this year (student_id → { fee_category_id, amount })
-      let variableAssignments: Array<{ student_id: number; fee_category_id: number; amount: number; frequency: string; due_day: number }> = []
+      let variableAssignments: Array<{ student_id: number; fee_category_id: number; amount: number; frequency: string }> = []
       try {
         const { rows: varCats } = await pool.query(
           `SELECT id, frequency FROM fee_categories
@@ -34,17 +46,6 @@ export async function POST(req: NextRequest) {
           [school_id]
         )
         if (varCats.length > 0) {
-          // Get due_day from fee_structures for variable categories (take max to be deterministic)
-          const { rows: varStructures } = await pool.query(
-            `SELECT fs.fee_category_id, MAX(fs.due_day) AS due_day
-             FROM fee_structures fs WHERE fs.school_id = $1 AND fs.academic_year = $2
-               AND fs.fee_category_id = ANY($3)
-             GROUP BY fs.fee_category_id`,
-            [school_id, academic_year, varCats.map(c => c.id)]
-          )
-          const dueDayMap: Record<number, number> = {}
-          varStructures.forEach(s => { dueDayMap[s.fee_category_id] = s.due_day })
-
           const gradeFilter = grade ? 'AND s.grade = $4' : ''
           const params = grade
             ? [school_id, academic_year, varCats.map(c => c.id), grade]
@@ -64,7 +65,6 @@ export async function POST(req: NextRequest) {
           variableAssignments = assigns.map(a => ({
             ...a,
             frequency: freqMap[a.fee_category_id] || 'monthly',
-            due_day: dueDayMap[a.fee_category_id] || 10,
           }))
         }
       } catch { /* assignments table may not exist — skip variable */ }
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest) {
         for (const student of students) {
           const studentStructures = structures.filter(s => s.grade === student.grade && s.category_type !== 'variable')
           for (const s of studentStructures) {
-            const periods = buildPeriods(s.frequency, academic_year, s.due_day)
+            const periods = buildPeriods(s.frequency, academic_year, dueDate)
             for (const period of periods) {
               const { rowCount } = await client.query(
                 `INSERT INTO student_fee_ledger
@@ -99,15 +99,40 @@ export async function POST(req: NextRequest) {
                  ON CONFLICT (student_id, fee_category_id, academic_year, period_label) DO NOTHING`,
                 [school_id, student.id, s.fee_category_id, s.id, academic_year, period.label, s.amount, period.due_date]
               )
-              if (rowCount && rowCount > 0) created++
-              else skipped++
+              if (rowCount && rowCount > 0) {
+                created++
+              } else {
+                skipped++
+                // A bill for this exact period already exists — but if the student has since
+                // moved to a different grade (e.g. promoted/transferred outside year-rollover),
+                // the existing row's fee_structure_id may now point at the WRONG grade's amount.
+                // Re-sync unpaid/overdue/partial bills to the current grade's structure, exactly
+                // like amending a structure does, so the student is billed at their actual grade.
+                // GREATEST(...) guards against amount_due ending up below amount_paid if the new
+                // grade's fee is lower than what the student already paid toward the old grade's
+                // bill — amount_due must never be less than what's already been collected.
+                await client.query(
+                  `UPDATE student_fee_ledger
+                   SET fee_structure_id = $1, amount_due = GREATEST($2, amount_paid),
+                       status = CASE
+                         WHEN COALESCE(waiver_amount,0) + amount_paid >= GREATEST($2, amount_paid) THEN 'paid'
+                         WHEN amount_paid > 0 THEN 'partial'
+                         ELSE status
+                       END
+                   WHERE school_id = $3 AND student_id = $4 AND fee_category_id = $5
+                     AND academic_year = $6 AND period_label = $7
+                     AND status IN ('pending', 'overdue', 'partial')
+                     AND fee_structure_id IS DISTINCT FROM $1`,
+                  [s.id, s.amount, school_id, student.id, s.fee_category_id, academic_year, period.label]
+                )
+              }
             }
           }
         }
 
         // Variable categories → only assigned students at per-student amount
         for (const a of variableAssignments) {
-          const periods = buildPeriods(a.frequency, academic_year, a.due_day)
+          const periods = buildPeriods(a.frequency, academic_year, dueDate)
           for (const period of periods) {
             const { rowCount } = await client.query(
               `INSERT INTO student_fee_ledger
@@ -125,16 +150,31 @@ export async function POST(req: NextRequest) {
       } catch (e) { await client.query('ROLLBACK'); throw e }
       finally { client.release() }
 
-      // Mark overdue entries
+      // Mark overdue: entries become overdue only after the academic year's end date passes
       await pool.query(
-        `UPDATE student_fee_ledger
-         SET status = 'overdue'
-         WHERE school_id = $1 AND academic_year = $2
-           AND status = 'pending' AND due_date < CURRENT_DATE`,
+        `UPDATE student_fee_ledger l SET status = 'overdue'
+         WHERE l.school_id = $1 AND l.academic_year = $2 AND l.status = 'pending'
+           AND EXISTS (
+             SELECT 1 FROM academic_years ay
+             WHERE ay.school_id = l.school_id AND ay.label = l.academic_year
+               AND ay.end_date < CURRENT_DATE
+           )`,
         [school_id, academic_year]
       )
 
-      return NextResponse.json({ created, skipped, total_students: students.length })
+      // Auto-lock the fee structure after bills are generated so amounts can't be
+      // changed directly (amendments still work via the audit-trail route).
+      // ON CONFLICT DO NOTHING: if already locked, silently skip — idempotent.
+      const access = await requireFeeAccess(school_id)
+      const lockedBy = access ? access.actor : 'system'
+      await pool.query(
+        `INSERT INTO fee_structure_locks (school_id, academic_year, locked_by, locked_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (school_id, academic_year) DO NOTHING`,
+        [school_id, academic_year, lockedBy]
+      ).catch(() => {/* lock table may not exist yet — non-fatal */})
+
+      return NextResponse.json({ created, skipped, total_students: students.length, auto_locked: true })
     } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed to generate ledger' }, { status: 500 }) }
 } catch (err: unknown) {
     console.error('[API]', err)
@@ -142,7 +182,11 @@ export async function POST(req: NextRequest) {
   }
 }
 
-function buildPeriods(frequency: string, academicYear: string, dueDay: number): { label: string; due_date: string }[] {
+// Builds the set of billing periods for a frequency — period_label still differs per
+// period (so monthly/quarterly bills remain separate, trackable ledger rows), but every
+// period shares the same due_date: the academic year's own end_date. There is no more
+// per-category due-day — every bill becomes due at year-end, all at once.
+function buildPeriods(frequency: string, academicYear: string, dueDate: string): { label: string; due_date: string }[] {
   const [startYStr] = academicYear.split('-')
   const startYear = parseInt(startYStr)
   const endYear = startYear + 1
@@ -157,25 +201,22 @@ function buildPeriods(frequency: string, academicYear: string, dueDay: number): 
   const MONTH_NAMES = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
   if (frequency === 'monthly') {
-    return months.map(({ m, y }) => ({
-      label: `${MONTH_NAMES[m]} ${y}`,
-      due_date: `${y}-${String(m).padStart(2, '0')}-${String(dueDay).padStart(2, '0')}`,
-    }))
+    return months.map(({ m, y }) => ({ label: `${MONTH_NAMES[m]} ${y}`, due_date: dueDate }))
   }
   if (frequency === 'quarterly') {
     return [
-      { label: `Q1 ${academicYear}`, due_date: `${startYear}-04-${String(dueDay).padStart(2, '0')}` },
-      { label: `Q2 ${academicYear}`, due_date: `${startYear}-07-${String(dueDay).padStart(2, '0')}` },
-      { label: `Q3 ${academicYear}`, due_date: `${startYear}-10-${String(dueDay).padStart(2, '0')}` },
-      { label: `Q4 ${academicYear}`, due_date: `${endYear}-01-${String(dueDay).padStart(2, '0')}` },
+      { label: `Q1 ${academicYear}`, due_date: dueDate },
+      { label: `Q2 ${academicYear}`, due_date: dueDate },
+      { label: `Q3 ${academicYear}`, due_date: dueDate },
+      { label: `Q4 ${academicYear}`, due_date: dueDate },
     ]
   }
   if (frequency === 'half_yearly') {
     return [
-      { label: `H1 ${academicYear}`, due_date: `${startYear}-04-${String(dueDay).padStart(2, '0')}` },
-      { label: `H2 ${academicYear}`, due_date: `${startYear}-10-${String(dueDay).padStart(2, '0')}` },
+      { label: `H1 ${academicYear}`, due_date: dueDate },
+      { label: `H2 ${academicYear}`, due_date: dueDate },
     ]
   }
   // annual or one_time
-  return [{ label: academicYear, due_date: `${startYear}-04-${String(dueDay).padStart(2, '0')}` }]
+  return [{ label: academicYear, due_date: dueDate }]
 }

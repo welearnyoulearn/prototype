@@ -3,8 +3,9 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 
-type Feature = { key: string; label: string; category: string }
-type Matrix  = Record<string, Record<string, boolean>>  // feature_key → { basic, standard, premium }
+type Feature    = { key: string; label: string; category: string }
+type Matrix     = Record<string, Record<string, boolean>>  // feature_key → { basic, standard, premium }
+type StaffLimits = Record<string, string>  // tier → '' (unlimited) | '2' | '5' etc.
 
 const TIERS = [
   { key: 'basic',    label: 'Basic',    color: 'text-green-700',  bg: 'bg-green-50',  ring: 'ring-green-400',  check: 'bg-green-500' },
@@ -12,15 +13,16 @@ const TIERS = [
   { key: 'premium',  label: 'Premium',  color: 'text-purple-700', bg: 'bg-purple-50', ring: 'ring-purple-400', check: 'bg-purple-500' },
 ]
 
-const CATEGORY_ORDER = ['Core', 'Academic', 'Analytics', 'Finance', 'Communication', 'Administration']
+const CATEGORY_ORDER = ['Core', 'Scheduling', 'Analytics', 'Finance', 'Communication', 'Administration']
 
 export default function FeaturePlansPage() {
-  const [features, setFeatures] = useState<Feature[]>([])
-  const [matrix, setMatrix]     = useState<Matrix>({})
-  const [loading, setLoading]   = useState(true)
-  const [saving, setSaving]     = useState(false)
-  const [saved, setSaved]       = useState(false)
-  const [error, setError]       = useState('')
+  const [features, setFeatures]     = useState<Feature[]>([])
+  const [matrix, setMatrix]         = useState<Matrix>({})
+  const [staffLimits, setStaffLimits] = useState<StaffLimits>({ basic: '2', standard: '5', premium: '', none: '1' })
+  const [loading, setLoading]       = useState(true)
+  const [saving, setSaving]         = useState(false)
+  const [saved, setSaved]           = useState(false)
+  const [error, setError]           = useState('')
   const [showSavedPopup, setShowSavedPopup] = useState(false)
 
   useEffect(() => { load() }, [])
@@ -29,8 +31,16 @@ export default function FeaturePlansPage() {
     try {
       const res = await fetch('/api/platform/features')
       const data = await res.json()
-      setFeatures(data.features)
-      setMatrix(data.matrix)
+      if (Array.isArray(data.features)) setFeatures(data.features)
+      if (data.matrix && typeof data.matrix === 'object') setMatrix(data.matrix)
+      if (data.staffLimits) {
+        setStaffLimits({
+          basic:    data.staffLimits.basic    == null ? '' : String(data.staffLimits.basic),
+          standard: data.staffLimits.standard == null ? '' : String(data.staffLimits.standard),
+          premium:  data.staffLimits.premium  == null ? '' : String(data.staffLimits.premium),
+          none:     data.staffLimits.none     == null ? '' : String(data.staffLimits.none),
+        })
+      }
     } catch { setError('Failed to load features') }
     finally { setLoading(false) }
   }
@@ -60,7 +70,7 @@ export default function FeaturePlansPage() {
       const res = await fetch('/api/platform/features', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignments }),
+        body: JSON.stringify({ assignments, staffLimits }),
       })
       if (!res.ok) throw new Error()
       setSaved(true)
@@ -117,6 +127,21 @@ export default function FeaturePlansPage() {
               <p className={`text-sm font-bold uppercase tracking-wide ${t.color}`}>{t.label}</p>
               <p className="text-3xl font-black text-gray-900 mt-2">{loading ? '—' : counts[t.key]}</p>
               <p className="text-xs text-gray-500 mt-1">of {features.length} features enabled</p>
+              <div className="mt-4 pt-4 border-t border-black/10">
+                <label className="text-xs font-semibold text-gray-600 block mb-1.5">Staff Account Limit</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="Unlimited"
+                    value={staffLimits[t.key] ?? ''}
+                    onChange={e => { setStaffLimits(prev => ({ ...prev, [t.key]: e.target.value })); setSaved(false) }}
+                    className="w-full rounded-lg border border-black/20 bg-white/70 px-3 py-1.5 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-offset-0 focus:ring-current"
+                    data-testid={`staff-limit-${t.key}`}
+                  />
+                </div>
+                <p className="text-[11px] text-gray-400 mt-1">Leave blank for unlimited</p>
+              </div>
             </div>
           ))}
         </div>

@@ -898,6 +898,10 @@ export async function initDB() {
     )`,
     `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) DEFAULT 0`,
     `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS granted_by_name VARCHAR(100)`,
+    `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS is_revoked    BOOLEAN     NOT NULL DEFAULT FALSE`,
+    `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoked_by    TEXT`,
+    `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoked_at    TIMESTAMPTZ`,
+    `ALTER TABLE fee_waivers ADD COLUMN IF NOT EXISTS revoke_reason TEXT`,
 
     // ── Receipt number sequence ───────────────────────────────────────────────
     `CREATE SEQUENCE IF NOT EXISTS receipt_number_seq START 1000`,
@@ -1484,6 +1488,52 @@ async function runIncrementalMigrations() {
   await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS verified_by      TEXT`)
   await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS verified_at      TIMESTAMPTZ`)
   await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS rejection_reason TEXT`)
+  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancelled_by     TEXT`)
+  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancelled_at     TIMESTAMPTZ`)
+  await pool.query(`ALTER TABLE fee_payments ADD COLUMN IF NOT EXISTS cancel_reason    TEXT`)
+  await pool.query(`ALTER TABLE fee_waivers  ADD COLUMN IF NOT EXISTS is_revoked    BOOLEAN NOT NULL DEFAULT FALSE`)
+  await pool.query(`ALTER TABLE fee_waivers  ADD COLUMN IF NOT EXISTS revoked_by    TEXT`)
+  await pool.query(`ALTER TABLE fee_waivers  ADD COLUMN IF NOT EXISTS revoked_at    TIMESTAMPTZ`)
+  // Previously only self-healed inline in categories/route.ts's GET handler, and
+  // duplicated again in year-end/route.ts, year-rollover/route.ts, generate/route.ts —
+  // meaning whichever of those ran first "got lucky"; any other route hit first on a
+  // cold instance would 500 with "column category_type does not exist".
+  await pool.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS category_type TEXT NOT NULL DEFAULT 'fixed'`)
+  // Previously only ever created inline in year-end/route.ts (ENSURE_CLOSE) — other
+  // routes that check whether a year is closed (payments/cancel, ledger/[id]) wrapped
+  // the query in .catch(() => ({rows:[]})), so a missing table silently failed the
+  // "is this year closed" guard open instead of erroring.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_year_close (
+      id             SERIAL PRIMARY KEY,
+      school_id      INTEGER NOT NULL,
+      academic_year  TEXT    NOT NULL,
+      closed_by      TEXT    NOT NULL,
+      closed_at      TIMESTAMPTZ DEFAULT NOW(),
+      carried_count  INTEGER NOT NULL DEFAULT 0,
+      carried_total  NUMERIC(12,2) NOT NULL DEFAULT 0,
+      writeoff_count INTEGER NOT NULL DEFAULT 0,
+      writeoff_total NUMERIC(12,2) NOT NULL DEFAULT 0,
+      open_count     INTEGER NOT NULL DEFAULT 0,
+      open_total     NUMERIC(12,2) NOT NULL DEFAULT 0,
+      is_reopened    BOOLEAN NOT NULL DEFAULT FALSE,
+      reopened_by    TEXT,
+      reopened_at    TIMESTAMPTZ,
+      reopen_reason  TEXT,
+      UNIQUE(school_id, academic_year)
+    )
+  `)
+  // Previously self-healed independently in upi-id/route.ts (x2) and upi-qr/route.ts.
+  await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS upi_id TEXT`)
+  // Already added by the fresh-DB-only migrations[] array above (and thus already
+  // exists on the live DB), but that array never runs against an already-bootstrapped
+  // database — add it here too so a future re-bootstrap scenario can't regress this.
+  await pool.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS waiver_amount NUMERIC(10,2) NOT NULL DEFAULT 0`)
+  // Previously only self-healed inline in year-end/route.ts, immediately before its
+  // own use in the same request — safe there in isolation, but still outside the
+  // sanctioned migration path.
+  await pool.query(`ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS notes TEXT`)
+  await pool.query(`ALTER TABLE fee_waivers  ADD COLUMN IF NOT EXISTS revoke_reason TEXT`)
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS uq_student_fee_ledger_entry
     ON student_fee_ledger (student_id, fee_category_id, academic_year, period_label)
@@ -1501,4 +1551,254 @@ async function runIncrementalMigrations() {
       UNIQUE(student_id, activity_type, completed_date)
     )
   `)
+
+  // ── School roll number (class roll number assigned by school) ─────────────────
+  await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS school_roll_number INTEGER`)
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_students_school_roll_unique
+      ON students(school_id, grade, section, school_roll_number)
+      WHERE school_roll_number IS NOT NULL
+  `)
+  // Drop UNIQUE constraint on fee_payments.receipt_number to allow multi-entry receipts
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE fee_payments DROP CONSTRAINT IF EXISTS fee_payments_receipt_number_key;
+    EXCEPTION WHEN others THEN NULL;
+    END $$
+  `)
+
+  // ── DB-level safety constraints on fee ledger amounts ────────────────────────
+  // NOT VALID skips scanning existing rows — only new/updated rows are checked.
+  // This prevents ensureDB from failing if legacy data has edge-case values.
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_amount_due_positive    CHECK (amount_due    >= 0) NOT VALID;
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+  `).catch(() => {})
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_amount_paid_positive   CHECK (amount_paid   >= 0) NOT VALID;
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+  `).catch(() => {})
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_waiver_amount_positive CHECK (waiver_amount >= 0) NOT VALID;
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+  `).catch(() => {})
+
+  // ── Plan pricing table (may not exist on older DBs that skipped migrations array) ──
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS plan_pricing (
+      id SERIAL PRIMARY KEY,
+      tier VARCHAR(20) NOT NULL UNIQUE,
+      display_name VARCHAR(50) NOT NULL,
+      monthly_price NUMERIC(10,2) NOT NULL DEFAULT 0,
+      included_whatsapp_messages INTEGER NOT NULL DEFAULT 0,
+      whatsapp_overage_rate NUMERIC(10,4) NOT NULL DEFAULT 0,
+      online_payments_included BOOLEAN NOT NULL DEFAULT FALSE,
+      whatsapp_included BOOLEAN NOT NULL DEFAULT FALSE,
+      usage_billing_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`
+    INSERT INTO plan_pricing (tier, display_name, monthly_price, included_whatsapp_messages, whatsapp_overage_rate, online_payments_included, whatsapp_included, usage_billing_enabled)
+    VALUES
+      ('none',     'No Plan',  0,    0,    0,    false, false, false),
+      ('basic',    'Basic',    499,  0,    0,    false, false, false),
+      ('standard', 'Standard', 999,  1000, 0.20, true,  true,  true),
+      ('premium',  'Premium',  1999, 5000, 0.20, true,  true,  true)
+    ON CONFLICT (tier) DO NOTHING
+  `).catch(() => {})
+
+  // ── Staff limit per plan tier ─────────────────────────────────────────────────
+  await pool.query(`ALTER TABLE plan_pricing ADD COLUMN IF NOT EXISTS staff_limit INTEGER DEFAULT NULL`).catch(() => {})
+  await pool.query(`
+    UPDATE plan_pricing SET staff_limit = CASE
+      WHEN tier = 'none'     THEN 1
+      WHEN tier = 'basic'    THEN 2
+      WHEN tier = 'standard' THEN 5
+      WHEN tier = 'premium'  THEN NULL
+    END
+    WHERE staff_limit IS NULL
+  `).catch(() => {})
+
+  // ── Login performance indexes (functional, case-insensitive) ─────────────────
+  // teachers.email: every teacher login was a full table scan — no index existed
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_teachers_email_lower
+      ON teachers(LOWER(email))
+      WHERE email IS NOT NULL
+  `).catch(() => {})
+  // students.roll_number: every student login was a full table scan — no index existed
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_students_roll_number_lower
+      ON students(LOWER(roll_number))
+      WHERE roll_number IS NOT NULL
+  `).catch(() => {})
+  // users.email: existing index was on raw column; LOWER() queries couldn't use it
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_users_email_lower
+      ON users(LOWER(email))
+      WHERE email IS NOT NULL
+  `).catch(() => {})
+  // users.school_code: admin login ORs on school_code — no index existed at all
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_users_school_code_lower
+      ON users(LOWER(school_code))
+      WHERE school_code IS NOT NULL
+  `).catch(() => {})
+  // parents.email: existing index was on raw column; LOWER() queries couldn't use it
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_parents_email_lower
+      ON parents(LOWER(email))
+      WHERE email IS NOT NULL
+  `).catch(() => {})
+
+  // ── Per-school feature overrides (self-heal) ───────────────────────────────────
+  // This table's CREATE TABLE only lived in the one-time fresh-DB bootstrap block
+  // above, which never re-runs once a database is already bootstrapped — so on any
+  // existing database (dev/qa/prod) the table was never actually created. Repeating
+  // it here (idempotent, IF NOT EXISTS) ensures it exists everywhere.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS school_feature_overrides (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      feature_key VARCHAR(50) NOT NULL,
+      enabled BOOLEAN NOT NULL,
+      updated_by TEXT,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, feature_key)
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_school_feature_overrides_school ON school_feature_overrides(school_id)
+  `).catch(() => {})
+
+  // ── Student/parent portal feature keys ────────────────────────────────────────
+  // New keys default to disabled if unconfigured (see GET /api/platform/features).
+  // Seed every existing tier as enabled so onboarding for existing schools is
+  // unaffected by this change — schools that want to disable portals do so via
+  // a per-school override in school_feature_overrides instead.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES
+      ('student-portal', 'basic', true), ('student-portal', 'standard', true), ('student-portal', 'premium', true),
+      ('parent-portal',  'basic', true), ('parent-portal',  'standard', true), ('parent-portal',  'premium', true)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+
+  // ── Academic year date-order safety ────────────────────────────────────────────
+  // Nothing previously stopped start_date >= end_date on academic_years.
+  await pool.query(`
+    ALTER TABLE academic_years ADD CONSTRAINT chk_academic_years_date_order CHECK (start_date < end_date)
+  `).catch(() => {})
+
+  // ── Academic year edit snapshots ────────────────────────────────────────────────
+  // Read-only audit trail captured whenever an academic year's dates are edited
+  // AFTER fee bills already exist for it. Stores the pre-edit ledger state (as
+  // JSON, row-level) so it can be inspected or exported later, without keeping a
+  // second "live" copy of the year around — only one version of a year is ever
+  // active/transactable at a time; this table is purely historical record-keeping.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS academic_year_snapshots (
+      id SERIAL PRIMARY KEY,
+      academic_year_id INTEGER NOT NULL REFERENCES academic_years(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      label VARCHAR(20) NOT NULL,
+      old_start_date DATE NOT NULL,
+      old_end_date DATE NOT NULL,
+      new_start_date DATE NOT NULL,
+      new_end_date DATE NOT NULL,
+      ledger_snapshot JSONB NOT NULL DEFAULT '[]',
+      status_summary JSONB NOT NULL DEFAULT '{}',
+      changed_by TEXT NOT NULL,
+      changed_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_academic_year_snapshots_year ON academic_year_snapshots(academic_year_id)
+  `).catch(() => {})
+
+  // ── source_academic_year on student_fee_ledger ────────────────────────────────
+  // Tracks which year a bill was originally generated in. NULL = current-year bill.
+  // Set to the source year when a carry-forward bill is created in a new year so
+  // ledger/reports can badge or separate "Previous Year Dues" from current-year fees.
+  await pool.query(`
+    ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS source_academic_year VARCHAR(10)
+  `).catch(() => {})
+
+  // ── source_ledger_id on student_fee_ledger ────────────────────────────────────
+  // For passout-ledger bills (academic_year = 'passout'): links back to the original
+  // bill(s) in the closed year. Enables the passout ledger to show which year's debt
+  // each entry originated from without duplicating the source year's ledger data.
+  await pool.query(`
+    ALTER TABLE student_fee_ledger ADD COLUMN IF NOT EXISTS source_ledger_id INTEGER REFERENCES student_fee_ledger(id)
+  `).catch(() => {})
+
+  // ── passout_students table ────────────────────────────────────────────────────
+  // Tracks which students were moved to passout status and when. Lets the overview
+  // panel filter/count passout students separately from active students.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS passout_students (
+      id            SERIAL PRIMARY KEY,
+      school_id     INTEGER NOT NULL REFERENCES schools(id),
+      student_id    INTEGER NOT NULL REFERENCES students(id),
+      passout_year  TEXT    NOT NULL,
+      moved_by      TEXT    NOT NULL,
+      moved_at      TIMESTAMPTZ DEFAULT NOW(),
+      notes         TEXT,
+      UNIQUE(school_id, student_id)
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_passout_students_school ON passout_students(school_id)
+  `).catch(() => {})
+
+  // ── Watchline: request_logs ───────────────────────────────────────────────
+  // One row per HTTP request for schools with api-monitoring enabled.
+  // school_id is nullable — platform-level errors have no school context.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS request_logs (
+      id            BIGSERIAL PRIMARY KEY,
+      school_id     INTEGER     REFERENCES schools(id) ON DELETE CASCADE,
+      route         TEXT        NOT NULL,
+      method        VARCHAR(10) NOT NULL,
+      status_code   SMALLINT    NOT NULL,
+      duration_ms   INTEGER     NOT NULL,
+      actor_role    VARCHAR(30),
+      actor_email   VARCHAR(200),
+      error_code    VARCHAR(50),
+      error_message TEXT,
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS rl_school_time ON request_logs (school_id, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS rl_status      ON request_logs (status_code)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS rl_route       ON request_logs (route, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS rl_created     ON request_logs (created_at DESC)`).catch(() => {})
+
+  // ── Watchline: error_events ───────────────────────────────────────────────
+  // Written on every non-2xx or caught exception regardless of monitoring toggle —
+  // errors are always captured so platform admin can see failures even for schools
+  // that have monitoring off.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS error_events (
+      id             BIGSERIAL PRIMARY KEY,
+      school_id      INTEGER     REFERENCES schools(id) ON DELETE CASCADE,
+      severity       VARCHAR(10) NOT NULL CHECK (severity IN ('info','warn','error','critical')),
+      source         VARCHAR(50) NOT NULL,
+      route          TEXT,
+      error_name     TEXT,
+      error_message  TEXT        NOT NULL,
+      stack_trace    TEXT,
+      context        JSONB       DEFAULT '{}',
+      actor_email    VARCHAR(200),
+      request_log_id BIGINT      REFERENCES request_logs(id) ON DELETE SET NULL,
+      created_at     TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS ee_school_time ON error_events (school_id, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS ee_severity    ON error_events (severity, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS ee_created     ON error_events (created_at DESC)`).catch(() => {})
 }

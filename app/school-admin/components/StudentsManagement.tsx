@@ -1,6 +1,6 @@
-'use client'
+﻿'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 
 type Props = { schoolId: number; refreshKey?: number }
 
@@ -19,6 +19,19 @@ type Student = {
   status: string
 }
 
+type DupStudentRecord = {
+  id: number; name: string; grade: string; section: string
+  school_roll_number: number | null; roll_number: string
+  phone: string; parent_phone: string; parent_name: string
+  created_at: string; status: string
+}
+
+type DupGroup = {
+  keep: DupStudentRecord
+  duplicates: (DupStudentRecord & { reason: string })[]
+  reason: string
+}
+
 type EditForm = Partial<Student>
 
 type StudentPerf = {
@@ -35,6 +48,215 @@ type StudentRewards = {
   streak: { current_streak: number; longest_streak: number } | null
 }
 
+type DuplicatesPanelProps = {
+  dupGroups: DupGroup[]
+  dupLoading: boolean
+  dupError: string
+  dupTotalCount: number
+  selectedDupGroups: Set<number>
+  dupDeleting: boolean
+  dupConfirm: 'selected' | 'all' | null
+  onScan: () => void
+  onSelectGroup: (keepId: number, checked: boolean) => void
+  onSelectAll: (checked: boolean) => void
+  onDeleteSelected: () => void
+  onDeleteAll: () => void
+  onConfirmDelete: (mode: 'selected' | 'all') => void
+  onCancelConfirm: () => void
+}
+
+function DuplicatesPanel({
+  dupGroups, dupLoading, dupError, dupTotalCount, selectedDupGroups,
+  dupDeleting, dupConfirm, onScan, onSelectGroup, onSelectAll,
+  onDeleteSelected, onDeleteAll, onConfirmDelete, onCancelConfirm,
+}: DuplicatesPanelProps) {
+  const selectedCount = selectedDupGroups.size
+  const selectedDupCount = Array.from(selectedDupGroups).reduce((sum, keepId) => {
+    const g = dupGroups.find(g => g.keep.id === keepId)
+    return sum + (g ? g.duplicates.length : 0)
+  }, 0)
+
+  function reasonLabel(reason: string) {
+    if (reason === 'roll_number') return 'Same roll number'
+    if (reason === 'name+parent_phone') return 'Same name + parent phone'
+    if (reason === 'name+phone') return 'Same name + phone'
+    return reason
+  }
+
+  function fmtTime(iso: string) {
+    try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }
+    catch { return iso }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          {dupTotalCount > 0 && !dupLoading && (
+            <p className="text-sm text-orange-700 font-semibold">
+              Found {dupTotalCount} duplicate record{dupTotalCount !== 1 ? 's' : ''} in {dupGroups.length} group{dupGroups.length !== 1 ? 's' : ''}
+            </p>
+          )}
+          {!dupLoading && dupTotalCount === 0 && dupGroups.length === 0 && (
+            <p className="text-sm text-gray-400">No duplicates found</p>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button
+            data-testid="scan-duplicates-btn"
+            onClick={onScan}
+            disabled={dupLoading}
+            className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 disabled:opacity-40">
+            <svg className={`w-3.5 h-3.5 ${dupLoading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            {dupLoading ? 'Scanning...' : 'Scan for Duplicates'}
+          </button>
+          {dupTotalCount > 0 && (
+            <button
+              data-testid="delete-all-duplicates-btn"
+              onClick={onDeleteAll}
+              disabled={dupDeleting}
+              className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium disabled:opacity-40">
+              Delete All Duplicates
+            </button>
+          )}
+        </div>
+      </div>
+
+      {dupError && (
+        <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{dupError}</div>
+      )}
+
+      {dupGroups.length > 0 && (
+        <div className="mb-3 flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+            <input type="checkbox"
+              checked={selectedDupGroups.size === dupGroups.length}
+              onChange={e => onSelectAll(e.target.checked)}
+              className="rounded border-gray-300" />
+            Select All
+          </label>
+          {selectedCount > 0 && (
+            <button
+              data-testid="delete-selected-duplicates-btn"
+              onClick={onDeleteSelected}
+              disabled={dupDeleting}
+              className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-medium disabled:opacity-40">
+              Delete Selected ({selectedDupCount} duplicate{selectedDupCount !== 1 ? 's' : ''})
+            </button>
+          )}
+        </div>
+      )}
+
+      {dupLoading && (
+        <div className="py-12 text-center text-gray-400">
+          <div className="w-6 h-6 border-2 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+          Scanning for duplicates...
+        </div>
+      )}
+
+      {!dupLoading && dupGroups.length === 0 && dupTotalCount === 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 py-12 text-center">
+          <p className="text-gray-400 text-sm">Click "Scan for Duplicates" to check for duplicate students</p>
+        </div>
+      )}
+
+      <div className="space-y-4">
+        {dupGroups.map(group => (
+          <div key={group.keep.id}
+            className={`bg-white rounded-xl border overflow-hidden ${selectedDupGroups.has(group.keep.id) ? 'border-orange-300' : 'border-gray-200'}`}>
+            <div className="px-5 py-3 bg-orange-50 border-b border-orange-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <input type="checkbox"
+                  checked={selectedDupGroups.has(group.keep.id)}
+                  onChange={e => onSelectGroup(group.keep.id, e.target.checked)}
+                  className="rounded border-gray-300" />
+                <div>
+                  <span className="font-semibold text-orange-800 text-sm">{group.keep.name}</span>
+                  <span className="ml-2 text-xs text-orange-600">
+                    Grade {group.keep.grade}{group.keep.section ? ` · Section ${group.keep.section}` : ''}
+                    {group.keep.school_roll_number != null ? ` · Roll ${group.keep.school_roll_number}` : ''}
+                  </span>
+                  <span className="ml-2 text-xs text-gray-400">— {reasonLabel(group.reason)}</span>
+                </div>
+              </div>
+              <button
+                data-testid={`delete-group-${group.keep.id}`}
+                onClick={() => onSelectGroup(group.keep.id, true)}
+                className="text-xs text-red-600 hover:text-red-800 border border-red-200 hover:border-red-400 px-2 py-1 rounded-lg transition-colors">
+                Select Group
+              </button>
+            </div>
+
+            <div className="divide-y divide-gray-100">
+              <div className="px-5 py-3 flex items-center gap-4 bg-green-50/30">
+                <span className="text-xs font-semibold text-green-700 w-14 flex-shrink-0">KEEP</span>
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium text-gray-900">{group.keep.name}</span>
+                  <span className="ml-2 text-xs text-gray-400 font-mono">{group.keep.roll_number}</span>
+                </div>
+                <span className="text-xs text-gray-400">Created {fmtTime(group.keep.created_at)}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${group.keep.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {group.keep.status}
+                </span>
+              </div>
+
+              {group.duplicates.map(dup => (
+                <div key={dup.id} className="px-5 py-3 flex items-center gap-4 bg-red-50/20">
+                  <span className="text-xs font-semibold text-red-600 w-14 flex-shrink-0">DELETE</span>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-gray-700">{dup.name}</span>
+                    <span className="ml-2 text-xs text-gray-400 font-mono">{dup.roll_number}</span>
+                  </div>
+                  <span className="text-xs text-gray-400">Created {fmtTime(dup.created_at)}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${dup.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                    {dup.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {dupConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <h3 className="text-base font-bold text-gray-900 mb-3">
+              Delete {dupConfirm === 'all' ? dupTotalCount : selectedDupCount} duplicate record{(dupConfirm === 'all' ? dupTotalCount : selectedDupCount) !== 1 ? 's' : ''}?
+            </h3>
+            <div className="space-y-2 mb-5 text-sm">
+              <p className="flex items-center gap-2 text-green-700">
+                <span>✓</span> Keeping oldest record for each student
+              </p>
+              <p className="flex items-center gap-2 text-red-700">
+                <span>✗</span> Deleting {dupConfirm === 'all' ? dupTotalCount : selectedDupCount} newer duplicate{(dupConfirm === 'all' ? dupTotalCount : selectedDupCount) !== 1 ? 's' : ''}
+              </p>
+              <p className="flex items-center gap-2 text-amber-700">
+                <span>⚠</span> Fee records will be reassigned to the kept record
+              </p>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button onClick={onCancelConfirm}
+                className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                data-testid="confirm-delete-duplicates-btn"
+                onClick={() => onConfirmDelete(dupConfirm)}
+                disabled={dupDeleting}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium disabled:opacity-40">
+                {dupDeleting ? 'Deleting...' : 'Confirm Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const [students, setStudents] = useState<Student[]>([])
   const [classes, setClasses] = useState<{ id: number; grade: string; section: string }[]>([])
@@ -42,7 +264,14 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const [error, setError] = useState('')
   const [gradeFilter, setGradeFilter] = useState('all')
   const [sectionFilter, setSectionFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active')
+  const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all' | 'duplicates'>('active')
+  const [dupGroups, setDupGroups] = useState<DupGroup[]>([])
+  const [dupLoading, setDupLoading] = useState(false)
+  const [dupTotalCount, setDupTotalCount] = useState(0)
+  const [selectedDupGroups, setSelectedDupGroups] = useState<Set<number>>(new Set())
+  const [dupError, setDupError] = useState('')
+  const [dupConfirm, setDupConfirm] = useState<'selected' | 'all' | null>(null)
+  const [dupDeleting, setDupDeleting] = useState(false)
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Student | null>(null)
   const [editing, setEditing] = useState(false)
@@ -97,6 +326,46 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
       setStudents(Array.isArray(data) ? data : [])
     } catch { setError('Failed to refresh students') }
     finally { setLoading(false) }
+  }
+
+  const loadDuplicates = useCallback(async () => {
+    setDupLoading(true); setDupError('')
+    try {
+      const res = await fetch(`/api/students/duplicates?school_id=${schoolId}`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setDupGroups(data.groups ?? [])
+      setDupTotalCount(data.total_duplicates ?? 0)
+      setSelectedDupGroups(new Set())
+    } catch (err: unknown) {
+      setDupError(err instanceof Error ? err.message : 'Failed to scan duplicates')
+    } finally { setDupLoading(false) }
+  }, [schoolId])
+
+  async function handleDeleteDuplicates(mode: 'selected' | 'all') {
+    setDupDeleting(true); setDupConfirm(null); setDupError('')
+    try {
+      const body = mode === 'all'
+        ? { school_id: schoolId, cleanup_all: true }
+        : {
+            school_id: schoolId,
+            duplicate_ids: Array.from(selectedDupGroups).flatMap(keepId => {
+              const g = dupGroups.find(grp => grp.keep.id === keepId)
+              return g ? g.duplicates.map(d => d.id) : []
+            }),
+          }
+      const res = await fetch('/api/students/duplicates/cleanup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      await loadDuplicates()
+      reloadStudents()
+    } catch (err: unknown) {
+      setDupError(err instanceof Error ? err.message : 'Cleanup failed')
+    } finally { setDupDeleting(false) }
   }
 
   function validateSave(): string | null {
@@ -170,6 +439,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
 
   const displayStudents = statusFilter === 'active' ? activeStudents
     : statusFilter === 'inactive' ? inactiveStudents
+    : statusFilter === 'duplicates' ? activeStudents
     : students
 
   const grades = ['all', ...Array.from(new Set(displayStudents.map(s => s.grade).filter(Boolean)))
@@ -187,8 +457,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
     const matchesGrade   = gradeFilter === 'all' || s.grade === gradeFilter
     const matchesSection = sectionFilter === 'all' || sec === sectionFilter.toUpperCase()
     const matchesSearch  = !search || s.name.toLowerCase().includes(search.toLowerCase()) ||
-      (s.roll_number || '').toLowerCase().includes(search.toLowerCase()) ||
-      (s.school_roll_number != null && String(s.school_roll_number).includes(search))
+      (s.roll_number || '').toLowerCase().includes(search.toLowerCase())
     return matchesGrade && matchesSection && matchesSearch
   })
 
@@ -233,15 +502,27 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
 
         {/* Status tabs */}
         <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-fit">
-          {([['active', 'Active'], ['inactive', 'Removed'], ['all', 'All']] as const).map(([key, label]) => (
-            <button key={key} onClick={() => { setStatusFilter(key); setGradeFilter('all'); setSectionFilter('all') }}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-              {label}
-              {key === 'inactive' && inactiveStudents.length > 0 && (
-                <span className="ml-1.5 bg-red-100 text-red-600 text-xs px-1.5 py-0.5 rounded-full">{inactiveStudents.length}</span>
-              )}
-            </button>
-          ))}
+          {(['active', 'inactive', 'all'] as const).map(key => {
+            const labels: Record<string, string> = { active: 'Active', inactive: 'Removed', all: 'All' }
+            return (
+              <button key={key} onClick={() => { setStatusFilter(key); setGradeFilter('all'); setSectionFilter('all') }}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                {labels[key]}
+                {key === 'inactive' && inactiveStudents.length > 0 && (
+                  <span className="ml-1.5 bg-red-100 text-red-600 text-xs px-1.5 py-0.5 rounded-full">{inactiveStudents.length}</span>
+                )}
+              </button>
+            )
+          })}
+          <button
+            data-testid="duplicates-tab-btn"
+            onClick={() => { setStatusFilter('duplicates'); if (dupGroups.length === 0 && !dupLoading) loadDuplicates() }}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === 'duplicates' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            Duplicates
+            {dupTotalCount > 0 && (
+              <span className="ml-1.5 bg-orange-100 text-orange-600 text-xs px-1.5 py-0.5 rounded-full">{dupTotalCount}</span>
+            )}
+          </button>
         </div>
 
         {error && (
@@ -251,6 +532,34 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
           </div>
         )}
 
+        {statusFilter === 'duplicates' ? (
+          <DuplicatesPanel
+            dupGroups={dupGroups}
+            dupLoading={dupLoading}
+            dupError={dupError}
+            dupTotalCount={dupTotalCount}
+            selectedDupGroups={selectedDupGroups}
+            dupDeleting={dupDeleting}
+            dupConfirm={dupConfirm}
+            onScan={loadDuplicates}
+            onSelectGroup={(keepId, checked) => {
+              setSelectedDupGroups(prev => {
+                const next = new Set(prev)
+                if (checked) next.add(keepId); else next.delete(keepId)
+                return next
+              })
+            }}
+            onSelectAll={checked => {
+              if (checked) setSelectedDupGroups(new Set(dupGroups.map(g => g.keep.id)))
+              else setSelectedDupGroups(new Set())
+            }}
+            onDeleteSelected={() => setDupConfirm('selected')}
+            onDeleteAll={() => setDupConfirm('all')}
+            onConfirmDelete={handleDeleteDuplicates}
+            onCancelConfirm={() => setDupConfirm(null)}
+          />
+        ) : (
+        <>
         {/* Filters */}
         <div className="flex gap-3 mb-4 flex-wrap">
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or ID..."
@@ -281,7 +590,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b border-gray-100">
                     <tr>
-                      <th className="text-left px-3 py-2.5 font-medium text-amber-700 text-xs bg-amber-50 w-14">Roll</th>
+                      <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">Student ID</th>
                       <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">Name</th>
                       <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">Parent</th>
                       <th className="text-left px-5 py-2.5 font-medium text-gray-500 text-xs">Contact</th>
@@ -289,17 +598,10 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {[...members].sort((a, b) => {
-                      if (a.school_roll_number != null && b.school_roll_number != null) return a.school_roll_number - b.school_roll_number
-                      if (a.school_roll_number != null) return -1
-                      if (b.school_roll_number != null) return 1
-                      return a.name.localeCompare(b.name)
-                    }).map(s => (
+                    {members.map(s => (
                       <tr key={s.id} onClick={() => { setSelected(s); setEditing(false); setDetailTab('info'); setStudentPerf(null); setStudentRewards(null) }}
                         className={`cursor-pointer transition-colors ${selected?.id === s.id ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
-                        <td className="px-3 py-3 text-center font-semibold text-sm text-amber-700 bg-amber-50/40">
-                          {s.school_roll_number ?? <span className="text-gray-300 font-normal text-xs">—</span>}
-                        </td>
+                        <td className="px-5 py-3 font-mono text-xs text-gray-400">{s.roll_number || '—'}</td>
                         <td className="px-5 py-3 font-medium text-gray-900">{s.name}</td>
                         <td className="px-5 py-3 text-gray-600 text-xs">{s.parent_name || '—'}</td>
                         <td className="px-5 py-3 text-gray-500 text-xs">{s.parent_phone || s.phone || '—'}</td>
@@ -350,6 +652,8 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
             </div>
           )
         })()}
+        </>
+        )}
       </div>
 
       {/* Right: Detail panel */}
@@ -545,3 +849,12 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
     </div>
   )
 }
+
+
+
+
+
+
+
+
+

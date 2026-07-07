@@ -29,7 +29,7 @@ function ChangePasswordForm() {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Failed'); return }
-      router.push('/profile-setup')
+      router.push(data.profileCompleted ? '/school-admin' : '/profile-setup')
     } catch {
       setError('Connection error. Please try again.')
     } finally {
