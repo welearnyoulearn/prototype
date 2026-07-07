@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
       const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
       const result = await pool.query(
-        `SELECT * FROM students ${where} ORDER BY ${gradeOrderSql('grade')}, section, name`,
+        `SELECT * FROM students ${where} ORDER BY ${gradeOrderSql('grade')}, section, school_roll_number NULLS LAST, name`,
         values
       )
       return NextResponse.json(result.rows)
@@ -93,6 +93,16 @@ export async function POST(req: NextRequest) {
     if (school_roll_number != null && grade && section) {
       const dupRoll = await pool.query(
         `SELECT id FROM students WHERE school_id = $1 AND grade = $2 AND section = $3 AND school_roll_number = $4 AND status = 'active'`,
+        [school_id, grade, section, school_roll_number]
+      )
+      if (dupRoll.rows.length > 0) {
+        return NextResponse.json({ error: `Roll number ${school_roll_number} already exists in Grade ${grade} Section ${section}` }, { status: 409 })
+      }
+    }
+
+    if (school_roll_number != null && grade && section) {
+      const dupRoll = await pool.query(
+        `SELECT id FROM students WHERE school_id = $1 AND grade = $2 AND section = $3 AND school_roll_number = $4`,
         [school_id, grade, section, school_roll_number]
       )
       if (dupRoll.rows.length > 0) {
