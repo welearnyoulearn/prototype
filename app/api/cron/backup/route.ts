@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
   try {
     const iso = new Date().toISOString()
     const key = backupKeyFor(iso)
-    const tables = await listTables()
+    const tables = await listTables(client)
 
     // rows → gzip → byte counter → multipart upload. Nothing is fully buffered.
     const gzip = createGzip()

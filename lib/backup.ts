@@ -1,4 +1,5 @@
 import type { NextRequest } from 'next/server'
+import type { Pool, PoolClient } from 'pg'
 import pool from '@/lib/db'
 
 // Shared helpers for the R2 backup + restore routes.
@@ -20,8 +21,10 @@ export interface TableMeta {
 }
 
 // All base tables in the public schema, each with its PK columns.
-export async function listTables(): Promise<TableMeta[]> {
-  const { rows } = await pool.query<{ table_name: string }>(
+// Pass the caller's checked-out client when the pool is max:1 (Vercel) —
+// querying the pool while holding its only client deadlocks until timeout.
+export async function listTables(db: Pool | PoolClient = pool): Promise<TableMeta[]> {
+  const { rows } = await db.query<{ table_name: string }>(
     `SELECT table_name FROM information_schema.tables
      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
      ORDER BY table_name`,
@@ -29,7 +32,7 @@ export async function listTables(): Promise<TableMeta[]> {
 
   const tables: TableMeta[] = []
   for (const { table_name } of rows) {
-    const { rows: pkRows } = await pool.query<{ column_name: string }>(
+    const { rows: pkRows } = await db.query<{ column_name: string }>(
       `SELECT kcu.column_name
        FROM information_schema.table_constraints tc
        JOIN information_schema.key_column_usage kcu
