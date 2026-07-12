@@ -8,6 +8,10 @@
     {
       "path": "/api/internal/log-cleanup",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/backup",
+      "schedule": "30 2 * * *"
     }
   ]
 }

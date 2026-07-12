@@ -18,6 +18,14 @@ All finished features and bug fixes. Most recent first.
 
 ---
 
+### 2026-07-01 — Database backup & restore to Cloudflare R2 (#NN)
+**Type:** Feature
+**Portal:** Platform Admin / Infrastructure
+**Summary:** Daily Vercel Cron backs up all public tables to R2 as gzipped JSON Lines (14-backup retention); a non-destructive restore endpoint re-inserts only missing rows (gap-fill, never overwrites/deletes). See `wiki/features/backup-restore.md`.
+**PR:** #TBD
+
+---
+
 <!-- 
 ### 2026-XX-XX — Example feature (#issue-number)
 **Type:** Feature
