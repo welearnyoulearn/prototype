@@ -158,7 +158,7 @@ function DuplicatesPanel({
 
       {!dupLoading && dupGroups.length === 0 && dupTotalCount === 0 && (
         <div className="bg-white rounded-xl border border-gray-200 py-12 text-center">
-          <p className="text-gray-400 text-sm">Click "Scan for Duplicates" to check for duplicate students</p>
+          <p className="text-gray-400 text-sm">Click &quot;Scan for Duplicates&quot; to check for duplicate students</p>
         </div>
       )}
 
@@ -456,9 +456,19 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
     const sec = (s.section ?? '').toUpperCase()
     const matchesGrade   = gradeFilter === 'all' || s.grade === gradeFilter
     const matchesSection = sectionFilter === 'all' || sec === sectionFilter.toUpperCase()
-    const matchesSearch  = !search || s.name.toLowerCase().includes(search.toLowerCase()) ||
-      (s.roll_number || '').toLowerCase().includes(search.toLowerCase()) ||
-      (s.school_roll_number != null && String(s.school_roll_number).includes(search))
+    const q = search.trim().toLowerCase()
+    const matchesSearch  = !q || [
+      s.name,
+      s.email,
+      s.phone,
+      s.roll_number,
+      s.school_roll_number != null ? String(s.school_roll_number) : '',
+      s.parent_name,
+      s.parent_phone,
+      s.parent_email,
+      s.grade,
+      s.section,
+    ].some(v => (v || '').toLowerCase().includes(q))
     return matchesGrade && matchesSection && matchesSearch
   })
 
@@ -563,7 +573,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
         <>
         {/* Filters */}
         <div className="flex gap-3 mb-4 flex-wrap">
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or ID..."
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, ID, email, phone, parent..."
             className="flex-1 min-w-[160px] border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300" />
           <select value={gradeFilter} onChange={e => { setGradeFilter(e.target.value); setSectionFilter('all') }}
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300">
@@ -605,7 +615,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                       if (b.school_roll_number != null) return 1
                       return a.name.localeCompare(b.name)
                     }).map(s => (
-                      <tr key={s.id} onClick={() => { setSelected(s); setEditing(false); setDetailTab('info'); setStudentPerf(null); setStudentRewards(null) }}
+                      <tr key={s.id} onClick={() => { setSelected(s); setEditing(false); setEditForm({}); setDetailTab('info'); setStudentPerf(null); setStudentRewards(null) }}
                         className={`cursor-pointer transition-colors ${selected?.id === s.id ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-3 text-center font-semibold text-sm text-amber-700 bg-amber-50/40">
                           {s.school_roll_number ?? <span className="text-gray-300 font-normal text-xs">—</span>}
@@ -831,7 +841,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                   </button>
                 </div>
               ) : (
-                <button onClick={() => setEditing(true)}
+                <button onClick={() => { setEditForm({}); setEditing(true) }}
                   className="w-full border border-green-200 text-green-600 py-2 rounded-lg text-sm font-medium hover:bg-green-50 transition-colors">
                   Edit Details
                 </button>
