@@ -110,16 +110,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (school_roll_number != null && grade && section) {
-      const dupRoll = await pool.query(
-        `SELECT id FROM students WHERE school_id = $1 AND grade = $2 AND section = $3 AND school_roll_number = $4`,
-        [school_id, grade, section, school_roll_number]
-      )
-      if (dupRoll.rows.length > 0) {
-        return NextResponse.json({ error: `Roll number ${school_roll_number} already exists in Grade ${grade} Section ${section}` }, { status: 409 })
-      }
-    }
-
     // Auto-create class if it doesn't exist
     if (grade && section) {
       await pool.query(
