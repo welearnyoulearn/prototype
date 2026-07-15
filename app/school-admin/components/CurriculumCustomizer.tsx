@@ -1,9 +1,22 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import {
+  BookOpen, Plus, Pencil, X, ChevronDown, ChevronRight, HelpCircle,
+  Lock, Trash2, Check, FileText, Video, Link as LinkIcon, Quote, Sparkles,
+} from 'lucide-react'
+import { INK, TEAL, BORDER, SURFACE, GREEN } from '@/app/components/ulearn/theme'
+import { QuizPill } from '@/app/components/ulearn/primitives'
 
 type Props = {
   schoolId: number
+}
+
+type Question = {
+  q: string
+  options: string[]
+  answer: number
+  source?: string
 }
 
 type Subject = {
@@ -40,6 +53,7 @@ type Topic = {
   is_custom: boolean
   created_at: string
   resources?: Resource[]
+  questions?: Question[]
 }
 
 type Resource = {
@@ -75,11 +89,14 @@ type MasterSubject = {
   subject_name: string
 }
 
+const inputCls =
+  'w-full bg-white border rounded-xl px-3 py-2 text-sm text-[#0F2A3F] placeholder-gray-400 focus:outline-none focus:ring-2'
+const labelCls = 'block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide'
+
 export default function CurriculumCustomizer({ schoolId }: Props) {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [activeSubject, setActiveSubject] = useState<Subject | null>(null)
   const [loading, setLoading] = useState(true)
-  const [loadingDetails, setLoadingDetails] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
@@ -139,6 +156,16 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
     school_topic_id: ''
   })
 
+  // Read-only quiz preview modal (ported from the Ulearn prototype's SchoolView)
+  const [viewQuiz, setViewQuiz] = useState<{ topic: Topic; chapterName: string } | null>(null)
+
+  useEffect(() => {
+    if (!viewQuiz) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setViewQuiz(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [viewQuiz])
+
   // Load school subscribed subjects
   const loadSchoolSubjects = useCallback(async (selectIdAfterLoad?: number, yearOverride?: string) => {
     setLoading(true)
@@ -165,8 +192,8 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       } else {
         setActiveSubject(null)
       }
-    } catch (err: any) {
-      setError(err.message || 'Failed to load school curriculum')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to load school curriculum')
     } finally {
       setLoading(false)
     }
@@ -191,6 +218,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       .catch(() => {
         loadSchoolSubjects()
       })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schoolId])
 
   // Automatically expand the grade accordion for the active subject
@@ -201,7 +229,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
         [activeSubject.grade]: true
       }))
     }
-  }, [activeSubject?.id])
+  }, [activeSubject?.id, activeSubject])
 
   const handleYearChange = (year: string) => {
     setSelectedYear(year)
@@ -216,7 +244,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
   }
 
   // Load master templates for opt-in subscription
-  const loadMasterTemplates = async () => {
+  const loadMasterTemplates = useCallback(async () => {
     try {
       const res = await fetch(`/api/platform/subjects?board=${filterBoard}&grade=${filterGrade}`)
       const data = await res.json()
@@ -226,7 +254,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
     } catch {
       // quiet
     }
-  }
+  }, [filterBoard, filterGrade])
 
   // Load school classes on mount
   useEffect(() => {
@@ -254,7 +282,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
     if (showSubscribeModal) {
       loadMasterTemplates()
     }
-  }, [showSubscribeModal, filterBoard, filterGrade])
+  }, [showSubscribeModal, filterBoard, filterGrade, loadMasterTemplates])
 
   const handleSubscribe = async () => {
     if (!selectedMasterId) return
@@ -275,13 +303,13 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
-      setSuccess('✓ Successfully subscribed and cloned curriculum!')
+      setSuccess('Successfully subscribed and cloned curriculum!')
       setShowSubscribeModal(false)
       setSelectedMasterId('')
       // Load and set active to new subject
       await loadSchoolSubjects(data.school_subject_id, subscribeYear || selectedYear)
-    } catch (err: any) {
-      setError(err.message || 'Failed to subscribe to subject')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to subscribe to subject')
     } finally {
       setSubscribing(false)
     }
@@ -307,12 +335,12 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
-      setSuccess('✓ Custom chapter added successfully!')
+      setSuccess('Custom chapter added successfully!')
       setNewChapterName('')
       setShowAddChapterForm(null)
       await loadSchoolSubjects()
-    } catch (err: any) {
-      setError(err.message || 'Failed to add custom chapter')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to add custom chapter')
     }
   }
 
@@ -338,11 +366,11 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
-      setSuccess('✓ Chapter updated successfully!')
+      setSuccess('Chapter updated successfully!')
       setEditingChapterId(null)
       await loadSchoolSubjects()
-    } catch (err: any) {
-      setError(err.message || 'Failed to rename chapter')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to rename chapter')
     }
   }
 
@@ -354,10 +382,10 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
-      setSuccess('✓ Custom chapter deleted')
+      setSuccess('Custom chapter deleted')
       await loadSchoolSubjects()
-    } catch (err: any) {
-      setError(err.message || 'Failed to delete chapter')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to delete chapter')
     }
   }
 
@@ -421,11 +449,11 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
-      setSuccess(topicModalState.mode === 'edit' ? '✓ Custom topic updated' : '✓ Custom topic created!')
+      setSuccess(topicModalState.mode === 'edit' ? 'Custom topic updated' : 'Custom topic created!')
       setTopicModalState(null)
       await loadSchoolSubjects()
-    } catch (err: any) {
-      setError(err.message || 'Failed to save topic')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to save topic')
     }
   }
 
@@ -437,10 +465,10 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
-      setSuccess('✓ Custom topic deleted')
+      setSuccess('Custom topic deleted')
       await loadSchoolSubjects()
-    } catch (err: any) {
-      setError(err.message || 'Failed to delete topic')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to delete topic')
     }
   }
 
@@ -475,8 +503,8 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       if (!res.ok) throw new Error(data.error)
 
       await loadSchoolSubjects()
-    } catch (err: any) {
-      setError(err.message || 'Failed to toggle task active status')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to toggle task active status')
     }
   }
 
@@ -536,11 +564,11 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
-      setSuccess(taskModalState.mode === 'edit' ? '✓ Custom task updated' : '✓ Custom task added!')
+      setSuccess(taskModalState.mode === 'edit' ? 'Custom task updated' : 'Custom task added!')
       setTaskModalState(null)
       await loadSchoolSubjects()
-    } catch (err: any) {
-      setError(err.message || 'Failed to save task')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to save task')
     }
   }
 
@@ -552,86 +580,85 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
-      setSuccess('✓ Custom task deleted')
+      setSuccess('Custom task deleted')
       await loadSchoolSubjects()
-    } catch (err: any) {
-      setError(err.message || 'Failed to delete task')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to delete task')
     }
   }
 
   return (
     <div className="space-y-6">
       {/* Subject Header / Action Group */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border" style={{ borderColor: BORDER }}>
         <div>
-          <h2 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
-            <span>📚</span> Syllabus Customizer & Custom Tasks
+          <h2 className="text-xl font-semibold flex items-center gap-2" style={{ color: INK }}>
+            <BookOpen size={20} style={{ color: TEAL }} /> Syllabus Customizer & Custom Tasks
           </h2>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-gray-500 mt-1">
             Subscribe to Master templates, toggle optional exercises, and insert custom local school chapters/assignments.
           </p>
         </div>
         <button
+          data-testid="curriculum-subscribe-open-btn"
           onClick={() => setShowSubscribeModal(true)}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4.5 py-2.5 rounded-xl transition-all shadow-sm flex items-center gap-1.5"
+          className="flex items-center gap-1.5 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-sm"
+          style={{ background: TEAL }}
         >
-          <span>✨</span> Subscribe to Board Subject
+          <Sparkles size={14} /> Subscribe to Board Subject
         </button>
       </div>
 
       {/* Messages */}
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex justify-between items-center text-xs">
-          <span className="font-semibold">⚠️ {error}</span>
-          <button onClick={() => setError('')} className="text-red-400 hover:text-red-600">✕</button>
+        <div className="px-4 py-3 rounded-xl flex justify-between items-center text-xs" style={{ background: '#FCEBEB', color: '#791F1F' }}>
+          <span className="font-semibold">{error}</span>
+          <button data-testid="curriculum-error-dismiss" onClick={() => setError('')} aria-label="Dismiss error"><X size={13} /></button>
         </div>
       )}
 
       {success && (
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-4 py-3 rounded-xl flex justify-between items-center text-xs">
-          <span className="font-semibold">✓ {success}</span>
-          <button onClick={() => setSuccess('')} className="text-emerald-400 hover:text-emerald-600">✕</button>
+        <div className="px-4 py-3 rounded-xl flex justify-between items-center text-xs" style={{ background: '#E1F5EE', color: '#085041' }}>
+          <span className="font-semibold">{success}</span>
+          <button data-testid="curriculum-success-dismiss" onClick={() => setSuccess('')} aria-label="Dismiss success message"><X size={13} /></button>
         </div>
       )}
 
       {loading ? (
-        <div className="bg-white border border-slate-200 rounded-3xl py-24 flex flex-col items-center justify-center gap-4">
-          <div className="relative">
-            <div className="w-12 h-12 rounded-full border-4 border-slate-100" />
-            <div className="w-12 h-12 rounded-full border-4 border-indigo-500 border-t-transparent animate-spin absolute inset-0" />
-          </div>
-          <p className="text-xs text-slate-400 font-semibold animate-pulse">Loading curriculum overrides...</p>
+        <div className="bg-white border rounded-3xl py-24 flex flex-col items-center justify-center gap-4" style={{ borderColor: BORDER }}>
+          <div className="w-10 h-10 border-2 rounded-full animate-spin" style={{ borderColor: TEAL, borderTopColor: 'transparent' }} />
+          <p className="text-xs text-gray-400 font-semibold">Loading curriculum overrides…</p>
         </div>
       ) : subjects.length === 0 ? (
-        <div className="bg-white border border-dashed border-slate-200 rounded-3xl py-24 text-center">
-          <div className="w-16 h-16 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <span className="text-2xl">📓</span>
-          </div>
-          <h3 className="text-base font-bold text-slate-800 mb-1">No Active Syllabus Subscriptions</h3>
-          <p className="text-xs text-slate-500 max-w-sm mx-auto mb-6">
+        <div className="bg-white border border-dashed rounded-3xl py-24 text-center" style={{ borderColor: BORDER }}>
+          <BookOpen size={28} className="mx-auto mb-3" style={{ color: TEAL }} />
+          <h3 className="text-base font-semibold mb-1" style={{ color: INK }}>No Active Syllabus Subscriptions</h3>
+          <p className="text-xs text-gray-500 max-w-sm mx-auto mb-6">
             Your school hasn&apos;t subscribed to any global board subjects yet. Subscribe to CBSE/SSC templates to customize your classes.
           </p>
           <button
+            data-testid="curriculum-subscribe-open-btn-empty"
             onClick={() => setShowSubscribeModal(true)}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all shadow-md"
+            className="text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-sm"
+            style={{ background: TEAL }}
           >
             Choose & Subscribe to Subject
           </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
-          
+
           {/* Active Subscribed Subjects Sidebar */}
           <div className="lg:col-span-1 space-y-4">
             {/* Academic Year Selector Card */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm space-y-3">
-              <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
-                Academic Service Year
-              </label>
+            <div className="bg-white rounded-2xl border p-4 space-y-3" style={{ borderColor: BORDER }}>
+              <label className={labelCls}>Academic Service Year</label>
               <select
+                data-testid="curriculum-year-select"
                 value={selectedYear}
                 onChange={e => handleYearChange(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                className="w-full border rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2"
+                style={{ background: SURFACE, borderColor: BORDER, color: INK }}
               >
                 {academicYears.map(y => (
                   <option key={y.id} value={y.label}>
@@ -642,8 +669,8 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
             </div>
 
             {/* Accordion List */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm">
-              <h3 className="text-2xs font-extrabold text-slate-400 uppercase tracking-wider mb-4">
+            <div className="bg-white rounded-2xl border p-4" style={{ borderColor: BORDER }}>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-4">
                 Subscribed Subjects ({subjects.length})
               </h3>
               <div className="space-y-2">
@@ -665,46 +692,44 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                     const gradeSubjects = groupedSubjects[grade] || []
                     const isExpanded = expandedGrades[grade]
                     return (
-                      <div key={grade} className="border border-slate-100 rounded-xl overflow-hidden">
+                      <div key={grade} className="border rounded-xl overflow-hidden" style={{ borderColor: BORDER }}>
                         {/* Accordion Header */}
                         <button
+                          data-testid={`curriculum-grade-toggle-${grade}`}
                           onClick={() => toggleGrade(grade)}
-                          className={`w-full flex items-center justify-between px-3 py-2.5 text-xs font-bold transition-colors ${
-                            isExpanded
-                              ? 'bg-slate-50/80 text-slate-800'
-                              : 'bg-transparent text-slate-600 hover:bg-slate-50/50'
-                          }`}
+                          className="w-full flex items-center justify-between px-3 py-2.5 text-xs font-semibold transition-colors"
+                          style={{ background: isExpanded ? SURFACE : 'transparent', color: isExpanded ? INK : '#6b7280' }}
                         >
                           <span className="flex items-center gap-1.5">
-                            <span>🏫</span> Grade {grade}
+                            Grade {grade}
                           </span>
-                          <span className="text-[10px] text-slate-400">
-                            {isExpanded ? '▼' : '▶'}
-                          </span>
+                          {isExpanded ? <ChevronDown size={13} className="text-gray-400" /> : <ChevronRight size={13} className="text-gray-400" />}
                         </button>
 
                         {/* Accordion Content */}
                         {isExpanded && (
-                          <div className="p-1.5 bg-white border-t border-slate-100 space-y-1">
+                          <div className="p-1.5 bg-white border-t space-y-1" style={{ borderColor: BORDER }}>
                             {gradeSubjects.map(s => {
                               const isActive = activeSubject?.id === s.id
                               return (
                                 <button
                                   key={s.id}
+                                  data-testid={`curriculum-subject-select-${s.id}`}
                                   onClick={() => {
                                     setActiveSubject(s)
                                     setEditingChapterId(null)
                                     setShowAddChapterForm(null)
                                   }}
-                                  className={`w-full text-left p-2.5 rounded-lg transition-all border text-xs flex flex-col gap-1 ${
-                                    isActive
-                                      ? 'bg-indigo-50/50 border-indigo-200 text-indigo-900 font-semibold shadow-sm'
-                                      : 'bg-transparent border-transparent text-slate-600 hover:bg-slate-50/80'
-                                  }`}
+                                  className="w-full text-left p-2.5 rounded-lg transition-all border text-xs flex flex-col gap-1"
+                                  style={{
+                                    background: isActive ? '#E7F3F4' : 'transparent',
+                                    borderColor: isActive ? TEAL : 'transparent',
+                                    color: isActive ? TEAL : '#6b7280',
+                                  }}
                                 >
-                                  <span className="font-bold truncate">{s.subject_name}</span>
-                                  <div className="flex items-center gap-1.5 text-[9px] text-slate-400">
-                                    <span>🏛️ {s.board || 'Custom'}</span>
+                                  <span className="font-semibold truncate">{s.subject_name}</span>
+                                  <div className="flex items-center gap-1.5 text-[9px] text-gray-400">
+                                    <span>{s.board || 'Custom'}</span>
                                     <span>·</span>
                                     <span>{s.chapters?.length || 0} chapters</span>
                                   </div>
@@ -721,14 +746,15 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
             </div>
 
             {/* Quick Helper Tips */}
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-[11px] text-slate-500 leading-relaxed">
-              <p className="font-bold text-slate-700 mb-1 flex items-center gap-1">
-                <span>💡</span> Inheritance Rules
+            <div className="rounded-2xl border p-4 text-[11px] text-gray-500 leading-relaxed" style={{ background: SURFACE, borderColor: BORDER }}>
+              <p className="font-semibold mb-1 flex items-center gap-1" style={{ color: INK }}>
+                <Sparkles size={12} style={{ color: TEAL }} /> Inheritance Rules
               </p>
               <ul className="space-y-1 list-disc pl-4">
-                <li>Board mandated subjects, chapters, and topics are locked 🔒 (cannot be deleted or renamed).</li>
+                <li>Board mandated subjects, chapters, and topics are locked (cannot be deleted or renamed).</li>
                 <li>You can add custom local chapters or topics in between them.</li>
                 <li>Mandatory tasks are locked, but optional master exercises can be deactivated for your teachers using the toggles.</li>
+                <li>Click a blue quiz badge to preview a topic&apos;s approved questions (read-only).</li>
               </ul>
             </div>
           </div>
@@ -738,28 +764,30 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
             {activeSubject && (
               <>
                 {/* Active Subscribed Subject Summary Card */}
-                <div className="bg-gradient-to-br from-indigo-950 via-slate-900 to-indigo-900 text-white rounded-2xl p-6 shadow-md relative overflow-hidden">
-                  <div className="absolute top-0 right-0 w-48 h-48 bg-white/5 rounded-full blur-2xl" />
+                <div className="rounded-2xl p-6 shadow-sm relative overflow-hidden" style={{ background: INK }}>
+                  <div className="absolute top-0 right-0 w-48 h-48 rounded-full blur-2xl" style={{ background: 'rgba(255,255,255,0.05)' }} />
                   <div className="flex items-start justify-between gap-4 flex-wrap">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-extrabold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-400/20 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full" style={{ background: 'rgba(42,127,140,0.25)', color: '#9FD8DF' }}>
                           {activeSubject.board || 'Local School'} Template
                         </span>
-                        <span className="text-[10px] font-extrabold uppercase bg-white/10 text-white px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full text-white" style={{ background: 'rgba(255,255,255,0.1)' }}>
                           Grade {activeSubject.grade}
                         </span>
                       </div>
-                      <h2 className="text-2xl font-black mt-3 text-white tracking-tight">{activeSubject.subject_name}</h2>
-                      <p className="text-xs text-indigo-200 mt-1">
+                      <h2 className="text-2xl font-semibold mt-3 text-white tracking-tight">{activeSubject.subject_name}</h2>
+                      <p className="text-xs mt-1" style={{ color: '#9FB8C7' }}>
                         Subscribed: {new Date(activeSubject.created_at).toLocaleDateString()}
                       </p>
                     </div>
 
                     <div className="flex flex-col gap-2">
                       <button
+                        data-testid="curriculum-add-chapter-open-btn"
                         onClick={() => setShowAddChapterForm(activeSubject.id)}
-                        className="bg-white text-indigo-950 hover:bg-slate-100 text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md self-start"
+                        className="text-xs font-semibold px-4 py-2.5 rounded-xl shadow-md self-start"
+                        style={{ background: 'white', color: INK }}
                       >
                         + Add Custom Chapter
                       </button>
@@ -768,28 +796,33 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
 
                   {/* Add Chapter Inline form */}
                   {showAddChapterForm === activeSubject.id && (
-                    <div className="mt-5 pt-5 border-t border-white/10 flex gap-2 items-center bg-white/5 p-4 rounded-xl">
+                    <div className="mt-5 pt-5 border-t flex gap-2 items-center p-4 rounded-xl" style={{ borderColor: 'rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.05)' }}>
                       <input
+                        data-testid="curriculum-new-chapter-input"
                         type="text"
                         placeholder="Chapter Title (e.g. Unit 6: Practical Lab Exercises)"
                         value={newChapterName}
                         onChange={e => setNewChapterName(e.target.value)}
-                        className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-400"
+                        className="flex-1 border rounded-xl px-3 py-2 text-xs text-white placeholder-gray-500 focus:outline-none"
+                        style={{ background: 'rgba(0,0,0,0.3)', borderColor: 'rgba(255,255,255,0.15)' }}
                         autoFocus
                       />
                       <button
+                        data-testid="curriculum-new-chapter-submit"
                         onClick={() => handleAddChapter(activeSubject.id)}
                         disabled={!newChapterName.trim()}
-                        className="bg-indigo-500 hover:bg-indigo-600 text-white text-xs font-bold px-4 py-2 rounded-xl disabled:opacity-50"
+                        className="text-white text-xs font-semibold px-4 py-2 rounded-xl disabled:opacity-50"
+                        style={{ background: TEAL }}
                       >
                         Add
                       </button>
                       <button
+                        data-testid="curriculum-new-chapter-cancel"
                         onClick={() => {
                           setShowAddChapterForm(null)
                           setNewChapterName('')
                         }}
-                        className="text-xs text-slate-300 hover:text-white px-2"
+                        className="text-xs text-gray-300 hover:text-white px-2"
                       >
                         Cancel
                       </button>
@@ -799,7 +832,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
 
                 {/* Chapter tree list */}
                 {(!activeSubject.chapters || activeSubject.chapters.length === 0) ? (
-                  <div className="bg-white border border-slate-200/80 rounded-2xl py-12 text-center text-slate-500 text-xs shadow-sm">
+                  <div className="bg-white border rounded-2xl py-12 text-center text-gray-500 text-xs" style={{ borderColor: BORDER }}>
                     No chapters exist for this subject. Create a custom chapter to get started.
                   </div>
                 ) : (
@@ -810,32 +843,37 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                         const isEditingCh = editingChapterId === ch.id
 
                         return (
-                          <div key={ch.id} className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm space-y-4">
-                            
+                          <div key={ch.id} className="bg-white rounded-2xl border p-5 space-y-4" style={{ borderColor: BORDER }}>
+
                             {/* Chapter Header */}
-                            <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100 flex-wrap">
+                            <div className="flex items-start justify-between gap-3 pb-3 border-b flex-wrap" style={{ borderColor: '#EFEDE6' }}>
                               <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center font-bold text-xs">
+                                <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs" style={{ background: SURFACE, color: INK }}>
                                   {chIdx + 1}
                                 </div>
                                 {isEditingCh ? (
                                   <div className="flex items-center gap-2">
                                     <input
+                                      data-testid={`chapter-${ch.id}-rename-input`}
                                       type="text"
                                       value={editingChapterName}
                                       onChange={e => setEditingChapterName(e.target.value)}
-                                      className="border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-800"
+                                      className="border rounded-lg px-2 py-1 text-xs"
+                                      style={{ borderColor: BORDER, color: INK }}
                                       autoFocus
                                     />
                                     <button
+                                      data-testid={`chapter-${ch.id}-rename-save`}
                                       onClick={() => handleSaveEditChapter(ch)}
-                                      className="text-xs bg-emerald-600 text-white px-2 py-1 rounded"
+                                      className="text-xs text-white px-2 py-1 rounded"
+                                      style={{ background: GREEN }}
                                     >
                                       Save
                                     </button>
                                     <button
+                                      data-testid={`chapter-${ch.id}-rename-cancel`}
                                       onClick={() => setEditingChapterId(null)}
-                                      className="text-xs text-slate-500 px-1"
+                                      className="text-xs text-gray-500 px-1"
                                     >
                                       Cancel
                                     </button>
@@ -843,21 +881,18 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                                 ) : (
                                   <div>
                                     <div className="flex items-center gap-2">
-                                      <h3 className="font-black text-slate-800 text-sm">{ch.chapter_name}</h3>
+                                      <h3 className="font-semibold text-sm" style={{ color: INK }}>{ch.chapter_name}</h3>
                                       {ch.is_custom ? (
-                                        <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full uppercase">
+                                        <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase" style={{ background: '#E1F5EE', color: '#085041' }}>
                                           Custom School Chapter
                                         </span>
                                       ) : (
-                                        <span className="bg-amber-50 text-amber-700 border border-amber-200 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full uppercase flex items-center gap-1">
-                                          <svg className="w-2.5 h-2.5 text-amber-500" fill="currentColor" viewBox="0 0 20 20">
-                                            <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                                          </svg>
-                                          Locked Chapter
+                                        <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase flex items-center gap-1" style={{ background: '#FCEBDB', color: '#8A4B12' }}>
+                                          <Lock size={9} /> Locked Chapter
                                         </span>
                                       )}
                                     </div>
-                                    <p className="text-[10px] text-slate-400 mt-0.5">Chapter Order: {ch.chapter_order}</p>
+                                    <p className="text-[10px] text-gray-400 mt-0.5">Chapter Order: {ch.chapter_order}</p>
                                   </div>
                                 )}
                               </div>
@@ -865,40 +900,44 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                               <div className="flex items-center gap-2">
                                 <div className="flex items-center gap-1.5">
                                   <button
+                                    data-testid={`chapter-${ch.id}-edit-btn`}
                                     onClick={() => handleStartEditChapter(ch)}
-                                    className="text-slate-400 hover:text-slate-600 p-1"
+                                    className="text-gray-400 hover:text-gray-600 p-1"
                                     title="Rename Chapter"
+                                    aria-label={`Rename chapter ${ch.chapter_name}`}
                                   >
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                    </svg>
+                                    <Pencil size={14} />
                                   </button>
                                   {ch.is_custom ? (
                                     <button
+                                      data-testid={`chapter-${ch.id}-delete-btn`}
                                       onClick={() => handleDeleteChapter(ch)}
-                                      className="text-slate-400 hover:text-red-500 p-1"
+                                      className="text-gray-400 hover:text-red-500 p-1"
                                       title="Delete Chapter"
+                                      aria-label={`Delete chapter ${ch.chapter_name}`}
                                     >
-                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                      </svg>
+                                      <Trash2 size={14} />
                                     </button>
                                   ) : (
-                                    <span className="text-[10px] text-slate-400 flex items-center gap-1 font-medium bg-slate-50 px-2 py-0.5 rounded-lg" title="Mandatory Chapter cannot be deleted">
-                                      🔒 Board Chapter
+                                    <span className="text-[10px] text-gray-400 flex items-center gap-1 font-medium px-2 py-0.5 rounded-lg" style={{ background: SURFACE }} title="Mandatory Chapter cannot be deleted">
+                                      <Lock size={9} /> Board Chapter
                                     </span>
                                   )}
                                 </div>
 
                                 <button
+                                  data-testid={`chapter-${ch.id}-add-topic-btn`}
                                   onClick={() => handleOpenAddTopic(ch.id)}
-                                  className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold px-2.5 py-1.5 rounded-lg transition-colors ml-2"
+                                  className="text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition-colors ml-2"
+                                  style={{ background: SURFACE, color: INK }}
                                 >
                                   + Custom Topic
                                 </button>
                                 <button
+                                  data-testid={`chapter-${ch.id}-add-task-btn`}
                                   onClick={() => handleOpenAddTask(ch.id)}
-                                  className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2.5 py-1.5 rounded-lg transition-colors"
+                                  className="text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition-colors"
+                                  style={{ background: '#E7F3F4', color: TEAL }}
                                 >
                                   + Custom Task
                                 </button>
@@ -907,132 +946,157 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
 
                             {/* Topics list & Tasks list inside chapter */}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                              
+
                               {/* Topics Area */}
                               <div className="space-y-2.5">
-                                <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 pb-1">
-                                  <span>📝</span> Topics in this Chapter
+                                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pb-1">
+                                  Topics in this Chapter
                                 </h4>
 
                                 {(!ch.topics || ch.topics.length === 0) ? (
-                                  <div className="text-[11px] text-slate-400 italic py-2">No topics. Add custom topics above.</div>
+                                  <div className="text-[11px] text-gray-400 italic py-2">No topics. Add custom topics above.</div>
                                 ) : (
                                   <div className="space-y-2">
                                     {ch.topics
                                       .sort((a, b) => a.topic_order - b.topic_order)
-                                      .map(topic => (
-                                        <div key={topic.id} className="bg-slate-50 border border-slate-200/60 rounded-xl p-3 flex flex-col gap-1">
+                                      .map(topic => {
+                                        const qCount = topic.questions?.length || 0
+                                        return (
+                                        <div key={topic.id} className="rounded-xl p-3 flex flex-col gap-1.5 border" style={{ background: SURFACE, borderColor: BORDER }}>
                                           <div className="flex items-start justify-between gap-2">
                                             <div>
-                                              <p className="text-xs font-bold text-slate-700">
+                                              <p className="text-xs font-bold" style={{ color: INK }}>
                                                 {topic.topic_order}. {topic.topic_name}
                                               </p>
                                               {topic.is_custom ? (
-                                                <span className="text-[8px] bg-emerald-100 text-emerald-800 font-extrabold px-1 rounded">
+                                                <span className="text-[8px] font-bold px-1 rounded" style={{ background: '#E1F5EE', color: '#085041' }}>
                                                   Custom School Override
                                                 </span>
                                               ) : (
-                                                <span className="text-[8px] bg-amber-100 text-amber-800 font-extrabold px-1 rounded">
-                                                  🔒 Mandated
+                                                <span className="text-[8px] font-bold px-1 rounded flex items-center gap-0.5 w-fit" style={{ background: '#FCEBDB', color: '#8A4B12' }}>
+                                                  <Lock size={8} /> Mandated
                                                 </span>
                                               )}
                                             </div>
-                                            <div className="flex gap-1 items-center">
+                                            <div className="flex gap-1 items-center shrink-0">
                                               <button
+                                                data-testid={`topic-${topic.id}-edit-btn`}
                                                 onClick={() => handleOpenEditTopic(ch.id, topic)}
-                                                className="text-slate-400 hover:text-slate-600 text-xs p-0.5"
+                                                className="text-gray-400 hover:text-gray-600 p-0.5"
                                                 title="Edit Topic Content"
+                                                aria-label={`Edit topic ${topic.topic_name}`}
                                               >
-                                                ✎
+                                                <Pencil size={12} />
                                               </button>
                                               {topic.is_custom ? (
                                                 <button
+                                                  data-testid={`topic-${topic.id}-delete-btn`}
                                                   onClick={() => handleDeleteTopic(topic)}
-                                                  className="text-slate-400 hover:text-red-500 text-xs p-0.5"
+                                                  className="text-gray-400 hover:text-red-500 p-0.5"
                                                   title="Delete Topic"
+                                                  aria-label={`Delete topic ${topic.topic_name}`}
                                                 >
-                                                  ✕
+                                                  <X size={12} />
                                                 </button>
                                               ) : (
-                                                <span className="text-[9px] text-slate-400" title="Board topic cannot be deleted">🔒</span>
+                                                <span className="text-[9px] text-gray-400" title="Board topic cannot be deleted"><Lock size={10} /></span>
                                               )}
                                             </div>
                                           </div>
 
                                           {topic.content_text && (
-                                            <p className="text-[10px] text-slate-500 mt-1 line-clamp-2 leading-relaxed">{topic.content_text}</p>
+                                            <p className="text-[10px] text-gray-500 line-clamp-2 leading-relaxed">{topic.content_text}</p>
                                           )}
 
                                           {topic.content_pdf_url && (
-                                            <p className="text-[9px] text-indigo-600 font-semibold truncate mt-1">
-                                              📄 PDF Link: <a href={topic.content_pdf_url} target="_blank" rel="noreferrer" className="underline">{topic.content_pdf_url}</a>
+                                            <p className="text-[9px] font-semibold truncate flex items-center gap-1" style={{ color: TEAL }}>
+                                              <FileText size={10} />
+                                              <a data-testid={`topic-${topic.id}-pdf-link`} href={topic.content_pdf_url} target="_blank" rel="noreferrer" className="underline">{topic.content_pdf_url}</a>
                                             </p>
                                           )}
 
                                           {/* Resources list inside topic */}
                                           {topic.resources && topic.resources.length > 0 && (
-                                            <div className="flex flex-wrap gap-1 mt-1.5">
+                                            <div className="flex flex-wrap gap-1 mt-0.5">
                                               {topic.resources.map(res => (
                                                 <span
                                                   key={res.id}
-                                                  className="text-[8px] bg-slate-200/50 text-slate-600 border border-slate-300 px-1.5 py-0.5 rounded font-mono truncate max-w-[140px]"
+                                                  className="text-[8px] border px-1.5 py-0.5 rounded font-mono truncate max-w-[140px] flex items-center gap-1"
+                                                  style={{ background: 'white', borderColor: BORDER, color: '#6b7280' }}
                                                   title={`${res.title} (${res.resource_type})`}
                                                 >
-                                                  {res.resource_type === 'video' ? '📺' : '🔗'} {res.title}
+                                                  {res.resource_type === 'video' ? <Video size={9} /> : <LinkIcon size={9} />} {res.title}
                                                 </span>
                                               ))}
                                             </div>
                                           )}
+
+                                          {/* Quiz preview trigger — read-only view of the topic's approved questions */}
+                                          <div className="mt-0.5">
+                                            {qCount > 0 ? (
+                                              <button
+                                                data-testid={`topic-${topic.id}-view-quiz-btn`}
+                                                onClick={() => setViewQuiz({ topic, chapterName: ch.chapter_name })}
+                                                className="hover:opacity-80"
+                                                title="View quiz questions"
+                                              >
+                                                <QuizPill count={qCount} />
+                                              </button>
+                                            ) : (
+                                              <QuizPill count={0} />
+                                            )}
+                                          </div>
                                         </div>
-                                      ))}
+                                      )})}
                                   </div>
                                 )}
                               </div>
 
                               {/* Exercises & Tasks Area */}
                               <div className="space-y-2.5">
-                                <h4 className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest flex items-center gap-1.5 pb-1">
-                                  <span>🎯</span> Exercises & Homework Tasks
+                                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pb-1">
+                                  Exercises & Homework Tasks
                                 </h4>
 
                                 {(!ch.tasks || ch.tasks.length === 0) ? (
-                                  <div className="text-[11px] text-slate-400 italic py-2">No tasks assigned. Click Custom Task to add.</div>
+                                  <div className="text-[11px] text-gray-400 italic py-2">No tasks assigned. Click Custom Task to add.</div>
                                 ) : (
                                   <div className="space-y-2">
                                     {ch.tasks.map(task => {
                                       const mappedTopic = ch.topics?.find(t => t.id === task.school_topic_id)
-                                      
+
                                       return (
                                         <div
                                           key={task.id}
-                                          className={`border rounded-xl p-3 flex flex-col gap-1 transition-all ${
-                                            task.is_active
-                                              ? 'bg-slate-50 border-slate-200/60'
-                                              : 'bg-slate-100/60 border-slate-200/30 opacity-60'
-                                          }`}
+                                          className="border rounded-xl p-3 flex flex-col gap-1 transition-all"
+                                          style={{
+                                            background: task.is_active ? SURFACE : '#F1F0EC',
+                                            borderColor: BORDER,
+                                            opacity: task.is_active ? 1 : 0.6,
+                                          }}
                                         >
                                           <div className="flex items-start justify-between gap-3">
                                             <div>
                                               <div className="flex items-center gap-2 flex-wrap">
-                                                <p className={`text-xs font-bold ${task.is_active ? 'text-slate-800' : 'text-slate-400 line-through'}`}>
+                                                <p className={`text-xs font-bold ${task.is_active ? '' : 'line-through'}`} style={{ color: task.is_active ? INK : '#9ca3af' }}>
                                                   {task.title}
                                                 </p>
                                                 {task.is_custom ? (
-                                                  <span className="bg-emerald-100 text-emerald-800 text-[8px] font-extrabold px-1 rounded uppercase">
+                                                  <span className="text-[8px] font-bold px-1 rounded uppercase" style={{ background: '#E1F5EE', color: '#085041' }}>
                                                     Custom
                                                   </span>
                                                 ) : task.is_mandatory ? (
-                                                  <span className="bg-red-50 text-red-700 border border-red-200 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full uppercase flex items-center gap-0.5">
-                                                    🔒 Mandated
+                                                  <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase flex items-center gap-0.5" style={{ background: '#FCEBEB', color: '#791F1F' }}>
+                                                    <Lock size={8} /> Mandated
                                                   </span>
                                                 ) : (
-                                                  <span className="bg-orange-50 text-orange-700 border border-orange-200 text-[8px] font-extrabold px-1.5 py-0.5 rounded-full uppercase">
+                                                  <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase" style={{ background: '#FAEEDA', color: '#633806' }}>
                                                     Board Optional
                                                   </span>
                                                 )}
                                               </div>
                                               {mappedTopic && (
-                                                <p className="text-[8.5px] text-slate-400 mt-0.5">
+                                                <p className="text-[8.5px] text-gray-400 mt-0.5">
                                                   Linked topic: <span className="font-semibold">{mappedTopic.topic_name}</span>
                                                 </p>
                                               )}
@@ -1041,48 +1105,54 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                                             {/* Action Control: Mandatory exercises cannot be toggled or deleted. Optional can be toggled. Custom can be edited/deleted. */}
                                             <div className="flex items-center gap-1.5">
                                               <button
+                                                data-testid={`task-${task.id}-edit-btn`}
                                                 onClick={() => handleOpenEditTask(ch.id, task)}
-                                                className="text-slate-400 hover:text-slate-600 text-xs p-0.5"
+                                                className="text-gray-400 hover:text-gray-600 p-0.5"
                                                 title="Edit Task"
+                                                aria-label={`Edit task ${task.title}`}
                                               >
-                                                ✎
+                                                <Pencil size={12} />
                                               </button>
                                               {task.is_custom ? (
                                                 <button
+                                                  data-testid={`task-${task.id}-delete-btn`}
                                                   onClick={() => handleDeleteTask(task)}
-                                                  className="text-slate-400 hover:text-red-500 text-xs p-0.5"
+                                                  className="text-gray-400 hover:text-red-500 p-0.5"
                                                   title="Delete Task"
+                                                  aria-label={`Delete task ${task.title}`}
                                                 >
-                                                  ✕
+                                                  <X size={12} />
                                                 </button>
                                               ) : !task.is_mandatory ? (
-                                                <div className="flex items-center gap-1.5">
-                                                  <label className="relative inline-flex items-center cursor-pointer scale-90" title={task.is_active ? 'Deactivate Task' : 'Activate Task'}>
-                                                    <input
-                                                      type="checkbox"
-                                                      checked={task.is_active}
-                                                      onChange={() => handleToggleTaskActive(task)}
-                                                      className="sr-only peer"
-                                                    />
-                                                    <div className="w-7 h-4 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-600"></div>
-                                                  </label>
-                                                </div>
+                                                <label className="relative inline-flex items-center cursor-pointer scale-90" title={task.is_active ? 'Deactivate Task' : 'Activate Task'}>
+                                                  <input
+                                                    data-testid={`task-${task.id}-active-toggle`}
+                                                    type="checkbox"
+                                                    checked={task.is_active}
+                                                    onChange={() => handleToggleTaskActive(task)}
+                                                    className="sr-only peer"
+                                                  />
+                                                  <div
+                                                    className="w-7 h-4 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all transition-colors"
+                                                    style={{ background: task.is_active ? TEAL : '#cbd5e1' }}
+                                                  />
+                                                </label>
                                               ) : (
-                                                <span className="text-[9px] text-slate-400 font-semibold" title="Mandatory Curriculum Requirement">
-                                                  🔒 Required
+                                                <span className="text-[9px] text-gray-400 font-semibold" title="Mandatory Curriculum Requirement">
+                                                  Required
                                                 </span>
                                               )}
                                             </div>
                                           </div>
 
                                           {task.instructions && (
-                                            <p className={`text-[10px] mt-1 leading-relaxed ${task.is_active ? 'text-slate-500' : 'text-slate-400 line-through'}`}>
+                                            <p className={`text-[10px] leading-relaxed ${task.is_active ? 'text-gray-500' : 'text-gray-400 line-through'}`}>
                                               {task.instructions}
                                             </p>
                                           )}
 
-                                          <div className="flex gap-2.5 mt-2 text-[9px] text-slate-400 font-medium">
-                                            <span className="bg-slate-200/50 px-1.5 py-0.5 rounded capitalize">{task.task_type}</span>
+                                          <div className="flex gap-2.5 mt-1 text-[9px] text-gray-400 font-medium">
+                                            <span className="px-1.5 py-0.5 rounded capitalize" style={{ background: 'white', border: `1px solid ${BORDER}` }}>{task.task_type}</span>
                                             <span>Max Marks: {task.max_marks}</span>
                                           </div>
                                         </div>
@@ -1109,24 +1179,28 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
 
       {/* Subscribe Master Modal */}
       {showSubscribeModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg p-6 relative shadow-2xl max-h-[85vh] overflow-y-auto">
-            <button onClick={() => setShowSubscribeModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
-            
-            <h3 className="text-lg font-black text-slate-800 mb-2 flex items-center gap-2">
-              <span>🏛️</span> Subscribe to Board Curriculum Templates
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,42,63,0.45)' }}>
+          <div className="bg-white rounded-3xl w-full max-w-lg p-6 relative shadow-2xl max-h-[85vh] overflow-y-auto">
+            <button data-testid="subscribe-modal-close" onClick={() => setShowSubscribeModal(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-700 font-bold text-lg" aria-label="Close subscribe modal">
+              <X size={18} />
+            </button>
+
+            <h3 className="text-lg font-semibold mb-2 flex items-center gap-2" style={{ color: INK }}>
+              Subscribe to Board Curriculum Templates
             </h3>
-            <p className="text-xs text-slate-500 mb-5">
+            <p className="text-xs text-gray-500 mb-5">
               Select an academic board and grade level, choose a master subject template, and clone it instantly into your school workspace.
             </p>
 
             <div className="grid grid-cols-3 gap-3 mb-4">
               <div>
-                <label className="block text-2xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Academic Board</label>
+                <label className={labelCls}>Academic Board</label>
                 <select
+                  data-testid="subscribe-board-select"
                   value={filterBoard}
                   onChange={e => setFilterBoard(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  className="w-full border rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2"
+                  style={{ background: SURFACE, borderColor: BORDER, color: INK }}
                 >
                   <option value="CBSE">CBSE (Central Board)</option>
                   <option value="AP_SSC">AP SSC (Andhra Pradesh)</option>
@@ -1134,11 +1208,13 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                 </select>
               </div>
               <div>
-                <label className="block text-2xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Grade Level</label>
+                <label className={labelCls}>Grade Level</label>
                 <select
+                  data-testid="subscribe-grade-select"
                   value={filterGrade}
                   onChange={e => setFilterGrade(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  className="w-full border rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2"
+                  style={{ background: SURFACE, borderColor: BORDER, color: INK }}
                 >
                   <option value="6">Grade 6</option>
                   <option value="7">Grade 7</option>
@@ -1148,11 +1224,13 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                 </select>
               </div>
               <div>
-                <label className="block text-2xs font-bold text-slate-500 mb-1 uppercase tracking-wider">Target Year</label>
+                <label className={labelCls}>Target Year</label>
                 <select
+                  data-testid="subscribe-year-select"
                   value={subscribeYear}
                   onChange={e => setSubscribeYear(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  className="w-full border rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2"
+                  style={{ background: SURFACE, borderColor: BORDER, color: INK }}
                 >
                   {academicYears.map(y => (
                     <option key={y.id} value={y.label}>
@@ -1164,12 +1242,12 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
             </div>
 
             {/* Sections Selector */}
-            <div className="mb-5 bg-slate-50/50 border border-slate-100 rounded-2xl p-4">
-              <label className="block text-2xs font-black text-slate-500 mb-2 uppercase tracking-wider flex items-center gap-1.5">
-                <span>🏫</span> Assign to Class Sections (Grade {filterGrade})
+            <div className="mb-5 rounded-2xl p-4" style={{ background: SURFACE, border: `1px solid ${BORDER}` }}>
+              <label className="block text-[10px] font-bold text-gray-500 mb-2 uppercase tracking-wider">
+                Assign to Class Sections (Grade {filterGrade})
               </label>
               {classes.filter(c => c.grade.toString().trim() === filterGrade.toString().trim()).length === 0 ? (
-                <p className="text-2xs text-slate-400 italic">
+                <p className="text-[11px] text-gray-400 italic">
                   No sections found in database for Grade {filterGrade}.
                 </p>
               ) : (
@@ -1181,26 +1259,21 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                       return (
                         <button
                           key={cls.id}
+                          data-testid={`subscribe-class-${cls.id}-toggle`}
                           type="button"
                           onClick={() => {
                             setSelectedClassIds(prev =>
                               isChecked ? prev.filter(id => id !== cls.id) : [...prev, cls.id]
                             )
                           }}
-                          className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] ${
-                            isChecked
-                              ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm shadow-indigo-100'
-                              : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300'
-                          }`}
+                          className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all"
+                          style={{
+                            background: isChecked ? TEAL : 'white',
+                            borderColor: isChecked ? TEAL : BORDER,
+                            color: isChecked ? 'white' : '#6b7280',
+                          }}
                         >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            readOnly
-                            className={`rounded border-slate-300 transition-colors ${
-                              isChecked ? 'accent-white text-indigo-600' : 'accent-indigo-600'
-                            }`}
-                          />
+                          <Check size={12} className={isChecked ? 'opacity-100' : 'opacity-0'} />
                           <span>Section {cls.section}</span>
                         </button>
                       )
@@ -1210,10 +1283,10 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
             </div>
 
             <div className="space-y-2 mb-6">
-              <label className="block text-2xs font-bold text-slate-500 uppercase tracking-wider">Select Available Template Subject *</label>
-              
+              <label className={labelCls}>Select Available Template Subject *</label>
+
               {masterSubjects.length === 0 ? (
-                <p className="text-xs text-slate-400 italic text-center py-4 bg-slate-50 rounded-xl border border-slate-100">
+                <p className="text-xs text-gray-400 italic text-center py-4 rounded-xl border" style={{ background: SURFACE, borderColor: BORDER }}>
                   No subjects found. Create subjects in Platform Master builder first.
                 </p>
               ) : (
@@ -1226,31 +1299,33 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                     return (
                       <label
                         key={sub.id}
-                        className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
-                          alreadySubscribed
-                            ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed text-slate-400'
-                            : selectedMasterId === String(sub.id)
-                            ? 'border-indigo-400 bg-indigo-50/40 text-indigo-900 font-semibold'
-                            : 'border-slate-200 hover:bg-slate-50 text-slate-700'
-                        }`}
+                        className="flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all"
+                        style={{
+                          background: alreadySubscribed ? SURFACE : selectedMasterId === String(sub.id) ? '#E7F3F4' : 'white',
+                          borderColor: alreadySubscribed ? BORDER : selectedMasterId === String(sub.id) ? TEAL : BORDER,
+                          color: alreadySubscribed ? '#9ca3af' : selectedMasterId === String(sub.id) ? TEAL : '#374151',
+                          opacity: alreadySubscribed ? 0.6 : 1,
+                          cursor: alreadySubscribed ? 'not-allowed' : 'pointer',
+                        }}
                       >
                         <div className="flex items-center gap-3">
                           <input
+                            data-testid={`subscribe-master-${sub.id}-radio`}
                             type="radio"
                             name="masterSubject"
                             value={sub.id}
                             disabled={alreadySubscribed}
                             checked={selectedMasterId === String(sub.id)}
                             onChange={() => setSelectedMasterId(String(sub.id))}
-                            className="mt-0.5 accent-indigo-600"
+                            className="mt-0.5"
                           />
                           <div>
                             <p className="text-xs font-bold">{sub.subject_name}</p>
-                            <p className="text-3xs uppercase tracking-widest text-slate-400 mt-0.5">{sub.board} · Grade {sub.grade}</p>
+                            <p className="text-[10px] uppercase tracking-widest text-gray-400 mt-0.5">{sub.board} · Grade {sub.grade}</p>
                           </div>
                         </div>
                         {alreadySubscribed && (
-                          <span className="text-[9px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full font-bold">
+                          <span className="text-[9px] px-2 py-0.5 rounded-full font-bold" style={{ background: BORDER, color: '#6b7280' }}>
                             Subscribed
                           </span>
                         )}
@@ -1261,19 +1336,22 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
               )}
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <div className="flex justify-end gap-2 pt-2 border-t" style={{ borderColor: '#EFEDE6' }}>
               <button
+                data-testid="subscribe-modal-cancel"
                 type="button"
                 onClick={() => setShowSubscribeModal(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700"
+                className="px-4 py-2 text-xs font-bold text-gray-500 hover:text-gray-700"
               >
                 Cancel
               </button>
               <button
+                data-testid="subscribe-modal-submit"
                 type="button"
                 onClick={handleSubscribe}
                 disabled={subscribing || !selectedMasterId}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl disabled:opacity-50 transition-all shadow-md"
+                className="text-white text-xs font-semibold px-5 py-2.5 rounded-xl disabled:opacity-50 transition-all shadow-md"
+                style={{ background: TEAL }}
               >
                 {subscribing ? 'Cloning Syllabus...' : 'Subscribe & Clone'}
               </button>
@@ -1284,65 +1362,75 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
 
       {/* Add / Edit Topic Modal */}
       {topicModalState?.show && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg p-6 relative shadow-2xl my-8">
-            <button onClick={() => setTopicModalState(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
-            
-            <h3 className="text-base font-black text-slate-800 mb-2">
-              {topicModalState.mode === 'edit' ? '✎ Edit Custom Topic' : '📝 Create Custom Topic'}
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto" style={{ background: 'rgba(15,42,63,0.45)' }}>
+          <div className="bg-white rounded-3xl w-full max-w-lg p-6 relative shadow-2xl my-8">
+            <button data-testid="topic-modal-close" onClick={() => setTopicModalState(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-700 font-bold text-lg" aria-label="Close topic modal">
+              <X size={18} />
+            </button>
+
+            <h3 className="text-base font-semibold mb-2" style={{ color: INK }}>
+              {topicModalState.mode === 'edit' ? 'Edit Custom Topic' : 'Create Custom Topic'}
             </h3>
-            <p className="text-xs text-slate-500 mb-4">
+            <p className="text-xs text-gray-500 mb-4">
               Add direct syllabus reading content, textbook PDF link, and digital reference assets.
             </p>
 
             <form onSubmit={handleSaveTopic} className="space-y-4">
               <div>
-                <label className="block text-2xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Topic Title *</label>
+                <label className={labelCls}>Topic Title *</label>
                 <input
+                  data-testid="topic-modal-name-input"
                   type="text"
                   placeholder="e.g. Practical Lab Activity 1"
                   required
                   value={topicForm.topic_name}
                   onChange={e => setTopicForm(prev => ({ ...prev, topic_name: e.target.value }))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  className={inputCls}
+                  style={{ borderColor: BORDER }}
                 />
               </div>
               <div>
-                <label className="block text-2xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Study Content (Text)</label>
+                <label className={labelCls}>Study Content (Text)</label>
                 <textarea
+                  data-testid="topic-modal-content-textarea"
                   placeholder="Direct lesson content/instructions for teachers..."
                   rows={4}
                   value={topicForm.content_text}
                   onChange={e => setTopicForm(prev => ({ ...prev, content_text: e.target.value }))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300 resize-none"
+                  className={`${inputCls} resize-none`}
+                  style={{ borderColor: BORDER }}
                 />
               </div>
               <div>
-                <label className="block text-2xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Textbook PDF Link Reference</label>
+                <label className={labelCls}>Textbook PDF Link Reference</label>
                 <input
+                  data-testid="topic-modal-pdf-input"
                   type="url"
                   placeholder="https://example.com/custom-materials.pdf"
                   value={topicForm.content_pdf_url}
                   onChange={e => setTopicForm(prev => ({ ...prev, content_pdf_url: e.target.value }))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  className={inputCls}
+                  style={{ borderColor: BORDER }}
                 />
               </div>
 
               {/* Resources builder inside Topic Form */}
-              <div className="border-t border-slate-100 pt-3">
-                <h4 className="text-xs font-bold text-slate-700 mb-2">Media & Attachments</h4>
-                
+              <div className="border-t pt-3" style={{ borderColor: '#EFEDE6' }}>
+                <h4 className="text-xs font-semibold mb-2" style={{ color: INK }}>Media & Attachments</h4>
+
                 {topicForm.resources.length > 0 && (
                   <div className="space-y-1.5 mb-3">
                     {topicForm.resources.map((res, rIdx) => (
-                      <div key={rIdx} className="flex items-center justify-between bg-slate-50 border border-slate-100 p-2 rounded-lg text-xs">
-                        <span className="truncate font-semibold text-slate-700">
-                          {res.resource_type === 'video' ? '📺' : '🔗'} {res.title}
+                      <div key={rIdx} className="flex items-center justify-between border p-2 rounded-lg text-xs" style={{ background: SURFACE, borderColor: BORDER }}>
+                        <span className="truncate font-semibold flex items-center gap-1.5" style={{ color: INK }}>
+                          {res.resource_type === 'video' ? <Video size={11} /> : <LinkIcon size={11} />} {res.title}
                         </span>
                         <button
+                          data-testid={`topic-modal-remove-resource-${rIdx}-btn`}
                           type="button"
                           onClick={() => handleRemoveResourceItem(rIdx)}
-                          className="text-red-500 hover:text-red-700 text-xs px-2"
+                          className="text-xs px-2"
+                          style={{ color: '#791F1F' }}
                         >
                           Remove
                         </button>
@@ -1351,12 +1439,14 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                   </div>
                 )}
 
-                <div className="bg-slate-50 border border-slate-200/80 p-3 rounded-xl grid grid-cols-1 sm:grid-cols-4 gap-2">
+                <div className="p-3 rounded-xl grid grid-cols-1 sm:grid-cols-4 gap-2" style={{ background: SURFACE, border: `1px solid ${BORDER}` }}>
                   <div className="sm:col-span-1">
                     <select
+                      data-testid="topic-modal-resource-type-select"
                       value={newResource.resource_type}
                       onChange={e => setNewResource(prev => ({ ...prev, resource_type: e.target.value }))}
-                      className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-slate-700 focus:outline-none"
+                      className="w-full bg-white border rounded-lg px-2 py-1.5 text-xs focus:outline-none"
+                      style={{ borderColor: BORDER, color: INK }}
                     >
                       <option value="video">Video</option>
                       <option value="gdoc">Google Doc</option>
@@ -1366,25 +1456,31 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                   </div>
                   <div className="sm:col-span-3 space-y-2">
                     <input
+                      data-testid="topic-modal-resource-title-input"
                       type="text"
                       placeholder="Attachment Title (e.g. Lab Demonstration Link)"
                       value={newResource.title}
                       onChange={e => setNewResource(prev => ({ ...prev, title: e.target.value }))}
-                      className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-700 focus:outline-none"
+                      className="w-full bg-white border rounded-lg px-3 py-1.5 text-xs focus:outline-none"
+                      style={{ borderColor: BORDER, color: INK }}
                     />
                     <div className="flex gap-2">
                       <input
+                        data-testid="topic-modal-resource-url-input"
                         type="url"
                         placeholder="https://..."
                         value={newResource.url}
                         onChange={e => setNewResource(prev => ({ ...prev, url: e.target.value }))}
-                        className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-700 focus:outline-none"
+                        className="flex-1 bg-white border rounded-lg px-3 py-1.5 text-xs focus:outline-none"
+                        style={{ borderColor: BORDER, color: INK }}
                       />
                       <button
+                        data-testid="topic-modal-add-resource-btn"
                         type="button"
                         onClick={handleAddResourceItem}
                         disabled={!newResource.title.trim() || !newResource.url.trim()}
-                        className="bg-indigo-600 text-white hover:bg-indigo-700 text-xs font-bold px-3 py-1.5 rounded-lg disabled:opacity-50"
+                        className="text-white text-xs font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50"
+                        style={{ background: TEAL }}
                       >
                         Add
                       </button>
@@ -1393,17 +1489,20 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <div className="flex justify-end gap-2 pt-2 border-t" style={{ borderColor: '#EFEDE6' }}>
                 <button
+                  data-testid="topic-modal-cancel"
                   type="button"
                   onClick={() => setTopicModalState(null)}
-                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700"
+                  className="px-4 py-2 text-xs font-bold text-gray-500 hover:text-gray-700"
                 >
                   Cancel
                 </button>
                 <button
+                  data-testid="topic-modal-submit"
                   type="submit"
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all shadow-md"
+                  className="text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-md"
+                  style={{ background: TEAL }}
                 >
                   Save Topic
                 </button>
@@ -1415,36 +1514,42 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
 
       {/* Add / Edit Task Modal */}
       {taskModalState?.show && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md p-6 relative shadow-2xl">
-            <button onClick={() => setTaskModalState(null)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
-            
-            <h3 className="text-base font-black text-slate-800 mb-2">
-              {taskModalState.mode === 'edit' ? '✎ Edit Custom Task' : '🎯 Add Custom School Exercise'}
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,42,63,0.45)' }}>
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 relative shadow-2xl">
+            <button data-testid="task-modal-close" onClick={() => setTaskModalState(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-700 font-bold text-lg" aria-label="Close task modal">
+              <X size={18} />
+            </button>
+
+            <h3 className="text-base font-semibold mb-2" style={{ color: INK }}>
+              {taskModalState.mode === 'edit' ? 'Edit Custom Task' : 'Add Custom School Exercise'}
             </h3>
-            <p className="text-xs text-slate-500 mb-4">
+            <p className="text-xs text-gray-500 mb-4">
               Add homework assignments, tests, or worksheets specific to your local classes.
             </p>
 
             <form onSubmit={handleSaveTask} className="space-y-4">
               <div>
-                <label className="block text-2xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Exercise Title *</label>
+                <label className={labelCls}>Exercise Title *</label>
                 <input
+                  data-testid="task-modal-title-input"
                   type="text"
                   placeholder="e.g. End of Unit Written Test"
                   required
                   value={taskForm.title}
                   onChange={e => setTaskForm(prev => ({ ...prev, title: e.target.value }))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  className={inputCls}
+                  style={{ borderColor: BORDER }}
                 />
               </div>
 
               <div>
-                <label className="block text-2xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Link to Specific Topic (Optional)</label>
+                <label className={labelCls}>Link to Specific Topic (Optional)</label>
                 <select
+                  data-testid="task-modal-topic-select"
                   value={taskForm.school_topic_id}
                   onChange={e => setTaskForm(prev => ({ ...prev, school_topic_id: e.target.value }))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  className="w-full border rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2"
+                  style={{ background: SURFACE, borderColor: BORDER, color: INK }}
                 >
                   <option value="">— General Chapter Level Task —</option>
                   {activeSubject?.chapters
@@ -1457,11 +1562,13 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-2xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Task Type</label>
+                  <label className={labelCls}>Task Type</label>
                   <select
+                    data-testid="task-modal-type-select"
                     value={taskForm.task_type}
                     onChange={e => setTaskForm(prev => ({ ...prev, task_type: e.target.value }))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    className="w-full border rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:ring-2"
+                    style={{ background: SURFACE, borderColor: BORDER, color: INK }}
                   >
                     <option value="homework">Homework</option>
                     <option value="test">Test</option>
@@ -1469,45 +1576,107 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-2xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Max Marks</label>
+                  <label className={labelCls}>Max Marks</label>
                   <input
+                    data-testid="task-modal-maxmarks-input"
                     type="number"
                     min={1}
                     max={100}
                     value={taskForm.max_marks}
                     onChange={e => setTaskForm(prev => ({ ...prev, max_marks: parseInt(e.target.value) || 10 }))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    className={inputCls}
+                    style={{ borderColor: BORDER }}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-2xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Task Instructions & Description</label>
+                <label className={labelCls}>Task Instructions & Description</label>
                 <textarea
+                  data-testid="task-modal-instructions-textarea"
                   placeholder="Provide instruction steps, study links, or page references for students..."
                   rows={3}
                   value={taskForm.instructions}
                   onChange={e => setTaskForm(prev => ({ ...prev, instructions: e.target.value }))}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300 resize-none"
+                  className={`${inputCls} resize-none`}
+                  style={{ borderColor: BORDER }}
                 />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <div className="flex justify-end gap-2 pt-2 border-t" style={{ borderColor: '#EFEDE6' }}>
                 <button
+                  data-testid="task-modal-cancel"
                   type="button"
                   onClick={() => setTaskModalState(null)}
-                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700"
+                  className="px-4 py-2 text-xs font-bold text-gray-500 hover:text-gray-700"
                 >
                   Cancel
                 </button>
                 <button
+                  data-testid="task-modal-submit"
                   type="submit"
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all shadow-md"
+                  className="text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-md"
+                  style={{ background: TEAL }}
                 >
                   Save Task
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Read-only quiz preview modal — ported from the Ulearn prototype's SchoolView.
+          Shows a topic's approved questions with the correct option highlighted and
+          the grounding `source`, if any. Escape or backdrop click closes it. */}
+      {viewQuiz && (
+        <div
+          data-testid="quiz-preview-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(15,42,63,0.45)' }}
+          onClick={() => setViewQuiz(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Quiz for ${viewQuiz.topic.topic_name}`}
+        >
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between p-4 border-b sticky top-0 bg-white" style={{ borderColor: BORDER }}>
+              <div>
+                <div className="text-sm font-semibold" style={{ color: INK }}>Quiz · {viewQuiz.topic.topic_name}</div>
+                <div className="text-xs text-gray-400">
+                  From &quot;{viewQuiz.chapterName}&quot; · {viewQuiz.topic.questions?.length || 0} approved question{(viewQuiz.topic.questions?.length || 0) === 1 ? '' : 's'} · read-only · press Esc to close
+                </div>
+              </div>
+              <button data-testid="quiz-preview-close" onClick={() => setViewQuiz(null)} aria-label="Close quiz preview" className="p-1 rounded hover:bg-gray-100 text-gray-400">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              {(!viewQuiz.topic.questions || viewQuiz.topic.questions.length === 0) && (
+                <div className="text-sm text-gray-400">No approved questions yet.</div>
+              )}
+              {viewQuiz.topic.questions?.map((q, qi) => (
+                <div key={qi} className="rounded-xl border p-3" style={{ borderColor: BORDER }}>
+                  <div className="text-sm font-medium mb-2" style={{ color: INK }}>{qi + 1}. {q.q}</div>
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {q.options.map((o, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-lg"
+                        style={{ background: i === q.answer ? '#E1F5EE' : SURFACE, color: i === q.answer ? '#085041' : '#4b5563' }}
+                      >
+                        {i === q.answer ? <Check size={13} /> : <span className="w-3.5" />} {o}
+                      </div>
+                    ))}
+                  </div>
+                  {q.source && (
+                    <div className="flex items-start gap-1.5 text-xs rounded-lg px-2.5 py-2 mt-2" style={{ background: '#F5F2EA', color: '#6b7280' }}>
+                      <Quote size={12} className="mt-0.5 shrink-0" /> {q.source}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
