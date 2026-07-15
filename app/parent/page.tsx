@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import StudentSyllabus from '../student/components/StudentSyllabus'
 import { TRANSLATIONS, type Lang } from './translations'
 import ParentMarketplace from './components/ParentMarketplace'
+import ParentSyllabus from './components/ParentSyllabus'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Student = {
@@ -755,11 +755,13 @@ export default function ParentDashboard() {
           {/* ── SYLLABUS ──────────────────────────────────────────────────── */}
           {visited.has('syllabus') && (
           <div hidden={activeNav !== 'syllabus'}>
-            <div className="max-w-2xl mb-5">
-              <h2 className="text-lg font-bold text-gray-900 mb-0.5">{T.syllabusProgress}</h2>
-              <p className="text-sm text-gray-400">{T.syllabusSubtitle}</p>
-            </div>
-            <StudentSyllabus schoolId={student.school_id} classId={student.class_id} />
+            <ParentSyllabus
+              schoolId={student.school_id}
+              classId={student.class_id}
+              studentName={student.name}
+              grade={student.grade}
+              section={student.section}
+            />
           </div>
           )}
 
