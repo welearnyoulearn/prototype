@@ -38,6 +38,15 @@ const SCHEMA_SENTINEL_TABLE  = 'classes'
 const SCHEMA_SENTINEL_COLUMN = 'deleted_at'
 const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 
+// Run a migration statement that may reference a table the full bootstrap hasn't
+// created yet (fresh or partially-migrated DB) — e.g. an ALTER on a not-yet-built
+// table, or a CREATE whose foreign key targets one. The bootstrap below creates
+// everything complete, so silently ignoring "undefined_table" here is safe and
+// avoids crashing initDB before it can build the schema.
+async function runToleratingMissingTable(sql: string) {
+  await pool.query(`DO $$ BEGIN ${sql}; EXCEPTION WHEN undefined_table THEN NULL; END $$;`)
+}
+
 export async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS app_bootstrap_state (
@@ -48,19 +57,19 @@ export async function initDB() {
 
   // Always-run incremental migrations — idempotent columns added after the bootstrap
   // sentinel was set. These run on every cold start (fast: IF NOT EXISTS guard).
-  await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS board VARCHAR(20)`)
-  await pool.query(`ALTER TABLE master_topics ADD COLUMN IF NOT EXISTS questions JSONB DEFAULT '[]'::jsonb`)
-  await pool.query(`ALTER TABLE school_topics ADD COLUMN IF NOT EXISTS questions JSONB DEFAULT '[]'::jsonb`)
+  await runToleratingMissingTable(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS board VARCHAR(20)`)
+  await runToleratingMissingTable(`ALTER TABLE master_topics ADD COLUMN IF NOT EXISTS questions JSONB DEFAULT '[]'::jsonb`)
+  await runToleratingMissingTable(`ALTER TABLE school_topics ADD COLUMN IF NOT EXISTS questions JSONB DEFAULT '[]'::jsonb`)
 
   // ── Two-tier rewards: points_type splits academic vs marketplace ──────────────
-  await pool.query(`ALTER TABLE student_points ADD COLUMN IF NOT EXISTS points_type VARCHAR(20) DEFAULT 'academic'`)
+  await runToleratingMissingTable(`ALTER TABLE student_points ADD COLUMN IF NOT EXISTS points_type VARCHAR(20) DEFAULT 'academic'`)
 
   // ── School Topic Progress HOD Fields ──────────────────────────────────────────
-  await pool.query(`ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS target_date DATE`)
-  await pool.query(`ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS delay_reason TEXT`)
-  await pool.query(`ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS hod_remark TEXT`)
-  await pool.query(`ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS hod_remark_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL`)
-  await pool.query(`ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS hod_remark_at TIMESTAMPTZ`)
+  await runToleratingMissingTable(`ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS target_date DATE`)
+  await runToleratingMissingTable(`ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS delay_reason TEXT`)
+  await runToleratingMissingTable(`ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS hod_remark TEXT`)
+  await runToleratingMissingTable(`ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS hod_remark_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL`)
+  await runToleratingMissingTable(`ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS hod_remark_at TIMESTAMPTZ`)
 
   // ── Marketplace tables ────────────────────────────────────────────────────────
   await pool.query(`
@@ -74,7 +83,7 @@ export async function initDB() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `)
-  await pool.query(`
+  await runToleratingMissingTable(`
     CREATE TABLE IF NOT EXISTS marketplace_orders (
       id SERIAL PRIMARY KEY,
       student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
@@ -122,7 +131,7 @@ export async function initDB() {
   await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS reading_passage JSONB`)
   await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS writing_prompt JSONB`)
   await pool.query(`ALTER TABLE hub_daily_content ADD COLUMN IF NOT EXISTS speaking_sentences JSONB`)
-  await pool.query(`
+  await runToleratingMissingTable(`
     CREATE TABLE IF NOT EXISTS student_hub_completions (
       id SERIAL PRIMARY KEY,
       student_id INTEGER REFERENCES students(id) ON DELETE CASCADE,
