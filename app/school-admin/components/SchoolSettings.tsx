@@ -854,9 +854,9 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
             )}
 
             <div className="flex gap-3 pt-1">
-              <button type="submit" disabled={saving}
-                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60">
-                {saving ? 'Saving…' : 'Save Profile & Settings'}
+              <button type="submit" disabled={saving} data-testid="btn-save-profile"
+                className={`px-6 py-2.5 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60 ${saved ? 'bg-green-600 hover:bg-green-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
+                {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Profile & Settings'}
               </button>
               <button type="button" onClick={() => { saveGrading(new Event('submit') as unknown as React.FormEvent) }}
                 className="hidden" />
