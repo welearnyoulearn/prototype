@@ -94,6 +94,14 @@ type PaymentRecord = {
   bill_year?: string; ledger_id?: number
 }
 
+type ReceiptHeaderBlock = {
+  text: string
+  size: 'sm' | 'md' | 'lg' | 'xl'
+  bold: boolean
+  italic: boolean
+  align: 'left' | 'center' | 'right'
+}
+
 type PaySuccess = {
   receipt_number: string; student_name: string; amount: number
   school_name: string; roll_number: string; grade: string; section: string; parent_name: string | null
@@ -269,6 +277,121 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
     </body></html>`
 }
 
+// ─── Shared fee-receipt rendering (branding, signature block, dual-copy layout) ─────
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
+
+const RECEIPT_HEADER_SIZE_PX: Record<ReceiptHeaderBlock['size'], number> = { sm: 11, md: 14, lg: 18, xl: 24 }
+
+function renderHeaderBlocks(blocks: ReceiptHeaderBlock[] = []): string {
+  return blocks.map(b =>
+    `<div style="font-size:${RECEIPT_HEADER_SIZE_PX[b.size]}px;font-weight:${b.bold ? 700 : 400};font-style:${b.italic ? 'italic' : 'normal'};text-align:${b.align}">${escapeHtml(b.text)}</div>`
+  ).join('')
+}
+
+type ReceiptCardData = {
+  school_name: string
+  logo_url: string | null
+  header_blocks: ReceiptHeaderBlock[]
+  student_name: string
+  roll_number: string
+  grade: string
+  section: string
+  parent_name: string | null
+  receipt_number: string
+  lines: { label: string; period: string; amount: number }[]
+  total_paid: number
+  payment_mode: string
+  paid_date: string
+  transaction_ref?: string | null
+  collected_by_name?: string | null
+  notes?: string | null
+  balance_after?: number
+}
+
+const RECEIPT_MODE_LABEL: Record<string, string> = {
+  cash: 'Cash', cheque: 'Cheque', dd: 'Demand Draft', upi: 'UPI', online: 'Online Transfer',
+}
+
+function receiptCard(data: ReceiptCardData, copyLabel: string): string {
+  const lineRows = data.lines.map(l =>
+    `<tr><td>${escapeHtml(l.label)}</td><td>${escapeHtml(l.period)}</td><td style="text-align:right">${RUPEE(l.amount)}</td></tr>`
+  ).join('')
+  return `
+${copyLabel ? `<div class="copy-label">${escapeHtml(copyLabel)}</div>` : ''}
+${data.logo_url ? `<div style="text-align:center"><img src="${escapeHtml(data.logo_url)}" style="height:48px;margin-bottom:6px;object-fit:contain" /></div>` : ''}
+<div class="hdr">
+  ${renderHeaderBlocks(data.header_blocks)}
+  <div class="school">${escapeHtml(data.school_name)}</div>
+  <div class="rtitle">FEE RECEIPT</div>
+  <div class="rno">Receipt No: <strong>${escapeHtml(data.receipt_number)}</strong></div>
+</div>
+<div class="grid2">
+  <div><div class="lbl">Student Name</div><div class="val">${escapeHtml(data.student_name)}</div></div>
+  <div><div class="lbl">Roll Number</div><div class="val">${escapeHtml(data.roll_number)}</div></div>
+  <div><div class="lbl">Class</div><div class="val">Grade ${escapeHtml(data.grade)}${escapeHtml(data.section)}</div></div>
+  <div><div class="lbl">Parent / Guardian</div><div class="val">${escapeHtml(data.parent_name || '—')}</div></div>
+</div>
+<table><thead><tr><th>Fee Head</th><th>Period</th><th style="text-align:right">Amount</th></tr></thead>
+<tbody>${lineRows}</tbody>
+<tfoot><tr class="tot"><td colspan="2" style="text-align:right">Total Paid:</td><td style="text-align:right">${RUPEE(data.total_paid)}</td></tr></tfoot></table>
+<div class="grid2">
+  <div><div class="lbl">Payment Mode</div><div class="val">${RECEIPT_MODE_LABEL[data.payment_mode] || escapeHtml(data.payment_mode)}</div></div>
+  <div><div class="lbl">Payment Date</div><div class="val">${data.paid_date ? new Date(data.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) : '—'}</div></div>
+  ${data.transaction_ref ? `<div><div class="lbl">Reference</div><div class="val">${escapeHtml(data.transaction_ref)}</div></div>` : ''}
+</div>
+${data.notes ? `<div style="margin-bottom:10px"><div class="lbl">Remarks</div><div class="val">${escapeHtml(data.notes)}</div></div>` : ''}
+<div class="sig-row">
+  <div class="sig-box">${escapeHtml(data.collected_by_name || 'Collected By')}</div>
+  <div class="sig-box">Authorized Signatory</div>
+</div>
+${data.balance_after != null ? `<div class="ftr">Balance after this payment: ${RUPEE(data.balance_after)} &nbsp;·&nbsp; Generated on ${new Date().toLocaleString('en-IN')}</div>` : `<div class="ftr">Generated on ${new Date().toLocaleString('en-IN')} &nbsp;·&nbsp; Computer-generated receipt.</div>`}
+`
+}
+
+const RECEIPT_STYLE = `
+  @page { size: A4; margin: 10mm }
+  body{font-family:Arial,sans-serif;color:#222;max-width:720px;margin:0 auto}
+  .sheet{page-break-inside:avoid;position:relative;padding:12px 4px}
+  .cut-line{border-top:1px dashed #999;margin:2mm 0;text-align:center;color:#999;font-size:10px}
+  .copy-label{position:absolute;top:2px;right:4px;font-size:9px;color:#999;text-transform:uppercase;letter-spacing:.5px}
+  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:14px}
+  .school{font-size:20px;font-weight:bold}.rtitle{font-size:14px;font-weight:bold;margin-top:6px;letter-spacing:1px}
+  .rno{font-size:12px;color:#555;margin-top:4px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+  .lbl{font-size:11px;color:#888;margin-bottom:2px}.val{font-size:13px;font-weight:500}
+  table{width:100%;border-collapse:collapse;margin:10px 0}
+  th{background:#f3f4f6;padding:6px 10px;text-align:left;font-size:11px;border:1px solid #ddd}
+  td{padding:6px 10px;font-size:12px;border:1px solid #ddd}
+  .tot td{font-weight:bold;background:#f9fafb}
+  .sig-row{display:flex;justify-content:space-between;margin-top:24px}
+  .sig-box{text-align:center;border-top:1px solid #333;width:160px;padding-top:4px;font-size:10px;color:#555}
+  .ftr{margin-top:12px;text-align:center;font-size:10px;color:#aaa;border-top:1px solid #eee;padding-top:8px}
+  @media print{body{padding:0}}
+`
+
+function openReceiptWindow(receiptNumber: string, bodyHtml: string) {
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${escapeHtml(receiptNumber)}</title>
+<style>${RECEIPT_STYLE}</style></head><body>${bodyHtml}</body></html>`
+  const win = window.open('', '_blank', 'width=800,height=900')
+  if (win) { win.document.write(html); win.document.close(); win.print() }
+}
+
+// Two copies (Office + Payer) on one A4 sheet — used only when a payment is actually collected.
+function printDualCopyReceipt(data: ReceiptCardData) {
+  openReceiptWindow(data.receipt_number, `
+<div class="sheet" style="height:138mm">${receiptCard(data, 'Office Copy')}</div>
+<div class="cut-line">✂ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>
+<div class="sheet" style="height:138mm">${receiptCard(data, 'Payer Copy')}</div>`)
+}
+
+// Single copy — used for reprints (e.g. passbook), no office/payer split needed.
+function printSingleReceipt(data: ReceiptCardData) {
+  openReceiptWindow(data.receipt_number, `<div class="sheet">${receiptCard(data, '')}</div>`)
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 import dynamic from 'next/dynamic'
@@ -283,6 +406,16 @@ export default function FeeManagement({
   const [activeTab, setActiveTab] = useState<Tab>('overview')
 
   const hasOnlinePayments = useFeature('online-payments')
+
+  // Receipt branding — set once in School Profile, read here for every print function
+  const [branding, setBranding] = useState<{ school_name: string; logo_url: string | null; receipt_header_blocks: ReceiptHeaderBlock[] }>({
+    school_name: '', logo_url: null, receipt_header_blocks: [],
+  })
+  useEffect(() => {
+    fetch(`/api/schools/${schoolId}`).then(r => r.ok ? r.json() : null).then(d => {
+      if (d) setBranding({ school_name: d.name ?? '', logo_url: d.logo_url ?? null, receipt_header_blocks: d.receipt_header_blocks ?? [] })
+    }).catch(() => {})
+  }, [schoolId])
 
   // Shared
   const [academicYear, setAcademicYear]   = useState('')
@@ -984,64 +1117,6 @@ export default function FeeManagement({
       body: JSON.stringify({ is_active: true, changed_by: adminName || 'Admin' }),
     })
     if (r.ok) setCategories(prev => prev.map(c => c.id === catId ? { ...c, is_active: true } : c))
-  }
-
-  function printReceipt(data: PaySuccess) {
-    const modeLabel: Record<string, string> = {
-      cash: 'Cash', cheque: 'Cheque', dd: 'Demand Draft', upi: 'UPI', online: 'Online Transfer',
-    }
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${data.receipt_number}</title>
-<style>
-  body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:720px;margin:0 auto}
-  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:20px}
-  .school{font-size:22px;font-weight:bold}
-  .rtitle{font-size:15px;font-weight:bold;margin-top:6px;letter-spacing:1px}
-  .rno{font-size:12px;color:#555;margin-top:4px}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
-  .lbl{font-size:11px;color:#888;margin-bottom:2px}
-  .val{font-size:14px;font-weight:500}
-  table{width:100%;border-collapse:collapse;margin:14px 0}
-  th{background:#f3f4f6;padding:9px 12px;text-align:left;font-size:12px;border:1px solid #ddd}
-  td{padding:9px 12px;font-size:13px;border:1px solid #ddd}
-  .tot td{font-weight:bold;background:#f9fafb}
-  .ftr{margin-top:28px;text-align:center;font-size:11px;color:#aaa;border-top:1px solid #eee;padding-top:12px}
-  @media print{body{padding:0}}
-</style></head><body>
-<div class="hdr">
-  <div class="school">${data.school_name}</div>
-  <div class="rtitle">FEE RECEIPT</div>
-  <div class="rno">Receipt No: <strong>${data.receipt_number}</strong></div>
-</div>
-<div class="grid2">
-  <div><div class="lbl">Student Name</div><div class="val">${data.student_name}</div></div>
-  <div><div class="lbl">Roll Number</div><div class="val">${data.roll_number}</div></div>
-  <div><div class="lbl">Class</div><div class="val">Grade ${data.grade}${data.section}</div></div>
-  <div><div class="lbl">Parent / Guardian</div><div class="val">${data.parent_name || '—'}</div></div>
-</div>
-<table>
-  <thead><tr><th>Fee Category</th><th>Period</th><th>Amount Due</th><th>Amount Paid</th></tr></thead>
-  <tbody>
-    <tr><td>${data.category_name}</td><td>${data.period_label}</td>
-    <td>₹${Number(data.amount_due).toLocaleString('en-IN')}</td>
-    <td>₹${Number(data.amount).toLocaleString('en-IN')}</td></tr>
-  </tbody>
-  <tfoot><tr class="tot"><td colspan="3" style="text-align:right">Total Paid:</td>
-    <td>₹${Number(data.amount).toLocaleString('en-IN')}</td></tr></tfoot>
-</table>
-<div class="grid2">
-  <div><div class="lbl">Payment Mode</div><div class="val">${modeLabel[data.payment_mode] || data.payment_mode}</div></div>
-  <div><div class="lbl">Payment Date</div><div class="val">${data.paid_date ? new Date(data.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) : '—'}</div></div>
-  ${data.transaction_ref ? `<div><div class="lbl">Transaction Ref</div><div class="val">${data.transaction_ref}</div></div>` : ''}
-  ${data.collected_by_name ? `<div><div class="lbl">Collected By</div><div class="val">${data.collected_by_name}</div></div>` : ''}
-</div>
-${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}</div></div>` : ''}
-<div class="ftr">
-  Generated on ${new Date().toLocaleString('en-IN', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-  &nbsp;·&nbsp; This is a computer-generated receipt and does not require a signature.
-</div>
-</body></html>`
-    const win = window.open('', '_blank', 'width=800,height=650')
-    if (win) { win.document.write(html); win.document.close(); win.print() }
   }
 
   const filteredLedger = ledger.filter(e => {
@@ -1940,45 +2015,15 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
   // Print a multi-line receipt for counter collection
   function printCounterReceipt(row: StudentRow, paid: PaySuccess, lines: { cat: string; period: string; amount: number }[]) {
-    const modeLabel: Record<string, string> = { cash: 'Cash', cheque: 'Cheque', dd: 'Demand Draft', upi: 'UPI', online: 'Online Transfer' }
-    const lineRows = lines.map(l => `<tr><td>${l.cat}</td><td>${l.period}</td><td style="text-align:right">₹${Number(l.amount).toLocaleString('en-IN')}</td></tr>`).join('')
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${paid.receipt_number}</title>
-<style>
-  body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:720px;margin:0 auto}
-  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:20px}
-  .school{font-size:22px;font-weight:bold}.rtitle{font-size:15px;font-weight:bold;margin-top:6px;letter-spacing:1px}
-  .rno{font-size:12px;color:#555;margin-top:4px}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
-  .lbl{font-size:11px;color:#888;margin-bottom:2px}.val{font-size:14px;font-weight:500}
-  table{width:100%;border-collapse:collapse;margin:14px 0}
-  th{background:#f3f4f6;padding:9px 12px;text-align:left;font-size:12px;border:1px solid #ddd}
-  td{padding:9px 12px;font-size:13px;border:1px solid #ddd}
-  .tot td{font-weight:bold;background:#f9fafb}
-  .ftr{margin-top:28px;text-align:center;font-size:11px;color:#aaa;border-top:1px solid #eee;padding-top:12px}
-  @media print{body{padding:0}}
-</style></head><body>
-<div class="hdr"><div class="school">${paid.school_name || 'School'}</div>
-<div class="rtitle">FEE RECEIPT</div><div class="rno">Receipt No: <strong>${paid.receipt_number}</strong></div></div>
-<div class="grid2">
-  <div><div class="lbl">Student Name</div><div class="val">${row.student_name}</div></div>
-  <div><div class="lbl">Roll Number</div><div class="val">${row.roll_number}</div></div>
-  <div><div class="lbl">Class</div><div class="val">Grade ${row.grade}${row.section}</div></div>
-  <div><div class="lbl">Parent / Guardian</div><div class="val">${paid.parent_name || '—'}</div></div>
-</div>
-<table><thead><tr><th>Fee Head</th><th>Period</th><th style="text-align:right">Amount</th></tr></thead>
-<tbody>${lineRows}</tbody>
-<tfoot><tr class="tot"><td colspan="2" style="text-align:right">Total Paid:</td><td style="text-align:right">₹${Number(paid.amount).toLocaleString('en-IN')}</td></tr></tfoot></table>
-<div class="grid2">
-  <div><div class="lbl">Payment Mode</div><div class="val">${modeLabel[paid.payment_mode] || paid.payment_mode}</div></div>
-  <div><div class="lbl">Payment Date</div><div class="val">${paid.paid_date ? new Date(paid.paid_date).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' }) : '—'}</div></div>
-  ${paid.transaction_ref ? `<div><div class="lbl">Reference</div><div class="val">${paid.transaction_ref}</div></div>` : ''}
-  ${paid.collected_by_name ? `<div><div class="lbl">Collected By</div><div class="val">${paid.collected_by_name}</div></div>` : ''}
-</div>
-${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><div class="val">${paid.notes}</div></div>` : ''}
-<div class="ftr">Balance after this payment: ₹${Number(Math.max(0, (paid.outstanding_before ?? row.outstanding) - paid.amount)).toLocaleString('en-IN')} &nbsp;·&nbsp; Generated on ${new Date().toLocaleString('en-IN')} &nbsp;·&nbsp; Computer-generated receipt.</div>
-</body></html>`
-    const win = window.open('', '_blank', 'width=800,height=650')
-    if (win) { win.document.write(html); win.document.close(); win.print() }
+    printDualCopyReceipt({
+      school_name: paid.school_name || 'School', logo_url: branding.logo_url, header_blocks: branding.receipt_header_blocks,
+      student_name: row.student_name, roll_number: row.roll_number, grade: row.grade, section: row.section,
+      parent_name: paid.parent_name, receipt_number: paid.receipt_number,
+      lines: lines.map(l => ({ label: l.cat, period: l.period, amount: l.amount })),
+      total_paid: paid.amount, payment_mode: paid.payment_mode, paid_date: paid.paid_date,
+      transaction_ref: paid.transaction_ref, collected_by_name: paid.collected_by_name, notes: paid.notes,
+      balance_after: Math.max(0, (paid.outstanding_before ?? row.outstanding) - paid.amount),
+    })
   }
 
   // ── Day Close ──
@@ -2124,46 +2169,14 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
   function printPassbookReceipt(p: PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }) {
     if (!pbData) return
     const s = pbData.student
-    const modeLabel: Record<string, string> = { cash: 'Cash', cheque: 'Cheque', dd: 'Demand Draft', upi: 'UPI', online: 'Online Transfer' }
-    const head = p.fee_head_name || p.category_name || 'Fee'
-    const period = p.period_label || ''
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${p.receipt_number}</title>
-<style>
-  body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:720px;margin:0 auto}
-  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:20px}
-  .school{font-size:22px;font-weight:bold}.rtitle{font-size:15px;font-weight:bold;margin-top:6px;letter-spacing:1px}
-  .rno{font-size:12px;color:#555;margin-top:4px}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
-  .lbl{font-size:11px;color:#888;margin-bottom:2px}.val{font-size:14px;font-weight:500}
-  table{width:100%;border-collapse:collapse;margin:14px 0}
-  th{background:#f3f4f6;padding:9px 12px;text-align:left;font-size:12px;border:1px solid #ddd}
-  td{padding:9px 12px;font-size:13px;border:1px solid #ddd}
-  .tot td{font-weight:bold;background:#f9fafb}
-  .ftr{margin-top:28px;text-align:center;font-size:11px;color:#aaa;border-top:1px solid #eee;padding-top:12px}
-  @media print{body{padding:0}}
-</style></head><body>
-<div class="hdr"><div class="school">Fee Receipt</div>
-<div class="rtitle">PAYMENT RECEIPT</div><div class="rno">Receipt No: <strong>${p.receipt_number}</strong></div></div>
-<div class="grid2">
-  <div><div class="lbl">Student Name</div><div class="val">${s.name}</div></div>
-  <div><div class="lbl">Roll Number</div><div class="val">${s.roll_number}</div></div>
-  <div><div class="lbl">Class</div><div class="val">Grade ${s.grade}${s.section || ''}</div></div>
-  <div><div class="lbl">Parent / Guardian</div><div class="val">${s.parent_name || '—'}</div></div>
-</div>
-<table><thead><tr><th>Fee Head</th><th>Period</th><th style="text-align:right">Amount</th></tr></thead>
-<tbody><tr><td>${head}</td><td>${period}</td><td style="text-align:right">₹${Number(p.amount).toLocaleString('en-IN')}</td></tr></tbody>
-<tfoot><tr class="tot"><td colspan="2" style="text-align:right">Total Paid:</td><td style="text-align:right">₹${Number(p.amount).toLocaleString('en-IN')}</td></tr></tfoot></table>
-<div class="grid2">
-  <div><div class="lbl">Payment Mode</div><div class="val">${modeLabel[p.payment_mode] || p.payment_mode}</div></div>
-  <div><div class="lbl">Payment Date</div><div class="val">${p.paid_date ? new Date(p.paid_date).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' }) : '—'}</div></div>
-  ${p.transaction_ref ? `<div><div class="lbl">Reference</div><div class="val">${p.transaction_ref}</div></div>` : ''}
-  ${p.collected_by_name ? `<div><div class="lbl">Collected By</div><div class="val">${p.collected_by_name}</div></div>` : ''}
-</div>
-${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div></div>` : ''}
-<div class="ftr">Generated on ${new Date().toLocaleString('en-IN')} · Computer-generated receipt.</div>
-</body></html>`
-    const win = window.open('', '_blank', 'width=800,height=650')
-    if (win) { win.document.write(html); win.document.close(); win.print() }
+    printSingleReceipt({
+      school_name: branding.school_name || 'Fee Receipt', logo_url: branding.logo_url, header_blocks: branding.receipt_header_blocks,
+      student_name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section || '',
+      parent_name: s.parent_name, receipt_number: p.receipt_number,
+      lines: [{ label: p.fee_head_name || p.category_name || 'Fee', period: p.period_label || '', amount: p.amount }],
+      total_paid: p.amount, payment_mode: p.payment_mode, paid_date: p.paid_date,
+      transaction_ref: p.transaction_ref, collected_by_name: p.collected_by_name, notes: p.notes,
+    })
   }
 
   function printPassbookStatement() {
