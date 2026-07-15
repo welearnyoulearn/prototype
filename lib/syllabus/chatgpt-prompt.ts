@@ -35,6 +35,45 @@ Rules:
 - Output valid JSON only: double quotes, no trailing commas, no comments.`
 }
 
+// Placeholder JSON shown in the bulk-import textarea + loaded by "Load example".
+export const SYLLABUS_EXAMPLE = JSON.stringify(
+  [
+    {
+      title: 'Force and pressure',
+      topics: [
+        'Pressure in fluids',
+        {
+          title: 'Frictional force',
+          quiz: [
+            {
+              q: 'The force that opposes motion between two surfaces is —',
+              options: ['gravity', 'friction', 'magnetism', 'tension'],
+              correct: 1,
+              source: 'Friction opposes the relative motion between two surfaces in contact.',
+            },
+          ],
+        },
+      ],
+    },
+    { title: 'Sound', topics: ['How sound is produced', 'Frequency and pitch'] },
+  ],
+  null,
+  2,
+)
+
+export const QUIZ_EXAMPLE = JSON.stringify(
+  [
+    {
+      q: 'Your question text?',
+      options: ['Option A', 'Option B', 'Option C', 'Option D'],
+      correct: 0,
+      source: 'The sentence from the chapter this question is grounded in.',
+    },
+  ],
+  null,
+  2,
+)
+
 export function quizPrompt(chapter: string, topic: string, grade: string | number, subject: string): string {
   return `Write quiz questions for an EdTech app: Class ${grade}, ${subject} — chapter "${chapter}", topic "${topic}" (official CBSE / NCERT curriculum).
 

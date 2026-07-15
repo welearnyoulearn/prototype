@@ -65,10 +65,19 @@ export async function POST(req: NextRequest) {
 
       let topicOrder = 0
       for (const t of ch.topics) {
+        // The rest of the app reads master_topics.questions as { q, options,
+        // answer }, so map the schema's 0-based `correct` to `answer` (keeping
+        // the grounding `source`) instead of writing `correct` verbatim.
+        const questions = t.quiz.map((qq) => ({
+          q: qq.q,
+          options: qq.options,
+          answer: qq.correct,
+          source: qq.source,
+        }))
         await client.query(
           `INSERT INTO master_topics (chapter_id, topic_name, topic_order, questions)
            VALUES ($1, $2, $3, $4::jsonb)`,
-          [chapterId, t.title, topicOrder, JSON.stringify(t.quiz)],
+          [chapterId, t.title, topicOrder, JSON.stringify(questions)],
         )
         topicOrder += 1
       }
