@@ -1349,6 +1349,9 @@ export async function initDB() {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_students_school_roll_unique
        ON students(school_id, grade, section, school_roll_number)
        WHERE school_roll_number IS NOT NULL`,
+
+    // ── Fee receipt branding (logo reuses existing logo_url; header is a list of styled blocks) ──
+    `ALTER TABLE schools ADD COLUMN IF NOT EXISTS receipt_header_blocks JSONB DEFAULT '[]'`,
   ]
 
   for (const sql of migrations) {
