@@ -115,6 +115,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       await client.query('UPDATE doubts SET answered_by = NULL WHERE answered_by = $1', [id])
       await client.query('UPDATE doubts SET resolved_by = NULL WHERE resolved_by = $1', [id])
       await client.query('UPDATE doubts SET faq_set_by = NULL WHERE faq_set_by = $1', [id])
+      await client.query('UPDATE school_topic_progress SET covered_by = NULL WHERE covered_by = $1', [id])
       await client.query('UPDATE syllabus_topics SET covered_by = NULL WHERE covered_by = $1', [id])
       await client.query('UPDATE exam_records SET created_by = NULL WHERE created_by = $1', [id])
       await client.query('UPDATE exam_subjects SET teacher_id = NULL WHERE teacher_id = $1', [id])

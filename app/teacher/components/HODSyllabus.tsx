@@ -2,6 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
+import {
+  BookOpen, Plus, Upload, ChevronDown, X, Check, Trash2,
+  Sparkles, FileText, Loader2, Eye,
+} from 'lucide-react'
+import TopicContentViewer from '@/app/components/TopicContentViewer'
+import { INK, GOLD, CREAM, CORAL, GREEN, BORDER, SURFACE } from '@/app/components/ulearn/theme'
+import { StatusPill, QuizPill, ProgressBar, Toast } from '@/app/components/ulearn/primitives'
+import { useToast } from '@/app/components/ulearn/useToast'
 
 type HODAssignmentItem = {
   id: number
@@ -19,6 +27,9 @@ type Props = {
 
 type ClassOption = { id: number; grade: string; section: string }
 
+type Question = { q: string; options: string[]; answer: number; source?: string }
+type Resource = { id: number; title: string; url: string; resource_type: string }
+
 type Topic = {
   id: number
   topic_name: string
@@ -32,6 +43,10 @@ type Topic = {
   hod_remark: string | null
   hod_remark_by_name: string | null
   hod_remark_at: string | null
+  content_text?: string
+  content_pdf_url?: string
+  questions?: Question[] | string | null
+  resources?: Resource[] | null
 }
 
 type Chapter = {
@@ -41,6 +56,20 @@ type Chapter = {
   covered: number
   behind: number
   topics: Topic[]
+}
+
+// Real question count — `questions` may arrive as a JSON array or a raw string
+// depending on the DB driver's json handling; TopicContentViewer parses the
+// same way, so we mirror that here for the QuizPill count.
+function questionCount(q: Topic['questions']): number {
+  if (!q) return 0
+  if (Array.isArray(q)) return q.length
+  try {
+    const parsed = JSON.parse(q)
+    return Array.isArray(parsed) ? parsed.length : 0
+  } catch {
+    return 0
+  }
 }
 
 export default function HODSyllabus({ teacher, hodAssignments }: Props) {
@@ -60,6 +89,9 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
   const [expandedChapter, setExpandedChapter] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState<number | null>(null)
+  const [activeTopic, setActiveTopic] = useState<Topic | null>(null)
+
+  const { toast, flash } = useToast()
 
   // ── Add chapter (1b) ──────────────────────────────────────────────────────
   // "stagedChapter" exists only in local state until the first topic is added.
@@ -174,7 +206,7 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
       const res = await fetch(`/api/syllabus/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: teacher.school_id, ...payload }),
+        body: JSON.stringify({ school_id: teacher.school_id, class_id: selectedClassId, ...payload }),
       })
       if (!res.ok) throw new Error()
       await loadSyllabus()
@@ -182,11 +214,21 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
     finally { setSaving(null) }
   }
 
+  // "Mark taught" — flips school_topic_progress.status between covered/pending
+  // via PATCH /api/syllabus/:id (the only real progress state the API supports).
+  // TODO(syllabus-unlock): the Ulearn prototype's "mark taught auto-unlocks the
+  // next topic + opens its quiz to students" has no backing today — there is no
+  // locked/unlocked column, ordering gate, or quiz-visibility gate in the schema
+  // or API (TopicContentViewer already shows every topic's quiz unconditionally
+  // to students regardless of status). Marking a topic taught here only updates
+  // this topic's own progress row; it does not lock/unlock siblings. Needs new
+  // schema + API work before that flow can be real.
   async function coverTopic(topic: Topic, chapterName: string) {
     const newStatus = topic.status === 'covered' ? 'pending' : 'covered'
     setSuggestion(null)
     setSuggestError(false)
     await patchTopic(topic.id, { status: newStatus, covered_by: teacher.id })
+    flash(newStatus === 'covered' ? `"${topic.topic_name}" marked taught` : `"${topic.topic_name}" marked pending`)
     if (newStatus === 'covered') {
       const selectedClass = classes.find(c => c.id === selectedClassId)
       setSuggestLoading(true)
@@ -371,6 +413,12 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
     }
   }
 
+  // TODO(syllabus-publish): POST /api/syllabus/publish still targets a legacy
+  // `syllabus_topics(published)` table that doesn't exist in the current
+  // school_subjects → school_chapters → school_topics schema (GET /api/syllabus
+  // hardcodes published:true on every row already). This call is pre-existing
+  // and left wired as-is per scope — it will currently no-op/500 server-side.
+  // Flagged, not fabricated a fix.
   async function publishSyllabus() {
     if (!selectedClassId) return
     setPublishing(true)
@@ -407,39 +455,42 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
 
   if (!allClassIds.length) {
     return (
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 text-center">
-        <p className="text-amber-700 font-medium">No classes assigned yet.</p>
-        <p className="text-amber-500 text-sm mt-1">Ask the school admin to assign classes to your HOD profile.</p>
+      <div className="rounded-2xl border p-6 text-center" style={{ background: '#FCEBDB', borderColor: GOLD }}>
+        <p className="font-medium" style={{ color: '#8A4B12' }}>No classes assigned yet.</p>
+        <p className="text-sm mt-1" style={{ color: '#8A4B12', opacity: 0.75 }}>Ask the school admin to assign classes to your HOD profile.</p>
       </div>
     )
   }
 
   return (
-    <div>
+    <div className="rounded-2xl p-4 sm:p-6" style={{ background: CREAM }}>
       {/* Header */}
       <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold">HOD</span>
-            <h2 className="font-bold text-gray-900 text-xl">Syllabus Management</h2>
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: GOLD, color: 'white' }}>HOD</span>
+            <h2 className="font-bold text-xl flex items-center gap-2" style={{ color: INK }}>
+              <BookOpen size={19} style={{ color: GOLD }} /> Syllabus Management
+            </h2>
           </div>
           {/* 1d: Subject pill selector */}
           {allSubjects.length === 1 ? (
-            <span className="text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1 rounded-full">
+            <span className="text-sm font-semibold px-3 py-1 rounded-full border" style={{ color: GOLD, background: '#FCEBDB', borderColor: GOLD }}>
               {selectedSubject}
             </span>
           ) : (
             <div className="flex gap-2 flex-wrap">
-              {allSubjects.map(subj => (
-                <button key={subj} onClick={() => setSelectedSubject(subj)}
-                  className={`text-sm font-semibold px-3 py-1 rounded-full border transition-colors ${
-                    selectedSubject === subj
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
-                  }`}>
-                  {subj}
-                </button>
-              ))}
+              {allSubjects.map(subj => {
+                const active = selectedSubject === subj
+                return (
+                  <button key={subj} onClick={() => setSelectedSubject(subj)}
+                    data-testid={`subject-pill-${subj}`}
+                    className="text-sm font-semibold px-3 py-1 rounded-full border transition-colors"
+                    style={{ background: active ? GOLD : '#FCEBDB', color: active ? 'white' : '#8A4B12', borderColor: GOLD }}>
+                    {subj}
+                  </button>
+                )
+              })}
             </div>
           )}
         </div>
@@ -447,103 +498,105 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
           <button
             onClick={() => { setLoadPdfOpen(v => !v); setPdfMsg('') }}
             disabled={!selectedClassId}
-            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
+            data-testid="hod-load-pdf-toggle"
+            className="flex items-center gap-2 px-4 py-2 text-white rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
+            style={{ background: GREEN }}>
+            <Upload size={16} />
             Load Syllabus from PDF
           </button>
           <button
             onClick={() => { setShowAddChapter(v => !v); setNewChapterName('') }}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-medium transition-colors">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
+            data-testid="hod-add-chapter-toggle"
+            className="flex items-center gap-2 px-4 py-2 text-white rounded-xl text-sm font-medium transition-colors"
+            style={{ background: GOLD }}>
+            <Plus size={16} />
             Add Chapter
           </button>
         </div>
       </div>
 
       {error && (
-        <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex justify-between">
-          {error}<button onClick={() => setError('')} className="text-red-400 hover:text-red-600 ml-4">✕</button>
+        <div className="mb-4 rounded-xl text-sm flex justify-between px-4 py-3" style={{ background: '#FCEBEB', color: '#791F1F' }}>
+          {error}
+          <button onClick={() => setError('')} data-testid="hod-error-dismiss" className="ml-4 opacity-60 hover:opacity-100"><X size={15} /></button>
         </div>
       )}
 
       {loadMsg && (
-        <div className="mb-4 bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl text-sm flex items-center justify-between gap-3">
+        <div className="mb-4 rounded-xl text-sm flex items-center justify-between gap-3 px-4 py-3" style={{ background: '#FCEBDB', color: '#8A4B12' }}>
           <span>{loadMsg}</span>
-          <button onClick={() => setLoadMsg('')} className="text-amber-400 hover:text-amber-600 flex-shrink-0">✕</button>
+          <button onClick={() => setLoadMsg('')} data-testid="hod-loadmsg-dismiss" className="flex-shrink-0 opacity-60 hover:opacity-100"><X size={15} /></button>
         </div>
       )}
 
       {publishedMsg && (
-        <div className="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl text-sm flex items-center justify-between gap-3">
+        <div className="mb-4 rounded-xl text-sm flex items-center justify-between gap-3 px-4 py-3" style={{ background: '#E1F5EE', color: '#085041' }}>
           <span>{publishedMsg}</span>
-          <button onClick={() => setPublishedMsg('')} className="text-emerald-400 hover:text-emerald-600 flex-shrink-0">✕</button>
+          <button onClick={() => setPublishedMsg('')} data-testid="hod-publishedmsg-dismiss" className="flex-shrink-0 opacity-60 hover:opacity-100"><X size={15} /></button>
         </div>
       )}
 
       {/* Inline PDF syllabus loader */}
       {loadPdfOpen && (
-        <div className="mb-5 bg-emerald-50 border border-emerald-300 rounded-xl p-5">
+        <div className="mb-5 rounded-2xl p-5 border" style={{ background: 'white', borderColor: GREEN }}>
           <div className="flex items-start justify-between gap-3 mb-3">
             <div>
-              <p className="font-semibold text-emerald-900 text-sm">Load {selectedSubject} Syllabus from PDF</p>
-              <p className="text-xs text-emerald-700 mt-0.5">
+              <p className="font-semibold text-sm" style={{ color: INK }}>Load {selectedSubject} Syllabus from PDF</p>
+              <p className="text-xs mt-0.5" style={{ color: '#4b5563' }}>
                 Upload the textbook PDF — AI will read it and automatically create chapters and topics as a draft syllabus.
                 AI also stores the book content to improve homework suggestions and student Q&amp;A.
               </p>
             </div>
             <button onClick={() => { setLoadPdfOpen(false); setPdfMsg(''); setPdfFile(null) }}
-              className="text-emerald-400 hover:text-emerald-700 text-lg leading-none flex-shrink-0">✕</button>
+              data-testid="hod-load-pdf-close"
+              className="flex-shrink-0 text-gray-400 hover:text-gray-600"><X size={17} /></button>
           </div>
 
-          <label className={`flex items-center gap-3 border-2 border-dashed rounded-xl px-4 py-4 cursor-pointer transition-colors mb-3
-            ${pdfUploading ? 'border-emerald-400 bg-emerald-100' : 'border-emerald-300 hover:border-emerald-500 hover:bg-emerald-100'}`}>
-            <svg className="w-8 h-8 text-emerald-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-            </svg>
+          <label className="flex items-center gap-3 border-2 border-dashed rounded-xl px-4 py-4 cursor-pointer transition-colors mb-3"
+            style={{ borderColor: GREEN, background: pdfUploading ? SURFACE : 'white' }}>
+            <FileText size={30} style={{ color: GREEN, opacity: 0.5, flexShrink: 0 }} />
             <div>
-              <p className="text-sm font-medium text-gray-800">{pdfFile ? pdfFile.name : 'Click to select PDF textbook'}</p>
+              <p className="text-sm font-medium" style={{ color: INK }}>{pdfFile ? pdfFile.name : 'Click to select PDF textbook'}</p>
               <p className="text-xs text-gray-500 mt-0.5">PDF only · text-based (not scanned image) · max 50 MB</p>
             </div>
-            <input ref={pdfInputRef} type="file" accept=".pdf" className="hidden"
+            <input ref={pdfInputRef} type="file" accept=".pdf" className="hidden" data-testid="hod-pdf-file-input"
               onChange={(e: ChangeEvent<HTMLInputElement>) => { setPdfFile(e.target.files?.[0] ?? null); setPdfMsg('') }} />
           </label>
 
           {pdfUploading && (
-            <div className="h-1.5 bg-emerald-100 rounded-full mb-3 overflow-hidden">
-              <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${pdfProgress}%` }} />
-            </div>
+            <ProgressBar pct={pdfProgress} color={GREEN} className="w-full mb-3" />
           )}
 
           {pdfMsg && (
-            <p className={`text-sm mb-3 px-3 py-2 rounded-lg ${pdfMsg.startsWith('Error') ? 'bg-red-50 text-red-600 border border-red-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
+            <p className="text-sm mb-3 px-3 py-2 rounded-lg" style={pdfMsg.startsWith('Error') ? { background: '#FCEBEB', color: '#791F1F' } : { background: '#E1F5EE', color: '#085041' }}>
               {pdfMsg}
             </p>
           )}
 
           <div className="flex items-center gap-2">
             <button onClick={loadFromPDF} disabled={!pdfFile || pdfUploading}
-              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold px-5 py-2 rounded-xl text-sm transition-colors">
+              data-testid="hod-pdf-upload-btn"
+              className="text-white font-semibold px-5 py-2 rounded-xl text-sm transition-colors disabled:opacity-50"
+              style={{ background: GREEN }}>
               {pdfUploading ? `Analysing PDF… ${pdfProgress}%` : 'Upload & Generate Syllabus'}
             </button>
-            <p className="text-xs text-emerald-600">AI will extract chapters and topics — you review, then publish</p>
+            <p className="text-xs" style={{ color: GREEN }}>AI will extract chapters and topics — you review, then publish</p>
           </div>
         </div>
       )}
 
       {hasDraft && (
-        <div className="mb-4 bg-orange-50 border border-orange-300 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+        <div className="mb-4 rounded-xl px-4 py-3 flex items-center justify-between gap-3 border" style={{ background: '#FCEBDB', borderColor: GOLD }}>
           <div>
-            <p className="text-sm font-semibold text-orange-800">Draft syllabus — not visible to teachers yet</p>
-            <p className="text-xs text-orange-600 mt-0.5">Review the topics below, then publish to make them visible.</p>
+            <p className="text-sm font-semibold" style={{ color: '#8A4B12' }}>Draft syllabus — not visible to teachers yet</p>
+            <p className="text-xs mt-0.5" style={{ color: '#8A4B12', opacity: 0.8 }}>Review the topics below, then publish to make them visible.</p>
           </div>
           <button
             onClick={publishSyllabus}
             disabled={publishing}
-            className="flex-shrink-0 px-5 py-2 bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50">
+            data-testid="hod-publish-btn"
+            className="flex-shrink-0 px-5 py-2 text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50"
+            style={{ background: GOLD }}>
             {publishing ? 'Publishing…' : 'Publish Syllabus'}
           </button>
         </div>
@@ -552,22 +605,23 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
       {/* Class selector */}
       {classes.length > 1 && (
         <div className="flex gap-2 mb-5 flex-wrap">
-          {classes.map(c => (
-            <button key={c.id} onClick={() => setSelectedClassId(c.id)}
-              className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors border ${
-                selectedClassId === c.id
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-white text-gray-700 border-gray-200 hover:border-blue-300 hover:text-blue-600'
-              }`}>
-              Grade {c.grade}-{c.section}
-            </button>
-          ))}
+          {classes.map(c => {
+            const active = selectedClassId === c.id
+            return (
+              <button key={c.id} onClick={() => setSelectedClassId(c.id)}
+                data-testid={`hod-class-${c.id}`}
+                className="px-4 py-2 rounded-xl text-sm font-medium transition-colors border"
+                style={{ background: active ? GOLD : 'white', color: active ? 'white' : INK, borderColor: active ? GOLD : BORDER }}>
+                Grade {c.grade}-{c.section}
+              </button>
+            )
+          })}
         </div>
       )}
       {classes.length === 1 && (
         <div className="mb-4 flex items-center gap-2">
           <span className="text-xs text-gray-400">Class:</span>
-          <span className="text-sm font-semibold text-gray-700 bg-gray-100 px-3 py-1 rounded-lg">
+          <span className="text-sm font-semibold px-3 py-1 rounded-lg" style={{ color: INK, background: SURFACE }}>
             Grade {classes[0].grade}-{classes[0].section}
           </span>
         </div>
@@ -577,12 +631,12 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
       {totalTopics > 0 && (
         <div className="grid grid-cols-3 gap-3 mb-5">
           {[
-            { label: 'Total Topics', value: totalTopics, color: 'text-gray-700', bg: 'bg-gray-50', border: 'border-gray-200' },
-            { label: 'Covered', value: coveredTopics, color: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' },
-            { label: 'Behind Schedule', value: behindTopics, color: 'text-red-700', bg: 'bg-red-50', border: 'border-red-200' },
+            { label: 'Total Topics', value: totalTopics, color: INK },
+            { label: 'Taught', value: coveredTopics, color: GREEN },
+            { label: 'Behind Schedule', value: behindTopics, color: CORAL },
           ].map(s => (
-            <div key={s.label} className={`${s.bg} border ${s.border} rounded-xl px-4 py-3 text-center`}>
-              <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
+            <div key={s.label} className="rounded-2xl border px-4 py-3 text-center bg-white" style={{ borderColor: BORDER }}>
+              <p className="text-2xl font-black" style={{ color: s.color }}>{s.value}</p>
               <p className="text-xs text-gray-500 mt-0.5">{s.label}</p>
             </div>
           ))}
@@ -592,36 +646,39 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
       {/* AI Homework Suggestion */}
       <div ref={suggestionRef}>
         {suggestLoading && (
-          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 flex items-center gap-3">
-            <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-            <p className="text-sm text-amber-700">Generating AI homework suggestion...</p>
+          <div className="mb-4 rounded-2xl px-5 py-4 flex items-center gap-3 border" style={{ background: '#FCEBDB', borderColor: GOLD }}>
+            <Loader2 size={16} className="animate-spin flex-shrink-0" style={{ color: GOLD }} />
+            <p className="text-sm" style={{ color: '#8A4B12' }}>Generating AI homework suggestion...</p>
           </div>
         )}
         {suggestError && !suggestLoading && (
-          <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-5 py-3 flex items-center justify-between">
-            <p className="text-sm text-red-600">AI suggestion failed. Add homework manually from the Homework tab.</p>
-            <button onClick={() => setSuggestError(false)} className="text-red-400 hover:text-red-600 text-lg leading-none ml-4">✕</button>
+          <div className="mb-4 rounded-2xl px-5 py-3 flex items-center justify-between" style={{ background: '#FCEBEB' }}>
+            <p className="text-sm" style={{ color: '#791F1F' }}>AI suggestion failed. Add homework manually from the Homework tab.</p>
+            <button onClick={() => setSuggestError(false)} data-testid="hod-suggest-error-dismiss" className="ml-4 opacity-60 hover:opacity-100" style={{ color: '#791F1F' }}><X size={16} /></button>
           </div>
         )}
         {suggestion && !suggestLoading && (
-          <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4">
+          <div className="mb-5 rounded-2xl px-5 py-4 border" style={{ background: '#FCEBDB', borderColor: GOLD }}>
             <div className="flex items-start justify-between gap-3">
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">AI Homework Suggestion</p>
-                <p className="font-semibold text-gray-900 text-sm">{suggestion.title}</p>
-                <p className="text-xs text-gray-600 mt-1 leading-relaxed">{suggestion.instructions}</p>
+                <p className="text-xs font-bold uppercase tracking-wide mb-1 flex items-center gap-1.5" style={{ color: '#8A4B12' }}>
+                  <Sparkles size={12} /> AI Homework Suggestion
+                </p>
+                <p className="font-semibold text-sm" style={{ color: INK }}>{suggestion.title}</p>
+                <p className="text-xs mt-1 leading-relaxed" style={{ color: '#4b5563' }}>{suggestion.instructions}</p>
                 <div className="flex gap-3 mt-2">
-                  <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">{suggestion.estimated_time_minutes} min</span>
-                  <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">{suggestion.max_marks} marks</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ color: '#8A4B12', background: 'white' }}>{suggestion.estimated_time_minutes} min</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ color: '#8A4B12', background: 'white' }}>{suggestion.max_marks} marks</span>
                 </div>
               </div>
               <div className="flex flex-col gap-2 flex-shrink-0">
                 <button onClick={assignHomework} disabled={assigning}
-                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-sm font-semibold disabled:opacity-50">
+                  data-testid="hod-assign-homework-btn"
+                  className="px-4 py-2 text-white rounded-xl text-sm font-semibold disabled:opacity-50" style={{ background: GOLD }}>
                   {assigning ? 'Assigning...' : 'Assign to All'}
                 </button>
-                <button onClick={() => setSuggestion(null)}
-                  className="px-4 py-2 border border-gray-200 text-gray-400 rounded-xl text-sm hover:bg-gray-50">
+                <button onClick={() => setSuggestion(null)} data-testid="hod-suggest-dismiss"
+                  className="px-4 py-2 border rounded-xl text-sm hover:bg-gray-50" style={{ borderColor: BORDER, color: '#6b7280' }}>
                   Dismiss
                 </button>
               </div>
@@ -629,17 +686,17 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
           </div>
         )}
         {assignedMsg && (
-          <div className="mb-4 bg-emerald-50 border border-emerald-200 rounded-xl px-5 py-3 flex items-center justify-between">
-            <p className="text-sm text-emerald-700 font-medium">{assignedMsg}</p>
-            <button onClick={() => setAssignedMsg('')} className="text-emerald-400 hover:text-emerald-600 text-lg leading-none">✕</button>
+          <div className="mb-4 rounded-2xl px-5 py-3 flex items-center justify-between" style={{ background: '#E1F5EE' }}>
+            <p className="text-sm font-medium" style={{ color: '#085041' }}>{assignedMsg}</p>
+            <button onClick={() => setAssignedMsg('')} data-testid="hod-assignedmsg-dismiss" className="opacity-60 hover:opacity-100" style={{ color: '#085041' }}><X size={16} /></button>
           </div>
         )}
       </div>
 
       {/* Add chapter form */}
       {showAddChapter && (
-        <div className="mb-5 bg-blue-50 border border-blue-200 rounded-xl p-4">
-          <p className="text-sm font-semibold text-blue-800 mb-3">New Chapter</p>
+        <div className="mb-5 rounded-2xl p-4 border" style={{ background: 'white', borderColor: GOLD }}>
+          <p className="text-sm font-semibold mb-3" style={{ color: '#8A4B12' }}>New Chapter</p>
           <div className="flex gap-2">
             <input
               value={newChapterName}
@@ -647,41 +704,42 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
               onKeyDown={e => e.key === 'Enter' && stageChapter()}
               placeholder="Chapter name, e.g. Quadratic Equations"
               autoFocus
-              className="flex-1 border border-blue-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+              data-testid="hod-new-chapter-name"
+              className="flex-1 border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2"
+              style={{ borderColor: BORDER }}
             />
             <button onClick={stageChapter} disabled={!newChapterName.trim()}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50">
+              data-testid="hod-stage-chapter-btn"
+              className="px-4 py-2 text-white rounded-lg text-sm font-medium disabled:opacity-50" style={{ background: GOLD }}>
               Next →
             </button>
             <button onClick={() => { setShowAddChapter(false); setNewChapterName('') }}
-              className="px-3 py-2 border border-gray-200 text-gray-500 rounded-lg text-sm hover:bg-gray-50">
+              data-testid="hod-cancel-add-chapter-btn"
+              className="px-3 py-2 border rounded-lg text-sm hover:bg-gray-50" style={{ borderColor: BORDER, color: '#6b7280' }}>
               Cancel
             </button>
           </div>
-          <p className="text-xs text-blue-500 mt-2">You&apos;ll add topics in the next step</p>
+          <p className="text-xs mt-2" style={{ color: GOLD }}>You&apos;ll add topics in the next step</p>
         </div>
       )}
 
       {/* Syllabus content */}
       {loading ? (
         <div className="py-12 text-center">
-          <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          <Loader2 size={22} className="animate-spin mx-auto mb-3" style={{ color: GOLD }} />
           <p className="text-gray-400 text-sm">Loading syllabus...</p>
         </div>
       ) : visibleChapters.length === 0 ? (
-        <div className="bg-white rounded-xl border border-dashed border-gray-300 py-14 text-center px-6">
-          <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center mx-auto mb-3">
-            <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-            </svg>
+        <div className="bg-white rounded-2xl border border-dashed py-14 text-center px-6" style={{ borderColor: BORDER }}>
+          <div className="w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-3" style={{ background: '#FCEBDB' }}>
+            <BookOpen size={22} style={{ color: GOLD }} />
           </div>
-          <p className="text-gray-500 font-medium mb-1">No syllabus yet for this class</p>
+          <p className="font-medium mb-1" style={{ color: INK }}>No syllabus yet for this class</p>
           <div className="space-y-2 mt-3">
             <button onClick={() => { setLoadPdfOpen(true); setPdfMsg('') }}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-semibold transition-colors">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-              </svg>
+              data-testid="hod-empty-load-pdf-btn"
+              className="inline-flex items-center gap-2 px-5 py-2.5 text-white rounded-xl text-sm font-semibold transition-colors" style={{ background: GREEN }}>
+              <Upload size={16} />
               Load Syllabus from PDF
             </button>
             <p className="text-gray-400 text-xs">or click <strong>Add Chapter</strong> to build manually</p>
@@ -697,60 +755,56 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
             const chapterHasDraft = !isStaged && 'topics' in ch && ch.topics.some((t: Topic) => !t.published)
 
             return (
-              <div key={ch.chapter_name} className={`bg-white rounded-xl border overflow-hidden ${isStaged ? 'border-blue-300 ring-1 ring-blue-200' : chapterHasDraft ? 'border-orange-200' : 'border-gray-200'}`}>
+              <div key={ch.chapter_name} className="bg-white rounded-2xl border overflow-hidden"
+                style={{ borderColor: isStaged ? GOLD : chapterHasDraft ? GOLD : BORDER }}>
                 {/* Chapter header */}
                 <div className="flex items-center">
                 <button
                   onClick={() => setExpandedChapter(isExpanded ? null : ch.chapter_name)}
+                  data-testid={`hod-chapter-toggle-${chIdx}`}
                   className="flex-1 px-5 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors text-left min-w-0">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0 ${isStaged ? 'bg-blue-200 text-blue-800' : chapterHasDraft ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0"
+                    style={{ background: isStaged || chapterHasDraft ? '#FCEBDB' : SURFACE, color: isStaged || chapterHasDraft ? '#8A4B12' : INK }}>
                     {chIdx + 1}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-gray-900">{ch.chapter_name}</span>
+                      <span className="font-semibold" style={{ color: INK }}>{ch.chapter_name}</span>
                       {isStaged && (
-                        <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-medium">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ background: '#FCEBDB', color: '#8A4B12' }}>
                           Add topics to save
                         </span>
                       )}
                       {chapterHasDraft && (
-                        <span className="text-[10px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-medium">DRAFT</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ background: '#FCEBDB', color: '#8A4B12' }}>DRAFT</span>
                       )}
                       {'behind' in ch && ch.behind > 0 && (
-                        <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-medium">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ background: '#FCEBEB', color: '#791F1F' }}>
                           {ch.behind} behind
                         </span>
                       )}
                     </div>
                     {!isStaged && (
                       <div className="flex items-center gap-3 mt-1">
-                        <div className="flex-1 max-w-[140px] h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-emerald-500' : 'behind' in ch && ch.behind > 0 ? 'bg-red-400' : 'bg-blue-500'}`}
-                            style={{ width: `${pct}%` }} />
-                        </div>
-                        <span className="text-xs text-gray-400">{ch.covered}/{ch.total} covered</span>
+                        <ProgressBar pct={pct} color={pct === 100 ? GREEN : 'behind' in ch && ch.behind > 0 ? CORAL : GOLD} className="flex-1 max-w-[140px]" />
+                        <span className="text-xs text-gray-400">{ch.covered}/{ch.total} taught</span>
                       </div>
                     )}
                   </div>
-                  <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
+                  <ChevronDown size={16} className="text-gray-400 flex-shrink-0 transition-transform" style={{ transform: isExpanded ? 'rotate(180deg)' : undefined }} />
                 </button>
                 {!isStaged && (
                   <button onClick={() => deleteChapter(ch.chapter_name)} title="Delete chapter"
+                    data-testid={`hod-delete-chapter-${chIdx}`}
                     className="px-3 py-4 text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors flex-shrink-0">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
+                    <Trash2 size={16} />
                   </button>
                 )}
                 </div>
 
                 {/* Topics */}
                 {isExpanded && (
-                  <div className="border-t border-gray-100">
+                  <div className="border-t" style={{ borderColor: BORDER }}>
                     {!isStaged && ch.topics.length === 0 && (
                       <p className="px-6 py-3 text-sm text-gray-400 italic">No topics yet — add one below</p>
                     )}
@@ -758,37 +812,46 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
                     {'topics' in ch && ch.topics.map((topic, tIdx) => {
                       const isBehind = topic.status !== 'covered' && topic.target_date && topic.target_date < today
                       const isSaving = saving === topic.id
+                      const qCount = questionCount(topic.questions)
 
                       return (
-                        <div key={topic.id} className={`px-5 py-3 border-b border-gray-50 last:border-b-0 ${isBehind ? 'bg-red-50/40' : ''}`}>
+                        <div key={topic.id} className="px-5 py-3 border-b last:border-b-0"
+                          style={{ borderColor: SURFACE, background: isBehind ? '#FCEBEB40' : undefined }}>
                           <div className="flex items-start gap-3">
-                            {/* Cover toggle */}
+                            {/* Mark taught toggle */}
                             <button
                               onClick={() => coverTopic(topic, ch.chapter_name)}
                               disabled={isSaving}
-                              title={topic.status === 'covered' ? 'Mark as pending' : 'Mark as covered'}
-                              className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-                                topic.status === 'covered'
-                                  ? 'bg-emerald-500 border-emerald-500 text-white'
-                                  : isBehind ? 'border-red-400 hover:border-red-600'
-                                  : 'border-gray-300 hover:border-blue-400'
-                              } ${isSaving ? 'opacity-40' : ''}`}>
-                              {topic.status === 'covered' && (
-                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                </svg>
-                              )}
+                              title={topic.status === 'covered' ? 'Mark as pending' : 'Mark taught'}
+                              data-testid={`hod-mark-taught-${topic.id}`}
+                              className="mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors"
+                              style={{
+                                background: topic.status === 'covered' ? GREEN : 'white',
+                                borderColor: topic.status === 'covered' ? GREEN : isBehind ? CORAL : GOLD,
+                                opacity: isSaving ? 0.4 : 1,
+                              }}>
+                              {topic.status === 'covered' && <Check size={12} className="text-white" />}
                             </button>
 
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs font-bold text-gray-300">{tIdx + 1}.</span>
-                                <span className={`text-sm font-medium ${topic.status === 'covered' ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+                                <span className="text-sm font-medium" style={{ color: topic.status === 'covered' ? '#9ca3af' : INK, textDecoration: topic.status === 'covered' ? 'line-through' : undefined }}>
                                   {topic.topic_name}
                                 </span>
-                                {isBehind && <span className="text-[10px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-semibold">Behind</span>}
+                                <StatusPill status={topic.status === 'covered' ? 'taught' : 'unlocked'} />
+                                <QuizPill count={qCount} />
+                                <button
+                                  onClick={() => setActiveTopic(topic)}
+                                  data-testid={`hod-view-material-${topic.id}`}
+                                  className="text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1 ml-1"
+                                  style={{ color: GOLD, background: '#FCEBDB', border: `1px solid ${GOLD}` }}
+                                >
+                                  <Eye size={11} /> View Material
+                                </button>
+                                {isBehind && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold" style={{ background: '#FCEBEB', color: '#791F1F' }}>Behind</span>}
                                 {topic.status === 'covered' && (
-                                  <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full">
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: '#E1F5EE', color: '#085041' }}>
                                     ✓ {topic.covered_date}{topic.covered_by_name ? ` · ${topic.covered_by_name}` : ''}
                                   </span>
                                 )}
@@ -800,38 +863,43 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
                                 {editingTarget === topic.id ? (
                                   <span className="flex items-center gap-1">
                                     <input type="date" value={editVal} onChange={e => setEditVal(e.target.value)}
-                                      className="border border-blue-300 rounded px-1.5 py-0.5 text-xs focus:outline-none" />
+                                      data-testid={`hod-target-date-input-${topic.id}`}
+                                      className="border rounded px-1.5 py-0.5 text-xs focus:outline-none" style={{ borderColor: GOLD }} />
                                     <button onClick={async () => { await patchTopic(topic.id, { target_date: editVal || null }); setEditingTarget(null) }}
-                                      className="text-xs text-blue-600 font-medium">Save</button>
-                                    <button onClick={() => setEditingTarget(null)} className="text-xs text-gray-400">✕</button>
+                                      data-testid={`hod-target-date-save-${topic.id}`}
+                                      className="text-xs font-medium" style={{ color: GOLD }}>Save</button>
+                                    <button onClick={() => setEditingTarget(null)} data-testid={`hod-target-date-cancel-${topic.id}`} className="text-xs text-gray-400">✕</button>
                                   </span>
                                 ) : (
                                   <button
                                     onClick={() => { setEditingTarget(topic.id); setEditVal(topic.target_date || '') }}
-                                    className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
-                                      topic.target_date
-                                        ? isBehind ? 'bg-red-100 text-red-700 border-red-200' : 'bg-blue-50 text-blue-700 border-blue-100'
-                                        : 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200'
-                                    }`}>
+                                    data-testid={`hod-target-date-btn-${topic.id}`}
+                                    className="text-xs px-2 py-0.5 rounded-full border transition-colors"
+                                    style={topic.target_date
+                                      ? (isBehind ? { background: '#FCEBEB', color: '#791F1F', borderColor: '#F0999B' } : { background: '#FCEBDB', color: '#8A4B12', borderColor: GOLD })
+                                      : { background: SURFACE, color: '#9ca3af', borderColor: BORDER }}>
                                     {topic.target_date || 'Set date'}
                                   </button>
                                 )}
 
                                 {(isBehind || topic.delay_reason) && (
                                   <>
-                                    <span className="text-[10px] text-red-400">Delay:</span>
+                                    <span className="text-[10px]" style={{ color: '#791F1F' }}>Delay:</span>
                                     {editingDelay === topic.id ? (
                                       <span className="flex items-center gap-1">
                                         <input value={editVal} onChange={e => setEditVal(e.target.value)}
                                           placeholder="Reason for delay..."
-                                          className="border border-red-200 rounded px-1.5 py-0.5 text-xs w-40 focus:outline-none" />
+                                          data-testid={`hod-delay-reason-input-${topic.id}`}
+                                          className="border rounded px-1.5 py-0.5 text-xs w-40 focus:outline-none" style={{ borderColor: '#F0999B' }} />
                                         <button onClick={async () => { await patchTopic(topic.id, { delay_reason: editVal }); setEditingDelay(null) }}
-                                          className="text-xs text-red-600 font-medium">Save</button>
-                                        <button onClick={() => setEditingDelay(null)} className="text-xs text-gray-400">✕</button>
+                                          data-testid={`hod-delay-reason-save-${topic.id}`}
+                                          className="text-xs font-medium" style={{ color: '#791F1F' }}>Save</button>
+                                        <button onClick={() => setEditingDelay(null)} data-testid={`hod-delay-reason-cancel-${topic.id}`} className="text-xs text-gray-400">✕</button>
                                       </span>
                                     ) : (
                                       <button onClick={() => { setEditingDelay(topic.id); setEditVal(topic.delay_reason || '') }}
-                                        className="text-xs text-red-600 underline decoration-dotted">
+                                        data-testid={`hod-delay-reason-btn-${topic.id}`}
+                                        className="text-xs underline decoration-dotted" style={{ color: '#791F1F' }}>
                                         {topic.delay_reason || 'Add reason'}
                                       </button>
                                     )}
@@ -846,14 +914,17 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
                                   <span className="flex items-center gap-1">
                                     <input value={editVal} onChange={e => setEditVal(e.target.value)}
                                       placeholder="Add remark..."
-                                      className="border border-amber-200 rounded px-1.5 py-0.5 text-xs w-44 focus:outline-none" />
+                                      data-testid={`hod-remark-input-${topic.id}`}
+                                      className="border rounded px-1.5 py-0.5 text-xs w-44 focus:outline-none" style={{ borderColor: GOLD }} />
                                     <button onClick={async () => { await patchTopic(topic.id, { hod_remark: editVal, hod_remark_by: teacher.id }); setEditingRemark(null) }}
-                                      className="text-xs text-amber-700 font-medium">Save</button>
-                                    <button onClick={() => setEditingRemark(null)} className="text-xs text-gray-400">✕</button>
+                                      data-testid={`hod-remark-save-${topic.id}`}
+                                      className="text-xs font-medium" style={{ color: '#8A4B12' }}>Save</button>
+                                    <button onClick={() => setEditingRemark(null)} data-testid={`hod-remark-cancel-${topic.id}`} className="text-xs text-gray-400">✕</button>
                                   </span>
                                 ) : (
                                   <button onClick={() => { setEditingRemark(topic.id); setEditVal(topic.hod_remark || '') }}
-                                    className="text-xs text-amber-700 underline decoration-dotted">
+                                    data-testid={`hod-remark-btn-${topic.id}`}
+                                    className="text-xs underline decoration-dotted" style={{ color: '#8A4B12' }}>
                                     {topic.hod_remark ? `"${topic.hod_remark}"` : 'Add note'}
                                   </button>
                                 )}
@@ -862,10 +933,9 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
 
                             {/* Delete topic */}
                             <button onClick={() => deleteTopic(topic.id)} title="Remove topic"
+                              data-testid={`hod-delete-topic-${topic.id}`}
                               className="text-gray-200 hover:text-red-400 transition-colors flex-shrink-0 mt-0.5">
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         </div>
@@ -874,9 +944,9 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
 
                     {/* Add topic form */}
                     {addTopicChapter === ch.chapter_name ? (
-                      <div className="px-5 py-3 bg-gray-50 border-t border-gray-100">
+                      <div className="px-5 py-3 border-t" style={{ background: SURFACE, borderColor: BORDER }}>
                         {isStaged && (
-                          <p className="text-xs text-blue-600 font-medium mb-2">
+                          <p className="text-xs font-medium mb-2" style={{ color: GOLD }}>
                             Add the first topic — chapter will be saved automatically
                           </p>
                         )}
@@ -890,24 +960,30 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
                             onKeyDown={e => e.key === 'Enter' && addTopic()}
                             placeholder="Topic name..."
                             autoFocus
-                            className="flex-1 min-w-[160px] border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+                            data-testid={`hod-new-topic-name-${ch.chapter_name}`}
+                            className="flex-1 min-w-[160px] border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2"
+                            style={{ borderColor: BORDER }}
                           />
                           <input
                             type="date"
                             value={newTopicTarget}
                             onChange={e => setNewTopicTarget(e.target.value)}
                             title="Target completion date"
-                            className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+                            data-testid={`hod-new-topic-target-${ch.chapter_name}`}
+                            className="border rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2"
+                            style={{ borderColor: BORDER }}
                           />
                           <button onClick={addTopic} disabled={addingTopic || !newTopicName.trim()}
-                            className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50">
+                            data-testid="hod-add-topic-submit"
+                            className="px-3 py-2 text-white rounded-lg text-sm font-medium disabled:opacity-50" style={{ background: GOLD }}>
                             {addingTopic ? 'Adding...' : 'Add Topic'}
                           </button>
                           <button onClick={() => {
                             if (isStaged) cancelStagedChapter()
                             else { setAddTopicChapter(null); setNewTopicName(''); setNewTopicTarget('') }
                           }}
-                            className="px-3 py-2 border border-gray-200 text-gray-500 rounded-lg text-sm hover:bg-gray-100">
+                            data-testid="hod-add-topic-cancel"
+                            className="px-3 py-2 border rounded-lg text-sm hover:bg-gray-100" style={{ borderColor: BORDER, color: '#6b7280' }}>
                             {isStaged ? 'Discard chapter' : 'Cancel'}
                           </button>
                         </div>
@@ -915,10 +991,10 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
                     ) : !isStaged ? (
                       <button
                         onClick={() => { setAddTopicChapter(ch.chapter_name); setNewTopicName(''); setNewTopicTarget(''); setExpandedChapter(ch.chapter_name) }}
-                        className="w-full px-5 py-2.5 text-left text-xs text-blue-600 hover:bg-blue-50 transition-colors flex items-center gap-1.5 border-t border-gray-50">
-                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
+                        data-testid={`hod-add-topic-link-${chIdx}`}
+                        className="w-full px-5 py-2.5 text-left text-xs transition-colors flex items-center gap-1.5 border-t"
+                        style={{ color: GOLD, borderColor: SURFACE }}>
+                        <Plus size={14} />
                         Add topic to this chapter
                       </button>
                     ) : null}
@@ -929,6 +1005,17 @@ export default function HODSyllabus({ teacher, hodAssignments }: Props) {
           })}
         </div>
       )}
+
+      {/* Premium Content Viewer Modal */}
+      {activeTopic && (
+        <TopicContentViewer
+          topic={activeTopic}
+          onClose={() => setActiveTopic(null)}
+          role="teacher"
+        />
+      )}
+
+      <Toast message={toast} />
     </div>
   )
 }

@@ -9,6 +9,7 @@ import StudentDoubts from './components/StudentDoubts'
 import StudentProfile from './components/StudentProfile'
 import StudentMarks from './components/StudentMarks'
 import StudentTimetable from './components/StudentTimetable'
+import StudentSyllabus from './components/StudentSyllabus'
 import NotificationBell from '../components/NotificationBell'
 
 type Student = {
@@ -26,6 +27,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: 'dashboard', label: 'Dashboard',    icon: '🏠' },
       { key: 'timetable', label: 'My Timetable', icon: '🗓️' },
+      { key: 'syllabus',  label: 'Syllabus',     icon: '📚' },
     ],
   },
   {
@@ -239,6 +241,7 @@ export default function StudentPortal() {
             {visitedNav.has('doubts')      && <div hidden={activeNav !== 'doubts'}><StudentDoubts student={student} classId={classId} schoolId={student.school_id} /></div>}
             {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={student.school_id} classId={classId} /></div>}
             {visitedNav.has('timetable')   && <div hidden={activeNav !== 'timetable'}><StudentTimetable classId={classId} schoolId={student.school_id} grade={student.grade} section={student.section} /></div>}
+            {visitedNav.has('syllabus')    && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={student.school_id} classId={classId} /></div>}
             {visitedNav.has('profile')     && <div hidden={activeNav !== 'profile'}><StudentProfile student={student} /></div>}
           </div>
         </main>

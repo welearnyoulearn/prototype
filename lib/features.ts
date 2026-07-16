@@ -14,6 +14,7 @@ export const ALL_FEATURES = [
   { key: 'leave-requests',     label: 'Leave Requests',                  category: 'Scheduling' },
   { key: 'emergency-cover',    label: 'Emergency Cover',                 category: 'Scheduling' },
   { key: 'timetable',          label: 'Timetable Management',            category: 'Scheduling' },
+  { key: 'curriculum',         label: 'Syllabus Customizer',             category: 'Scheduling' },
   { key: 'exam-schedule',      label: 'Exam Schedule',                   category: 'Scheduling' },
 
   // â”€â”€ Analytics & Intelligence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

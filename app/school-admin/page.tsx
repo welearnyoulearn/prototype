@@ -32,6 +32,7 @@ const StaffOnboarding       = dynamic(() => import('./components/StaffOnboarding
 const StudentOnboarding     = dynamic(() => import('./components/StudentOnboarding'),      { loading: () => <ModuleSkeleton /> })
 const ClassManagement       = dynamic(() => import('./components/ClassManagement'),        { loading: () => <ModuleSkeleton /> })
 const TimetableManagement   = dynamic(() => import('./components/TimetableManagement'),    { loading: () => <ModuleSkeleton /> })
+const CurriculumCustomizer   = dynamic(() => import('./components/CurriculumCustomizer'),   { loading: () => <ModuleSkeleton /> })
 const ExamSchedule          = dynamic(() => import('./components/ExamSchedule'),           { loading: () => <ModuleSkeleton /> })
 const TeachersManagement    = dynamic(() => import('./components/TeachersManagement'),     { loading: () => <ModuleSkeleton /> })
 const StudentsManagement    = dynamic(() => import('./components/StudentsManagement'),     { loading: () => <ModuleSkeleton /> })
@@ -64,7 +65,7 @@ const NAV_SECTIONS = [
   { label: 'OVERVIEW',      keys: ['overview'] },
   { label: 'PEOPLE',        keys: ['staff', 'students', 'class-management'] },
   { label: 'MANAGEMENT',    keys: ['fee-management'] },
-  { label: 'SCHEDULING',    keys: ['timetable', 'attendance', 'leave-requests', 'emergency-cover', 'exam-schedule'] },
+  { label: 'SCHEDULING',    keys: ['timetable', 'curriculum', 'attendance', 'leave-requests', 'emergency-cover', 'exam-schedule'] },
   { label: 'COMMUNICATION', keys: ['announcements'] },
   { label: 'TOOLS',         keys: ['export', 'settings', 'year-rollover'] },
 ]
@@ -138,6 +139,16 @@ const NAV_ITEMS: NavItem[] = [
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'curriculum',
+    label: 'Syllabus Customizer',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
       </svg>
     ),
   },
@@ -574,6 +585,7 @@ function SchoolAdmin() {
 
                 {visited.has('class-management') && <div hidden={activeNav !== 'class-management'}><ClassManagement schoolId={selectedSchool.id} onNavigate={navigateTo} /></div>}
                 {visited.has('timetable')        && <div hidden={activeNav !== 'timetable'}><TimetableManagement schoolId={selectedSchool.id} /></div>}
+                {visited.has('curriculum')       && <div hidden={activeNav !== 'curriculum'}><CurriculumCustomizer schoolId={selectedSchool.id} /></div>}
                 {visited.has('exam-schedule')    && <div hidden={activeNav !== 'exam-schedule'}><ExamSchedule schoolId={selectedSchool.id} /></div>}
                 {visited.has('announcements')    && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} /></div>}
                 {visited.has('export')           && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}
