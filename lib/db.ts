@@ -1510,6 +1510,14 @@ const SYLLABUS_SCHEMA: string[] = [
       UNIQUE(class_id, school_topic_id)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_school_topic_progress_class ON school_topic_progress(class_id)`,
+
+    // HOD tracking fields — the syllabus GET route selects these, so they must
+    // exist alongside the table itself (the CREATE above predates them).
+    `ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS target_date DATE`,
+    `ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS delay_reason TEXT`,
+    `ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS hod_remark TEXT`,
+    `ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS hod_remark_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL`,
+    `ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS hod_remark_at TIMESTAMPTZ`,
     `ALTER TABLE school_subjects ADD COLUMN IF NOT EXISTS academic_year VARCHAR(20) DEFAULT '2025-26'`,
     `ALTER TABLE school_subjects DROP CONSTRAINT IF EXISTS school_subjects_school_id_grade_subject_name_key`,
 ]
