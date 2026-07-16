@@ -113,6 +113,10 @@ type PaySuccess = {
   // `row` state, which can still reflect the pre-payment balance if the admin clicks
   // Print before the refetch has resolved and re-rendered.
   outstanding_before?: number
+  // Per-fee-head breakdown from the API — a single payment can span multiple fee
+  // categories (e.g. Tuition + Transport + Hostel), so this is the source of truth
+  // for the receipt table rather than the single category_name/period_label above.
+  line_items?: { category_name: string; period_label: string; amount: number }[]
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -2004,6 +2008,7 @@ export default function FeeManagement({
         collected_by_name: payCollectedBy || null,
         transaction_ref: payRef || null, notes: payNotes || null,
         outstanding_before: openStudent.outstanding,
+        line_items: d.line_items || undefined,
       })
       setShowCollectForm(false)
       setPassoutOpenStudent(null)
@@ -3838,15 +3843,21 @@ export default function FeeManagement({
                                 </div>
                                 <div className="flex gap-2">
                                   <button onClick={() => {
-                                    const selected = row.open_entries.filter(e => collectChecked.has(e.id))
-                                    const selectedTotal = selected.reduce((s, e) => s + Number(e.balance), 0)
+                                    // line_items from the payment API is the source of truth — it reflects
+                                    // every fee head actually paid, even when several are settled in one
+                                    // transaction (e.g. Tuition + Transport + Hostel). Ledger checkbox state
+                                    // can be empty/stale by the time Print is clicked, so it's only a fallback.
                                     let lines: { cat: string; period: string; amount: number }[]
-                                    if (paySuccess.amount >= selectedTotal - 0.01 && selected.length > 0) {
-                                      // full payment of selected bills — itemise each
-                                      lines = selected.map(e => ({ cat: e.category_name, period: e.period_label, amount: Number(e.balance) }))
+                                    if (paySuccess.line_items?.length) {
+                                      lines = paySuccess.line_items.map(li => ({ cat: li.category_name, period: li.period_label, amount: li.amount }))
                                     } else {
-                                      // no selection to itemise (or a partial amount) — fall back to the fee category actually paid
-                                      lines = [{ cat: paySuccess.category_name || 'Part payment towards dues', period: selected.map(e => e.period_label).join(', ') || paySuccess.period_label, amount: paySuccess.amount }]
+                                      const selected = row.open_entries.filter(e => collectChecked.has(e.id))
+                                      const selectedTotal = selected.reduce((s, e) => s + Number(e.balance), 0)
+                                      if (paySuccess.amount >= selectedTotal - 0.01 && selected.length > 0) {
+                                        lines = selected.map(e => ({ cat: e.category_name, period: e.period_label, amount: Number(e.balance) }))
+                                      } else {
+                                        lines = [{ cat: paySuccess.category_name || 'Part payment towards dues', period: selected.map(e => e.period_label).join(', ') || paySuccess.period_label, amount: paySuccess.amount }]
+                                      }
                                     }
                                     printCounterReceipt(row, paySuccess, lines)
                                   }}
