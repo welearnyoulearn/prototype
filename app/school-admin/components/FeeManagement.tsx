@@ -1776,11 +1776,12 @@ export default function FeeManagement({
       <td>${st.is_leaver ? st.leaver_reason : 'Continuing'}</td>
       <td>${(yeDecisions[st.student_id] || 'open').replace('writeoff','Write Off').replace('carry','Carry Forward').replace('open','Leave Open')}</td>
     </tr>`).join('')
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Year-End Statement ${academicYear}</title>
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Year-End Statement ${escapeHtml(academicYear)}</title>
 <style>
   body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:820px;margin:0 auto}
   .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:18px}
-  .title{font-size:20px;font-weight:bold}.sub{font-size:13px;color:#555;margin-top:4px}
+  .school{font-size:18px;font-weight:bold}
+  .title{font-size:20px;font-weight:bold;margin-top:4px}.sub{font-size:13px;color:#555;margin-top:4px}
   .sumbox{display:flex;gap:12px;margin:18px 0}
   .sumbox div{flex:1;border:1px solid #ddd;border-radius:8px;padding:10px;text-align:center}
   .sumbox .l{font-size:11px;color:#888}.sumbox .v{font-size:15px;font-weight:bold;margin-top:2px}
@@ -1790,7 +1791,13 @@ export default function FeeManagement({
   .ftr{margin-top:24px;text-align:center;font-size:11px;color:#aaa}
   @media print{body{padding:0}}
 </style></head><body>
-<div class="hdr"><div class="title">Year-End Financial Statement</div><div class="sub">Academic Year ${academicYear}</div></div>
+<div class="hdr">
+  ${branding.logo_url ? `<img src="${escapeHtml(branding.logo_url)}" style="height:44px;margin-bottom:6px;object-fit:contain" />` : ''}
+  ${renderHeaderBlocks(branding.receipt_header_blocks)}
+  <div class="school">${escapeHtml(branding.school_name || 'School')}</div>
+  <div class="title">Year-End Financial Statement</div>
+  <div class="sub">Academic Year ${escapeHtml(academicYear)}</div>
+</div>
 <div class="sumbox">
   <div><div class="l">Total Billed</div><div class="v">₹${Number(s.total_billed).toLocaleString('en-IN')}</div></div>
   <div><div class="l">Collected</div><div class="v">₹${Number(s.total_collected).toLocaleString('en-IN')}</div></div>
@@ -2197,11 +2204,12 @@ export default function FeeManagement({
       <td style="text-align:right">${t.credit > 0 ? '₹' + Number(t.credit).toLocaleString('en-IN') : ''}</td>
       <td style="text-align:right">₹${Number(t.balance).toLocaleString('en-IN')}</td>
     </tr>`).join('')
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Statement ${s.name}</title>
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Statement ${escapeHtml(s.name)}</title>
 <style>
   body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:820px;margin:0 auto}
   .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:18px}
-  .title{font-size:20px;font-weight:bold}.sub{font-size:13px;color:#555;margin-top:4px}
+  .school{font-size:18px;font-weight:bold}
+  .title{font-size:20px;font-weight:bold;margin-top:4px}.sub{font-size:13px;color:#555;margin-top:4px}
   .info{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;font-size:13px}
   .sumbox{display:flex;gap:16px;margin-bottom:18px}
   .sumbox div{flex:1;border:1px solid #ddd;border-radius:8px;padding:10px;text-align:center}
@@ -2212,8 +2220,13 @@ export default function FeeManagement({
   .ftr{margin-top:24px;text-align:center;font-size:11px;color:#aaa}
   @media print{body{padding:0}}
 </style></head><body>
-<div class="hdr"><div class="title">Fee Statement (Passbook)</div>
-<div class="sub">${s.name} · Grade ${s.grade}${s.section} · Roll #${s.roll_number} · ${academicYear}</div></div>
+<div class="hdr">
+  ${branding.logo_url ? `<img src="${escapeHtml(branding.logo_url)}" style="height:44px;margin-bottom:6px;object-fit:contain" />` : ''}
+  ${renderHeaderBlocks(branding.receipt_header_blocks)}
+  <div class="school">${escapeHtml(branding.school_name || 'School')}</div>
+  <div class="title">Fee Statement (Passbook)</div>
+  <div class="sub">${escapeHtml(s.name)} · Grade ${escapeHtml(s.grade)}${escapeHtml(s.section || '')} · Roll #${escapeHtml(s.roll_number)} · ${escapeHtml(academicYear)}</div>
+</div>
 <div class="info">
   <div>Parent: ${s.parent_name || '—'}</div>
   <div>Phone: ${s.parent_phone || '—'}</div>
