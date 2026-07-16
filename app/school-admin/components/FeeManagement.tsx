@@ -352,23 +352,24 @@ ${data.balance_after != null ? `<div class="ftr">Balance after this payment: ${R
 }
 
 const RECEIPT_STYLE = `
+  *{box-sizing:border-box}
   @page { size: A4; margin: 10mm }
   body{font-family:Arial,sans-serif;color:#222;max-width:720px;margin:0 auto}
-  .sheet{page-break-inside:avoid;position:relative;padding:12px 4px}
-  .cut-line{border-top:1px dashed #999;margin:2mm 0;text-align:center;color:#999;font-size:10px}
+  .sheet{page-break-inside:avoid;overflow:hidden;position:relative;padding:8px 4px}
+  .cut-line{height:6mm;line-height:6mm;overflow:hidden;border-top:1px dashed #999;text-align:center;color:#999;font-size:10px}
   .copy-label{position:absolute;top:2px;right:4px;font-size:9px;color:#999;text-transform:uppercase;letter-spacing:.5px}
-  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:14px}
-  .school{font-size:20px;font-weight:bold}.rtitle{font-size:14px;font-weight:bold;margin-top:6px;letter-spacing:1px}
-  .rno{font-size:12px;color:#555;margin-top:4px}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
-  .lbl{font-size:11px;color:#888;margin-bottom:2px}.val{font-size:13px;font-weight:500}
-  table{width:100%;border-collapse:collapse;margin:10px 0}
-  th{background:#f3f4f6;padding:6px 10px;text-align:left;font-size:11px;border:1px solid #ddd}
-  td{padding:6px 10px;font-size:12px;border:1px solid #ddd}
+  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:10px}
+  .school{font-size:18px;font-weight:bold}.rtitle{font-size:13px;font-weight:bold;margin-top:4px;letter-spacing:1px}
+  .rno{font-size:11px;color:#555;margin-top:3px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .lbl{font-size:10px;color:#888;margin-bottom:1px}.val{font-size:12px;font-weight:500}
+  table{width:100%;border-collapse:collapse;margin:8px 0}
+  th{background:#f3f4f6;padding:5px 8px;text-align:left;font-size:10px;border:1px solid #ddd}
+  td{padding:5px 8px;font-size:11px;border:1px solid #ddd}
   .tot td{font-weight:bold;background:#f9fafb}
-  .sig-row{display:flex;justify-content:space-between;margin-top:24px}
-  .sig-box{text-align:center;border-top:1px solid #333;width:160px;padding-top:4px;font-size:10px;color:#555}
-  .ftr{margin-top:12px;text-align:center;font-size:10px;color:#aaa;border-top:1px solid #eee;padding-top:8px}
+  .sig-row{display:flex;justify-content:space-between;margin-top:16px}
+  .sig-box{text-align:center;border-top:1px solid #333;width:150px;padding-top:3px;font-size:10px;color:#555}
+  .ftr{margin-top:8px;text-align:center;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:6px}
   @media print{body{padding:0}}
 `
 
@@ -380,11 +381,13 @@ function openReceiptWindow(receiptNumber: string, bodyHtml: string) {
 }
 
 // Two copies (Office + Payer) on one A4 sheet — used only when a payment is actually collected.
+// Sheet heights + cut-line are budgeted to total well under the ~277mm usable A4 height
+// (297mm page - 10mm top/bottom margins) so both copies always land on a single page.
 function printDualCopyReceipt(data: ReceiptCardData) {
   openReceiptWindow(data.receipt_number, `
-<div class="sheet" style="height:138mm">${receiptCard(data, 'Office Copy')}</div>
+<div class="sheet" style="height:133mm">${receiptCard(data, 'Office Copy')}</div>
 <div class="cut-line">✂ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>
-<div class="sheet" style="height:138mm">${receiptCard(data, 'Payer Copy')}</div>`)
+<div class="sheet" style="height:133mm">${receiptCard(data, 'Payer Copy')}</div>`)
 }
 
 // Single copy — used for reprints (e.g. passbook), no office/payer split needed.
@@ -3842,8 +3845,8 @@ export default function FeeManagement({
                                       // full payment of selected bills — itemise each
                                       lines = selected.map(e => ({ cat: e.category_name, period: e.period_label, amount: Number(e.balance) }))
                                     } else {
-                                      // partial payment — single line for the actual amount taken
-                                      lines = [{ cat: 'Part payment towards dues', period: selected.map(e => e.period_label).join(', ') || paySuccess.period_label, amount: paySuccess.amount }]
+                                      // no selection to itemise (or a partial amount) — fall back to the fee category actually paid
+                                      lines = [{ cat: paySuccess.category_name || 'Part payment towards dues', period: selected.map(e => e.period_label).join(', ') || paySuccess.period_label, amount: paySuccess.amount }]
                                     }
                                     printCounterReceipt(row, paySuccess, lines)
                                   }}
