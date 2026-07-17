@@ -1684,6 +1684,34 @@ async function runIncrementalMigrations() {
       UNIQUE(school_id, academic_year)
     )
   `)
+  // Only ever created inline in category-assignments/route.ts, but categories/route.ts's
+  // DELETE unconditionally deletes from it — so deleting a fee category on any database
+  // where category-assignments had never been hit 500s with "relation does not exist".
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS student_fee_category_assignments (
+      id               SERIAL PRIMARY KEY,
+      school_id        INTEGER NOT NULL,
+      fee_category_id  INTEGER NOT NULL REFERENCES fee_categories(id) ON DELETE CASCADE,
+      student_id       INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      academic_year    TEXT    NOT NULL DEFAULT '2025-26',
+      amount           NUMERIC(10,2) NOT NULL DEFAULT 0,
+      created_at       TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS student_fee_assignment_history (
+      id               SERIAL PRIMARY KEY,
+      school_id        INTEGER NOT NULL,
+      student_id       INTEGER NOT NULL,
+      fee_category_id  INTEGER NOT NULL,
+      academic_year    TEXT    NOT NULL,
+      old_amount       NUMERIC(10,2),
+      new_amount       NUMERIC(10,2),
+      change_type      TEXT    NOT NULL DEFAULT 'update',
+      changed_by       TEXT    NOT NULL DEFAULT 'Admin',
+      changed_at       TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
   // Previously self-healed independently in upi-id/route.ts (x2) and upi-qr/route.ts.
   await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS upi_id TEXT`)
   // Already added by the fresh-DB-only migrations[] array above (and thus already
