@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 
-const BASE = 'http://localhost:3000'
+const BASE = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000'
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
 

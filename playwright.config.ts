@@ -3,6 +3,11 @@ import { defineConfig, devices } from '@playwright/test'
 const now = new Date()
 const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`
 
+// Specs already honour PLAYWRIGHT_BASE_URL for their direct fetch() calls, so the
+// config has to agree with them — otherwise page.goto() and fetch() split across
+// two ports, and reuseExistingServer can silently adopt an unrelated app on 3000.
+const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000'
+
 export default defineConfig({
   globalTeardown: './e2e/global-teardown.ts',
   testDir: './e2e',
@@ -11,7 +16,7 @@ export default defineConfig({
   reporter: [['html', { outputFolder: `test-results/${timestamp}/html-report` }], ['list']],
   outputDir: `test-results/${timestamp}/artifacts`,
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: BASE_URL,
     trace: 'on',
     screenshot: 'on',
     video: 'on',
@@ -31,7 +36,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'npm run dev',
-    url: 'http://localhost:3000',
+    url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 180000, // Next.js cold start + first-request DB migrations
   },
