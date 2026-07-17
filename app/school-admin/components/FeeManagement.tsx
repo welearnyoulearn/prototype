@@ -113,6 +113,10 @@ type PaySuccess = {
   // `row` state, which can still reflect the pre-payment balance if the admin clicks
   // Print before the refetch has resolved and re-rendered.
   outstanding_before?: number
+  // Per-fee-head breakdown from the API — a single payment can span multiple fee
+  // categories (e.g. Tuition + Transport + Hostel), so this is the source of truth
+  // for the receipt table rather than the single category_name/period_label above.
+  line_items?: { category_name: string; period_label: string; amount: number }[]
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -352,23 +356,24 @@ ${data.balance_after != null ? `<div class="ftr">Balance after this payment: ${R
 }
 
 const RECEIPT_STYLE = `
+  *{box-sizing:border-box}
   @page { size: A4; margin: 10mm }
   body{font-family:Arial,sans-serif;color:#222;max-width:720px;margin:0 auto}
-  .sheet{page-break-inside:avoid;position:relative;padding:12px 4px}
-  .cut-line{border-top:1px dashed #999;margin:2mm 0;text-align:center;color:#999;font-size:10px}
+  .sheet{page-break-inside:avoid;overflow:hidden;position:relative;padding:8px 4px}
+  .cut-line{height:6mm;line-height:6mm;overflow:hidden;border-top:1px dashed #999;text-align:center;color:#999;font-size:10px}
   .copy-label{position:absolute;top:2px;right:4px;font-size:9px;color:#999;text-transform:uppercase;letter-spacing:.5px}
-  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:10px;margin-bottom:14px}
-  .school{font-size:20px;font-weight:bold}.rtitle{font-size:14px;font-weight:bold;margin-top:6px;letter-spacing:1px}
-  .rno{font-size:12px;color:#555;margin-top:4px}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
-  .lbl{font-size:11px;color:#888;margin-bottom:2px}.val{font-size:13px;font-weight:500}
-  table{width:100%;border-collapse:collapse;margin:10px 0}
-  th{background:#f3f4f6;padding:6px 10px;text-align:left;font-size:11px;border:1px solid #ddd}
-  td{padding:6px 10px;font-size:12px;border:1px solid #ddd}
+  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:10px}
+  .school{font-size:18px;font-weight:bold}.rtitle{font-size:13px;font-weight:bold;margin-top:4px;letter-spacing:1px}
+  .rno{font-size:11px;color:#555;margin-top:3px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .lbl{font-size:10px;color:#888;margin-bottom:1px}.val{font-size:12px;font-weight:500}
+  table{width:100%;border-collapse:collapse;margin:8px 0}
+  th{background:#f3f4f6;padding:5px 8px;text-align:left;font-size:10px;border:1px solid #ddd}
+  td{padding:5px 8px;font-size:11px;border:1px solid #ddd}
   .tot td{font-weight:bold;background:#f9fafb}
-  .sig-row{display:flex;justify-content:space-between;margin-top:24px}
-  .sig-box{text-align:center;border-top:1px solid #333;width:160px;padding-top:4px;font-size:10px;color:#555}
-  .ftr{margin-top:12px;text-align:center;font-size:10px;color:#aaa;border-top:1px solid #eee;padding-top:8px}
+  .sig-row{display:flex;justify-content:space-between;margin-top:16px}
+  .sig-box{text-align:center;border-top:1px solid #333;width:150px;padding-top:3px;font-size:10px;color:#555}
+  .ftr{margin-top:8px;text-align:center;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:6px}
   @media print{body{padding:0}}
 `
 
@@ -379,37 +384,47 @@ function openReceiptWindow(receiptNumber: string, bodyHtml: string) {
   if (win) { win.document.write(html); win.document.close(); win.print() }
 }
 
-// Two copies (Office + Payer) on one A4 sheet — used only when a payment is actually collected.
+// Two copies (Office + Payer) on one A4 sheet — used for every printed receipt
+// (payment collection and passbook reprints alike). Sheet heights + cut-line are
+// budgeted to total well under the ~277mm usable A4 height (297mm page - 10mm
+// top/bottom margins) so both copies always land on a single page.
 function printDualCopyReceipt(data: ReceiptCardData) {
   openReceiptWindow(data.receipt_number, `
-<div class="sheet" style="height:138mm">${receiptCard(data, 'Office Copy')}</div>
+<div class="sheet" style="height:133mm">${receiptCard(data, 'Office Copy')}</div>
 <div class="cut-line">✂ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>
-<div class="sheet" style="height:138mm">${receiptCard(data, 'Payer Copy')}</div>`)
+<div class="sheet" style="height:133mm">${receiptCard(data, 'Payer Copy')}</div>`)
 }
 
-// Single copy — used for reprints (e.g. passbook), no office/payer split needed.
-function printSingleReceipt(data: ReceiptCardData) {
-  openReceiptWindow(data.receipt_number, `<div class="sheet">${receiptCard(data, '')}</div>`)
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 import dynamic from 'next/dynamic'
 
 export default function FeeManagement({
-  schoolId, adminName
+  schoolId, adminName, schoolName, schoolLogoUrl, schoolHeaderBlocks,
 }: {
   schoolId: number
   adminName?: string
+  // Passed down from the school-admin page's already-loaded `selectedSchool` (fetched
+  // before this component ever mounts) rather than fetched again here — avoids a race
+  // where a print button could be clicked before a fresh in-component fetch resolved,
+  // which showed a blank/placeholder school name on printed receipts.
+  schoolName?: string
+  schoolLogoUrl?: string | null
+  schoolHeaderBlocks?: ReceiptHeaderBlock[]
 }) {
   type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'students' | 'reports' | 'yearend'
   const [activeTab, setActiveTab] = useState<Tab>('overview')
 
   const hasOnlinePayments = useFeature('online-payments')
 
-  // Receipt branding — set once in School Profile, read here for every print function
+  // Receipt branding — set once in School Profile, read here for every print function.
+  // Seeded from props (the school-admin page's `selectedSchool`, already loaded before
+  // this component ever mounts) so there's never an empty-window race where a print
+  // button could be clicked before branding data exists. The fetch below just refreshes
+  // it in case School Profile was edited earlier in the same session without a reload.
   const [branding, setBranding] = useState<{ school_name: string; logo_url: string | null; receipt_header_blocks: ReceiptHeaderBlock[] }>({
-    school_name: '', logo_url: null, receipt_header_blocks: [],
+    school_name: schoolName ?? '', logo_url: schoolLogoUrl ?? null, receipt_header_blocks: schoolHeaderBlocks ?? [],
   })
   useEffect(() => {
     fetch(`/api/schools/${schoolId}`).then(r => r.ok ? r.json() : null).then(d => {
@@ -1769,11 +1784,12 @@ export default function FeeManagement({
       <td>${st.is_leaver ? st.leaver_reason : 'Continuing'}</td>
       <td>${(yeDecisions[st.student_id] || 'open').replace('writeoff','Write Off').replace('carry','Carry Forward').replace('open','Leave Open')}</td>
     </tr>`).join('')
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Year-End Statement ${academicYear}</title>
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Year-End Statement ${escapeHtml(academicYear)}</title>
 <style>
   body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:820px;margin:0 auto}
   .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:18px}
-  .title{font-size:20px;font-weight:bold}.sub{font-size:13px;color:#555;margin-top:4px}
+  .school{font-size:18px;font-weight:bold}
+  .title{font-size:20px;font-weight:bold;margin-top:4px}.sub{font-size:13px;color:#555;margin-top:4px}
   .sumbox{display:flex;gap:12px;margin:18px 0}
   .sumbox div{flex:1;border:1px solid #ddd;border-radius:8px;padding:10px;text-align:center}
   .sumbox .l{font-size:11px;color:#888}.sumbox .v{font-size:15px;font-weight:bold;margin-top:2px}
@@ -1783,7 +1799,13 @@ export default function FeeManagement({
   .ftr{margin-top:24px;text-align:center;font-size:11px;color:#aaa}
   @media print{body{padding:0}}
 </style></head><body>
-<div class="hdr"><div class="title">Year-End Financial Statement</div><div class="sub">Academic Year ${academicYear}</div></div>
+<div class="hdr">
+  ${branding.logo_url ? `<img src="${escapeHtml(branding.logo_url)}" style="height:44px;margin-bottom:6px;object-fit:contain" />` : ''}
+  ${renderHeaderBlocks(branding.receipt_header_blocks)}
+  <div class="school">${escapeHtml(branding.school_name || 'School')}</div>
+  <div class="title">Year-End Financial Statement</div>
+  <div class="sub">Academic Year ${escapeHtml(academicYear)}</div>
+</div>
 <div class="sumbox">
   <div><div class="l">Total Billed</div><div class="v">₹${Number(s.total_billed).toLocaleString('en-IN')}</div></div>
   <div><div class="l">Collected</div><div class="v">₹${Number(s.total_collected).toLocaleString('en-IN')}</div></div>
@@ -2001,6 +2023,7 @@ export default function FeeManagement({
         collected_by_name: payCollectedBy || null,
         transaction_ref: payRef || null, notes: payNotes || null,
         outstanding_before: openStudent.outstanding,
+        line_items: d.line_items || undefined,
       })
       setShowCollectForm(false)
       setPassoutOpenStudent(null)
@@ -2169,7 +2192,7 @@ export default function FeeManagement({
   function printPassbookReceipt(p: PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }) {
     if (!pbData) return
     const s = pbData.student
-    printSingleReceipt({
+    printDualCopyReceipt({
       school_name: branding.school_name || 'Fee Receipt', logo_url: branding.logo_url, header_blocks: branding.receipt_header_blocks,
       student_name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section || '',
       parent_name: s.parent_name, receipt_number: p.receipt_number,
@@ -2189,11 +2212,12 @@ export default function FeeManagement({
       <td style="text-align:right">${t.credit > 0 ? '₹' + Number(t.credit).toLocaleString('en-IN') : ''}</td>
       <td style="text-align:right">₹${Number(t.balance).toLocaleString('en-IN')}</td>
     </tr>`).join('')
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Statement ${s.name}</title>
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Statement ${escapeHtml(s.name)}</title>
 <style>
   body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:820px;margin:0 auto}
   .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:18px}
-  .title{font-size:20px;font-weight:bold}.sub{font-size:13px;color:#555;margin-top:4px}
+  .school{font-size:18px;font-weight:bold}
+  .title{font-size:20px;font-weight:bold;margin-top:4px}.sub{font-size:13px;color:#555;margin-top:4px}
   .info{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;font-size:13px}
   .sumbox{display:flex;gap:16px;margin-bottom:18px}
   .sumbox div{flex:1;border:1px solid #ddd;border-radius:8px;padding:10px;text-align:center}
@@ -2204,8 +2228,13 @@ export default function FeeManagement({
   .ftr{margin-top:24px;text-align:center;font-size:11px;color:#aaa}
   @media print{body{padding:0}}
 </style></head><body>
-<div class="hdr"><div class="title">Fee Statement (Passbook)</div>
-<div class="sub">${s.name} · Grade ${s.grade}${s.section} · Roll #${s.roll_number} · ${academicYear}</div></div>
+<div class="hdr">
+  ${branding.logo_url ? `<img src="${escapeHtml(branding.logo_url)}" style="height:44px;margin-bottom:6px;object-fit:contain" />` : ''}
+  ${renderHeaderBlocks(branding.receipt_header_blocks)}
+  <div class="school">${escapeHtml(branding.school_name || 'School')}</div>
+  <div class="title">Fee Statement (Passbook)</div>
+  <div class="sub">${escapeHtml(s.name)} · Grade ${escapeHtml(s.grade)}${escapeHtml(s.section || '')} · Roll #${escapeHtml(s.roll_number)} · ${escapeHtml(academicYear)}</div>
+</div>
 <div class="info">
   <div>Parent: ${s.parent_name || '—'}</div>
   <div>Phone: ${s.parent_phone || '—'}</div>
@@ -3835,15 +3864,21 @@ export default function FeeManagement({
                                 </div>
                                 <div className="flex gap-2">
                                   <button onClick={() => {
-                                    const selected = row.open_entries.filter(e => collectChecked.has(e.id))
-                                    const selectedTotal = selected.reduce((s, e) => s + Number(e.balance), 0)
+                                    // line_items from the payment API is the source of truth — it reflects
+                                    // every fee head actually paid, even when several are settled in one
+                                    // transaction (e.g. Tuition + Transport + Hostel). Ledger checkbox state
+                                    // can be empty/stale by the time Print is clicked, so it's only a fallback.
                                     let lines: { cat: string; period: string; amount: number }[]
-                                    if (paySuccess.amount >= selectedTotal - 0.01 && selected.length > 0) {
-                                      // full payment of selected bills — itemise each
-                                      lines = selected.map(e => ({ cat: e.category_name, period: e.period_label, amount: Number(e.balance) }))
+                                    if (paySuccess.line_items?.length) {
+                                      lines = paySuccess.line_items.map(li => ({ cat: li.category_name, period: li.period_label, amount: li.amount }))
                                     } else {
-                                      // partial payment — single line for the actual amount taken
-                                      lines = [{ cat: 'Part payment towards dues', period: selected.map(e => e.period_label).join(', ') || paySuccess.period_label, amount: paySuccess.amount }]
+                                      const selected = row.open_entries.filter(e => collectChecked.has(e.id))
+                                      const selectedTotal = selected.reduce((s, e) => s + Number(e.balance), 0)
+                                      if (paySuccess.amount >= selectedTotal - 0.01 && selected.length > 0) {
+                                        lines = selected.map(e => ({ cat: e.category_name, period: e.period_label, amount: Number(e.balance) }))
+                                      } else {
+                                        lines = [{ cat: paySuccess.category_name || 'Part payment towards dues', period: selected.map(e => e.period_label).join(', ') || paySuccess.period_label, amount: paySuccess.amount }]
+                                      }
                                     }
                                     printCounterReceipt(row, paySuccess, lines)
                                   }}
