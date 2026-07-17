@@ -384,9 +384,10 @@ function openReceiptWindow(receiptNumber: string, bodyHtml: string) {
   if (win) { win.document.write(html); win.document.close(); win.print() }
 }
 
-// Two copies (Office + Payer) on one A4 sheet — used only when a payment is actually collected.
-// Sheet heights + cut-line are budgeted to total well under the ~277mm usable A4 height
-// (297mm page - 10mm top/bottom margins) so both copies always land on a single page.
+// Two copies (Office + Payer) on one A4 sheet — used for every printed receipt
+// (payment collection and passbook reprints alike). Sheet heights + cut-line are
+// budgeted to total well under the ~277mm usable A4 height (297mm page - 10mm
+// top/bottom margins) so both copies always land on a single page.
 function printDualCopyReceipt(data: ReceiptCardData) {
   openReceiptWindow(data.receipt_number, `
 <div class="sheet" style="height:133mm">${receiptCard(data, 'Office Copy')}</div>
@@ -394,10 +395,6 @@ function printDualCopyReceipt(data: ReceiptCardData) {
 <div class="sheet" style="height:133mm">${receiptCard(data, 'Payer Copy')}</div>`)
 }
 
-// Single copy — used for reprints (e.g. passbook), no office/payer split needed.
-function printSingleReceipt(data: ReceiptCardData) {
-  openReceiptWindow(data.receipt_number, `<div class="sheet">${receiptCard(data, '')}</div>`)
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -2184,7 +2181,7 @@ export default function FeeManagement({
   function printPassbookReceipt(p: PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }) {
     if (!pbData) return
     const s = pbData.student
-    printSingleReceipt({
+    printDualCopyReceipt({
       school_name: branding.school_name || 'Fee Receipt', logo_url: branding.logo_url, header_blocks: branding.receipt_header_blocks,
       student_name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section || '',
       parent_name: s.parent_name, receipt_number: p.receipt_number,
