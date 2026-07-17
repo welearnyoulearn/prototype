@@ -401,19 +401,30 @@ function printDualCopyReceipt(data: ReceiptCardData) {
 import dynamic from 'next/dynamic'
 
 export default function FeeManagement({
-  schoolId, adminName
+  schoolId, adminName, schoolName, schoolLogoUrl, schoolHeaderBlocks,
 }: {
   schoolId: number
   adminName?: string
+  // Passed down from the school-admin page's already-loaded `selectedSchool` (fetched
+  // before this component ever mounts) rather than fetched again here — avoids a race
+  // where a print button could be clicked before a fresh in-component fetch resolved,
+  // which showed a blank/placeholder school name on printed receipts.
+  schoolName?: string
+  schoolLogoUrl?: string | null
+  schoolHeaderBlocks?: ReceiptHeaderBlock[]
 }) {
   type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'students' | 'reports' | 'yearend'
   const [activeTab, setActiveTab] = useState<Tab>('overview')
 
   const hasOnlinePayments = useFeature('online-payments')
 
-  // Receipt branding — set once in School Profile, read here for every print function
+  // Receipt branding — set once in School Profile, read here for every print function.
+  // Seeded from props (the school-admin page's `selectedSchool`, already loaded before
+  // this component ever mounts) so there's never an empty-window race where a print
+  // button could be clicked before branding data exists. The fetch below just refreshes
+  // it in case School Profile was edited earlier in the same session without a reload.
   const [branding, setBranding] = useState<{ school_name: string; logo_url: string | null; receipt_header_blocks: ReceiptHeaderBlock[] }>({
-    school_name: '', logo_url: null, receipt_header_blocks: [],
+    school_name: schoolName ?? '', logo_url: schoolLogoUrl ?? null, receipt_header_blocks: schoolHeaderBlocks ?? [],
   })
   useEffect(() => {
     fetch(`/api/schools/${schoolId}`).then(r => r.ok ? r.json() : null).then(d => {
