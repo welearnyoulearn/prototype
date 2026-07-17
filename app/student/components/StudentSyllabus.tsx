@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { BookOpen, Check, HelpCircle } from 'lucide-react'
+import { BookOpen, Check, HelpCircle, Lock } from 'lucide-react'
 import TopicContentViewer from '@/app/components/TopicContentViewer'
 import { INK, GREEN, BORDER, SURFACE, CREAM } from '@/app/components/ulearn/theme'
 import { Pills, ProgressBar, UlearnCard, StatusPill, QuizPill, BackBtn, Toast } from '@/app/components/ulearn/primitives'
@@ -203,7 +203,7 @@ export default function StudentSyllabus({ schoolId, classId }: Props) {
     <div className="max-w-3xl mx-auto space-y-5">
       <div className="rounded-3xl p-4 sm:p-5" style={{ background: CREAM, border: `1px solid ${BORDER}` }}>
         <h2 className="text-lg font-semibold" style={{ color: INK }}>My learning</h2>
-        <p className="text-sm text-gray-500 mt-0.5">You can only see topics your teacher has taught. Take the quiz once it&apos;s ready.</p>
+        <p className="text-sm text-gray-500 mt-0.5">Topics unlock as your teacher teaches them. Take the quiz once one&apos;s unlocked.</p>
       </div>
 
       <Pills items={subjectNames} value={activeSubject} onChange={setActiveSubject} color={GREEN} />
@@ -222,59 +222,73 @@ export default function StudentSyllabus({ schoolId, classId }: Props) {
       </UlearnCard>
 
       {allLocked && (
-        <UlearnCard className="p-6 text-center text-sm text-gray-400" borderColor={BORDER}>
-          Nothing in {subject.subject} yet — your teacher hasn&apos;t marked any topics as taught.
+        <UlearnCard className="p-4 text-center text-sm text-gray-400" borderColor={BORDER}>
+          Nothing unlocked in {subject.subject} yet — your teacher hasn&apos;t marked any topics as taught.
         </UlearnCard>
       )}
 
-      {subject.chapters.map(ch => {
-        const taughtTopics = ch.topics.filter(t => t.status === 'covered')
-        if (taughtTopics.length === 0) return null
-        return (
-          <UlearnCard key={ch.chapter_name} className="p-4" borderColor={BORDER}>
-            <div className="flex items-center gap-2 mb-3">
-              <BookOpen size={16} style={{ color: GREEN }} />
-              <span className="font-medium text-sm" style={{ color: INK }}>{ch.chapter_name}</span>
-            </div>
-            <div className="space-y-2">
-              {taughtTopics.map(t => {
-                const bank = parseQuestions(t.questions)
-                const score = quizScores[t.id]
+      {subject.chapters.map(ch => (
+        <UlearnCard key={ch.chapter_name} className="p-4" borderColor={BORDER}>
+          <div className="flex items-center gap-2 mb-3">
+            <BookOpen size={16} style={{ color: GREEN }} />
+            <span className="font-medium text-sm" style={{ color: INK }}>{ch.chapter_name}</span>
+            <span className="text-xs text-gray-400 ml-auto">{ch.covered}/{ch.topics.length} taught</span>
+          </div>
+          <div className="space-y-2">
+            {ch.topics.map(t => {
+              const taught = t.status === 'covered'
+              if (!taught) {
+                // Locked topics stay visible so the student can see the road ahead,
+                // but the name is all they get until the teacher marks it taught.
                 return (
-                  <div key={t.id} className="flex items-center gap-3 rounded-lg px-3 py-2 flex-wrap" style={{ background: SURFACE }}>
-                    <Check size={14} style={{ color: GREEN }} className="shrink-0" />
-                    <button
-                      data-testid={`topic-study-${t.id}`}
-                      onClick={() => setActiveTopic(t)}
-                      className="text-sm flex-1 text-left hover:underline min-w-[140px]"
-                      style={{ color: INK }}
-                    >
-                      {t.topic_name}
-                    </button>
-                    <StatusPill status="taught" />
-                    {score != null ? (
-                      <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: '#E1F5EE', color: '#085041' }}>
-                        your score {score}/10
-                      </span>
-                    ) : bank.length > 0 ? (
-                      <button
-                        data-testid={`topic-take-quiz-${t.id}`}
-                        onClick={() => openQuiz(t)}
-                        className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg text-white font-medium"
-                        style={{ background: GREEN }}
-                      >
-                        <HelpCircle size={12} /> Take quiz
-                      </button>
-                    ) : (
-                      <QuizPill count={0} />
-                    )}
+                  <div
+                    key={t.id}
+                    data-testid={`topic-locked-${t.id}`}
+                    className="flex items-center gap-3 rounded-lg px-3 py-2 flex-wrap"
+                    style={{ background: SURFACE, opacity: 0.7 }}
+                  >
+                    <Lock size={14} className="shrink-0" style={{ color: '#9b978d' }} />
+                    <span className="text-sm flex-1 min-w-[140px]" style={{ color: '#5F5E5A' }}>{t.topic_name}</span>
+                    <StatusPill status="locked" />
                   </div>
                 )
-              })}
-            </div>
-          </UlearnCard>
-        )
-      })}
+              }
+              const bank = parseQuestions(t.questions)
+              const score = quizScores[t.id]
+              return (
+                <div key={t.id} className="flex items-center gap-3 rounded-lg px-3 py-2 flex-wrap" style={{ background: SURFACE }}>
+                  <Check size={14} style={{ color: GREEN }} className="shrink-0" />
+                  <button
+                    data-testid={`topic-study-${t.id}`}
+                    onClick={() => setActiveTopic(t)}
+                    className="text-sm flex-1 text-left hover:underline min-w-[140px]"
+                    style={{ color: INK }}
+                  >
+                    {t.topic_name}
+                  </button>
+                  <StatusPill status="taught" />
+                  {score != null ? (
+                    <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: '#E1F5EE', color: '#085041' }}>
+                      your score {score}/10
+                    </span>
+                  ) : bank.length > 0 ? (
+                    <button
+                      data-testid={`topic-take-quiz-${t.id}`}
+                      onClick={() => openQuiz(t)}
+                      className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg text-white font-medium"
+                      style={{ background: GREEN }}
+                    >
+                      <HelpCircle size={12} /> Take quiz
+                    </button>
+                  ) : (
+                    <QuizPill count={0} />
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </UlearnCard>
+      ))}
 
       {activeTopic && (
         <TopicContentViewer topic={activeTopic} onClose={() => setActiveTopic(null)} role="student" />
