@@ -11,7 +11,12 @@ const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000'
 export default defineConfig({
   globalTeardown: './e2e/global-teardown.ts',
   testDir: './e2e',
+  // fullyParallel:false only serialises tests *within* a file — separate spec files still
+  // run concurrently across workers. These specs share one database and provision schools
+  // with overlapping state, so cross-file parallelism produced failures that vanish on a
+  // serial run. Until the specs are isolated per-schema, one worker is the honest setting.
   fullyParallel: false,
+  workers: 1,
   retries: process.env.CI ? 2 : 0,
   reporter: [['html', { outputFolder: `test-results/${timestamp}/html-report` }], ['list']],
   outputDir: `test-results/${timestamp}/artifacts`,
