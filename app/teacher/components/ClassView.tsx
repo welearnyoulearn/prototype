@@ -95,7 +95,7 @@ type ClassSubstitute = {
   time_to: string | null
 }
 
-type TeacherObj = {
+export type TeacherObj = {
   id: number
   name: string
   subject: string
@@ -447,7 +447,7 @@ type HomeworkSuggestion = {
   topicId: number
 }
 
-function SyllabusTracking({
+export function SyllabusTracking({
   classId, schoolId, grade, teacher, isClassTeacher, onGoToHomework,
 }: {
   classId: number
