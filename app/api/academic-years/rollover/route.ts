@@ -18,8 +18,8 @@ import { requireFeeAccess } from '@/lib/auth'
 //   school_id,
 //   from_year_id,      -- current academic year id (will be snapshotted)
 //   to_year_id,        -- next academic year id (will become current)
-//   final_grade,       -- grade whose students graduate (e.g. "12")
-//   grade_sequence,    -- ordered array of all grades e.g. ["Nursery","LKG","UKG","1","2"..."12"]
+//   final_grade,       -- grade whose students graduate (e.g. "10")
+//   grade_sequence,    -- ordered array of all grades e.g. ["Nursery","LKG","UKG","1","2"..."10"]
 // }
 //
 // Returns: { snapshotted, promoted, graduated, errors }
@@ -119,7 +119,14 @@ export async function POST(req: NextRequest) {
         continue
       }
 
-      const isGraduating = final_grade && student.grade === final_grade
+      // A student whose grade is the configured final_grade, OR whose grade isn't in
+      // the current sequence at all but is purely numeric and higher than every grade
+      // in it (e.g. a grade 11/12 student left over from a school that shortened its
+      // ladder to end at grade 10), is treated as graduating rather than silently
+      // stuck un-promoted.
+      const maxSeqNum = Math.max(0, ...grade_sequence.filter((g: string) => /^\d+$/.test(g)).map(Number))
+      const isBeyondSequence = /^\d+$/.test(student.grade) && Number(student.grade) > maxSeqNum
+      const isGraduating = (!!final_grade && student.grade === final_grade) || isBeyondSequence
       const nextGrade = isGraduating
         ? null
         : nextGradeInSequence(student.grade, grade_sequence)
