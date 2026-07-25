@@ -1352,6 +1352,7 @@ export async function initDB() {
 
     // ── Fee receipt branding (logo reuses existing logo_url; header is a list of styled blocks) ──
     `ALTER TABLE schools ADD COLUMN IF NOT EXISTS receipt_header_blocks JSONB DEFAULT '[]'`,
+    `ALTER TABLE schools ADD COLUMN IF NOT EXISTS logo_align VARCHAR(10) DEFAULT 'center'`,
   ]
 
   for (const sql of migrations) {
@@ -1807,4 +1808,5 @@ async function runIncrementalMigrations() {
 
   // ── Fee receipt branding (logo reuses existing logo_url; header is a list of styled blocks) ──
   await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS receipt_header_blocks JSONB DEFAULT '[]'`).catch(() => {})
+  await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS logo_align VARCHAR(10) DEFAULT 'center'`).catch(() => {})
 }
