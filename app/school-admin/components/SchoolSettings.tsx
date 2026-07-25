@@ -13,6 +13,7 @@ type SchoolData = {
   phone: string; email: string; address: string
   school_code: string; grading_scheme: GradeRow[]; board?: string
   logo_url?: string | null; receipt_header_blocks?: ReceiptHeaderBlock[]
+  logo_align?: 'left' | 'center' | 'right' | null
 }
 
 type GradeRow = { grade: string; min: number; max: number }
@@ -118,6 +119,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   })
   const [scheme, setScheme] = useState<GradeRow[]>(DEFAULT_GRADING)
   const [logoUrl, setLogoUrl] = useState('')
+  const [logoAlign, setLogoAlign] = useState<'left' | 'center' | 'right'>('center')
   const [headerBlocks, setHeaderBlocks] = useState<ReceiptHeaderBlock[]>([])
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoUploadError, setLogoUploadError] = useState('')
@@ -200,6 +202,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       })
       if (d.grading_scheme?.length) setScheme(d.grading_scheme)
       setLogoUrl(d.logo_url ?? '')
+      setLogoAlign(d.logo_align ?? 'center')
       setHeaderBlocks(d.receipt_header_blocks?.length ? d.receipt_header_blocks : [])
     } finally { setLoading(false) }
   }
@@ -254,6 +257,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
         body: JSON.stringify({
           ...profile, board: profile.board || null,
           logo_url: logoUrl || null,
+          logo_align: logoAlign,
           receipt_header_blocks: headerBlocks.filter(b => b.text.trim()),
         }),
       })
@@ -779,6 +783,21 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                 </div>
                 <p className="text-xs text-gray-400 mt-1">JPG or PNG, up to 2MB</p>
                 {logoUploadError && <p className="text-xs text-red-500 mt-1">{logoUploadError}</p>}
+
+                {logoUrl && (
+                  <div className="mt-3">
+                    <label className="block text-xs font-semibold text-gray-500 mb-1.5">Logo Position</label>
+                    <div className="flex gap-2">
+                      {(['left', 'center', 'right'] as const).map(a => (
+                        <button key={a} type="button" data-testid={`btn-logo-align-${a}`}
+                          onClick={() => setLogoAlign(a)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border capitalize ${logoAlign === a ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                          {a}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -824,22 +843,46 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                 + Add Line{headerBlocks.length >= 6 ? ' (max 6)' : ''}
               </button>
 
-              {/* Live preview — mirrors exactly what prints on the receipt header */}
+              {/* Live preview — mirrors exactly what prints at the top of a fee receipt */}
               <div className="border border-gray-100 rounded-xl p-4 bg-gray-50">
-                <p className="text-xs font-semibold text-gray-400 mb-2">Preview</p>
-                <div className="bg-white border border-gray-200 rounded-lg p-4 text-center">
-                  {logoUrl && <img src={logoUrl} alt="School logo" className="h-12 mx-auto mb-2 object-contain" />}
-                  {headerBlocks.filter(b => b.text.trim()).map((b, idx) => (
-                    <div key={idx}
-                      style={{
-                        fontSize: HEADER_BLOCK_SIZE_PX[b.size], fontWeight: b.bold ? 700 : 400,
-                        fontStyle: b.italic ? 'italic' : 'normal', textAlign: b.align,
-                      }}>
-                      {b.text}
-                    </div>
-                  ))}
-                  {!logoUrl && headerBlocks.filter(b => b.text.trim()).length === 0 && (
-                    <p className="text-xs text-gray-300">No branding set — receipts will show just the school name</p>
+                <p className="text-xs font-semibold text-gray-400 mb-2">Receipt Preview</p>
+                <div className="bg-white border border-gray-200 rounded-lg p-5 max-w-md mx-auto" data-testid="receipt-header-preview">
+                  <div className="text-center border-b-2 border-gray-800 pb-2 mb-3">
+                    {logoUrl && (
+                      <div style={{ textAlign: logoAlign }}>
+                        <img src={logoUrl} alt="School logo" className="h-12 mb-2 object-contain inline-block" />
+                      </div>
+                    )}
+                    <div className="text-lg font-bold">{profile.name || 'School Name'}</div>
+                    {headerBlocks.filter(b => b.text.trim()).map((b, idx) => (
+                      <div key={idx}
+                        style={{
+                          fontSize: HEADER_BLOCK_SIZE_PX[b.size], fontWeight: b.bold ? 700 : 400,
+                          fontStyle: b.italic ? 'italic' : 'normal', textAlign: b.align,
+                        }}>
+                        {b.text}
+                      </div>
+                    ))}
+                    <div className="text-xs font-bold tracking-wide mt-1">FEE RECEIPT</div>
+                    <div className="text-[11px] text-gray-500 mt-0.5">Receipt No: <strong>RCP-000-0000-000000</strong></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-left mb-2">
+                    <div><div className="text-[10px] text-gray-400">Student Name</div><div className="text-xs font-medium">Sample Student</div></div>
+                    <div><div className="text-[10px] text-gray-400">Roll Number</div><div className="text-xs font-medium">wlyl-stu-sample-0000</div></div>
+                    <div><div className="text-[10px] text-gray-400">Class</div><div className="text-xs font-medium">Grade 1A</div></div>
+                    <div><div className="text-[10px] text-gray-400">Parent / Guardian</div><div className="text-xs font-medium">Sample Parent</div></div>
+                  </div>
+                  <table className="w-full text-xs border-collapse mb-2">
+                    <thead><tr className="bg-gray-100"><th className="text-left p-1 border border-gray-200 text-[10px]">Fee Head</th><th className="text-left p-1 border border-gray-200 text-[10px]">Period</th><th className="text-right p-1 border border-gray-200 text-[10px]">Amount</th></tr></thead>
+                    <tbody><tr><td className="p-1 border border-gray-200">Tuition Fee</td><td className="p-1 border border-gray-200">2026-27</td><td className="p-1 border border-gray-200 text-right">₹1,200</td></tr></tbody>
+                    <tfoot><tr className="font-bold bg-gray-50"><td colSpan={2} className="p-1 border border-gray-200 text-right">Total Paid:</td><td className="p-1 border border-gray-200 text-right">₹1,200</td></tr></tfoot>
+                  </table>
+                  <div className="flex justify-between mt-4">
+                    <div className="text-center border-t border-gray-800 w-28 pt-1 text-[10px] text-gray-500">Collected By</div>
+                    <div className="text-center border-t border-gray-800 w-28 pt-1 text-[10px] text-gray-500">Authorized Signatory</div>
+                  </div>
+                  {!logoUrl && !profile.name && headerBlocks.filter(b => b.text.trim()).length === 0 && (
+                    <p className="text-xs text-gray-300 text-center mt-2">No branding set — receipts will show just a generic header</p>
                   )}
                 </div>
               </div>

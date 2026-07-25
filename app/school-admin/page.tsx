@@ -49,6 +49,7 @@ type School = {
   country: string
   status: string
   logo_url?: string | null
+  logo_align?: 'left' | 'center' | 'right' | null
   receipt_header_blocks?: { text: string; size: 'sm' | 'md' | 'lg' | 'xl'; bold: boolean; italic: boolean; align: 'left' | 'center' | 'right' }[]
 }
 
@@ -581,7 +582,7 @@ function SchoolAdmin() {
                 {visited.has('export')           && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}
                 {visited.has('settings')         && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} /></div>}
                 {visited.has('profile')          && <div hidden={activeNav !== 'profile'}><StaffProfile /></div>}
-                {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} schoolName={selectedSchool.name} schoolLogoUrl={selectedSchool.logo_url ?? null} schoolHeaderBlocks={selectedSchool.receipt_header_blocks ?? []} /></div>}
+                {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} schoolName={selectedSchool.name} schoolLogoUrl={selectedSchool.logo_url ?? null} schoolLogoAlign={selectedSchool.logo_align ?? 'center'} schoolHeaderBlocks={selectedSchool.receipt_header_blocks ?? []} /></div>}
                 {visited.has('year-rollover')    && <div hidden={activeNav !== 'year-rollover'}><YearRollover schoolId={selectedSchool.id} /></div>}
               </FeaturesProvider>
             )}

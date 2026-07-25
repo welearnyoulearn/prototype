@@ -298,6 +298,7 @@ function renderHeaderBlocks(blocks: ReceiptHeaderBlock[] = []): string {
 type ReceiptCardData = {
   school_name: string
   logo_url: string | null
+  logo_align: 'left' | 'center' | 'right'
   header_blocks: ReceiptHeaderBlock[]
   student_name: string
   roll_number: string
@@ -325,10 +326,10 @@ function receiptCard(data: ReceiptCardData, copyLabel: string): string {
   ).join('')
   return `
 ${copyLabel ? `<div class="copy-label">${escapeHtml(copyLabel)}</div>` : ''}
-${data.logo_url ? `<div style="text-align:center"><img src="${escapeHtml(data.logo_url)}" style="height:48px;margin-bottom:6px;object-fit:contain" /></div>` : ''}
+${data.logo_url ? `<div style="text-align:${data.logo_align}"><img src="${escapeHtml(data.logo_url)}" style="height:48px;margin-bottom:6px;object-fit:contain" /></div>` : ''}
 <div class="hdr">
-  ${renderHeaderBlocks(data.header_blocks)}
   <div class="school">${escapeHtml(data.school_name)}</div>
+  ${renderHeaderBlocks(data.header_blocks)}
   <div class="rtitle">FEE RECEIPT</div>
   <div class="rno">Receipt No: <strong>${escapeHtml(data.receipt_number)}</strong></div>
 </div>
@@ -377,11 +378,27 @@ const RECEIPT_STYLE = `
   @media print{body{padding:0}}
 `
 
+// Writes HTML into a popup window and prints only after any <img> tags (e.g. school
+// logo from Cloudinary) have finished loading — printing immediately after
+// document.write() races the image request and can print a blank logo.
+function writeAndPrint(win: Window, html: string) {
+  win.document.write(html); win.document.close()
+
+  const images = Array.from(win.document.images)
+  if (images.length === 0) { win.print(); return }
+  let remaining = images.length
+  const proceed = () => { if (--remaining <= 0) win.print() }
+  images.forEach(img => {
+    if (img.complete) proceed()
+    else { img.addEventListener('load', proceed); img.addEventListener('error', proceed) }
+  })
+}
+
 function openReceiptWindow(receiptNumber: string, bodyHtml: string) {
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${escapeHtml(receiptNumber)}</title>
 <style>${RECEIPT_STYLE}</style></head><body>${bodyHtml}</body></html>`
   const win = window.open('', '_blank', 'width=800,height=900')
-  if (win) { win.document.write(html); win.document.close(); win.print() }
+  if (win) writeAndPrint(win, html)
 }
 
 // Two copies (Office + Payer) on one A4 sheet — used for every printed receipt
@@ -401,7 +418,7 @@ function printDualCopyReceipt(data: ReceiptCardData) {
 import dynamic from 'next/dynamic'
 
 export default function FeeManagement({
-  schoolId, adminName, schoolName, schoolLogoUrl, schoolHeaderBlocks,
+  schoolId, adminName, schoolName, schoolLogoUrl, schoolLogoAlign, schoolHeaderBlocks,
 }: {
   schoolId: number
   adminName?: string
@@ -411,6 +428,7 @@ export default function FeeManagement({
   // which showed a blank/placeholder school name on printed receipts.
   schoolName?: string
   schoolLogoUrl?: string | null
+  schoolLogoAlign?: 'left' | 'center' | 'right' | null
   schoolHeaderBlocks?: ReceiptHeaderBlock[]
 }) {
   type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'students' | 'reports' | 'yearend'
@@ -423,12 +441,12 @@ export default function FeeManagement({
   // this component ever mounts) so there's never an empty-window race where a print
   // button could be clicked before branding data exists. The fetch below just refreshes
   // it in case School Profile was edited earlier in the same session without a reload.
-  const [branding, setBranding] = useState<{ school_name: string; logo_url: string | null; receipt_header_blocks: ReceiptHeaderBlock[] }>({
-    school_name: schoolName ?? '', logo_url: schoolLogoUrl ?? null, receipt_header_blocks: schoolHeaderBlocks ?? [],
+  const [branding, setBranding] = useState<{ school_name: string; logo_url: string | null; logo_align: 'left' | 'center' | 'right'; receipt_header_blocks: ReceiptHeaderBlock[] }>({
+    school_name: schoolName ?? '', logo_url: schoolLogoUrl ?? null, logo_align: schoolLogoAlign ?? 'center', receipt_header_blocks: schoolHeaderBlocks ?? [],
   })
   useEffect(() => {
     fetch(`/api/schools/${schoolId}`).then(r => r.ok ? r.json() : null).then(d => {
-      if (d) setBranding({ school_name: d.name ?? '', logo_url: d.logo_url ?? null, receipt_header_blocks: d.receipt_header_blocks ?? [] })
+      if (d) setBranding({ school_name: d.name ?? '', logo_url: d.logo_url ?? null, logo_align: d.logo_align ?? 'center', receipt_header_blocks: d.receipt_header_blocks ?? [] })
     }).catch(() => {})
   }, [schoolId])
 
@@ -1800,9 +1818,9 @@ export default function FeeManagement({
   @media print{body{padding:0}}
 </style></head><body>
 <div class="hdr">
-  ${branding.logo_url ? `<img src="${escapeHtml(branding.logo_url)}" style="height:44px;margin-bottom:6px;object-fit:contain" />` : ''}
-  ${renderHeaderBlocks(branding.receipt_header_blocks)}
+  ${branding.logo_url ? `<div style="text-align:${branding.logo_align}"><img src="${escapeHtml(branding.logo_url)}" style="height:44px;margin-bottom:6px;object-fit:contain" /></div>` : ''}
   <div class="school">${escapeHtml(branding.school_name || 'School')}</div>
+  ${renderHeaderBlocks(branding.receipt_header_blocks)}
   <div class="title">Year-End Financial Statement</div>
   <div class="sub">Academic Year ${escapeHtml(academicYear)}</div>
 </div>
@@ -1818,7 +1836,7 @@ export default function FeeManagement({
 <div class="ftr">Generated ${new Date().toLocaleString('en-IN')} · ${adminName || 'Admin'} · Computer-generated statement.</div>
 </body></html>`
     const win = window.open('', '_blank', 'width=900,height=680')
-    if (win) { win.document.write(html); win.document.close(); win.print() }
+    if (win) writeAndPrint(win, html)
   }
 
   async function fetchAmendImpact(catId: number, grade: string) {
@@ -2039,7 +2057,7 @@ export default function FeeManagement({
   // Print a multi-line receipt for counter collection
   function printCounterReceipt(row: StudentRow, paid: PaySuccess, lines: { cat: string; period: string; amount: number }[]) {
     printDualCopyReceipt({
-      school_name: paid.school_name || 'School', logo_url: branding.logo_url, header_blocks: branding.receipt_header_blocks,
+      school_name: paid.school_name || 'School', logo_url: branding.logo_url, logo_align: branding.logo_align, header_blocks: branding.receipt_header_blocks,
       student_name: row.student_name, roll_number: row.roll_number, grade: row.grade, section: row.section,
       parent_name: paid.parent_name, receipt_number: paid.receipt_number,
       lines: lines.map(l => ({ label: l.cat, period: l.period, amount: l.amount })),
@@ -2193,7 +2211,7 @@ export default function FeeManagement({
     if (!pbData) return
     const s = pbData.student
     printDualCopyReceipt({
-      school_name: branding.school_name || 'Fee Receipt', logo_url: branding.logo_url, header_blocks: branding.receipt_header_blocks,
+      school_name: branding.school_name || 'Fee Receipt', logo_url: branding.logo_url, logo_align: branding.logo_align, header_blocks: branding.receipt_header_blocks,
       student_name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section || '',
       parent_name: s.parent_name, receipt_number: p.receipt_number,
       lines: [{ label: p.fee_head_name || p.category_name || 'Fee', period: p.period_label || '', amount: p.amount }],
@@ -2229,9 +2247,9 @@ export default function FeeManagement({
   @media print{body{padding:0}}
 </style></head><body>
 <div class="hdr">
-  ${branding.logo_url ? `<img src="${escapeHtml(branding.logo_url)}" style="height:44px;margin-bottom:6px;object-fit:contain" />` : ''}
-  ${renderHeaderBlocks(branding.receipt_header_blocks)}
+  ${branding.logo_url ? `<div style="text-align:${branding.logo_align}"><img src="${escapeHtml(branding.logo_url)}" style="height:44px;margin-bottom:6px;object-fit:contain" /></div>` : ''}
   <div class="school">${escapeHtml(branding.school_name || 'School')}</div>
+  ${renderHeaderBlocks(branding.receipt_header_blocks)}
   <div class="title">Fee Statement (Passbook)</div>
   <div class="sub">${escapeHtml(s.name)} · Grade ${escapeHtml(s.grade)}${escapeHtml(s.section || '')} · Roll #${escapeHtml(s.roll_number)} · ${escapeHtml(academicYear)}</div>
 </div>
@@ -2250,7 +2268,7 @@ export default function FeeManagement({
 <div class="ftr">Generated ${new Date().toLocaleString('en-IN')} · Computer-generated statement.</div>
 </body></html>`
     const win = window.open('', '_blank', 'width=900,height=680')
-    if (win) { win.document.write(html); win.document.close(); win.print() }
+    if (win) writeAndPrint(win, html)
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
