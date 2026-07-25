@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { CURRICULA } from '@/lib/curricula'
 import StudentSyllabus from '../../student/components/StudentSyllabus'
+import { GRADE_SEQUENCE } from '@/lib/grades'
 
 type Props = { schoolId: number; onNavigate?: (tab: string) => void }
 
@@ -110,7 +111,8 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
     const grade = newClass.grade.trim()
     const section = newClass.section.trim().toUpperCase()
     if (!grade || !section) { setError('Grade and Section required'); return }
-    if (!/^[0-9]+$/.test(grade) || parseInt(grade) < 1 || parseInt(grade) > 12) { setError('Grade must be 1–12'); return }
+    const maxNumericGrade = Math.max(...GRADE_SEQUENCE.filter(g => /^\d+$/.test(g)).map(Number))
+    if (!/^[0-9]+$/.test(grade) || parseInt(grade) < 1 || parseInt(grade) > maxNumericGrade) { setError(`Grade must be 1–${maxNumericGrade}`); return }
     if (!/^[A-Z]$/.test(section)) { setError('Section must be a single letter A–Z'); return }
     setAddingClass(true)
     setSetupMsg('Creating class...')
@@ -379,14 +381,14 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
                   <span className="text-xs font-medium text-gray-600">From Grade</span>
                   <select value={newSetFrom} onChange={e => setNewSetFrom(e.target.value)}
                     className="border border-indigo-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map(g => <option key={g} value={g}>{g}</option>)}
+                    {GRADE_SEQUENCE.filter(g => /^\d+$/.test(g)).map(Number).map(g => <option key={g} value={g}>{g}</option>)}
                   </select>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-medium text-gray-600">To Grade</span>
                   <select value={newSetTo} onChange={e => setNewSetTo(e.target.value)}
                     className="border border-indigo-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map(g => <option key={g} value={g}>{g}</option>)}
+                    {GRADE_SEQUENCE.filter(g => /^\d+$/.test(g)).map(Number).map(g => <option key={g} value={g}>{g}</option>)}
                   </select>
                 </div>
               </div>

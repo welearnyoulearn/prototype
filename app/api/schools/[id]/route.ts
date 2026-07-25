@@ -37,7 +37,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const { id } = await params
     try {
       const body = await req.json()
-      const { name, type, city, country, status, phone, email, address, logo_url, grading_scheme, board, upi_id, restore } = body
+      const { name, type, city, country, status, phone, email, address, logo_url, logo_align, grading_scheme, board, upi_id, restore, receipt_header_blocks } = body
 
       // Restore a soft-deleted school
       if (restore) {
@@ -47,27 +47,49 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         return NextResponse.json(r.rows[0])
       }
 
+      const VALID_SIZES = new Set(['sm', 'md', 'lg', 'xl'])
+      const VALID_ALIGNS = new Set(['left', 'center', 'right'])
+      if (logo_align !== undefined && logo_align !== null && !VALID_ALIGNS.has(logo_align)) {
+        return NextResponse.json({ error: 'Invalid logo_align' }, { status: 400 })
+      }
+      if (receipt_header_blocks !== undefined) {
+        if (!Array.isArray(receipt_header_blocks) || receipt_header_blocks.length > 6) {
+          return NextResponse.json({ error: 'receipt_header_blocks must be an array of at most 6 items' }, { status: 400 })
+        }
+        for (const b of receipt_header_blocks) {
+          if (typeof b?.text !== 'string' || b.text.length > 200
+            || !VALID_SIZES.has(b.size) || !VALID_ALIGNS.has(b.align)
+            || typeof b.bold !== 'boolean' || typeof b.italic !== 'boolean') {
+            return NextResponse.json({ error: 'Invalid receipt header block' }, { status: 400 })
+          }
+        }
+      }
+
       const result = await pool.query(
         `UPDATE schools SET
-          name           = COALESCE($1,  name),
-          type           = COALESCE($2,  type),
-          city           = COALESCE($3,  city),
-          country        = COALESCE($4,  country),
-          status         = COALESCE($5,  status),
-          phone          = COALESCE($6,  phone),
-          email          = COALESCE($7,  email),
-          address        = COALESCE($8,  address),
-          logo_url       = COALESCE($9,  logo_url),
-          grading_scheme = COALESCE($10, grading_scheme),
-          board          = COALESCE($11, board),
-          upi_id         = COALESCE($13, upi_id)
+          name                  = COALESCE($1,  name),
+          type                  = COALESCE($2,  type),
+          city                  = COALESCE($3,  city),
+          country               = COALESCE($4,  country),
+          status                = COALESCE($5,  status),
+          phone                 = COALESCE($6,  phone),
+          email                 = COALESCE($7,  email),
+          address               = COALESCE($8,  address),
+          logo_url              = COALESCE($9,  logo_url),
+          grading_scheme        = COALESCE($10, grading_scheme),
+          board                 = COALESCE($11, board),
+          upi_id                = COALESCE($13, upi_id),
+          receipt_header_blocks = COALESCE($14, receipt_header_blocks),
+          logo_align             = COALESCE($15, logo_align)
          WHERE id = $12 RETURNING *`,
         [name, type, city, country, status, phone, email, address,
          logo_url,
          grading_scheme !== undefined ? JSON.stringify(grading_scheme) : null,
          board ?? null,
          id,
-         upi_id ?? null]
+         upi_id ?? null,
+         receipt_header_blocks !== undefined ? JSON.stringify(receipt_header_blocks) : null,
+         logo_align ?? null]
       )
       if (result.rowCount === 0) return NextResponse.json({ error: 'School not found' }, { status: 404 })
       return NextResponse.json(result.rows[0])

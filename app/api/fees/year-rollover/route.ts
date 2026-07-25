@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { FINAL_GRADE } from '@/lib/grades'
 
 // GET /api/fees/year-rollover?school_id=X
 // Returns list of closed academic years for this school.
@@ -35,7 +36,7 @@ function nextYearLabel(label: string): string {
 // Body: { school_id, from_year, done_by? }
 // One-shot year rollover:
 //   1. Auto-carry all unpaid dues → "Previous Year Dues" in next year
-//   2. Promote every active student grade++ (Grade 12 → status=left)
+//   2. Promote every active student grade++ (final grade → status=left)
 //   3. Create next academic year, set as current
 //   4. Close from_year in fee_year_close
 export async function POST(req: NextRequest) {
@@ -113,11 +114,11 @@ export async function POST(req: NextRequest) {
       )
       if (pd) {
         prevDuesCatId = pd.id
-        await client.query(`UPDATE fee_categories SET is_active = TRUE WHERE id = $1`, [pd.id])
+        await client.query(`UPDATE fee_categories SET is_active = TRUE, is_system = TRUE WHERE id = $1`, [pd.id])
       } else {
         const { rows: [created] } = await client.query(
-          `INSERT INTO fee_categories (school_id, name, description, frequency, category_type, is_active)
-           VALUES ($1, 'Previous Year Dues', 'Carried-forward unpaid balance from previous year', 'one_time', 'fixed', TRUE)
+          `INSERT INTO fee_categories (school_id, name, description, frequency, category_type, is_active, is_system)
+           VALUES ($1, 'Previous Year Dues', 'Carried-forward unpaid balance from previous year', 'one_time', 'fixed', TRUE, TRUE)
            RETURNING id`,
           [school_id]
         )
@@ -136,23 +137,25 @@ export async function POST(req: NextRequest) {
       )
 
       // ── STEP 3: Carry forward all unpaid dues ────────────────────────────────
-      // Grade 12 graduates (and inactive students) are excluded — their dues must go
-      // through the passout ledger via the year-end / passout API, not auto-carried
+      // Final-grade graduates (and inactive students) are excluded — their dues must
+      // go through the passout ledger via the year-end / passout API, not auto-carried
       // into the next year (they won't be enrolled in it).
       const { rows: unpaidStudents } = await client.query(
         `SELECT l.student_id,
                 SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)) AS balance,
                 array_agg(l.id) AS ledger_ids,
-                array_agg(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)) AS balances
+                array_agg(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)) AS balances,
+                string_agg(fc.name || ' - ' || l.period_label, ', ' ORDER BY l.id) AS breakdown
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
+         JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE l.school_id = $1 AND l.academic_year = $2
            AND l.status IN ('pending','overdue','partial')
            AND GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) > 0
            AND s.status = 'active'
-           AND s.grade != '12'
+           AND NOT (s.grade = $3 OR (s.grade ~ '^[0-9]+$' AND s.grade::int > $3::int))
          GROUP BY l.student_id`,
-        [school_id, from_year]
+        [school_id, from_year, FINAL_GRADE]
       )
 
       let carriedCount = 0
@@ -170,9 +173,10 @@ export async function POST(req: NextRequest) {
               period_label, amount_due, due_date, status, notes, source_academic_year)
            VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, 'pending', $8, $9)
            ON CONFLICT (student_id, fee_category_id, academic_year, period_label)
-           DO UPDATE SET amount_due = EXCLUDED.amount_due, source_academic_year = EXCLUDED.source_academic_year`,
+           DO UPDATE SET amount_due = EXCLUDED.amount_due, notes = EXCLUDED.notes,
+                         source_academic_year = EXCLUDED.source_academic_year`,
           [school_id, row.student_id, prevDuesCatId, to_year, periodLabel,
-           balance, `${toStartYear + 1}-03-31`, `Auto-carried from ${from_year}`, from_year]
+           balance, `${toStartYear + 1}-03-31`, `Carried from ${from_year}: ${row.breakdown}`, from_year]
         )
 
         // Mark original bills as settled/waived in old year.

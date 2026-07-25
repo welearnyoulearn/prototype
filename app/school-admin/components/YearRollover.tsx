@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { GRADE_SEQUENCE, FINAL_GRADE } from '@/lib/grades'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -24,7 +25,7 @@ type RolloverResult = {
 }
 
 // Default grade sequence — admin can edit in UI
-const DEFAULT_SEQUENCE = ['Nursery', 'LKG', 'UKG', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
+const DEFAULT_SEQUENCE = GRADE_SEQUENCE
 
 // ── Helper ─────────────────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ export default function YearRollover({ schoolId }: { schoolId: number }) {
 
   // Grade config
   const [sequenceStr, setSequenceStr] = useState(DEFAULT_SEQUENCE.join(', '))
-  const [finalGrade, setFinalGrade]   = useState('12')
+  const [finalGrade, setFinalGrade]   = useState(FINAL_GRADE)
 
   useEffect(() => { init() }, [schoolId])
 
