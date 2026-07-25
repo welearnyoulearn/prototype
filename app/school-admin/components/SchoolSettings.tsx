@@ -847,24 +847,34 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               <div className="border border-gray-100 rounded-xl p-4 bg-gray-50">
                 <p className="text-xs font-semibold text-gray-400 mb-2">Receipt Preview</p>
                 <div className="bg-white border border-gray-200 rounded-lg p-5 max-w-md mx-auto" data-testid="receipt-header-preview">
-                  <div className="text-center border-b-2 border-gray-800 pb-2 mb-3">
-                    {logoUrl && (
-                      <div style={{ textAlign: logoAlign }}>
-                        <img src={logoUrl} alt="School logo" className="h-12 mb-2 object-contain inline-block" />
+                  <div className="border-b-2 border-gray-800 pb-2 mb-3">
+                    {logoUrl && logoAlign === 'center' && (
+                      <div className="text-center mb-1">
+                        <img src={logoUrl} alt="School logo" className="h-14 mx-auto object-contain" />
                       </div>
                     )}
-                    <div className="text-lg font-bold">{profile.name || 'School Name'}</div>
-                    {headerBlocks.filter(b => b.text.trim()).map((b, idx) => (
-                      <div key={idx}
-                        style={{
-                          fontSize: HEADER_BLOCK_SIZE_PX[b.size], fontWeight: b.bold ? 700 : 400,
-                          fontStyle: b.italic ? 'italic' : 'normal', textAlign: b.align,
-                        }}>
-                        {b.text}
+                    <div className="relative">
+                      {logoUrl && logoAlign === 'left' && (
+                        <img src={logoUrl} alt="School logo" className="h-16 object-contain absolute left-0 top-1/2 -translate-y-1/2" />
+                      )}
+                      {logoUrl && logoAlign === 'right' && (
+                        <img src={logoUrl} alt="School logo" className="h-16 object-contain absolute right-0 top-1/2 -translate-y-1/2" />
+                      )}
+                      <div className="text-center">
+                        <div className="text-lg font-bold">{profile.name || 'School Name'}</div>
+                        {headerBlocks.filter(b => b.text.trim()).map((b, idx) => (
+                          <div key={idx}
+                            style={{
+                              fontSize: HEADER_BLOCK_SIZE_PX[b.size], fontWeight: b.bold ? 700 : 400,
+                              fontStyle: b.italic ? 'italic' : 'normal', textAlign: b.align,
+                            }}>
+                            {b.text}
+                          </div>
+                        ))}
+                        <div className="text-xs font-bold tracking-wide mt-1">FEE RECEIPT</div>
+                        <div className="text-[11px] text-gray-500 mt-0.5">Receipt No: <strong>RCP-000-0000-000000</strong></div>
                       </div>
-                    ))}
-                    <div className="text-xs font-bold tracking-wide mt-1">FEE RECEIPT</div>
-                    <div className="text-[11px] text-gray-500 mt-0.5">Receipt No: <strong>RCP-000-0000-000000</strong></div>
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-left mb-2">
                     <div><div className="text-[10px] text-gray-400">Student Name</div><div className="text-xs font-medium">Sample Student</div></div>

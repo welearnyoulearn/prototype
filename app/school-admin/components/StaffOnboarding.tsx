@@ -2,6 +2,7 @@
 
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { parseCSV } from '@/lib/parseCSV'
+import { GRADE_SEQUENCE } from '@/lib/grades'
 
 type Props = { schoolId: number; onRefresh?: () => void }
 
@@ -25,12 +26,12 @@ const EMPTY_ROW: TeacherRow = {
 
 const CSV_HEADER = 'name,email,subject,phone,department,qualification,date_of_joining,staff_type,teaches_grades'
 const CSV_EXAMPLE = `Priya Sharma,priya@school.com,Mathematics,9876543210,Science,B.Ed,2023-06-01,teaching,"8,9,10"
-Raj Kumar,raj@school.com,Physics,9876543211,Science,M.Sc,2022-07-15,teaching,"11,12"
+Raj Kumar,raj@school.com,Physics,9876543211,Science,M.Sc,2022-07-15,teaching,"9,10"
 Suresh Patel,suresh@school.com,,,Admin,,2021-01-10,non_teaching,
 # Note: wrap grades in quotes — "8,9,10" — or leave blank for all grades`
 
 const STUDENT_CSV_MARKERS = ['roll_number', 'parent_name', 'parent_phone', 'parent_email']
-const ALL_GRADES = Array.from({ length: 12 }, (_, i) => String(i + 1))
+const ALL_GRADES = GRADE_SEQUENCE.filter(g => /^\d+$/.test(g))
 
 function normalizeStaffType(raw: string): string {
   const v = raw.toLowerCase().replace(/[\s\-]/g, '_')
@@ -157,8 +158,9 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
       .filter(cols => !(cols[0] ?? '').trim().startsWith('#'))
     const parsed: TeacherRow[] = dataRows.map(cols => {
       // Grades recovery: if user wrote 8,9,10 without quotes, CSV parser spills them into cols 8,9,10...
-      // Detect: col 8 onwards are all grade numbers (1–12), merge them back
-      const isGrade = (v: string) => /^\d{1,2}$/.test(v.trim()) && +v.trim() >= 1 && +v.trim() <= 12
+      // Detect: col 8 onwards are all valid numeric grades, merge them back
+      const maxGrade = Math.max(...GRADE_SEQUENCE.filter(g => /^\d+$/.test(g)).map(Number))
+      const isGrade = (v: string) => /^\d{1,2}$/.test(v.trim()) && +v.trim() >= 1 && +v.trim() <= maxGrade
       let teachesGrades = cols[8] ?? ''
       if (cols.length > 9 && isGrade(cols[8] ?? '')) {
         const spilledGrades = cols.slice(8).filter(c => isGrade(c))

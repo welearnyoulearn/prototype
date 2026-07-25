@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import { GRADE_SEQUENCE } from '@/lib/grades'
 
 type Book = {
   id: number
@@ -19,7 +20,7 @@ const SUBJECTS_BY_BOARD: Record<string, string[]> = {
   CBSE:  ['English', 'Hindi', 'Mathematics', 'Physics', 'Chemistry', 'Biology', 'Social Science', 'Computer Applications', 'Sanskrit'],
   Other: ['Telugu', 'Hindi', 'English', 'Mathematics', 'Science', 'Social Studies', 'Computer Science', 'Other'],
 }
-const GRADES = ['1','2','3','4','5','6','7','8','9','10','11','12']
+const GRADES = GRADE_SEQUENCE.filter(g => /^\d+$/.test(g))
 
 function fmt(chars: number) {
   if (chars >= 1_000_000) return (chars / 1_000_000).toFixed(1) + 'M chars'
