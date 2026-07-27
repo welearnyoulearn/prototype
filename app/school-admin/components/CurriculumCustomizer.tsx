@@ -26,8 +26,10 @@ type Subject = {
   subject_name: string
   board: string | null
   grade: string
+  category?: 'academic' | 'extra'
   created_at: string
   chapters?: Chapter[]
+  master_chapter_count?: number
 }
 
 type Chapter = {
@@ -93,6 +95,10 @@ const inputCls =
   'w-full bg-white border rounded-xl px-3 py-2 text-sm text-[#0F2A3F] placeholder-gray-400 focus:outline-none focus:ring-2'
 const labelCls = 'block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide'
 
+// Matches platform-admin's curriculum page — Extra Subjects are filed under
+// this fixed pseudo-board in master_subjects, invisible to the user.
+const EXTRA_BOARD = 'EXTRA'
+
 export default function CurriculumCustomizer({ schoolId }: Props) {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [activeSubject, setActiveSubject] = useState<Subject | null>(null)
@@ -114,7 +120,9 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
   const [showSubscribeModal, setShowSubscribeModal] = useState(false)
   const [masterSubjects, setMasterSubjects] = useState<MasterSubject[]>([])
   const [subscribing, setSubscribing] = useState(false)
+  const [resyncing, setResyncing] = useState(false)
   const [selectedMasterId, setSelectedMasterId] = useState<string>('')
+  const [filterCategory, setFilterCategory] = useState<'academic' | 'extra'>('academic')
   const [filterBoard, setFilterBoard] = useState('CBSE')
   const [filterGrade, setFilterGrade] = useState('10')
 
@@ -246,7 +254,8 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
   // Load master templates for opt-in subscription
   const loadMasterTemplates = useCallback(async () => {
     try {
-      const res = await fetch(`/api/platform/subjects?board=${filterBoard}&grade=${filterGrade}`)
+      const board = filterCategory === 'extra' ? EXTRA_BOARD : filterBoard
+      const res = await fetch(`/api/platform/subjects?board=${board}&grade=${filterGrade}&category=${filterCategory}`)
       const data = await res.json()
       if (res.ok) {
         setMasterSubjects(data.subjects || data)
@@ -254,7 +263,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
     } catch {
       // quiet
     }
-  }, [filterBoard, filterGrade])
+  }, [filterCategory, filterBoard, filterGrade])
 
   // Load school classes on mount
   useEffect(() => {
@@ -282,7 +291,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
     if (showSubscribeModal) {
       loadMasterTemplates()
     }
-  }, [showSubscribeModal, filterBoard, filterGrade, loadMasterTemplates])
+  }, [showSubscribeModal, filterCategory, filterBoard, filterGrade, loadMasterTemplates])
 
   const handleSubscribe = async () => {
     if (!selectedMasterId) return
@@ -312,6 +321,30 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       setError(err instanceof Error ? err.message : 'Failed to subscribe to subject')
     } finally {
       setSubscribing(false)
+    }
+  }
+
+  // Pull in any master chapters added to the template after this school
+  // subscribed — subscribing clones the catalog once, it doesn't stay in sync.
+  const handleResync = async (subject: Subject) => {
+    setResyncing(true)
+    setError('')
+    setSuccess('')
+    try {
+      const res = await fetch(`/api/school/subjects/${subject.id}/resync`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+
+      setSuccess(
+        data.chapters_added > 0
+          ? `Synced ${data.chapters_added} new chapter${data.chapters_added === 1 ? '' : 's'} from the master template.`
+          : 'Already up to date — no new chapters to sync.'
+      )
+      await loadSchoolSubjects(subject.id)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to sync new chapters')
+    } finally {
+      setResyncing(false)
     }
   }
 
@@ -727,9 +760,19 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                                     color: isActive ? TEAL : '#6b7280',
                                   }}
                                 >
-                                  <span className="font-semibold truncate">{s.subject_name}</span>
+                                  <span className="flex items-center gap-1.5 truncate">
+                                    <span className="font-semibold truncate">{s.subject_name}</span>
+                                    {s.board === EXTRA_BOARD && (
+                                      <span
+                                        className="text-[8px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide flex-shrink-0"
+                                        style={{ background: '#E7F3F4', color: TEAL }}
+                                      >
+                                        Extra
+                                      </span>
+                                    )}
+                                  </span>
                                   <div className="flex items-center gap-1.5 text-[9px] text-gray-400">
-                                    <span>{s.board || 'Custom'}</span>
+                                    <span>{s.board === EXTRA_BOARD ? 'Extra Subject' : (s.board || 'Custom')}</span>
                                     <span>·</span>
                                     <span>{s.chapters?.length || 0} chapters</span>
                                   </div>
@@ -782,7 +825,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                       </p>
                     </div>
 
-                    <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-2 items-end">
                       <button
                         data-testid="curriculum-add-chapter-open-btn"
                         onClick={() => setShowAddChapterForm(activeSubject.id)}
@@ -791,6 +834,17 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                       >
                         + Add Custom Chapter
                       </button>
+                      {activeSubject.master_subject_id && (activeSubject.master_chapter_count ?? 0) > (activeSubject.chapters?.length ?? 0) && (
+                        <button
+                          data-testid="curriculum-resync-btn"
+                          onClick={() => handleResync(activeSubject)}
+                          disabled={resyncing}
+                          className="text-xs font-semibold px-4 py-2.5 rounded-xl shadow-md self-start disabled:opacity-50"
+                          style={{ background: TEAL, color: 'white' }}
+                        >
+                          {resyncing ? 'Syncing…' : `Sync ${(activeSubject.master_chapter_count ?? 0) - (activeSubject.chapters?.length ?? 0)} New Chapter${(activeSubject.master_chapter_count ?? 0) - (activeSubject.chapters?.length ?? 0) === 1 ? '' : 's'}`}
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1192,7 +1246,23 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
               Select an academic board and grade level, choose a master subject template, and clone it instantly into your school workspace.
             </p>
 
-            <div className="grid grid-cols-3 gap-3 mb-4">
+            <div className="flex gap-1 p-1 rounded-xl mb-4 w-fit" style={{ background: SURFACE }}>
+              {(['academic', 'extra'] as const).map(c => (
+                <button
+                  key={c}
+                  type="button"
+                  data-testid={`subscribe-category-${c}`}
+                  onClick={() => setFilterCategory(c)}
+                  className="px-4 py-1.5 rounded-lg text-xs font-semibold transition-all"
+                  style={{ background: filterCategory === c ? TEAL : 'transparent', color: filterCategory === c ? 'white' : '#6b7280' }}
+                >
+                  {c === 'academic' ? 'Board Subjects' : 'Extra Subjects'}
+                </button>
+              ))}
+            </div>
+
+            <div className={`grid gap-3 mb-4 ${filterCategory === 'academic' ? 'grid-cols-3' : 'grid-cols-2'}`}>
+              {filterCategory === 'academic' && (
               <div>
                 <label className={labelCls}>Academic Board</label>
                 <select
@@ -1207,6 +1277,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                   <option value="TS_SSC">TS SSC (Telangana)</option>
                 </select>
               </div>
+              )}
               <div>
                 <label className={labelCls}>Grade Level</label>
                 <select

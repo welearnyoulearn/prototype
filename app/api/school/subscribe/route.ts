@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { matchTeacher } from '@/lib/matchTeacher'
 import { invalidateCache } from '@/lib/responseCache'
+import { requireFeeAccess } from '@/lib/auth'
+import { resolveAcademicYear } from '@/lib/academicYear'
 
 // POST /api/school/subscribe
 export async function POST(req: NextRequest) {
@@ -13,6 +15,7 @@ export async function POST(req: NextRequest) {
     if (!school_id || !master_subject_id) {
       return NextResponse.json({ error: 'school_id and master_subject_id are required' }, { status: 400 })
     }
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     // Start a database transaction
     const client = await pool.connect()
@@ -20,15 +23,7 @@ export async function POST(req: NextRequest) {
       await client.query('BEGIN')
 
       if (!academic_year) {
-        const activeYearRes = await client.query(
-          'SELECT label FROM academic_years WHERE school_id = $1 AND is_current = TRUE LIMIT 1',
-          [school_id]
-        )
-        if ((activeYearRes.rowCount ?? 0) > 0) {
-          academic_year = activeYearRes.rows[0].label
-        } else {
-          academic_year = '2025-26'
-        }
+        academic_year = await resolveAcademicYear(school_id)
       }
 
       // 1. Fetch master subject details
@@ -49,10 +44,10 @@ export async function POST(req: NextRequest) {
 
       // 3. Create school subject
       const schoolSubRes = await client.query(
-        `INSERT INTO school_subjects (school_id, master_subject_id, subject_name, board, grade, academic_year)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO school_subjects (school_id, master_subject_id, subject_name, board, grade, academic_year, category)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id`,
-        [school_id, master_subject_id, masterSub.subject_name, masterSub.board, masterSub.grade, academic_year]
+        [school_id, master_subject_id, masterSub.subject_name, masterSub.board, masterSub.grade, academic_year, masterSub.category]
       )
       const schoolSubjectId = schoolSubRes.rows[0].id
 

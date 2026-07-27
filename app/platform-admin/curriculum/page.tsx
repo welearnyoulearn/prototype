@@ -18,6 +18,7 @@ type Subject = {
   grade: string
   subject_name: string
   created_at: string
+  category?: 'academic' | 'extra'
 }
 
 type Chapter = {
@@ -68,8 +69,16 @@ const BOARDS = [
 
 const GRADES = ['6', '7', '8', '9', '10']
 
+// Extra Subjects (Dance, Music, Art, ...) use the identical
+// subject→chapter→topic structure as academic ones, filed under a fixed
+// pseudo-board so the existing UNIQUE(board, grade, subject_name) and every
+// board-scoped query keep working unchanged — "EXTRA" is invisible to the
+// user, who only ever sees the category tab.
+const EXTRA_BOARD = 'EXTRA'
+
 export default function PlatformCurriculum() {
   const [subjects, setSubjects] = useState<Subject[]>([])
+  const [category, setCategory] = useState<'academic' | 'extra'>('academic')
   const [selectedBoard, setSelectedBoard] = useState('CBSE')
   const [selectedGrade, setSelectedGrade] = useState('10')
   const [activeSubject, setActiveSubject] = useState<Subject | null>(null)
@@ -128,7 +137,8 @@ export default function PlatformCurriculum() {
     setLoading(true)
     setError('')
     try {
-      const res = await fetch(`/api/platform/subjects?board=${selectedBoard}&grade=${selectedGrade}`)
+      const board = category === 'extra' ? EXTRA_BOARD : selectedBoard
+      const res = await fetch(`/api/platform/subjects?board=${board}&grade=${selectedGrade}&category=${category}`)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       const list = data.subjects || []
@@ -145,7 +155,7 @@ export default function PlatformCurriculum() {
     } finally {
       setLoading(false)
     }
-  }, [selectedBoard, selectedGrade, activeSubject?.id])
+  }, [category, selectedBoard, selectedGrade, activeSubject?.id])
 
   useEffect(() => {
     loadSubjects()
@@ -191,9 +201,10 @@ export default function PlatformCurriculum() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          board: selectedBoard,
+          board: category === 'extra' ? EXTRA_BOARD : selectedBoard,
           grade: selectedGrade,
           subject_name: newSubjectForm.subject_name.trim(),
+          category,
         }),
       })
       const data = await res.json()
@@ -960,6 +971,25 @@ export default function PlatformCurriculum() {
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-4">Template Scope</h3>
               <div className="space-y-4">
                 <div>
+                  <label className="block text-xs font-semibold text-gray-400 mb-1.5 uppercase">Category</label>
+                  <div className="grid grid-cols-2 gap-1 p-1 rounded-xl" style={{ background: SURFACE }}>
+                    {(['academic', 'extra'] as const).map(c => {
+                      const active = category === c
+                      return (
+                        <button
+                          key={c}
+                          onClick={() => setCategory(c)}
+                          className="py-1.5 rounded-lg text-xs font-bold transition-all"
+                          style={{ background: active ? PURPLE : 'transparent', color: active ? 'white' : '#6b7280' }}
+                        >
+                          {c === 'academic' ? 'Board Subjects' : 'Extra Subjects'}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                {category === 'academic' && (
+                <div>
                   <label className="block text-xs font-semibold text-gray-400 mb-1.5 uppercase">Academic Board</label>
                   <div className="space-y-1">
                     {BOARDS.map(b => {
@@ -981,6 +1011,7 @@ export default function PlatformCurriculum() {
                     })}
                   </div>
                 </div>
+                )}
                 <div>
                   <label className="block text-xs font-semibold text-gray-400 mb-1.5 uppercase">Grade level</label>
                   <div className="grid grid-cols-5 gap-1 p-1 rounded-xl" style={{ background: SURFACE }}>

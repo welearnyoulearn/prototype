@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { getAnySession, requirePlatformAdmin } from '@/lib/auth'
 
-// GET /api/platform/subjects?board=&grade=&include_details=
+// GET /api/platform/subjects?board=&grade=&category=&include_details=
+// Read-only master catalog shared across every school — not tenant-scoped
+// data, so any authenticated portal session (platform-admin or school-admin)
+// may read it, unlike the writes below which are platform-admin only.
 export async function GET(req: NextRequest) {
+  const platformSession = await requirePlatformAdmin()
+  const anySession = platformSession ? null : await getAnySession()
+  if (!platformSession && !anySession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const board = req.nextUrl.searchParams.get('board')
   const grade = req.nextUrl.searchParams.get('grade')
+  const category = req.nextUrl.searchParams.get('category')
   const includeDetails = req.nextUrl.searchParams.get('include_details') === 'true'
 
   try {
@@ -18,6 +27,10 @@ export async function GET(req: NextRequest) {
     if (grade) {
       query += ' AND grade = $' + (args.length + 1)
       args.push(grade)
+    }
+    if (category) {
+      query += ' AND category = $' + (args.length + 1)
+      args.push(category)
     }
 
     query += ' ORDER BY id'
@@ -72,19 +85,20 @@ export async function GET(req: NextRequest) {
 
 // POST /api/platform/subjects
 export async function POST(req: NextRequest) {
+  if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   try {
-    const { board, grade, subject_name } = await req.json()
+    const { board, grade, subject_name, category } = await req.json()
     if (!board || !grade || !subject_name) {
       return NextResponse.json({ error: 'board, grade, and subject_name are required' }, { status: 400 })
     }
 
     const { rows } = await pool.query(
-      `INSERT INTO master_subjects (board, grade, subject_name)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (board, grade, subject_name) 
+      `INSERT INTO master_subjects (board, grade, subject_name, category)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (board, grade, subject_name)
        DO UPDATE SET updated_at = NOW()
        RETURNING *`,
-      [board, grade, subject_name]
+      [board, grade, subject_name, category === 'extra' ? 'extra' : 'academic']
     )
 
     return NextResponse.json({ subject: rows[0] })
@@ -96,6 +110,7 @@ export async function POST(req: NextRequest) {
 
 // DELETE /api/platform/subjects?id=
 export async function DELETE(req: NextRequest) {
+  if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const id = req.nextUrl.searchParams.get('id')
   if (!id) {
     return NextResponse.json({ error: 'id required' }, { status: 400 })
