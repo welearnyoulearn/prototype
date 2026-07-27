@@ -3,19 +3,24 @@ import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { gradeOrderSql } from '@/lib/grades'
 import { withWatchline } from '@/lib/logger'
+import { resolveAcademicYear } from '@/lib/academicYear'
 
 // GET /api/fees/ledger?school_id=X&academic_year=2025-26&grade=8&status=overdue&student_id=Y
 async function handleGET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
     const school_id    = p.get('school_id')
-    const academic_year = p.get('academic_year')
     const grade        = p.get('grade')
     const status       = p.get('status')
     const student_id   = p.get('student_id')
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+    // 'passout' is a real sentinel value (a graduated student's carried-over
+    // ledger, not a year label) — only auto-resolve to the active year when
+    // the caller passed nothing at all, never override an explicit value.
+    const academic_year = p.get('academic_year') || await resolveAcademicYear(school_id)
 
     const conditions = ['l.school_id = $1']
     const values: (string | number)[] = [school_id]

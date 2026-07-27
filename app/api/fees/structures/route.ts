@@ -2,22 +2,23 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { gradeOrderSql } from '@/lib/grades'
+import { resolveAcademicYear } from '@/lib/academicYear'
 
 // GET /api/fees/structures?school_id=X&academic_year=2025-26
 export async function GET(req: NextRequest) {
   try {
     const school_id = req.nextUrl.searchParams.get('school_id')
-    const academic_year = req.nextUrl.searchParams.get('academic_year')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
+      const academic_year = req.nextUrl.searchParams.get('academic_year') || await resolveAcademicYear(school_id)
       const { rows } = await pool.query(
         `SELECT fs.*, fc.name AS category_name, fc.frequency
          FROM fee_structures fs
          JOIN fee_categories fc ON fc.id = fs.fee_category_id
-         WHERE fs.school_id = $1 ${academic_year ? 'AND fs.academic_year = $2' : ''}
+         WHERE fs.school_id = $1 AND fs.academic_year = $2
          ORDER BY fc.name, ${gradeOrderSql('fs.grade')}`,
-        academic_year ? [school_id, academic_year] : [school_id]
+        [school_id, academic_year]
       )
       return NextResponse.json(rows)
     } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
