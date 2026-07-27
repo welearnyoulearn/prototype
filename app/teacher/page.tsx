@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import AppLoader from '../components/AppLoader'
+import { FeaturesProvider } from '@/lib/features-context'
 import SmartSnapshot from './components/SmartSnapshot'
 import ClassView from './components/ClassView'
 import FullTimetable from './components/FullTimetable'
@@ -38,6 +39,13 @@ type Teacher = {
 type NavSection = {
   label: string
   items: { key: string; label: string; icon: React.ReactNode; comingSoon?: boolean }[]
+}
+
+// Maps a sidebar nav key to the school-plan feature key that gates it —
+// same feature keys school-admin's sidebar and Class Management already use.
+const NAV_KEY_TO_FEATURE: Record<string, string> = {
+  timetable: 'timetable',
+  attendance: 'attendance',
 }
 
 const NAV_SECTIONS: NavSection[] = [
@@ -107,6 +115,9 @@ export default function TeacherPortal() {
     router.push('/teacher/login')
   }, [router])
 
+  const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
+  const [academicYear, setAcademicYear] = useState('')
+
   // Fetch teacher identity from session cookie
   useEffect(() => {
     fetch('/api/teacher/auth/me')
@@ -122,6 +133,38 @@ export default function TeacherPortal() {
       .finally(() => setLoading(false))
   }, [router])
 
+  // A teacher belongs to a school, and the school's plan decides which
+  // features exist — same gate school-admin already applies (e.g. Timetable
+  // tab hidden on the Basic plan). Without this, the teacher portal shows
+  // Timetable/Attendance nav items and tabs regardless of the school's plan.
+  useEffect(() => {
+    if (!teacher?.school_id) return
+    fetch(`/api/schools/${teacher.school_id}/subscription`)
+      .then(r => r.json())
+      .then(async subData => {
+        const tier = subData.tier || 'none'
+        if (tier === 'none') return
+        const featRes = await fetch(`/api/platform/features?tier=${tier}`)
+        if (featRes.ok) {
+          const fd = await featRes.json()
+          setEnabledFeatures(new Set(fd.enabled || []))
+        }
+      })
+      .catch(() => {})
+  }, [teacher?.school_id])
+
+  // Ambient "which year am I looking at" badge — every syllabus/class screen
+  // already scopes its own data to the school's active academic year, but
+  // gave no visible signal when that year is wrong. One fetch here, shown
+  // once in the header, covers every tab.
+  useEffect(() => {
+    if (!teacher?.school_id) return
+    fetch(`/api/academic-year/current?school_id=${teacher.school_id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.label) setAcademicYear(d.label) })
+      .catch(() => {})
+  }, [teacher?.school_id])
+
   if (loading) return <AppLoader message="Loading your portal" sub="Getting your classes and schedule ready…" />
 
   if (!teacher) return null
@@ -130,6 +173,7 @@ export default function TeacherPortal() {
   const greeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening'
 
   return (
+    <FeaturesProvider value={enabledFeatures}>
     <div className="min-h-screen flex flex-col bg-gray-100">
       {/* Top bar */}
       <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between flex-shrink-0 z-30">
@@ -154,6 +198,15 @@ export default function TeacherPortal() {
           </nav>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
+          {academicYear && (
+            <span
+              data-testid="academic-year-badge"
+              title="Active academic year — all data on this screen is scoped to this year"
+              className="hidden sm:inline-flex items-center gap-1 bg-gray-100 border border-gray-200 text-gray-500 text-xs font-medium px-2.5 py-1 rounded-full"
+            >
+              📅 {academicYear}
+            </span>
+          )}
           <p className="hidden sm:block text-sm font-medium text-gray-800">{greeting}, {teacher.name}</p>
           <NotificationBell teacherId={teacher.id} onNavigate={handleNavigate} />
           <button
@@ -182,11 +235,18 @@ export default function TeacherPortal() {
 
           <nav className="flex-1 py-3 overflow-y-auto">
             {NAV_SECTIONS.map(section => {
-              if (section.items.length === 0) return null
+              // Only these nav keys correspond to a school-plan feature gate —
+              // the rest (My Classes, My Students, Syllabus, Profile, Leave)
+              // aren't plan-gated features and always show.
+              const visibleItems = section.items.filter(item => {
+                const featureKey = NAV_KEY_TO_FEATURE[item.key]
+                return !featureKey || enabledFeatures.size === 0 || enabledFeatures.has(featureKey)
+              })
+              if (visibleItems.length === 0) return null
               return (
                 <div key={section.label} className="mb-2">
                   <p className="px-4 py-1.5 text-[10px] font-semibold text-slate-500 uppercase tracking-widest">{section.label}</p>
-                  {section.items.map(item => (
+                  {visibleItems.map(item => (
                     <button key={item.key}
                       onClick={() => { if (!item.comingSoon) navigateTo(item.key) }}
                       className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors text-left ${
@@ -226,11 +286,12 @@ export default function TeacherPortal() {
           {visitedNav.has('attendance')     && <div hidden={activeNav !== 'attendance'}><Attendance teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('leave')          && <div hidden={activeNav !== 'leave'}><TeacherLeave teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('profile')        && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher as (t: unknown) => void} /></div>}
-          {visitedNav.has('my-classes')     && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} /></div>}
+          {visitedNav.has('my-classes')     && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} onGoToSyllabus={cls => handleNavigate('class-view', { classId: cls.id, tab: 'Syllabus' })} /></div>}
           {visitedNav.has('my-students')    && <div hidden={activeNav !== 'my-students'}><MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('syllabus')       && <div hidden={activeNav !== 'syllabus'}><TeacherSyllabus teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onGoToHomework={classId => handleNavigate('class-view', { classId, tab: 'Homework' })} /></div>}
         </main>
       </div>
     </div>
+    </FeaturesProvider>
   )
 }

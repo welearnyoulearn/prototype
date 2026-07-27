@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 
-// PATCH /api/syllabus/[id] — update status, target dates, delay reasons, HOD remarks, topic details
+// PATCH /api/syllabus/[id] — update status, target dates, delay reasons, topic details
 // Body: { school_id, class_id?, status?, covered_by?, topic_name?, topic_order?,
-//         target_date?, delay_reason?, hod_remark?, hod_remark_by? }
+//         target_date?, delay_reason? }
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -14,7 +14,7 @@ export async function PATCH(
   const {
     school_id, class_id, status, covered_by,
     topic_name, topic_order,
-    target_date, delay_reason, hod_remark, hod_remark_by,
+    target_date, delay_reason,
   } = body
 
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
@@ -23,8 +23,7 @@ export async function PATCH(
     const isUpdatingProgress = (
       status !== undefined ||
       target_date !== undefined ||
-      delay_reason !== undefined ||
-      hod_remark !== undefined
+      delay_reason !== undefined
     )
 
     if (isUpdatingProgress && !class_id) {
@@ -59,30 +58,24 @@ export async function PATCH(
 
       const newTargetDate = target_date !== undefined ? (target_date || null) : (current.target_date || null)
       const newDelayReason = delay_reason !== undefined ? (delay_reason || null) : (current.delay_reason || null)
-      const newHodRemark = hod_remark !== undefined ? (hod_remark || null) : (current.hod_remark || null)
-      const newHodRemarkBy = hod_remark_by !== undefined ? (hod_remark_by || null) : (current.hod_remark_by || null)
-      const newHodRemarkAt = hod_remark !== undefined ? new Date() : (current.hod_remark_at || null)
 
       // Upsert into school_topic_progress
       const upsertRes = await pool.query(
         `INSERT INTO school_topic_progress (
           class_id, school_topic_id, status, covered_date, covered_by,
-          target_date, delay_reason, hod_remark, hod_remark_by, hod_remark_at
+          target_date, delay_reason
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (class_id, school_topic_id) DO UPDATE SET
            status = EXCLUDED.status,
            covered_date = EXCLUDED.covered_date,
            covered_by = EXCLUDED.covered_by,
            target_date = EXCLUDED.target_date,
-           delay_reason = EXCLUDED.delay_reason,
-           hod_remark = EXCLUDED.hod_remark,
-           hod_remark_by = EXCLUDED.hod_remark_by,
-           hod_remark_at = EXCLUDED.hod_remark_at
+           delay_reason = EXCLUDED.delay_reason
          RETURNING *`,
         [
           class_id, id, newStatus, newCoveredDate, newCoveredBy,
-          newTargetDate, newDelayReason, newHodRemark, newHodRemarkBy, newHodRemarkAt
+          newTargetDate, newDelayReason
         ]
       )
       progressResult = upsertRes.rows[0]

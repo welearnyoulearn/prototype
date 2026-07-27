@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, Suspense } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
-import { FeaturesProvider } from './features-context'
+import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
 import { useRouter, useSearchParams } from 'next/navigation'
 import AppLoader from '../components/AppLoader'
@@ -33,6 +33,7 @@ const StudentOnboarding     = dynamic(() => import('./components/StudentOnboardi
 const ClassManagement       = dynamic(() => import('./components/ClassManagement'),        { loading: () => <ModuleSkeleton /> })
 const TimetableManagement   = dynamic(() => import('./components/TimetableManagement'),    { loading: () => <ModuleSkeleton /> })
 const CurriculumCustomizer   = dynamic(() => import('./components/CurriculumCustomizer'),   { loading: () => <ModuleSkeleton /> })
+const AcademicAnalytics      = dynamic(() => import('./components/AcademicAnalytics'),      { loading: () => <ModuleSkeleton /> })
 const ExamSchedule          = dynamic(() => import('./components/ExamSchedule'),           { loading: () => <ModuleSkeleton /> })
 const TeachersManagement    = dynamic(() => import('./components/TeachersManagement'),     { loading: () => <ModuleSkeleton /> })
 const StudentsManagement    = dynamic(() => import('./components/StudentsManagement'),     { loading: () => <ModuleSkeleton /> })
@@ -50,6 +51,7 @@ type School = {
   country: string
   status: string
   logo_url?: string | null
+  logo_align?: 'left' | 'center' | 'right' | null
   receipt_header_blocks?: { text: string; size: 'sm' | 'md' | 'lg' | 'xl'; bold: boolean; italic: boolean; align: 'left' | 'center' | 'right' }[]
 }
 
@@ -155,6 +157,16 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    key: 'syllabus-tracking',
+    label: 'Syllabus Tracking',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+      </svg>
+    ),
+  },
+  {
     key: 'exam-schedule',
     label: 'Exam Schedule',
     tier: ['basic', 'standard', 'premium'],
@@ -231,6 +243,7 @@ function SchoolAdmin() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [selectedSchool, setSelectedSchool] = useState<School | null>(null)
+  const [academicYear, setAcademicYear] = useState('')
   const [tier, setTier] = useState<Tier>('none')
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
   const initialTab = searchParams.get('tab') || 'overview'
@@ -277,6 +290,16 @@ function SchoolAdmin() {
           ? await schoolRes.json()
           : { id: me.school_id, name: me.school_name, type: '', city: '', country: '', status: 'active' }
         setSelectedSchool(school)
+
+        // Ambient "which year am I looking at" badge — every feature already
+        // scopes its own data to the active academic year server-side, but
+        // used to give no visible signal when that year is wrong (silently
+        // empty screens). One fetch here, shown once in the header, covers
+        // every tab instead of adding it to each one individually.
+        fetch(`/api/academic-year/current?school_id=${school.id}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(d => { if (d?.label) setAcademicYear(d.label) })
+          .catch(() => {})
 
         // Load subscription + features before showing UI — prevents "No Plan Assigned" flash
         try {
@@ -333,6 +356,17 @@ function SchoolAdmin() {
               <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
               {selectedSchool.name}
             </div>
+          )}
+
+          {/* Active academic year — ambient, visible on every tab */}
+          {academicYear && (
+            <span
+              data-testid="academic-year-badge"
+              title="Active academic year — all data on this screen is scoped to this year"
+              className="hidden sm:inline-flex items-center gap-1 bg-slate-100 border border-slate-200 text-slate-600 text-xs font-medium px-2.5 py-1 rounded-full"
+            >
+              📅 {academicYear}
+            </span>
           )}
         </div>
 
@@ -588,12 +622,13 @@ function SchoolAdmin() {
                 {visited.has('class-management') && <div hidden={activeNav !== 'class-management'}><ClassManagement schoolId={selectedSchool.id} onNavigate={navigateTo} /></div>}
                 {visited.has('timetable')        && <div hidden={activeNav !== 'timetable'}><TimetableManagement schoolId={selectedSchool.id} /></div>}
                 {visited.has('curriculum')       && <div hidden={activeNav !== 'curriculum'}><CurriculumCustomizer schoolId={selectedSchool.id} /></div>}
+                {visited.has('syllabus-tracking') && <div hidden={activeNav !== 'syllabus-tracking'}><AcademicAnalytics schoolId={selectedSchool.id} /></div>}
                 {visited.has('exam-schedule')    && <div hidden={activeNav !== 'exam-schedule'}><ExamSchedule schoolId={selectedSchool.id} /></div>}
                 {visited.has('announcements')    && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} /></div>}
                 {visited.has('export')           && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}
                 {visited.has('settings')         && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} /></div>}
                 {visited.has('profile')          && <div hidden={activeNav !== 'profile'}><StaffProfile /></div>}
-                {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} schoolName={selectedSchool.name} schoolLogoUrl={selectedSchool.logo_url ?? null} schoolHeaderBlocks={selectedSchool.receipt_header_blocks ?? []} /></div>}
+                {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} schoolName={selectedSchool.name} schoolLogoUrl={selectedSchool.logo_url ?? null} schoolLogoAlign={selectedSchool.logo_align ?? 'center'} schoolHeaderBlocks={selectedSchool.receipt_header_blocks ?? []} /></div>}
                 {visited.has('year-rollover')    && <div hidden={activeNav !== 'year-rollover'}><YearRollover schoolId={selectedSchool.id} /></div>}
               </FeaturesProvider>
             )}

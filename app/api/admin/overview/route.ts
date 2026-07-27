@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireSchoolAdmin } from '@/lib/auth'
 import { gradeOrderSql } from '@/lib/grades'
+import { resolveAcademicYear } from '@/lib/academicYear'
 
 export async function GET(req: NextRequest) {
   try {
@@ -13,9 +14,7 @@ export async function GET(req: NextRequest) {
     const school_id = parseInt(sid)
     const features  = new Set((sp.get('features') || '').split(',').map(s => s.trim()))
     const date      = sp.get('date') || new Date().toISOString().slice(0, 10)
-    const year      = sp.get('year') || await pool.query(
-      `SELECT label FROM academic_years WHERE school_id=$1 AND is_current=TRUE LIMIT 1`, [school_id]
-    ).then(r => r.rows[0]?.label ?? '2025-26').catch(() => '2025-26')
+    const year      = sp.get('year') || await resolveAcademicYear(school_id)
 
     // ── 1. Core counts (always) ───────────────────────────────────────────────
     const coreQ = pool.query(`

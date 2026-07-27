@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { resolveAcademicYear } from '@/lib/academicYear'
 
-// GET /api/syllabus?school_id=&class_id=&subject=&hod=1
+// GET /api/syllabus?school_id=&class_id=&subject=
 // Returns syllabus topics grouped by subject > chapter > topics with coverage stats.
 // Query maps to hierarchical school tables (school_subjects -> school_chapters -> school_topics -> school_topic_progress)
 export async function GET(req: NextRequest) {
@@ -28,18 +29,7 @@ export async function GET(req: NextRequest) {
 
     const { grade } = classRes.rows[0]
 
-    let academic_year = req.nextUrl.searchParams.get('academic_year')
-    if (!academic_year) {
-      const activeYearRes = await pool.query(
-        'SELECT label FROM academic_years WHERE school_id = $1 AND is_current = TRUE LIMIT 1',
-        [school_id]
-      )
-      if ((activeYearRes.rowCount ?? 0) > 0) {
-        academic_year = activeYearRes.rows[0].label
-      } else {
-        academic_year = '2025-26'
-      }
-    }
+    const academic_year = req.nextUrl.searchParams.get('academic_year') || await resolveAcademicYear(school_id)
 
     // 2. Query subjects, chapters, topics, and join with section progress for class_id
     let query = `
@@ -64,17 +54,12 @@ export async function GET(req: NextRequest) {
         stp.covered_by AS covered_by,
         t.name AS covered_by_name,
         stp.target_date AS target_date,
-        stp.delay_reason AS delay_reason,
-        stp.hod_remark AS hod_remark,
-        stp.hod_remark_by AS hod_remark_by,
-        ht.name AS hod_remark_by_name,
-        stp.hod_remark_at AS hod_remark_at
+        stp.delay_reason AS delay_reason
       FROM school_subjects ss
       JOIN school_chapters sc ON sc.school_subject_id = ss.id
-      JOIN school_topics st ON st.school_chapter_id = sc.id
+      LEFT JOIN school_topics st ON st.school_chapter_id = sc.id
       LEFT JOIN school_topic_progress stp ON stp.school_topic_id = st.id AND stp.class_id = $1
       LEFT JOIN teachers t ON t.id = stp.covered_by
-      LEFT JOIN teachers ht ON ht.id = stp.hod_remark_by
       WHERE ss.school_id = $2 AND ss.grade = $3 AND ss.academic_year = $4
     `
     const args: (string | number)[] = [class_id, school_id, grade, academic_year]
@@ -108,8 +93,6 @@ export async function GET(req: NextRequest) {
         grouped[subjName] = { subject: subjName, total: 0, covered: 0, chapters: {} }
       }
       const subj = grouped[subjName]
-      subj.total++
-      if (row.status === 'covered') subj.covered++
 
       const chName = row.chapter_name
       if (!subj.chapters[chName]) {
@@ -122,9 +105,17 @@ export async function GET(req: NextRequest) {
         }
       }
       const ch = subj.chapters[chName]
+
+      // A chapter with zero topics still needs to appear (LEFT JOIN produces
+      // one all-null topic row for it) — just don't count or list a topic
+      // that doesn't exist.
+      if (row.id == null) continue
+
+      subj.total++
+      if (row.status === 'covered') subj.covered++
       ch.total++
       if (row.status === 'covered') ch.covered++
-      
+
       // Inject published = true so legacy client logic passes filters
       ch.topics.push({
         ...row,
@@ -237,18 +228,7 @@ export async function POST(req: NextRequest) {
       }
       const { grade } = classRes.rows[0]
 
-      let academic_year = t.academic_year
-      if (!academic_year) {
-        const activeYearRes = await pool.query(
-          'SELECT label FROM academic_years WHERE school_id = $1 AND is_current = TRUE LIMIT 1',
-          [school_id]
-        )
-        if ((activeYearRes.rowCount ?? 0) > 0) {
-          academic_year = activeYearRes.rows[0].label
-        } else {
-          academic_year = '2025-26'
-        }
-      }
+      const academic_year = t.academic_year || await resolveAcademicYear(school_id)
 
       // 2. Find or create school subject
       let school_subject_id: number

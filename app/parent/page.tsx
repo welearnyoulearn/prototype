@@ -465,6 +465,15 @@ export default function ParentDashboard() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {feeAcYear && (
+            <span
+              data-testid="academic-year-badge"
+              title="Active academic year — all data on this screen is scoped to this year"
+              className="hidden sm:inline-flex items-center gap-1 bg-gray-100 border border-gray-200 text-gray-500 text-[10px] font-medium px-2.5 py-1 rounded-full"
+            >
+              📅 {feeAcYear}
+            </span>
+          )}
           {summary?.unacknowledged_count ? (
             <button onClick={() => navigateTo('results')}
               className="bg-red-100 text-red-700 text-xs font-bold px-2.5 py-1 rounded-full hover:bg-red-200">

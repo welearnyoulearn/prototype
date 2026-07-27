@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { resolveAcademicYear } from '@/lib/academicYear'
+import { requireFeeAccess } from '@/lib/auth'
 
 // GET /api/school/subjects?school_id=&class_id=&subject_name=&include_details=
 export async function GET(req: NextRequest) {
@@ -11,20 +13,10 @@ export async function GET(req: NextRequest) {
   if (!school_id) {
     return NextResponse.json({ error: 'school_id is required' }, { status: 400 })
   }
+  if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
-    let academic_year = req.nextUrl.searchParams.get('academic_year')
-    if (!academic_year) {
-      const activeYearRes = await pool.query(
-        'SELECT label FROM academic_years WHERE school_id = $1 AND is_current = TRUE LIMIT 1',
-        [school_id]
-      )
-      if ((activeYearRes.rowCount ?? 0) > 0) {
-        academic_year = activeYearRes.rows[0].label
-      } else {
-        academic_year = '2025-26'
-      }
-    }
+    const academic_year = req.nextUrl.searchParams.get('academic_year') || await resolveAcademicYear(school_id)
 
     let query = 'SELECT * FROM school_subjects WHERE school_id = $1 AND academic_year = $2'
     const args: any[] = [school_id, academic_year]
@@ -82,6 +74,21 @@ export async function GET(req: NextRequest) {
         }
 
         sub.chapters = chapters
+      }
+
+      // So the UI can offer "sync new chapters" without a per-subject round trip:
+      // compare each subject's cloned chapter count against its master template's
+      // current chapter count.
+      const masterSubjectIds = subjects.map((s) => s.master_subject_id).filter(Boolean)
+      if (masterSubjectIds.length > 0) {
+        const { rows: counts } = await pool.query(
+          'SELECT subject_id, COUNT(*)::int AS count FROM master_chapters WHERE subject_id = ANY($1) GROUP BY subject_id',
+          [masterSubjectIds],
+        )
+        const countMap = new Map(counts.map((r) => [r.subject_id, r.count]))
+        for (const sub of subjects) {
+          sub.master_chapter_count = sub.master_subject_id ? (countMap.get(sub.master_subject_id) ?? 0) : 0
+        }
       }
     }
 
