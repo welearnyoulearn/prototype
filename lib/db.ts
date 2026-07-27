@@ -6,11 +6,15 @@ import { Pool, types } from 'pg'
 // instead of "2026-03-31", causing a persistent one-day-behind display bug.
 types.setTypeParser(types.builtins.DATE, (val: string) => val)
 
-// Auto-detect local vs Supabase: skip SSL for localhost connections
+// Skip SSL only for an actual local Postgres — a local dev server almost
+// always points DATABASE_URL at remote Supabase, so "local DB" and "local
+// dev machine" are different things and must not share one flag.
 const dbUrl = process.env.DATABASE_URL ?? ''
-const isLocal = dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1')
+const isLocalDb = dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1')
 // Vercel serverless: each function instance is isolated — 1 connection is enough,
-// keeps us well under Supabase PgBouncer's session-mode pool_size limit.
+// keeps us well under Supabase PgBouncer's session-mode pool_size limit. A local
+// dev machine is a single long-lived process serving one developer, so it can
+// hold a real pool instead of contending for 1 connection across every request.
 const isVercel = process.env.VERCEL === '1'
 
 // If individual params are set (avoids special-char URL encoding issues on Vercel),
@@ -23,16 +27,16 @@ const poolConfig = (process.env.PGHOST)
       user:     process.env.PGUSER,
       password: process.env.PGPASSWORD,
       ssl: { rejectUnauthorized: false },
-      max: 1,
+      max: isVercel ? 1 : 10,
       idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 10000,
     }
   : {
       connectionString: dbUrl,
-      max: isLocal ? 10 : 1,
+      max: isVercel ? 1 : 10,
       idleTimeoutMillis: isVercel ? 10000 : 30000,
-      connectionTimeoutMillis: isLocal ? 5000 : 10000,
-      ssl: isLocal ? false : { rejectUnauthorized: false },
+      connectionTimeoutMillis: isVercel ? 10000 : 5000,
+      ssl: isLocalDb ? false : { rejectUnauthorized: false },
     }
 
 const pool = new Pool(poolConfig)
@@ -989,7 +993,7 @@ export async function initDB() {
       school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
       name VARCHAR(100) NOT NULL,
       from_grade INTEGER NOT NULL DEFAULT 1,
-      to_grade INTEGER NOT NULL DEFAULT 12,
+      to_grade INTEGER NOT NULL DEFAULT 10,
       subjects JSONB NOT NULL DEFAULT '[]',
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -1036,34 +1040,26 @@ export async function initDB() {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_teacher_ai_sessions_teacher ON teacher_ai_sessions(teacher_id, created_at DESC)`,
 
-    // ── HOD (Head of Department) assignments ─────────────────────────────────────
-    `CREATE TABLE IF NOT EXISTS department_hods (
-      id SERIAL PRIMARY KEY,
-      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
-      department VARCHAR(100) NOT NULL,
-      teacher_id INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
-      class_ids INTEGER[] NOT NULL DEFAULT '{}',
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_department_hods_school ON department_hods(school_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_department_hods_teacher ON department_hods(teacher_id)`,
-    `ALTER TABLE department_hods DROP CONSTRAINT IF EXISTS department_hods_school_id_department_key`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_department_hods_school_dept_teacher ON department_hods(school_id, department, teacher_id)`,
+    // HOD (Head of Department) management was removed — class_subjects
+    // (class + subject + teacher) is now the single source of truth for
+    // teacher syllabus visibility. department_hods was never wired to a live
+    // API route or UI beyond the orphaned HODSyllabus.tsx component.
+    `DROP TABLE IF EXISTS department_hods`,
 
-    // ── Extend syllabus_topics with HOD-governance fields ─────────────────────────
+    // ── Extend syllabus_topics with progress-tracking fields ──────────────────
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS target_date DATE`,
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS delay_reason TEXT`,
-    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS hod_remark TEXT`,
-    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS hod_remark_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL`,
-    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS hod_remark_at TIMESTAMPTZ`,
+    // HOD management was removed — no live code reads/writes these.
+    `ALTER TABLE syllabus_topics DROP COLUMN IF EXISTS hod_remark`,
+    `ALTER TABLE syllabus_topics DROP COLUMN IF EXISTS hod_remark_by`,
+    `ALTER TABLE syllabus_topics DROP COLUMN IF EXISTS hod_remark_at`,
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS last_teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL`,
 
     // ── Soft-delete for classes ───────────────────────────────────────────────
     `ALTER TABLE classes ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
     `CREATE INDEX IF NOT EXISTS idx_classes_deleted ON classes(deleted_at) WHERE deleted_at IS NOT NULL`,
 
-    // ── Syllabus publish workflow: HODs load → review → publish ───────────────
+    // ── Syllabus publish workflow: load → review → publish ────────────────────
     // Default TRUE so existing topics stay visible. Board-load sets FALSE (draft).
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT TRUE`,
     `CREATE INDEX IF NOT EXISTS idx_syllabus_published ON syllabus_topics(class_id, subject, published)`,
@@ -1352,6 +1348,12 @@ export async function initDB() {
 
     // ── Fee receipt branding (logo reuses existing logo_url; header is a list of styled blocks) ──
     `ALTER TABLE schools ADD COLUMN IF NOT EXISTS receipt_header_blocks JSONB DEFAULT '[]'`,
+    `ALTER TABLE schools ADD COLUMN IF NOT EXISTS logo_align VARCHAR(10) DEFAULT 'center'`,
+
+    // ── Grade ladder now tops out at 10, not 12 (lib/grades.ts GRADE_SEQUENCE) — only
+    // changes the default for NEW subject-template rows; existing rows keep whatever
+    // to_grade an admin already set.
+    `ALTER TABLE school_subject_templates ALTER COLUMN to_grade SET DEFAULT 10`,
   ]
 
   for (const sql of migrations) {
@@ -1383,6 +1385,12 @@ const SYLLABUS_SCHEMA: string[] = [
       updated_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(board, grade, subject_name)
     )`,
+    // Extra Subjects (Dance, Music, Art, ...) use the identical chapter/topic
+    // structure as academic subjects — 'category' just files them separately
+    // in the catalog. Extra subjects are stored under board='EXTRA' so the
+    // existing UNIQUE(board, grade, subject_name) and all board-scoped
+    // queries keep working unchanged.
+    `ALTER TABLE master_subjects ADD COLUMN IF NOT EXISTS category VARCHAR(20) NOT NULL DEFAULT 'academic'`,
 
     `CREATE TABLE IF NOT EXISTS master_chapters (
       id SERIAL PRIMARY KEY,
@@ -1443,6 +1451,10 @@ const SYLLABUS_SCHEMA: string[] = [
       UNIQUE(school_id, grade, subject_name, academic_year)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_school_subjects_school ON school_subjects(school_id)`,
+    // Copied from master_subjects.category at subscribe time — kept as its
+    // own column (not a live join) since master_subjects rows can change or
+    // be deleted after a school has already subscribed.
+    `ALTER TABLE school_subjects ADD COLUMN IF NOT EXISTS category VARCHAR(20) NOT NULL DEFAULT 'academic'`,
 
     `CREATE TABLE IF NOT EXISTS school_chapters (
       id SERIAL PRIMARY KEY,
@@ -1511,13 +1523,15 @@ const SYLLABUS_SCHEMA: string[] = [
     )`,
     `CREATE INDEX IF NOT EXISTS idx_school_topic_progress_class ON school_topic_progress(class_id)`,
 
-    // HOD tracking fields — the syllabus GET route selects these, so they must
+    // Progress-tracking fields the syllabus GET/PATCH routes select — must
     // exist alongside the table itself (the CREATE above predates them).
     `ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS target_date DATE`,
     `ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS delay_reason TEXT`,
-    `ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS hod_remark TEXT`,
-    `ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS hod_remark_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL`,
-    `ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS hod_remark_at TIMESTAMPTZ`,
+    // HOD management was removed — these columns were only ever read/written
+    // by the orphaned HODSyllabus.tsx component.
+    `ALTER TABLE school_topic_progress DROP COLUMN IF EXISTS hod_remark`,
+    `ALTER TABLE school_topic_progress DROP COLUMN IF EXISTS hod_remark_by`,
+    `ALTER TABLE school_topic_progress DROP COLUMN IF EXISTS hod_remark_at`,
     `ALTER TABLE school_subjects ADD COLUMN IF NOT EXISTS academic_year VARCHAR(20) DEFAULT '2025-26'`,
     `ALTER TABLE school_subjects DROP CONSTRAINT IF EXISTS school_subjects_school_id_grade_subject_name_key`,
 ]
@@ -1660,6 +1674,10 @@ async function runIncrementalMigrations() {
   // meaning whichever of those ran first "got lucky"; any other route hit first on a
   // cold instance would 500 with "column category_type does not exist".
   await pool.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS category_type TEXT NOT NULL DEFAULT 'fixed'`)
+  // System-generated categories ("Previous Year Dues", "Passout Dues") are billed
+  // directly to each student's ledger by year-rollover/year-end — they must never be
+  // gated behind the per-grade fee_structures setup that real fixed fee heads require.
+  await pool.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE`)
   // Previously only ever created inline in year-end/route.ts (ENSURE_CLOSE) — other
   // routes that check whether a year is closed (payments/cancel, ledger/[id]) wrapped
   // the query in .catch(() => ({rows:[]})), so a missing table silently failed the
@@ -1993,4 +2011,5 @@ async function runIncrementalMigrations() {
 
   // ── Fee receipt branding (logo reuses existing logo_url; header is a list of styled blocks) ──
   await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS receipt_header_blocks JSONB DEFAULT '[]'`).catch(() => {})
+  await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS logo_align VARCHAR(10) DEFAULT 'center'`).catch(() => {})
 }
