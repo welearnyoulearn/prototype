@@ -5,11 +5,13 @@ import Tasks from './Tasks'
 import ClassDoubts from './ClassDoubts'
 import ExamMarks from './ExamMarks'
 import { SCHEDULE } from '@/lib/schedule'
-import { BookOpen, ChevronDown, Check, Loader2, Sparkles, X, Eye } from 'lucide-react'
+import { BookOpen, ChevronDown, Check, Loader2, Sparkles, X, Eye, CalendarClock } from 'lucide-react'
 import TopicContentViewer from '@/app/components/TopicContentViewer'
 import { INK, GOLD, GREEN, BORDER, SURFACE } from '@/app/components/ulearn/theme'
 import { StatusPill, QuizPill, ProgressBar, Toast } from '@/app/components/ulearn/primitives'
 import { useToast } from '@/app/components/ulearn/useToast'
+import { useFeature } from '@/lib/features-context'
+import StudentDetail from './StudentDetail'
 
 type Subject = {
   id: number
@@ -22,12 +24,13 @@ type Subject = {
 type Student = {
   id: number
   name: string
-  email: string
+  email: string | null
   grade: string
   section: string
   roll_number: string
-  parent_name: string
-  parent_phone: string
+  parent_name: string | null
+  parent_phone: string | null
+  parent_email: string | null
   status: string
 }
 
@@ -119,7 +122,7 @@ type Props = {
 }
 
 const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Attendance', 'Timetable', 'Marks & Results', 'Homework', 'Doubts', 'Syllabus']
-const SUBJECT_TEACHER_TABS = ['My Overview', 'Marks & Results', 'Homework', 'Doubts', 'Timetable', 'Syllabus']
+const SUBJECT_TEACHER_TABS = ['My Overview', 'Students', 'Marks & Results', 'Homework', 'Doubts', 'Timetable', 'Syllabus']
 
 // API returns: { id, exam_name, exam_type, exam_date, status, subject_name, subject_status, max_marks, ... }
 type MyExamRow = {
@@ -405,6 +408,8 @@ type SylTopic = {
   status: string
   covered_date: string | null
   covered_by_name: string | null
+  target_date?: string | null
+  delay_reason?: string | null
   content_text?: string
   content_pdf_url?: string
   questions?: SylQuestion[] | string | null
@@ -448,13 +453,18 @@ type HomeworkSuggestion = {
 }
 
 export function SyllabusTracking({
-  classId, schoolId, grade, teacher, isClassTeacher, onGoToHomework,
+  classId, schoolId, grade, teacher, isClassTeacher, allowedSubjects, onGoToHomework,
 }: {
   classId: number
   schoolId: number
   grade: string
   teacher: TeacherObj | undefined
   isClassTeacher: boolean
+  // Subject names this teacher is assigned to for this class via
+  // Class Management's class_subjects table. Class teachers see every
+  // subject for their own class regardless (kept — a common real-school
+  // expectation); everyone else is gated strictly to their assignments.
+  allowedSubjects?: string[]
   onGoToHomework: () => void
 }) {
   const [subjects, setSubjects] = useState<SylSubject[]>([])
@@ -471,6 +481,22 @@ export function SyllabusTracking({
   const suggestionRef = useRef<HTMLDivElement>(null)
   const { toast, flash } = useToast()
 
+  // Add-custom-topic form — one open at a time, keyed by chapter name so a
+  // teacher can add topics to a chapter before or after marking others taught,
+  // same as school-admin's per-chapter "+ Custom Topic" in the Syllabus
+  // Customizer. Uses POST /api/syllabus, which finds-or-creates the chapter
+  // by name, so it works even for a chapter that has zero topics yet.
+  const [addTopicChapter, setAddTopicChapter] = useState<string | null>(null)
+  const [newTopicName, setNewTopicName] = useState('')
+  const [addingTopic, setAddingTopic] = useState(false)
+
+  // Inline target-date/delay-reason editor — one topic at a time, matching
+  // the add-custom-topic pattern above (keyed by topic id instead of chapter).
+  const [scheduleTopicId, setScheduleTopicId] = useState<number | null>(null)
+  const [scheduleDate, setScheduleDate] = useState('')
+  const [scheduleReason, setScheduleReason] = useState('')
+  const [savingSchedule, setSavingSchedule] = useState(false)
+
   // Scroll suggestion banner into view whenever it appears
   useEffect(() => {
     if ((suggestion || suggestLoading) && suggestionRef.current) {
@@ -484,9 +510,14 @@ export function SyllabusTracking({
       const subjectParam = selectedSubject ? `&subject=${encodeURIComponent(selectedSubject)}` : ''
       const res = await fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}${subjectParam}`)
       const data = await res.json()
-      const list: SylSubject[] = Array.isArray(data.subjects) ? data.subjects : []
+      const fetched: SylSubject[] = Array.isArray(data.subjects) ? data.subjects : []
+      // Class teachers see every subject for their own class; everyone else
+      // is gated to exactly what Class Management assigned them.
+      const list = (!isClassTeacher && allowedSubjects)
+        ? fetched.filter(s => allowedSubjects.includes(s.subject))
+        : fetched
       setSubjects(list)
-      // Auto-select: subject teacher gets their own subject, class teacher gets first
+      // Auto-select: first (and usually only) subject this teacher is allowed to see
       if (!selectedSubject && list.length > 0) {
         const own = teacher && !isClassTeacher ? list.find(s => s.subject === teacher.subject) : null
         setSelectedSubject(own ? own.subject : list[0].subject)
@@ -494,11 +525,63 @@ export function SyllabusTracking({
     } finally {
       setLoading(false)
     }
-  }, [classId, schoolId, selectedSubject, teacher, isClassTeacher])
+  }, [classId, schoolId, selectedSubject, teacher, isClassTeacher, allowedSubjects])
 
   useEffect(() => { loadSyllabus() }, [classId, schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentSubject = subjects.find(s => s.subject === selectedSubject)
+
+  async function addCustomTopic(chapter: SylChapter) {
+    const name = newTopicName.trim()
+    if (!name) return
+    setAddingTopic(true)
+    try {
+      const res = await fetch('/api/syllabus', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId,
+          class_id: classId,
+          subject: selectedSubject,
+          chapter_name: chapter.chapter_name,
+          chapter_order: chapter.chapter_order,
+          topic_name: name,
+          topic_order: chapter.topics.length,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to add topic')
+      flash(`"${name}" added to ${chapter.chapter_name}`)
+      setNewTopicName('')
+      await loadSyllabus()
+    } catch (err: unknown) {
+      flash(err instanceof Error ? err.message : 'Failed to add topic')
+    } finally {
+      setAddingTopic(false)
+    }
+  }
+
+  async function saveSchedule(topic: SylTopic) {
+    setSavingSchedule(true)
+    try {
+      await fetch(`/api/syllabus/${topic.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId, class_id: classId,
+          target_date: scheduleDate || null,
+          delay_reason: scheduleReason || null,
+        }),
+      })
+      flash(`Schedule updated for "${topic.topic_name}"`)
+      setScheduleTopicId(null)
+      await loadSyllabus()
+    } catch {
+      flash('Failed to update schedule')
+    } finally {
+      setSavingSchedule(false)
+    }
+  }
 
   // "Mark taught" — flips school_topic_progress.status between covered/pending
   // via PATCH /api/syllabus/:id, the only real progress state the API supports.
@@ -741,7 +824,12 @@ export function SyllabusTracking({
                 </button>
 
                 {/* Topics list */}
-                {isExpanded && (
+                {isExpanded && ch.topics.length === 0 && (
+                  <div className="border-t px-5 py-4 text-xs text-gray-400 italic" style={{ borderColor: BORDER }}>
+                    No topics added to this chapter yet.
+                  </div>
+                )}
+                {isExpanded && ch.topics.length > 0 && (
                   <div className="border-t divide-y" style={{ borderColor: BORDER }}>
                     {ch.topics.map((topic, tIdx) => {
                       const isCovered = topic.status === 'covered'
@@ -775,11 +863,64 @@ export function SyllabusTracking({
                                 style={{ color: GOLD, background: '#FCEBDB', border: `1px solid ${GOLD}` }}>
                                 <Eye size={11} /> View Material
                               </button>
+                              {!isCovered && (
+                                <button
+                                  onClick={() => {
+                                    setScheduleTopicId(scheduleTopicId === topic.id ? null : topic.id)
+                                    setScheduleDate(topic.target_date || '')
+                                    setScheduleReason(topic.delay_reason || '')
+                                  }}
+                                  data-testid={`syllabus-schedule-btn-${topic.id}`}
+                                  className="text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1"
+                                  style={{ color: '#6b7280', background: SURFACE, border: `1px solid ${BORDER}` }}>
+                                  <CalendarClock size={11} /> Schedule
+                                </button>
+                              )}
                             </div>
                             {isCovered && topic.covered_date && (
                               <p className="text-[10px] mt-0.5 ml-5" style={{ color: GREEN }}>
                                 Taught {topic.covered_date}{topic.covered_by_name ? ` · ${topic.covered_by_name}` : ''}
                               </p>
+                            )}
+                            {!isCovered && (topic.target_date || topic.delay_reason) && (
+                              <p className="text-[10px] mt-0.5 ml-5" style={{ color: '#9ca3af' }}>
+                                {topic.target_date && `Target: ${topic.target_date}`}
+                                {topic.target_date && topic.delay_reason && ' · '}
+                                {topic.delay_reason && `Delay: ${topic.delay_reason}`}
+                              </p>
+                            )}
+                            {scheduleTopicId === topic.id && (
+                              <div className="flex gap-2 items-center flex-wrap mt-2 ml-5">
+                                <input
+                                  type="date"
+                                  value={scheduleDate}
+                                  onChange={e => setScheduleDate(e.target.value)}
+                                  data-testid={`syllabus-target-date-${topic.id}`}
+                                  className="border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2"
+                                  style={{ borderColor: BORDER, color: INK }}
+                                />
+                                <input
+                                  value={scheduleReason}
+                                  onChange={e => setScheduleReason(e.target.value)}
+                                  placeholder="Delay reason (optional)"
+                                  data-testid={`syllabus-delay-reason-${topic.id}`}
+                                  className="flex-1 min-w-40 border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2"
+                                  style={{ borderColor: BORDER, color: INK }}
+                                />
+                                <button
+                                  onClick={() => saveSchedule(topic)}
+                                  disabled={savingSchedule}
+                                  data-testid={`syllabus-schedule-save-${topic.id}`}
+                                  className="text-xs font-semibold px-3 py-1 rounded-lg text-white disabled:opacity-50"
+                                  style={{ background: GOLD }}>
+                                  {savingSchedule ? 'Saving…' : 'Save'}
+                                </button>
+                                <button
+                                  onClick={() => setScheduleTopicId(null)}
+                                  className="text-xs text-gray-400 hover:text-gray-600 px-2">
+                                  Cancel
+                                </button>
+                              </div>
                             )}
                           </div>
                           {isMarking && (
@@ -788,6 +929,49 @@ export function SyllabusTracking({
                         </div>
                       )
                     })}
+                  </div>
+                )}
+
+                {/* Add custom topic — same POST /api/syllabus used by school-admin's
+                    Syllabus Customizer, so it works whether the teacher adds one topic
+                    now and more later, or several in a row before marking anything taught. */}
+                {isExpanded && (
+                  <div className="border-t px-5 py-3" style={{ borderColor: BORDER, background: SURFACE }}>
+                    {addTopicChapter === ch.chapter_name ? (
+                      <div className="flex gap-2 items-center flex-wrap">
+                        <input
+                          autoFocus
+                          value={newTopicName}
+                          onChange={e => setNewTopicName(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && addCustomTopic(ch)}
+                          placeholder="Topic name"
+                          data-testid={`syllabus-new-topic-input-${chIdx}`}
+                          className="flex-1 min-w-40 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2"
+                          style={{ borderColor: BORDER, color: INK }}
+                        />
+                        <button
+                          onClick={() => addCustomTopic(ch)}
+                          disabled={addingTopic || !newTopicName.trim()}
+                          data-testid={`syllabus-new-topic-submit-${chIdx}`}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
+                          style={{ background: GOLD }}>
+                          {addingTopic ? 'Adding…' : 'Add'}
+                        </button>
+                        <button
+                          onClick={() => { setAddTopicChapter(null); setNewTopicName('') }}
+                          className="text-xs text-gray-400 hover:text-gray-600 px-2">
+                          Done
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { setAddTopicChapter(ch.chapter_name); setNewTopicName('') }}
+                        data-testid={`syllabus-add-topic-btn-${chIdx}`}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors"
+                        style={{ borderColor: BORDER, color: INK }}>
+                        + Custom Topic
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -810,11 +994,18 @@ export function SyllabusTracking({
 }
 
 export default function ClassView({ classId, grade, section, schoolId, teacherName, teacherId, isClassTeacher, teacher, onBack, initialTab, openExamId }: Props) {
-  const tabs = isClassTeacher ? CLASS_TEACHER_TABS : SUBJECT_TEACHER_TABS
+  const hasTimetableFeature = useFeature('timetable')
+  const hasAttendanceFeature = useFeature('attendance')
+  const allTabs = isClassTeacher ? CLASS_TEACHER_TABS : SUBJECT_TEACHER_TABS
+  const tabs = allTabs.filter(t =>
+    (t !== 'Timetable' || hasTimetableFeature) &&
+    (t !== 'Attendance' || hasAttendanceFeature)
+  )
   const [classDetail, setClassDetail] = useState<ClassDetail | null>(null)
   const [students, setStudents] = useState<Student[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState(initialTab && tabs.includes(initialTab) ? initialTab : tabs[0])
+  const [detailStudent, setDetailStudent] = useState<Student | null>(null)
 
   // Today's timetable (for 1st period card + day-wise view)
   const [todaySlots, setTodaySlots] = useState<TimetableSlot[]>([])
@@ -1091,7 +1282,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         {/* Tabs */}
         <div className="flex gap-6 mt-5 border-b border-gray-100 -mb-5">
           {tabs.map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
+            <button key={tab} onClick={() => { setActiveTab(tab); setDetailStudent(null) }}
               className={`pb-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === tab ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}>{tab}</button>
@@ -1290,7 +1481,17 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
       )}
 
       {/* ── STUDENTS TAB ────────────────────────────────────────────────────── */}
-      {activeTab === 'Students' && (
+      {activeTab === 'Students' && detailStudent && (
+        <StudentDetail
+          student={detailStudent}
+          classId={classId}
+          schoolId={schoolId}
+          backLabel={`Back to ${className} Students`}
+          onBack={() => setDetailStudent(null)}
+        />
+      )}
+
+      {activeTab === 'Students' && !detailStudent && (
         <div className="bg-white rounded-xl border border-gray-200">
           <div className="px-5 py-4 border-b border-gray-100">
             <h3 className="font-semibold text-gray-800">All Students — {className}</h3>
@@ -1311,7 +1512,8 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
               </thead>
               <tbody>
                 {students.map((student, idx) => (
-                  <tr key={student.id} className="border-b border-gray-50 hover:bg-gray-50">
+                  <tr key={student.id} onClick={() => setDetailStudent(student)}
+                    className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer">
                     <td className="px-5 py-3 text-gray-400">{idx + 1}</td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2">

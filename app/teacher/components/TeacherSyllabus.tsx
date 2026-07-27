@@ -12,9 +12,12 @@ type ClassOption = {
   class_teacher_id: number | null
 }
 
-type TimetableSlot = {
-  grade: string | null
-  section: string | null
+type ClassSubjectAssignment = {
+  id: number
+  subject_name: string
+  class_id: number
+  grade: string
+  section: string
 }
 
 export default function TeacherSyllabus({
@@ -25,16 +28,20 @@ export default function TeacherSyllabus({
   onGoToHomework: (classId: number) => void
 }) {
   const [classes, setClasses] = useState<ClassOption[]>([])
+  const [assignments, setAssignments] = useState<ClassSubjectAssignment[]>([])
   const [activeKey, setActiveKey] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Same two sources MyClasses uses: the class they're class teacher of,
-    // plus every class they hold a timetable slot for.
+    // Class visibility comes from two sources: the class they're class
+    // teacher of (they oversee the whole class regardless of subject), plus
+    // every (class, subject) pair Class Management explicitly assigned them
+    // via class_subjects — replacing the old "any timetable slot" heuristic,
+    // which let a teacher see subjects that weren't actually theirs.
     Promise.all([
-      fetch(`/api/timetable?teacher_id=${teacher.id}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
+      fetch(`/api/teachers/${teacher.id}/class-subjects`).then(r => r.json()).catch(() => []),
       fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()).catch(() => []),
-    ]).then(([timetable, allClasses]: [TimetableSlot[], ClassOption[]]) => {
+    ]).then(([classSubjects, allClasses]: [ClassSubjectAssignment[], ClassOption[]]) => {
       const list = Array.isArray(allClasses) ? allClasses : []
       const picked = new Map<number, ClassOption>()
 
@@ -42,13 +49,15 @@ export default function TeacherSyllabus({
         const own = list.find(c => c.grade === teacher.class_teacher_grade && c.section === teacher.class_teacher_section)
         if (own) picked.set(own.id, own)
       }
-      ;(Array.isArray(timetable) ? timetable : []).forEach(slot => {
-        const cls = list.find(c => c.grade === slot.grade && c.section === slot.section)
+      const assigned = Array.isArray(classSubjects) ? classSubjects : []
+      assigned.forEach(a => {
+        const cls = list.find(c => c.id === a.class_id)
         if (cls) picked.set(cls.id, cls)
       })
 
       const found = Array.from(picked.values())
       setClasses(found)
+      setAssignments(assigned)
       if (found.length > 0) setActiveKey(`${found[0].grade}-${found[0].section}`)
     }).finally(() => setLoading(false))
   }, [teacher, schoolId])
@@ -60,7 +69,7 @@ export default function TeacherSyllabus({
       <UlearnCard className="p-6 text-center" borderColor={BORDER}>
         <div className="text-sm font-medium" style={{ color: INK }}>No classes assigned</div>
         <p className="text-sm text-gray-400 mt-1">
-          You&apos;ll see a syllabus here once you&apos;re set as a class teacher or given timetable slots.
+          You&apos;ll see a syllabus here once you&apos;re set as a class teacher or assigned a subject in Class Management.
         </p>
       </UlearnCard>
     )
@@ -68,6 +77,7 @@ export default function TeacherSyllabus({
 
   const active = classes.find(c => `${c.grade}-${c.section}` === activeKey) ?? classes[0]
   const isClassTeacher = active.class_teacher_id === teacher.id
+  const allowedSubjects = assignments.filter(a => a.class_id === active.id).map(a => a.subject_name)
 
   return (
     <div className="space-y-4">
@@ -92,6 +102,7 @@ export default function TeacherSyllabus({
         grade={active.grade}
         teacher={teacher}
         isClassTeacher={isClassTeacher}
+        allowedSubjects={allowedSubjects}
         onGoToHomework={() => onGoToHomework(active.id)}
       />
     </div>
