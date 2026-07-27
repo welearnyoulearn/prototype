@@ -2,6 +2,7 @@
 
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { parseCSV } from '@/lib/parseCSV'
+import { GRADE_SEQUENCE } from '@/lib/grades'
 
 type Props = { schoolId: number; onRefresh?: () => void }
 
@@ -25,12 +26,12 @@ const EMPTY_ROW: TeacherRow = {
 
 const CSV_HEADER = 'name,email,subject,phone,department,qualification,date_of_joining,staff_type,teaches_grades'
 const CSV_EXAMPLE = `Priya Sharma,priya@school.com,Mathematics,9876543210,Science,B.Ed,2023-06-01,teaching,"8,9,10"
-Raj Kumar,raj@school.com,Physics,9876543211,Science,M.Sc,2022-07-15,teaching,"11,12"
+Raj Kumar,raj@school.com,Physics,9876543211,Science,M.Sc,2022-07-15,teaching,"9,10"
 Suresh Patel,suresh@school.com,,,Admin,,2021-01-10,non_teaching,
 # Note: wrap grades in quotes — "8,9,10" — or leave blank for all grades`
 
 const STUDENT_CSV_MARKERS = ['roll_number', 'parent_name', 'parent_phone', 'parent_email']
-const ALL_GRADES = Array.from({ length: 12 }, (_, i) => String(i + 1))
+const ALL_GRADES = GRADE_SEQUENCE.filter(g => /^\d+$/.test(g))
 
 function normalizeStaffType(raw: string): string {
   const v = raw.toLowerCase().replace(/[\s\-]/g, '_')
@@ -44,6 +45,17 @@ function downloadTemplate() {
   const a = document.createElement('a')
   a.href = url; a.download = 'staff_template.csv'; a.click()
   URL.revokeObjectURL(url)
+}
+
+// Excel template with a real in-cell Subject dropdown (limited to the
+// school's subscribed subjects) — the plain-CSV template above can't carry a
+// dropdown at all, so a school that wants that protection downloads this
+// instead, fills it in Excel, and uploads the same .xlsx file back.
+function downloadExcelTemplate(schoolId: number) {
+  const a = document.createElement('a')
+  a.href = `/api/teachers/template?school_id=${schoolId}`
+  a.download = 'staff_template.xlsx'
+  a.click()
 }
 
 // Inline grade multi-select for table rows
@@ -114,6 +126,16 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
   const [showErrors, setShowErrors] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // Subject names to offer in the dropdown — prefer what the school has
+  // actually subscribed to (Syllabus Customizer), so a teacher's subject can
+  // never drift from what class_subjects/the syllabus system expects (same
+  // guard already applied to Class Management). If the school hasn't
+  // subscribed to anything (no Syllabus feature, or feature present but
+  // unused), fall back to the full platform master catalog — still a clean
+  // typo-proof list, just not narrowed to this school yet.
+  const [subscribedSubjectNames, setSubscribedSubjectNames] = useState<string[]>([])
+  const [subjectInputMode, setSubjectInputMode] = useState<Record<number, 'dropdown' | 'manual'>>({})
+
   const fetchStaffCount = useCallback(async () => {
     try {
       const res = await fetch(`/api/admin/overview?school_id=${schoolId}&features=`)
@@ -124,7 +146,34 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
     } catch { /* non-critical */ }
   }, [schoolId])
 
-  useEffect(() => { fetchStaffCount() }, [fetchStaffCount])
+  const fetchSubscribedSubjects = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/school/subjects?school_id=${schoolId}`)
+      if (res.ok) {
+        const d = await res.json()
+        const rows: { subject_name: string }[] = Array.isArray(d.subjects) ? d.subjects : []
+        const names = Array.from(new Set(rows.map(r => r.subject_name))).sort()
+        if (names.length > 0) {
+          setSubscribedSubjectNames(names)
+          return
+        }
+      }
+      // No subscribed subjects — either the school hasn't adopted the
+      // Syllabus feature at all, or it has the feature but hasn't subscribed
+      // to anything yet. Either way there's no per-school list to narrow to,
+      // so fall back to the full platform master catalog rather than forcing
+      // free text — still gives a clean, typo-proof list to pick from.
+      const masterRes = await fetch('/api/platform/subjects')
+      if (masterRes.ok) {
+        const d = await masterRes.json()
+        const rows: { subject_name: string }[] = Array.isArray(d.subjects) ? d.subjects : []
+        const names = Array.from(new Set(rows.map(r => r.subject_name))).sort()
+        setSubscribedSubjectNames(names)
+      }
+    } catch { /* non-critical — falls back to free text */ }
+  }, [schoolId])
+
+  useEffect(() => { fetchStaffCount(); fetchSubscribedSubjects() }, [fetchStaffCount, fetchSubscribedSubjects])
 
   function updateRow(index: number, field: keyof TeacherRow, value: string) {
     setRows(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r))
@@ -135,6 +184,19 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
   function removeRow(index: number) {
     if (rows.length === 1) return
     setRows(prev => prev.filter((_, i) => i !== index))
+    // subjectInputMode is keyed by row index, so deleting a row must shift
+    // every later row's entry down to match — otherwise row 3's recorded
+    // mode silently reattaches to what is now row 2 after the delete.
+    setSubjectInputMode(prev => {
+      const next: Record<number, 'dropdown' | 'manual'> = {}
+      for (const [key, value] of Object.entries(prev)) {
+        const i = Number(key)
+        if (i < index) next[i] = value
+        else if (i > index) next[i - 1] = value
+        // i === index is dropped — that row no longer exists
+      }
+      return next
+    })
   }
 
   function parseText(text: string) {
@@ -157,8 +219,9 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
       .filter(cols => !(cols[0] ?? '').trim().startsWith('#'))
     const parsed: TeacherRow[] = dataRows.map(cols => {
       // Grades recovery: if user wrote 8,9,10 without quotes, CSV parser spills them into cols 8,9,10...
-      // Detect: col 8 onwards are all grade numbers (1–12), merge them back
-      const isGrade = (v: string) => /^\d{1,2}$/.test(v.trim()) && +v.trim() >= 1 && +v.trim() <= 12
+      // Detect: col 8 onwards are all valid numeric grades, merge them back
+      const maxGrade = Math.max(...GRADE_SEQUENCE.filter(g => /^\d+$/.test(g)).map(Number))
+      const isGrade = (v: string) => /^\d{1,2}$/.test(v.trim()) && +v.trim() >= 1 && +v.trim() <= maxGrade
       let teachesGrades = cols[8] ?? ''
       if (cols.length > 9 && isGrade(cols[8] ?? '')) {
         const spilledGrades = cols.slice(8).filter(c => isGrade(c))
@@ -179,9 +242,40 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
     if (parsed.length > 0) { setRows(parsed); setMode('manual') }
   }
 
+  async function parseExcelFile(file: File) {
+    setCsvWarn('')
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch('/api/teachers/parse-import', { method: 'POST', body: form })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to read the Excel file')
+      const parsed: TeacherRow[] = (data.rows as Record<string, string>[]).map(r => ({
+        name:            r.name ?? '',
+        email:           r.email ?? '',
+        subject:         r.subject ?? '',
+        phone:           r.phone ?? '',
+        department:      r.department ?? '',
+        qualification:   r.qualification ?? '',
+        date_of_joining: r.date_of_joining ?? '',
+        staff_type:      normalizeStaffType(r.staff_type ?? ''),
+        teaches_grades:  r.teaches_grades ?? '',
+      }))
+      if (parsed.length > 0) { setRows(parsed); setMode('manual') }
+      else setCsvWarn('No staff rows found in that file.')
+    } catch (err) {
+      setCsvWarn(err instanceof Error ? err.message : 'Failed to read the Excel file')
+    }
+  }
+
   function handleFileImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    if (file.name.toLowerCase().endsWith('.xlsx')) {
+      parseExcelFile(file)
+      e.target.value = ''
+      return
+    }
     const reader = new FileReader()
     reader.onload = ev => { parseText(ev.target?.result as string) }
     reader.readAsText(file)
@@ -226,6 +320,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
   function cellCls(row: TeacherRow, field: keyof TeacherRow) {
     if (!showErrors) return inputCls
     if (field === 'name' && !row.name.trim()) return inputErrCls
+    if (field === 'email' && !row.email.trim()) return inputErrCls
     if (field === 'subject' && row.staff_type === 'teaching' && !row.subject.trim()) return inputErrCls
     return inputCls
   }
@@ -249,21 +344,32 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
           )}
         </div>
         <div className="flex gap-2">
-          <input ref={fileRef} type="file" accept=".csv,.txt" onChange={handleFileImport} className="hidden" />
+          <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx" onChange={handleFileImport} className="hidden" />
           <button onClick={downloadTemplate}
-            title="Download CSV template"
+            title="Download plain CSV template (free-text subject)"
             className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
-            Template
+            CSV Template
           </button>
+          {subscribedSubjectNames.length > 0 && (
+            <button onClick={() => downloadExcelTemplate(schoolId)}
+              title="Download Excel template with a Subject dropdown"
+              className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
+              Excel Template
+            </button>
+          )}
           <button onClick={() => fileRef.current?.click()}
+            title="Import a .csv or a filled-in .xlsx template"
             className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
-            Import CSV
+            Import File
           </button>
           <button onClick={() => setMode(m => m === 'csv' ? 'manual' : 'csv')}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === 'csv' ? 'bg-blue-600 text-white' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
@@ -346,15 +452,15 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                 <tr>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-8">#</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[130px]">Name <span className="text-red-400">*</span></th>
-                  <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[140px]">Email</th>
-                  <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Subject <span className="text-orange-400 text-[10px]">(req. for teaching)</span></th>
+                  <th className="text-left px-3 py-2.5 font-medium text-gray-700 min-w-[140px] bg-blue-50">Email <span className="text-red-400">*</span></th>
+                  <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Subject <span className="text-red-400">*</span> <span className="text-gray-400 text-[10px]">(teaching only)</span></th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[100px]">Phone</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Department</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[120px]">Qualification</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Joining Date</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Staff Type</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[130px]">
-                    Teaches Grades <span className="text-amber-400 text-[10px] font-semibold">← important</span>
+                    Teaches Grades <span className="text-amber-500 text-[10px] font-semibold">← important</span>
                   </th>
                   <th className="px-3 py-2.5 w-8"></th>
                 </tr>
@@ -370,7 +476,34 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                       </td>
                       <td className="px-3 py-2"><input className={cellCls(row, 'email')} placeholder="Email *" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
                       <td className="px-3 py-2">
-                        <input className={cellCls(row, 'subject')} placeholder={row.staff_type === 'teaching' ? 'Required *' : 'N/A'} value={row.subject} onChange={e => updateRow(i, 'subject', e.target.value)} />
+                        {subscribedSubjectNames.length > 0 && subjectInputMode[i] !== 'manual' ? (
+                          <select
+                            className={cellCls(row, 'subject')}
+                            value={subscribedSubjectNames.includes(row.subject) ? row.subject : ''}
+                            onChange={e => {
+                              if (e.target.value === '__other__') {
+                                setSubjectInputMode(prev => ({ ...prev, [i]: 'manual' }))
+                                updateRow(i, 'subject', '')
+                              } else {
+                                updateRow(i, 'subject', e.target.value)
+                              }
+                            }}>
+                            <option value="">{row.staff_type === 'teaching' ? 'Select subject *' : 'N/A'}</option>
+                            {subscribedSubjectNames.map(name => (
+                              <option key={name} value={name}>{name}</option>
+                            ))}
+                            <option value="__other__">Other (type manually)…</option>
+                          </select>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <input className={cellCls(row, 'subject')} placeholder={row.staff_type === 'teaching' ? 'Required *' : 'N/A'} value={row.subject} onChange={e => updateRow(i, 'subject', e.target.value)} />
+                            {subscribedSubjectNames.length > 0 && (
+                              <button type="button" title="Pick from the subject list"
+                                onClick={() => setSubjectInputMode(prev => ({ ...prev, [i]: 'dropdown' }))}
+                                className="text-[10px] text-blue-500 hover:text-blue-700 flex-shrink-0">↺</button>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="Phone" value={row.phone} onChange={e => updateRow(i, 'phone', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="Department" value={row.department} onChange={e => updateRow(i, 'department', e.target.value)} /></td>
@@ -405,6 +538,11 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                 })}
               </tbody>
             </table>
+          </div>
+          <div className="px-4 py-2 bg-blue-50/30 border-t border-blue-100 flex items-center gap-4 flex-wrap">
+            <p className="text-xs text-blue-600 font-medium">Email (blue) is required — login credentials are sent there</p>
+            <p className="text-xs text-gray-400">Subject required for teaching staff only</p>
+            <p className="text-xs text-amber-600">Teaches Grades — leave blank for all grades</p>
           </div>
           <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 flex items-center gap-2">
             <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
