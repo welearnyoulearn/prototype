@@ -3,6 +3,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { CURRICULA } from '@/lib/curricula'
 import StudentSyllabus from '../../student/components/StudentSyllabus'
+import { useFeature } from '@/lib/features-context'
+import { GRADE_SEQUENCE } from '@/lib/grades'
 
 type Props = { schoolId: number; onNavigate?: (tab: string) => void }
 
@@ -38,6 +40,7 @@ function canTeachGrade(teachesGrades: string | null | undefined, grade: string):
 }
 
 export default function ClassManagement({ schoolId, onNavigate }: Props) {
+  const timetableFeatureEnabled = useFeature('timetable')
   const [classes, setClasses] = useState<ClassRow[]>([])
   const [removedClasses, setRemovedClasses] = useState<{ id: number; grade: string; section: string; student_count: number; deleted_at: string }[]>([])
   const [teachers, setTeachers] = useState<Teacher[]>([])
@@ -110,7 +113,8 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
     const grade = newClass.grade.trim()
     const section = newClass.section.trim().toUpperCase()
     if (!grade || !section) { setError('Grade and Section required'); return }
-    if (!/^[0-9]+$/.test(grade) || parseInt(grade) < 1 || parseInt(grade) > 12) { setError('Grade must be 1–12'); return }
+    const maxNumericGrade = Math.max(...GRADE_SEQUENCE.filter(g => /^\d+$/.test(g)).map(Number))
+    if (!/^[0-9]+$/.test(grade) || parseInt(grade) < 1 || parseInt(grade) > maxNumericGrade) { setError(`Grade must be 1–${maxNumericGrade}`); return }
     if (!/^[A-Z]$/.test(section)) { setError('Section must be a single letter A–Z'); return }
     setAddingClass(true)
     setSetupMsg('Creating class...')
@@ -125,7 +129,12 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
 
       // Step 2: Auto-generate timetable
       const subCount = data.subjects_assigned ?? 0
-      setSetupMsg(`${subCount} subjects assigned · Generating timetable...`)
+      const unmatched: string[] = data.unmatched_subjects ?? []
+      setSetupMsg(
+        unmatched.length > 0
+          ? `${subCount} subjects assigned · ${unmatched.length} need a teacher (${unmatched.join(', ')}) · Generating timetable...`
+          : `${subCount} subjects assigned · Generating timetable...`
+      )
       await fetch('/api/class-timetable/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -273,9 +282,11 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
                       {cls.class_teacher_name
                         ? <p className="text-[10px] text-indigo-500 font-medium truncate">CT: {cls.class_teacher_name}</p>
                         : <p className="text-[10px] text-amber-400">No class teacher</p>}
-                      {cls.timetable_generated_at
-                        ? <p className="text-[10px] text-emerald-500 font-medium">Timetable ready</p>
-                        : <p className="text-[10px] text-gray-300">No timetable</p>}
+                      {timetableFeatureEnabled && (
+                        cls.timetable_generated_at
+                          ? <p className="text-[10px] text-emerald-500 font-medium">Timetable ready</p>
+                          : <p className="text-[10px] text-gray-300">No timetable</p>
+                      )}
                     </div>
                     <button onClick={e => deleteClass(e, cls.id)}
                       className="opacity-0 group-hover:opacity-100 text-red-300 hover:text-red-500 text-xs p-0.5 transition-all flex-shrink-0">✕</button>
@@ -379,14 +390,14 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
                   <span className="text-xs font-medium text-gray-600">From Grade</span>
                   <select value={newSetFrom} onChange={e => setNewSetFrom(e.target.value)}
                     className="border border-indigo-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map(g => <option key={g} value={g}>{g}</option>)}
+                    {GRADE_SEQUENCE.filter(g => /^\d+$/.test(g)).map(Number).map(g => <option key={g} value={g}>{g}</option>)}
                   </select>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-medium text-gray-600">To Grade</span>
                   <select value={newSetTo} onChange={e => setNewSetTo(e.target.value)}
                     className="border border-indigo-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map(g => <option key={g} value={g}>{g}</option>)}
+                    {GRADE_SEQUENCE.filter(g => /^\d+$/.test(g)).map(Number).map(g => <option key={g} value={g}>{g}</option>)}
                   </select>
                 </div>
               </div>
@@ -558,6 +569,7 @@ function ClassDetail({
   onClassUpdated: (updates: Partial<ClassRow> & { id: number }) => void
   onNavigate?: (tab: string) => void
 }) {
+  const timetableFeatureEnabled = useFeature('timetable')
   const [tab, setTab] = useState<'overview' | 'subjects' | 'timetable' | 'students' | 'syllabus'>('overview')
   const [attSummary, setAttSummary] = useState<{ date: string; present: number; absent: number; late: number }[]>([])
   const [attLoading, setAttLoading] = useState(false)
@@ -593,6 +605,12 @@ function ClassDetail({
   const [applyingDefaults, setApplyingDefaults] = useState(false)
   const [defaultsMsg, setDefaultsMsg] = useState<{ text: string; ok: boolean } | null>(null)
   const [selectedCurriculum, setSelectedCurriculum] = useState<'CBSE' | 'APSSC' | 'SSC' | 'both'>('both')
+  // Subjects the school has subscribed to (Syllabus Customizer) for this
+  // class's grade. When present, these — not the static CURRICULA list —
+  // are the only subjects offered here, so class_subjects.subject_name is
+  // always identical to school_subjects.subject_name (the string /api/syllabus
+  // and the teacher class-subjects gate join on).
+  const [subscribedSubjects, setSubscribedSubjects] = useState<string[] | null>(null)
 
   const inp = 'border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300'
 
@@ -603,6 +621,17 @@ function ClassDetail({
       setSubjects(Array.isArray(data) ? data : [])
     } finally { setSubLoading(false) }
   }, [cls.id])
+
+  const loadSubscribedSubjects = useCallback(async () => {
+    try {
+      const data = await fetch(`/api/school/subjects?school_id=${schoolId}`).then(r => r.json())
+      const rows: { grade: string; subject_name: string }[] = Array.isArray(data.subjects) ? data.subjects : []
+      const forGrade = rows.filter(s => s.grade === cls.grade).map(s => s.subject_name)
+      setSubscribedSubjects(forGrade.length > 0 ? forGrade : null)
+    } catch {
+      setSubscribedSubjects(null)
+    }
+  }, [schoolId, cls.grade])
 
   const loadTimetable = useCallback(async () => {
     setTtLoading(true)
@@ -644,6 +673,7 @@ function ClassDetail({
     setEditingClassTeacher(false)
     setCtId(String(cls.class_teacher_id || ''))
     loadSubjects()
+    loadSubscribedSubjects()
     loadAttendanceSummary()
   }, [cls.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -706,8 +736,16 @@ function ClassDetail({
       if (!res.ok) throw new Error(data.error)
       await loadSubjects()
       setNewName(''); setNewTeacher('')
-      setSubjectMsg({ text: `✓ ${subjectName} added${data.teacher_name ? ` · Teacher: ${data.teacher_name}` : ''}`, ok: true })
-      setTimeout(() => setSubjectMsg(null), 4000)
+      // No auto-matched teacher isn't an error, but it shouldn't read like a
+      // fully-done success either — no teacher's "subject" field matched this
+      // name (e.g. "Mathematics" typed at onboarding vs "Maths" subscribed
+      // here), so it needs a manual pick via "Assign Teacher" below.
+      setSubjectMsg(
+        data.teacher_name
+          ? { text: `✓ ${subjectName} added · Teacher: ${data.teacher_name}`, ok: true }
+          : { text: `${subjectName} added, but no teacher's subject matched — assign one manually below.`, ok: false }
+      )
+      setTimeout(() => setSubjectMsg(null), data.teacher_name ? 4000 : 7000)
     } catch (err: unknown) {
       setSubjectMsg({ text: err instanceof Error ? err.message : 'Failed to add subject', ok: false })
     } finally { setAddingSubject(false) }
@@ -838,7 +876,10 @@ function ClassDetail({
   const hasTimetable = timetable.length > 0
   const totalPPW = subjects.reduce((a, s) => a + s.periods_per_week, 0)
   const existingNames = new Set(subjects.map(s => s.subject_name.toLowerCase()))
-  const suggestions = getSuggestedSubjects(cls.grade, selectedCurriculum)
+  // Once the school has subscribed to syllabus subjects for this grade, those
+  // are the only options offered — not the static CURRICULA guess-list — so
+  // the name written to class_subjects always matches school_subjects exactly.
+  const suggestions = subscribedSubjects ?? getSuggestedSubjects(cls.grade, selectedCurriculum)
   const availableSuggestions = suggestions.filter(s => !existingNames.has(s.toLowerCase()))
 
   const ttByDay: Record<string, TimetableSlot[]> = {}
@@ -945,7 +986,9 @@ function ClassDetail({
 
         {/* Tabs */}
         <div className="flex gap-0 mt-3 -mb-4">
-          {(['overview', 'subjects', 'timetable', 'students', 'syllabus'] as const).map(t => (
+          {(['overview', 'subjects', 'timetable', 'students', 'syllabus'] as const)
+            .filter(t => t !== 'timetable' || timetableFeatureEnabled)
+            .map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
                 tab === t ? 'border-violet-600 text-violet-700' : 'border-transparent text-gray-500 hover:text-gray-800'
@@ -990,7 +1033,7 @@ function ClassDetail({
             </div>
 
             {/* Summary cards */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className={`grid gap-3 ${timetableFeatureEnabled ? 'grid-cols-3' : 'grid-cols-2'}`}>
               <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 text-center">
                 <p className="text-3xl font-black text-violet-700">{cls.student_count}</p>
                 <p className="text-xs text-violet-600 mt-1">Students</p>
@@ -999,16 +1042,18 @@ function ClassDetail({
                 <p className="text-3xl font-black text-blue-700">{subjects.length}</p>
                 <p className="text-xs text-blue-600 mt-1">Subjects</p>
               </div>
-              <div className={`border rounded-xl p-4 text-center ${cls.timetable_generated_at ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
-                <p className={`text-xs font-bold mt-1 ${cls.timetable_generated_at ? 'text-green-700' : 'text-amber-600'}`}>
-                  {cls.timetable_generated_at ? 'Timetable Ready' : 'No Timetable'}
-                </p>
-                {cls.timetable_generated_at && (
-                  <p className="text-[10px] text-green-500 mt-0.5">
-                    {new Date(cls.timetable_generated_at).toLocaleDateString()}
+              {timetableFeatureEnabled && (
+                <div className={`border rounded-xl p-4 text-center ${cls.timetable_generated_at ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+                  <p className={`text-xs font-bold mt-1 ${cls.timetable_generated_at ? 'text-green-700' : 'text-amber-600'}`}>
+                    {cls.timetable_generated_at ? 'Timetable Ready' : 'No Timetable'}
                   </p>
-                )}
-              </div>
+                  {cls.timetable_generated_at && (
+                    <p className="text-[10px] text-green-500 mt-0.5">
+                      {new Date(cls.timetable_generated_at).toLocaleDateString()}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Teachers & Subjects */}
@@ -1075,17 +1120,19 @@ function ClassDetail({
             </div>
 
             {/* Quick actions */}
-            <div className="grid grid-cols-3 gap-3">
+            <div className={`grid gap-3 ${timetableFeatureEnabled ? 'grid-cols-3' : 'grid-cols-2'}`}>
               <button onClick={() => setTab('subjects')}
                 className="border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors">
                 <p className="text-sm font-semibold text-gray-700">Manage Subjects</p>
                 <p className="text-xs text-gray-400 mt-0.5">{subjects.length} assigned</p>
               </button>
-              <button onClick={() => setTab('timetable')}
-                className="border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors">
-                <p className="text-sm font-semibold text-gray-700">View Timetable</p>
-                <p className="text-xs text-gray-400 mt-0.5">{cls.timetable_generated_at ? 'Generated' : 'Not generated'}</p>
-              </button>
+              {timetableFeatureEnabled && (
+                <button onClick={() => setTab('timetable')}
+                  className="border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors">
+                  <p className="text-sm font-semibold text-gray-700">View Timetable</p>
+                  <p className="text-xs text-gray-400 mt-0.5">{cls.timetable_generated_at ? 'Generated' : 'Not generated'}</p>
+                </button>
+              )}
               <button onClick={() => setTab('students')}
                 className="border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors">
                 <p className="text-sm font-semibold text-gray-700">Student List</p>
@@ -1204,21 +1251,29 @@ function ClassDetail({
             <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div>
-                  <p className="text-xs font-semibold text-gray-700">Suggested Subjects — Grade {cls.grade}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Pick curriculum · click subject to add · teacher auto-assigned</p>
+                  <p className="text-xs font-semibold text-gray-700">
+                    {subscribedSubjects ? 'Subscribed Syllabus Subjects' : 'Suggested Subjects'} — Grade {cls.grade}
+                  </p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {subscribedSubjects
+                      ? 'From the Syllabus Customizer subscription · click to add · teacher auto-assigned'
+                      : 'Pick curriculum · click subject to add · teacher auto-assigned'}
+                  </p>
                 </div>
-                <div className="flex gap-1.5 flex-wrap">
-                  {(['CBSE', 'APSSC', 'SSC', 'both'] as const).map(c => (
-                    <button key={c} onClick={() => setSelectedCurriculum(c)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors border ${
-                        selectedCurriculum === c
-                          ? 'bg-violet-600 text-white border-violet-600'
-                          : 'bg-white text-gray-600 border-gray-200 hover:border-violet-300 hover:text-violet-600'
-                      }`}>
-                      {c === 'both' ? 'All' : c === 'APSSC' ? 'AP SSC' : c}
-                    </button>
-                  ))}
-                </div>
+                {!subscribedSubjects && (
+                  <div className="flex gap-1.5 flex-wrap">
+                    {(['CBSE', 'APSSC', 'SSC', 'both'] as const).map(c => (
+                      <button key={c} onClick={() => setSelectedCurriculum(c)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors border ${
+                          selectedCurriculum === c
+                            ? 'bg-violet-600 text-white border-violet-600'
+                            : 'bg-white text-gray-600 border-gray-200 hover:border-violet-300 hover:text-violet-600'
+                        }`}>
+                        {c === 'both' ? 'All' : c === 'APSSC' ? 'AP SSC' : c}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               {availableSuggestions.length > 0 ? (
                 <div className="flex flex-wrap gap-1.5">
@@ -1230,44 +1285,53 @@ function ClassDetail({
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-gray-400 italic">All suggested subjects for this curriculum are already added.</p>
+                <p className="text-xs text-gray-400 italic">
+                  {subscribedSubjects
+                    ? 'All subscribed subjects for this grade are already added.'
+                    : 'All suggested subjects for this curriculum are already added.'}
+                </p>
               )}
             </div>
 
-            {/* Custom add */}
-            <div className="bg-white rounded-xl border border-gray-200 p-4">
-              <p className="text-xs font-semibold text-gray-700 mb-3">Add Custom Subject</p>
-              <div className="flex gap-2 flex-wrap">
-                <input value={newName} onChange={e => setNewName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && addSubject(newName, '4', newTeacher)}
-                  className={inp + ' flex-1 min-w-36 text-sm'} placeholder="Subject name" />
-                <select value={newTeacher} onChange={e => setNewTeacher(e.target.value)}
-                  className={inp + ' w-56 text-sm'}>
-                  <option value="">Auto-assign teacher</option>
-                  {(() => {
-                    const eligible   = teachers.filter(t => t.subject && canTeachGrade(t.teaches_grades, cls.grade))
-                    const ineligible = teachers.filter(t => t.subject && !canTeachGrade(t.teaches_grades, cls.grade))
-                    return (
-                      <>
-                        {eligible.length > 0 && <optgroup label={`Grade ${cls.grade} teachers`}>
-                          {eligible.map(t => <option key={t.id} value={t.id}>{t.name} – {t.subject}</option>)}
-                        </optgroup>}
-                        {ineligible.length > 0 && <optgroup label="Other grades">
-                          {ineligible.map(t => <option key={t.id} value={t.id}>{t.name} – {t.subject}</option>)}
-                        </optgroup>}
-                      </>
-                    )
-                  })()}
-                </select>
-                <button onClick={() => addSubject(newName, '4', newTeacher)}
-                  disabled={addingSubject || !newName.trim()}
-                  className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors">
-                  {addingSubject ? 'Adding...' : 'Add'}
-                </button>
+            {/* Custom add — hidden once the grade has subscribed syllabus
+                subjects, so a teacher can't be assigned to a subject name
+                that doesn't exist in school_subjects (breaking the syllabus
+                lookup and the teacher class-subjects gate). */}
+            {!subscribedSubjects && (
+              <div className="bg-white rounded-xl border border-gray-200 p-4">
+                <p className="text-xs font-semibold text-gray-700 mb-3">Add Custom Subject</p>
+                <div className="flex gap-2 flex-wrap">
+                  <input value={newName} onChange={e => setNewName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && addSubject(newName, '4', newTeacher)}
+                    className={inp + ' flex-1 min-w-36 text-sm'} placeholder="Subject name" />
+                  <select value={newTeacher} onChange={e => setNewTeacher(e.target.value)}
+                    className={inp + ' w-56 text-sm'}>
+                    <option value="">Auto-assign teacher</option>
+                    {(() => {
+                      const eligible   = teachers.filter(t => t.subject && canTeachGrade(t.teaches_grades, cls.grade))
+                      const ineligible = teachers.filter(t => t.subject && !canTeachGrade(t.teaches_grades, cls.grade))
+                      return (
+                        <>
+                          {eligible.length > 0 && <optgroup label={`Grade ${cls.grade} teachers`}>
+                            {eligible.map(t => <option key={t.id} value={t.id}>{t.name} – {t.subject}</option>)}
+                          </optgroup>}
+                          {ineligible.length > 0 && <optgroup label="Other grades">
+                            {ineligible.map(t => <option key={t.id} value={t.id}>{t.name} – {t.subject}</option>)}
+                          </optgroup>}
+                        </>
+                      )
+                    })()}
+                  </select>
+                  <button onClick={() => addSubject(newName, '4', newTeacher)}
+                    disabled={addingSubject || !newName.trim()}
+                    className="px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                    {addingSubject ? 'Adding...' : 'Add'}
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
-            {subjects.length > 0 && (
+            {subjects.length > 0 && timetableFeatureEnabled && (
               <div className={`rounded-xl px-4 py-3 flex items-center justify-between flex-wrap gap-3 ${hasTimetable ? 'bg-emerald-50 border border-emerald-200' : 'bg-blue-50 border border-blue-200'}`}>
                 <div>
                   <p className={`text-sm font-medium ${hasTimetable ? 'text-emerald-800' : 'text-blue-800'}`}>
