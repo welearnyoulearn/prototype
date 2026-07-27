@@ -81,7 +81,13 @@ export function parseSyllabusBulk(json: string): ParseResult<BulkParse> {
   } catch (e) {
     return { ok: false, error: `That isn't valid JSON — ${(e as Error).message}` }
   }
-  if (!Array.isArray(parsed)) return { ok: false, error: 'The top level must be an array of chapters.' }
+  // ChatGPT sometimes wraps the array in an object (e.g. { class, subject,
+  // chapters: [...] }) despite the prompt asking for a bare array — unwrap it
+  // rather than reject a syllabus that's otherwise perfectly usable.
+  if (!Array.isArray(parsed) && parsed && typeof parsed === 'object' && Array.isArray((parsed as { chapters?: unknown }).chapters)) {
+    parsed = (parsed as { chapters: unknown[] }).chapters
+  }
+  if (!Array.isArray(parsed)) return { ok: false, error: 'The top level must be an array of chapters (or an object with a "chapters" array).' }
   if (parsed.length === 0) return { ok: false, error: 'The array is empty — add at least one chapter.' }
 
   const chapters: NormalisedChapter[] = []

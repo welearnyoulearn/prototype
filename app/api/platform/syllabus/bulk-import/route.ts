@@ -95,7 +95,10 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {})
     console.error('bulk-import POST error:', err)
-    return NextResponse.json({ error: 'Failed to import syllabus' }, { status: 500 })
+    const message = err instanceof Error && /timeout exceeded when trying to connect/.test(err.message)
+      ? 'Database connection timed out — try again in a moment.'
+      : 'Failed to import syllabus'
+    return NextResponse.json({ error: message }, { status: 500 })
   } finally {
     client.release()
   }

@@ -235,6 +235,9 @@ export default function StudentSyllabus({ schoolId, classId }: Props) {
             <span className="text-xs text-gray-400 ml-auto">{ch.covered}/{ch.topics.length} taught</span>
           </div>
           <div className="space-y-2">
+            {ch.topics.length === 0 && (
+              <p className="text-xs text-gray-400 italic">No topics added to this chapter yet.</p>
+            )}
             {ch.topics.map(t => {
               const taught = t.status === 'covered'
               if (!taught) {

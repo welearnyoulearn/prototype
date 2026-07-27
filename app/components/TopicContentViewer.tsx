@@ -346,7 +346,7 @@ export default function TopicContentViewer({ topic, onClose, role }: Props) {
                 <div>
                   <h4 className="font-bold text-slate-800 text-sm">Welcome to your Interactive Study Guide!</h4>
                   <p className="text-slate-500 text-xs mt-1 leading-relaxed">
-                    Review and learn the concepts below. This guide covers core syllabus benchmarks set by the board and updated by your HOD.
+                    Review and learn the concepts below. This guide covers core syllabus benchmarks set by the board and your school.
                   </p>
                 </div>
               </div>
