@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { GRADE_SEQUENCE } from '@/lib/grades'
 
 type LessonPlan = {
   objectives: string[]
@@ -16,7 +17,7 @@ type Props = {
   schoolId: number
 }
 
-const GRADE_OPTIONS = ['1','2','3','4','5','6','7','8','9','10','11','12']
+const GRADE_OPTIONS = GRADE_SEQUENCE.filter(g => /^\d+$/.test(g))
 
 export default function LessonPlanner({ teacher }: Props) {
   const [subject, setSubject]   = useState(teacher.subject || '')

@@ -989,7 +989,7 @@ export async function initDB() {
       school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
       name VARCHAR(100) NOT NULL,
       from_grade INTEGER NOT NULL DEFAULT 1,
-      to_grade INTEGER NOT NULL DEFAULT 12,
+      to_grade INTEGER NOT NULL DEFAULT 10,
       subjects JSONB NOT NULL DEFAULT '[]',
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -1349,6 +1349,15 @@ export async function initDB() {
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_students_school_roll_unique
        ON students(school_id, grade, section, school_roll_number)
        WHERE school_roll_number IS NOT NULL`,
+
+    // ── Fee receipt branding (logo reuses existing logo_url; header is a list of styled blocks) ──
+    `ALTER TABLE schools ADD COLUMN IF NOT EXISTS receipt_header_blocks JSONB DEFAULT '[]'`,
+    `ALTER TABLE schools ADD COLUMN IF NOT EXISTS logo_align VARCHAR(10) DEFAULT 'center'`,
+
+    // ── Grade ladder now tops out at 10, not 12 (lib/grades.ts GRADE_SEQUENCE) — only
+    // changes the default for NEW subject-template rows; existing rows keep whatever
+    // to_grade an admin already set.
+    `ALTER TABLE school_subject_templates ALTER COLUMN to_grade SET DEFAULT 10`,
   ]
 
   for (const sql of migrations) {
@@ -1499,6 +1508,10 @@ async function runIncrementalMigrations() {
   // meaning whichever of those ran first "got lucky"; any other route hit first on a
   // cold instance would 500 with "column category_type does not exist".
   await pool.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS category_type TEXT NOT NULL DEFAULT 'fixed'`)
+  // System-generated categories ("Previous Year Dues", "Passout Dues") are billed
+  // directly to each student's ledger by year-rollover/year-end — they must never be
+  // gated behind the per-grade fee_structures setup that real fixed fee heads require.
+  await pool.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE`)
   // Previously only ever created inline in year-end/route.ts (ENSURE_CLOSE) — other
   // routes that check whether a year is closed (payments/cancel, ledger/[id]) wrapped
   // the query in .catch(() => ({rows:[]})), so a missing table silently failed the
@@ -1801,4 +1814,8 @@ async function runIncrementalMigrations() {
   await pool.query(`CREATE INDEX IF NOT EXISTS ee_school_time ON error_events (school_id, created_at DESC)`).catch(() => {})
   await pool.query(`CREATE INDEX IF NOT EXISTS ee_severity    ON error_events (severity, created_at DESC)`).catch(() => {})
   await pool.query(`CREATE INDEX IF NOT EXISTS ee_created     ON error_events (created_at DESC)`).catch(() => {})
+
+  // ── Fee receipt branding (logo reuses existing logo_url; header is a list of styled blocks) ──
+  await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS receipt_header_blocks JSONB DEFAULT '[]'`).catch(() => {})
+  await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS logo_align VARCHAR(10) DEFAULT 'center'`).catch(() => {})
 }

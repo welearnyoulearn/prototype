@@ -2,6 +2,23 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess, verifyPassword } from '@/lib/auth'
 
+// Catches the class of typo where an admin picks/types a wildly wrong end_date
+// (e.g. a few weeks after start_date instead of ~1 year) — every academic-year
+// creation path (first-login wizard, School Settings, carry-forward "create new
+// year" modal) is a free-typed date picker with no other guard against this.
+const MIN_ACADEMIC_YEAR_DAYS = 270 // ~9 months — shorter terms are almost certainly a typo
+function validateYearSpan(start_date: string, end_date: string): string | null {
+  const start = new Date(start_date)
+  const end = new Date(end_date)
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return 'Invalid start or end date'
+  if (start >= end) return 'Start date must be before end date'
+  const days = (end.getTime() - start.getTime()) / 86400000
+  if (days < MIN_ACADEMIC_YEAR_DAYS) {
+    return `End date is only ${Math.round(days)} days after start date — an academic year is usually close to a full year. Double-check the end date.`
+  }
+  return null
+}
+
 // GET /api/academic-years?school_id=
 // Returns all academic years for a school, ordered newest first.
 //
@@ -81,6 +98,8 @@ export async function POST(req: NextRequest) {
     if (!school_id || !label?.trim() || !start_date || !end_date) {
       return NextResponse.json({ error: 'school_id, label, start_date, end_date required' }, { status: 400 })
     }
+    const spanError = validateYearSpan(start_date, end_date)
+    if (spanError) return NextResponse.json({ error: spanError }, { status: 400 })
 
     const client = await pool.connect()
     try {
@@ -181,9 +200,8 @@ export async function PUT(req: NextRequest) {
     const newStartDate = start_date || year.start_date
     const newEndDate   = end_date || year.end_date
 
-    if (newStartDate >= newEndDate) {
-      return NextResponse.json({ error: 'Start date must be before end date' }, { status: 400 })
-    }
+    const spanError = validateYearSpan(newStartDate, newEndDate)
+    if (spanError) return NextResponse.json({ error: spanError }, { status: 400 })
 
     const { rows: [billCheck] } = await pool.query(
       `SELECT

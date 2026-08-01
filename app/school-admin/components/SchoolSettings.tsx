@@ -12,9 +12,22 @@ type SchoolData = {
   id: number; name: string; type: string; city: string; country: string
   phone: string; email: string; address: string
   school_code: string; grading_scheme: GradeRow[]; board?: string
+  logo_url?: string | null; receipt_header_blocks?: ReceiptHeaderBlock[]
+  logo_align?: 'left' | 'center' | 'right' | null
 }
 
 type GradeRow = { grade: string; min: number; max: number }
+
+type ReceiptHeaderBlock = {
+  text: string
+  size: 'sm' | 'md' | 'lg' | 'xl'
+  bold: boolean
+  italic: boolean
+  align: 'left' | 'center' | 'right'
+}
+
+const EMPTY_HEADER_BLOCK: ReceiptHeaderBlock = { text: '', size: 'md', bold: false, italic: false, align: 'center' }
+const HEADER_BLOCK_SIZE_PX: Record<ReceiptHeaderBlock['size'], number> = { sm: 11, md: 14, lg: 18, xl: 24 }
 
 type AcademicYear = {
   id: number; label: string; start_date: string; end_date: string
@@ -105,6 +118,12 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     address: '', board: '',
   })
   const [scheme, setScheme] = useState<GradeRow[]>(DEFAULT_GRADING)
+  const [logoUrl, setLogoUrl] = useState('')
+  const [logoAlign, setLogoAlign] = useState<'left' | 'center' | 'right'>('center')
+  const [headerBlocks, setHeaderBlocks] = useState<ReceiptHeaderBlock[]>([])
+  const [logoUploading, setLogoUploading] = useState(false)
+  const [logoUploadError, setLogoUploadError] = useState('')
+  const logoFileInputRef = useRef<HTMLInputElement>(null)
 
   // ── Academic years ─────────────────────────────────────────────────────────
   const [years, setYears]         = useState<AcademicYear[]>([])
@@ -182,6 +201,9 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
         board: d.board ?? '',
       })
       if (d.grading_scheme?.length) setScheme(d.grading_scheme)
+      setLogoUrl(d.logo_url ?? '')
+      setLogoAlign(d.logo_align ?? 'center')
+      setHeaderBlocks(d.receipt_header_blocks?.length ? d.receipt_header_blocks : [])
     } finally { setLoading(false) }
   }
 
@@ -232,13 +254,64 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     try {
       const r = await fetch(`/api/schools/${schoolId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...profile, board: profile.board || null }),
+        body: JSON.stringify({
+          ...profile, board: profile.board || null,
+          logo_url: logoUrl || null,
+          logo_align: logoAlign,
+          receipt_header_blocks: headerBlocks.filter(b => b.text.trim()),
+        }),
       })
       if (!r.ok) throw new Error((await r.json()).error)
       setSaved(true); setTimeout(() => setSaved(false), 3000)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to save')
     } finally { setSaving(false) }
+  }
+
+  async function handleLogoFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file) return
+    setLogoUploadError('')
+
+    if (!['image/jpeg', 'image/png'].includes(file.type)) {
+      setLogoUploadError('Logo must be a JPG or PNG image')
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setLogoUploadError('Logo must be under 2MB')
+      return
+    }
+
+    setLogoUploading(true)
+    try {
+      const signRes = await fetch('/api/upload/sign', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: 'school-logos', public_id: `school-${schoolId}` }),
+      })
+      const signData = await signRes.json()
+      if (!signRes.ok) throw new Error(signData?.error || 'Failed to get upload signature')
+      const { signature, timestamp, cloud_name, api_key, folder, public_id } = signData
+
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('api_key', api_key)
+      formData.append('timestamp', String(timestamp))
+      formData.append('signature', signature)
+      formData.append('folder', folder)
+      formData.append('public_id', public_id)
+
+      const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/${cloud_name}/image/upload`, {
+        method: 'POST', body: formData,
+      })
+      const uploadData = await uploadRes.json()
+      if (!uploadRes.ok) throw new Error(uploadData?.error?.message || 'Upload failed')
+      setLogoUrl(uploadData.secure_url)
+    } catch (err) {
+      setLogoUploadError(err instanceof Error ? err.message : 'Logo upload failed. Try again.')
+    } finally {
+      setLogoUploading(false)
+    }
   }
 
   async function saveGrading(e: React.FormEvent) {
@@ -683,6 +756,148 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               </div>
             )}
 
+            {/* Receipt Branding — logo + styled header lines shown on printed fee receipts */}
+            <div className="border-t border-gray-100 pt-5 space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700">Receipt Branding</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Shown on the header of printed fee receipts</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1.5">Logo</label>
+                <div className="flex items-center gap-3">
+                  {logoUrl && (
+                    <img src={logoUrl} alt="School logo" className="h-12 w-12 object-contain border border-gray-200 rounded-lg p-1" />
+                  )}
+                  <button type="button" data-testid="btn-upload-logo" disabled={logoUploading}
+                    onClick={() => logoFileInputRef.current?.click()}
+                    className="text-sm text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-4 py-2 rounded-lg disabled:opacity-50">
+                    {logoUploading ? 'Uploading…' : logoUrl ? 'Replace Logo' : 'Upload Logo'}
+                  </button>
+                  {logoUrl && !logoUploading && (
+                    <button type="button" data-testid="btn-remove-logo" onClick={() => setLogoUrl('')}
+                      className="text-xs text-red-400 hover:text-red-600">Remove</button>
+                  )}
+                  <input ref={logoFileInputRef} type="file" accept="image/jpeg,image/png" data-testid="input-logo-file"
+                    className="hidden" onChange={handleLogoFileSelect} />
+                </div>
+                <p className="text-xs text-gray-400 mt-1">JPG or PNG, up to 2MB</p>
+                {logoUploadError && <p className="text-xs text-red-500 mt-1">{logoUploadError}</p>}
+
+                {logoUrl && (
+                  <div className="mt-3">
+                    <label className="block text-xs font-semibold text-gray-500 mb-1.5">Logo Position</label>
+                    <div className="flex gap-2">
+                      {(['left', 'center', 'right'] as const).map(a => (
+                        <button key={a} type="button" data-testid={`btn-logo-align-${a}`}
+                          onClick={() => setLogoAlign(a)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border capitalize ${logoAlign === a ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                          {a}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                {headerBlocks.map((b, idx) => (
+                  <div key={idx} className="flex items-center gap-2 border border-gray-200 rounded-lg p-2">
+                    <input placeholder="e.g. Affiliated to CBSE · Estd. 1998" data-testid={`input-header-block-text-${idx}`}
+                      className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      value={b.text} maxLength={200}
+                      onChange={e => setHeaderBlocks(prev => prev.map((r, i) => i === idx ? { ...r, text: e.target.value } : r))} />
+                    <select data-testid={`select-header-block-size-${idx}`}
+                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      value={b.size}
+                      onChange={e => setHeaderBlocks(prev => prev.map((r, i) => i === idx ? { ...r, size: e.target.value as ReceiptHeaderBlock['size'] } : r))}>
+                      <option value="sm">Small</option>
+                      <option value="md">Medium</option>
+                      <option value="lg">Large</option>
+                      <option value="xl">X-Large</option>
+                    </select>
+                    <select data-testid={`select-header-block-align-${idx}`}
+                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      value={b.align}
+                      onChange={e => setHeaderBlocks(prev => prev.map((r, i) => i === idx ? { ...r, align: e.target.value as ReceiptHeaderBlock['align'] } : r))}>
+                      <option value="left">Left</option>
+                      <option value="center">Center</option>
+                      <option value="right">Right</option>
+                    </select>
+                    <button type="button" data-testid={`btn-header-block-bold-${idx}`}
+                      onClick={() => setHeaderBlocks(prev => prev.map((r, i) => i === idx ? { ...r, bold: !r.bold } : r))}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border ${b.bold ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 text-gray-500'}`}>B</button>
+                    <button type="button" data-testid={`btn-header-block-italic-${idx}`}
+                      onClick={() => setHeaderBlocks(prev => prev.map((r, i) => i === idx ? { ...r, italic: !r.italic } : r))}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs italic border ${b.italic ? 'bg-indigo-600 text-white border-indigo-600' : 'border-gray-200 text-gray-500'}`}>I</button>
+                    <button type="button" data-testid={`btn-header-block-remove-${idx}`}
+                      onClick={() => setHeaderBlocks(prev => prev.filter((_, i) => i !== idx))}
+                      className="text-red-400 hover:text-red-600 text-xs px-1">✕</button>
+                  </div>
+                ))}
+              </div>
+              <button type="button" data-testid="btn-add-header-block"
+                disabled={headerBlocks.length >= 6}
+                onClick={() => setHeaderBlocks(prev => [...prev, { ...EMPTY_HEADER_BLOCK }])}
+                className="text-sm text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-4 py-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                + Add Line{headerBlocks.length >= 6 ? ' (max 6)' : ''}
+              </button>
+
+              {/* Live preview — mirrors exactly what prints at the top of a fee receipt */}
+              <div className="border border-gray-100 rounded-xl p-4 bg-gray-50">
+                <p className="text-xs font-semibold text-gray-400 mb-2">Receipt Preview</p>
+                <div className="bg-white border border-gray-200 rounded-lg p-5 max-w-md mx-auto" data-testid="receipt-header-preview">
+                  <div className="border-b-2 border-gray-800 pb-2 mb-3">
+                    {logoUrl && logoAlign === 'center' && (
+                      <div className="text-center mb-1">
+                        <img src={logoUrl} alt="School logo" className="h-14 mx-auto object-contain" />
+                      </div>
+                    )}
+                    <div className="relative">
+                      {logoUrl && logoAlign === 'left' && (
+                        <img src={logoUrl} alt="School logo" className="h-16 object-contain absolute left-0 top-1/2 -translate-y-1/2" />
+                      )}
+                      {logoUrl && logoAlign === 'right' && (
+                        <img src={logoUrl} alt="School logo" className="h-16 object-contain absolute right-0 top-1/2 -translate-y-1/2" />
+                      )}
+                      <div className="text-center">
+                        <div className="text-lg font-bold">{profile.name || 'School Name'}</div>
+                        {headerBlocks.filter(b => b.text.trim()).map((b, idx) => (
+                          <div key={idx}
+                            style={{
+                              fontSize: HEADER_BLOCK_SIZE_PX[b.size], fontWeight: b.bold ? 700 : 400,
+                              fontStyle: b.italic ? 'italic' : 'normal', textAlign: b.align,
+                            }}>
+                            {b.text}
+                          </div>
+                        ))}
+                        <div className="text-xs font-bold tracking-wide mt-1">FEE RECEIPT</div>
+                        <div className="text-[11px] text-gray-500 mt-0.5">Receipt No: <strong>RCP-000-0000-000000</strong></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-left mb-2">
+                    <div><div className="text-[10px] text-gray-400">Student Name</div><div className="text-xs font-medium">Sample Student</div></div>
+                    <div><div className="text-[10px] text-gray-400">Roll Number</div><div className="text-xs font-medium">wlyl-stu-sample-0000</div></div>
+                    <div><div className="text-[10px] text-gray-400">Class</div><div className="text-xs font-medium">Grade 1A</div></div>
+                    <div><div className="text-[10px] text-gray-400">Parent / Guardian</div><div className="text-xs font-medium">Sample Parent</div></div>
+                  </div>
+                  <table className="w-full text-xs border-collapse mb-2">
+                    <thead><tr className="bg-gray-100"><th className="text-left p-1 border border-gray-200 text-[10px]">Fee Head</th><th className="text-left p-1 border border-gray-200 text-[10px]">Period</th><th className="text-right p-1 border border-gray-200 text-[10px]">Amount</th></tr></thead>
+                    <tbody><tr><td className="p-1 border border-gray-200">Tuition Fee</td><td className="p-1 border border-gray-200">2026-27</td><td className="p-1 border border-gray-200 text-right">₹1,200</td></tr></tbody>
+                    <tfoot><tr className="font-bold bg-gray-50"><td colSpan={2} className="p-1 border border-gray-200 text-right">Total Paid:</td><td className="p-1 border border-gray-200 text-right">₹1,200</td></tr></tfoot>
+                  </table>
+                  <div className="flex justify-between mt-4">
+                    <div className="text-center border-t border-gray-800 w-28 pt-1 text-[10px] text-gray-500">Collected By</div>
+                    <div className="text-center border-t border-gray-800 w-28 pt-1 text-[10px] text-gray-500">Authorized Signatory</div>
+                  </div>
+                  {!logoUrl && !profile.name && headerBlocks.filter(b => b.text.trim()).length === 0 && (
+                    <p className="text-xs text-gray-300 text-center mt-2">No branding set — receipts will show just a generic header</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
             {data?.school_code && (
               <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
                 <p className="text-xs font-semibold text-blue-600 mb-0.5">School Login Code</p>
@@ -692,9 +907,9 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
             )}
 
             <div className="flex gap-3 pt-1">
-              <button type="submit" disabled={saving}
-                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60">
-                {saving ? 'Saving…' : 'Save Profile & Settings'}
+              <button type="submit" disabled={saving} data-testid="btn-save-profile"
+                className={`px-6 py-2.5 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60 ${saved ? 'bg-green-600 hover:bg-green-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
+                {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Profile & Settings'}
               </button>
               <button type="button" onClick={() => { saveGrading(new Event('submit') as unknown as React.FormEvent) }}
                 className="hidden" />
