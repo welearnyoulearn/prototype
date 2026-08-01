@@ -267,10 +267,23 @@ async function handlePOST(req: NextRequest) {
         [createdPayments[0].id]
       )
 
+      // Per-fee-head breakdown for the receipt — createdPayments can span multiple
+      // fee categories (e.g. Tuition + Transport + Hostel paid in one transaction),
+      // so the receipt must itemise each rather than assuming a single category.
+      const { rows: lineItems } = await client.query(
+        `SELECT fp.id, fc.name AS category_name, l.period_label, fp.amount
+         FROM fee_payments fp
+         JOIN student_fee_ledger l ON l.id = fp.ledger_id
+         JOIN fee_categories fc ON fc.id = l.fee_category_id
+         WHERE fp.id = ANY($1::int[])`,
+        [createdPayments.map(p => p.id)]
+      )
+
       return NextResponse.json({
         ...full,
         receipt_number,
         total_paid: createdPayments.reduce((s, p) => s + parseFloat(p.amount), 0),
+        line_items: lineItems.map(li => ({ category_name: li.category_name, period_label: li.period_label, amount: parseFloat(li.amount) })),
         allocations: createdPayments.map(p => ({ ledger_id: p.ledger_id, amount: parseFloat(p.amount) })),
       }, { status: 201 })
     } catch (e) {

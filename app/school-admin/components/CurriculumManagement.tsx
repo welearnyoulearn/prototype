@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { CURRICULA, CURRICULUM_NAMES, getSubjectsForGrade } from '@/lib/curricula'
+import { GRADE_SEQUENCE } from '@/lib/grades'
 
 type Props = { schoolId: number }
 type Assignment = { id: number; grade: string; curriculum_type: string }
@@ -9,7 +10,7 @@ type SubjectRow = { id: number; subject_name: string; teacher_id: number | null;
 type ClassSubjectRow = { id: number; section: string; subjects: SubjectRow[] }
 type TeacherOpt = { id: number; name: string; subject: string }
 
-const GRADES = ['1','2','3','4','5','6','7','8','9','10','11','12']
+const GRADES = GRADE_SEQUENCE.filter(g => /^\d+$/.test(g))
 const CURRICULUM_TYPES = Object.keys(CURRICULUM_NAMES)
 
 export default function CurriculumManagement({ schoolId }: Props) {
