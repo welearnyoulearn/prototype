@@ -23,17 +23,6 @@ type Teacher = {
   teaches_grades: string | null
 }
 
-type HODAssignment = {
-  id: number
-  department: string
-  teacher_id: number
-  teacher_name: string
-  teacher_subject: string
-  class_ids: number[]
-}
-
-type ClassOption = { id: number; grade: string; section: string }
-
 type EditForm = Partial<Teacher>
 
 type TimetableSlot = {
@@ -114,11 +103,114 @@ function GradesDropdown({ value, onChange }: { value: string; onChange: (v: stri
   )
 }
 
+// Passwords are hashed and never recoverable after creation — the temp
+// password shown at onboarding (or a previous reset) is gone from the UI the
+// moment that screen closes. This panel is the only ongoing way to get a
+// usable, visible password for a staff member: click Reset, a fresh one is
+// generated, emailed to them, and shown here once.
+function CredentialsPanel({ teachers }: { teachers: Teacher[] }) {
+  const [search, setSearch] = useState('')
+  const [resettingId, setResettingId] = useState<number | null>(null)
+  const [results, setResults] = useState<Record<number, { password: string; error?: string }>>({})
+
+  async function handleReset(teacher: Teacher) {
+    if (!confirm(`Reset ${teacher.name}'s password? Their current password will stop working immediately, and the new one will be emailed to them.`)) return
+    setResettingId(teacher.id)
+    setResults(prev => {
+      const next = { ...prev }
+      delete next[teacher.id]
+      return next
+    })
+    try {
+      const res = await fetch(`/api/teachers/${teacher.id}/reset-credentials`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Reset failed')
+      setResults(prev => ({ ...prev, [teacher.id]: { password: data.temp_password } }))
+    } catch (err: unknown) {
+      setResults(prev => ({ ...prev, [teacher.id]: { password: '', error: err instanceof Error ? err.message : 'Reset failed' } }))
+    } finally {
+      setResettingId(null)
+    }
+  }
+
+  const filtered = teachers.filter(t =>
+    !search.trim() ||
+    t.name.toLowerCase().includes(search.toLowerCase()) ||
+    (t.email || '').toLowerCase().includes(search.toLowerCase())
+  )
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-xs text-gray-500 max-w-xl">
+          Passwords are never stored in plain text and can&apos;t be shown again after creation.
+          Click <strong>Reset</strong> to generate a new one — it&apos;s emailed to the staff member automatically and shown here once.
+        </p>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or email..."
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 min-w-[220px]" />
+      </div>
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 border-b border-gray-200">
+            <tr>
+              <th className="text-left px-4 py-2.5 font-medium text-gray-500">Staff</th>
+              <th className="text-left px-4 py-2.5 font-medium text-gray-500">Username (Email)</th>
+              <th className="text-left px-4 py-2.5 font-medium text-gray-500">Password</th>
+              <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-28">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.length === 0 ? (
+              <tr><td colSpan={4} className="text-center py-8 text-gray-400 text-sm">No staff found</td></tr>
+            ) : filtered.map(t => {
+              const result = results[t.id]
+              return (
+                <tr key={t.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <Avatar name={t.name} size="sm" />
+                      <span className="font-medium text-gray-900">{t.name}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {t.email
+                      ? <span className="font-mono text-gray-700 text-xs">{t.email}</span>
+                      : <span className="text-gray-400 italic text-xs">No email on file</span>}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {result?.error ? (
+                      <span className="text-red-500 text-xs">{result.error}</span>
+                    ) : result?.password ? (
+                      <span className="font-mono bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200 text-xs">{result.password}</span>
+                    ) : (
+                      <span className="text-gray-400 text-xs">•••••••• (hidden)</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <button
+                      data-testid={`reset-staff-credentials-${t.id}`}
+                      onClick={() => handleReset(t)}
+                      disabled={resettingId === t.id || !t.email}
+                      title={!t.email ? 'Add an email first' : 'Reset password'}
+                      className="text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-40 disabled:no-underline font-medium">
+                      {resettingId === t.id ? 'Resetting…' : 'Reset'}
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [mainTab, setMainTab] = useState<'staff' | 'hod'>('staff')
+  const [mainTab, setMainTab] = useState<'staff' | 'credentials'>('staff')
   const [tab, setTab] = useState<'teaching' | 'non_teaching'>('teaching')
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'removed' | 'all'>('active')
   const [deptFilter, setDeptFilter] = useState('all')
@@ -145,22 +237,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   const [loadingConsequences, setLoadingConsequences] = useState(false)
   const [removeToast, setRemoveToast] = useState<{ name: string; summary: string[] } | null>(null)
 
-  // HOD management state (subject-based, multiple HODs per subject)
-  const [hodAssignments, setHodAssignments] = useState<HODAssignment[]>([])
-  const [hodSubjects, setHodSubjects] = useState<string[]>([])
-  const [hodLoading, setHodLoading] = useState(false)
-  // modal: null=closed, subject=which subject, editId=editing existing assignment id (null=new)
-  const [hodModal, setHodModal] = useState<{ subject: string; editId: number | null } | null>(null)
-  const [hodForm, setHodForm] = useState<{ teacher_id: string; class_ids: number[] }>({ teacher_id: '', class_ids: [] })
-  const [hodSaving, setHodSaving] = useState(false)
-  const [classOptions, setClassOptions] = useState<ClassOption[]>([])
-
   useEffect(() => { loadTeachers() }, [schoolId, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Load HOD data whenever the HOD tab becomes active
-  useEffect(() => {
-    if (mainTab === 'hod') loadHODData()
-  }, [mainTab, schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadTeachers() {
     setLoading(true)
@@ -172,96 +249,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       setError('Failed to load teachers')
     } finally {
       setLoading(false)
-    }
-  }
-
-  async function loadHODData() {
-    setHodLoading(true)
-    setError('')
-    try {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 12000)
-
-      const [hodRes, classRes] = await Promise.all([
-        fetch(`/api/hod?school_id=${schoolId}`, { signal: controller.signal }),
-        fetch(`/api/classes?school_id=${schoolId}`, { signal: controller.signal }),
-      ])
-      clearTimeout(timer)
-
-      const hodData = await hodRes.json()
-      const classData = await classRes.json()
-
-      const hods: HODAssignment[] = Array.isArray(hodData.hods) ? hodData.hods : []
-      setHodAssignments(hods)
-
-      // Departments: from API merged with already-assigned departments + teacher.department field
-      const apiSubjects: string[] = Array.isArray(hodData.subjects) ? hodData.subjects : []
-      const assignedDepts: string[] = hods.map(h => h.department)
-      const teacherDepts: string[] = teachers
-        .filter(t => (t.staff_type || 'teaching') === 'teaching' && t.status === 'active' && t.department)
-        .map(t => t.department)
-      const merged = Array.from(new Set([...apiSubjects, ...assignedDepts, ...teacherDepts])).sort()
-      setHodSubjects(merged)
-
-      const sorted = Array.isArray(classData)
-        ? classData.sort((a: ClassOption, b: ClassOption) => {
-            const ga = parseInt(a.grade) || 0, gb = parseInt(b.grade) || 0
-            return ga !== gb ? ga - gb : a.section.localeCompare(b.section)
-          })
-        : []
-      setClassOptions(sorted)
-    } catch (err) {
-      const msg = err instanceof Error && err.name === 'AbortError'
-        ? 'Request timed out. Check server connection.'
-        : 'Failed to load HOD data'
-      setError(msg)
-      // Build departments from already-loaded teachers so UI stays usable
-      const teacherDepts = Array.from(new Set(
-        teachers.filter(t => (t.staff_type || 'teaching') === 'teaching' && t.status === 'active')
-          .map(t => t.department).filter(Boolean)
-      )).sort()
-      setHodSubjects(teacherDepts)
-    } finally {
-      setHodLoading(false)
-    }
-  }
-
-  async function saveHOD() {
-    if (!hodModal || !hodForm.teacher_id) return
-    setHodSaving(true)
-    try {
-      const res = await fetch('/api/hod', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          school_id: schoolId,
-          department: hodModal.subject,
-          teacher_id: parseInt(hodForm.teacher_id),
-          class_ids: hodForm.class_ids,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      // Replace if same id, otherwise append
-      setHodAssignments(prev => {
-        const idx = prev.findIndex(h => h.id === data.id)
-        if (idx >= 0) return prev.map(h => h.id === data.id ? data : h)
-        return [...prev, data]
-      })
-      setHodModal(null)
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to save HOD')
-    } finally {
-      setHodSaving(false)
-    }
-  }
-
-  async function removeHOD(id: number) {
-    try {
-      await fetch(`/api/hod?id=${id}`, { method: 'DELETE' })
-      setHodAssignments(prev => prev.filter(h => h.id !== id))
-    } catch {
-      setError('Failed to remove HOD')
     }
   }
 
@@ -439,14 +426,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
 
   if (loading) return <div className="py-12 text-center text-gray-400">Loading staff...</div>
 
-  // All unique departments for HOD management: from API + teachers' department field
-  const allSubjects = Array.from(new Set([
-    ...hodSubjects,
-    ...teachers
-      .filter(t => (t.staff_type || 'teaching') === 'teaching' && t.status === 'active')
-      .map(t => t.department).filter(Boolean),
-  ])).filter(Boolean).sort()
-
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -464,16 +443,16 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
         </div>
       </div>
 
-      {/* Main tabs: Staff Directory vs HOD Management */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit mb-5">
+      {/* Main tabs: Staff Directory vs Credentials */}
+      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit mb-4">
         <button onClick={() => setMainTab('staff')}
           className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${mainTab === 'staff' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
           Staff Directory
         </button>
-        <button onClick={() => setMainTab('hod')}
-          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${mainTab === 'hod' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-          HOD Management
-          <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-semibold">Syllabus</span>
+        <button onClick={() => setMainTab('credentials')}
+          data-testid="staff-credentials-tab"
+          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${mainTab === 'credentials' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+          Credentials
         </button>
       </div>
 
@@ -484,219 +463,10 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
         </div>
       )}
 
-      {/* HOD Management Panel */}
-      {mainTab === 'hod' && (
-        <div>
-          {hodLoading ? (
-            <div className="py-12 text-center text-gray-400">Loading subjects...</div>
-          ) : (
-            <div className="space-y-4">
-              <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 text-sm text-blue-700">
-                <p className="font-semibold mb-1">HOD assignment is per department — multiple HODs allowed per department for different class sets.</p>
-                <p className="text-blue-500 text-xs">e.g. Science HOD-1 manages Grade 9A, 9B · Science HOD-2 manages Grade 10A, 10B. Each HOD sees Syllabus Management in their teacher portal for their assigned classes only.</p>
-              </div>
-
-              {allSubjects.length === 0 ? (
-                <div className="bg-white rounded-xl border border-gray-200 py-10 text-center">
-                  <p className="text-gray-400 text-sm">No departments found. Add teachers with a department assigned first.</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {allSubjects.map(subject => {
-                    const subjectHODs = hodAssignments.filter(h => h.department === subject)
-                    // Teachers in this department
-                    const subjectTeachers = teachers.filter(t =>
-                      t.department === subject &&
-                      (t.staff_type || 'teaching') === 'teaching' && t.status === 'active'
-                    )
-                    return (
-                      <div key={subject} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                        {/* Subject header */}
-                        <div className="px-5 py-3 bg-gradient-to-r from-slate-50 to-blue-50 border-b border-gray-100 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center flex-shrink-0">
-                              <span className="text-white text-xs font-bold">{subject.charAt(0)}</span>
-                            </div>
-                            <div>
-                              <p className="font-semibold text-gray-900 text-sm">{subject}</p>
-                              <p className="text-xs text-gray-400">
-                                {subjectTeachers.length} staff in department
-                                {subjectHODs.length > 0 && ` · ${subjectHODs.length} HOD${subjectHODs.length !== 1 ? 's' : ''} assigned`}
-                              </p>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => {
-                              setHodModal({ subject, editId: null })
-                              setHodForm({ teacher_id: '', class_ids: [] })
-                            }}
-                            className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors flex items-center gap-1">
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                            </svg>
-                            Add HOD
-                          </button>
-                        </div>
-
-                        {/* HOD assignments for this subject */}
-                        {subjectHODs.length === 0 ? (
-                          <div className="px-5 py-4 text-sm text-gray-400 italic">
-                            No HOD assigned yet — click &quot;Add HOD&quot; to assign.
-                          </div>
-                        ) : (
-                          <div className="divide-y divide-gray-50">
-                            {subjectHODs.map((hod, idx) => (
-                              <div key={hod.id} className="px-5 py-3 flex items-start justify-between gap-4">
-                                <div className="flex items-center gap-3 min-w-0">
-                                  <div className="w-9 h-9 rounded-full bg-emerald-600 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                                    {hod.teacher_name.charAt(0).toUpperCase()}
-                                  </div>
-                                  <div className="min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <p className="font-semibold text-gray-900 text-sm">{hod.teacher_name}</p>
-                                      <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold">HOD {idx + 1}</span>
-                                    </div>
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                      {(hod.class_ids || []).length === 0 ? (
-                                        <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">No classes assigned</span>
-                                      ) : (
-                                        classOptions
-                                          .filter(c => hod.class_ids.includes(c.id))
-                                          .map(c => (
-                                            <span key={c.id} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
-                                              Gr.{c.grade}-{c.section}
-                                            </span>
-                                          ))
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-1.5 flex-shrink-0">
-                                  <button
-                                    onClick={() => {
-                                      setHodModal({ subject, editId: hod.id })
-                                      setHodForm({ teacher_id: String(hod.teacher_id), class_ids: hod.class_ids || [] })
-                                    }}
-                                    className="text-xs text-blue-500 hover:text-blue-700 border border-blue-100 hover:border-blue-300 px-2 py-1 rounded transition-colors">
-                                    Edit
-                                  </button>
-                                  <button
-                                    onClick={() => removeHOD(hod.id)}
-                                    className="text-xs text-red-500 hover:text-red-700 border border-red-100 hover:border-red-300 px-2 py-1 rounded transition-colors">
-                                    Remove
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* HOD Add / Edit Modal */}
-          {hodModal && (
-            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
-                <div className="px-6 py-4 border-b border-gray-100">
-                  <h3 className="font-bold text-gray-900">
-                    {hodModal.editId ? 'Edit HOD' : 'Add HOD'} — {hodModal.subject}
-                  </h3>
-                  <p className="text-xs text-gray-400 mt-0.5">Select the teacher and which classes they manage for this subject&apos;s syllabus</p>
-                </div>
-                <div className="px-6 py-5 space-y-4">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5">Teacher</label>
-                    <select
-                      value={hodForm.teacher_id}
-                      onChange={e => setHodForm(f => ({ ...f, teacher_id: e.target.value }))}
-                      disabled={!!hodModal.editId}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:bg-gray-50 disabled:text-gray-500">
-                      <option value="">— Select teacher from {hodModal.subject} dept —</option>
-                      {teachers.filter(t =>
-                        t.department === hodModal.subject &&
-                        (t.staff_type || 'teaching') === 'teaching' &&
-                        t.status === 'active' &&
-                        (!hodAssignments.find(h => h.department === hodModal.subject && h.teacher_id === t.id) || hodModal.editId)
-                      ).map(t => (
-                        <option key={t.id} value={t.id}>
-                          {t.name}{t.employee_id ? ` (${t.employee_id})` : ''}
-                        </option>
-                      ))}
-                    </select>
-                    {!hodModal.editId && teachers.filter(t => t.department === hodModal.subject && t.status === 'active').length === 0 && (
-                      <p className="text-xs text-amber-600 mt-1">No active teachers in &quot;{hodModal.subject}&quot; department. Check teacher profiles.</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1.5">Classes managed by this HOD</label>
-                    {classOptions.length === 0 ? (
-                      <p className="text-xs text-gray-400">No classes found. Create classes first.</p>
-                    ) : (
-                      <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-2">
-                        <div className="grid grid-cols-3 gap-1.5">
-                          {classOptions.map(c => {
-                            const isSelected = hodForm.class_ids.includes(c.id)
-                            // Show warning if class is already managed by another HOD for this subject
-                            const takenBy = hodAssignments.find(h =>
-                              h.department === hodModal.subject &&
-                              h.id !== hodModal.editId &&
-                              (h.class_ids || []).includes(c.id)
-                            )
-                            return (
-                              <button key={c.id} type="button"
-                                onClick={() => setHodForm(f => ({
-                                  ...f,
-                                  class_ids: isSelected
-                                    ? f.class_ids.filter(id => id !== c.id)
-                                    : [...f.class_ids, c.id],
-                                }))}
-                                title={takenBy ? `Already assigned to ${takenBy.teacher_name}` : ''}
-                                className={`py-1.5 px-2 rounded-lg text-xs font-medium text-center transition-colors relative ${
-                                  isSelected ? 'bg-blue-600 text-white'
-                                  : takenBy ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                }`}>
-                                Gr.{c.grade}-{c.section}
-                                {takenBy && !isSelected && <span className="absolute -top-1 -right-1 w-2 h-2 bg-amber-400 rounded-full" />}
-                              </button>
-                            )
-                          })}
-                        </div>
-                        <button type="button"
-                          onClick={() => setHodForm(f => ({ ...f, class_ids: [] }))}
-                          className="mt-2 w-full text-[10px] text-red-400 hover:text-red-600 text-center">
-                          Clear selection
-                        </button>
-                      </div>
-                    )}
-                    <p className="text-[10px] text-gray-400 mt-1">{hodForm.class_ids.length} class{hodForm.class_ids.length !== 1 ? 'es' : ''} selected · amber = already assigned to another HOD</p>
-                  </div>
-                </div>
-                <div className="flex gap-3 px-6 py-4 border-t border-gray-100">
-                  <button onClick={() => setHodModal(null)}
-                    className="flex-1 border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm hover:bg-gray-50">
-                    Cancel
-                  </button>
-                  <button onClick={saveHOD} disabled={hodSaving || !hodForm.teacher_id}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
-                    {hodSaving ? 'Saving...' : hodModal.editId ? 'Update Classes' : 'Assign HOD'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Staff Directory (only shown on staff tab) */}
-      {mainTab === 'hod' ? null : <>
-
+      {mainTab === 'credentials' ? (
+        <CredentialsPanel teachers={teachers.filter(t => t.status === 'active')} />
+      ) : (
+      <>
       {/* Staff type tabs */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit mb-4">
         {(['teaching', 'non_teaching'] as const).map(t => (
@@ -776,8 +546,8 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
           </div>
         </div>
       )}
-
-      </> /* end staff directory fragment */}
+      </>
+      )}
 
       {/* ── Full-screen Detail Modal ── */}
       {selected && (

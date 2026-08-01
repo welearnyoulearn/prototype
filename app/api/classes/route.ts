@@ -4,11 +4,19 @@ import { getSubjectsForGrade } from '@/lib/curricula'
 import { matchTeacher } from '@/lib/matchTeacher'
 import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
 import { gradeOrderSql } from '@/lib/grades'
+import { getAnySession, requireFeeAccess } from '@/lib/auth'
+import { resolveAcademicYear } from '@/lib/academicYear'
 
 export async function GET(req: NextRequest) {
   try {
+    const session = await getAnySession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (session.schoolId !== parseInt(school_id)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
     const removed = req.nextUrl.searchParams.get('removed') === 'true'
 
     if (!removed) {
@@ -50,6 +58,7 @@ export async function POST(req: NextRequest) {
     if (!school_id || !grade || !section) {
       return NextResponse.json({ error: 'school_id, grade, section required' }, { status: 400 })
     }
+    if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const client = await pool.connect()
     try {
@@ -62,16 +71,41 @@ export async function POST(req: NextRequest) {
         [school_id, grade.trim(), section.trim(), class_teacher_id || null]
       )
 
-      // 2. Auto-assign subjects from curriculum
-      //    Check if a curriculum is assigned for this grade, else default to CBSE
-      const { rows: currRows } = await client.query(
-        'SELECT curriculum_type FROM curriculum_assignments WHERE school_id=$1 AND grade=$2',
-        [school_id, grade.trim()]
-      )
-      const curriculumType: string = currRows[0]?.curriculum_type ?? 'CBSE'
-      const subjects = getSubjectsForGrade(curriculumType, grade.trim())
+      // 2. Auto-assign subjects — prefer whatever the school has actually
+      //    subscribed to via the Syllabus Customizer for this grade (so
+      //    class_subjects.subject_name is guaranteed identical to
+      //    school_subjects.subject_name, the join key /api/syllabus and the
+      //    teacher class-subjects gate both rely on). Only fall back to the
+      //    static CURRICULA guess-list ("Mathematics" etc., which can silently
+      //    mismatch a subscribed "Maths") when nothing is subscribed yet.
+      let academicYear: string | undefined
+      try {
+        academicYear = await resolveAcademicYear(school_id)
+      } catch {
+        // No academic_years row at all for this school — fall through to
+        // the CURRICULA guess-list below rather than failing class creation.
+      }
+      const { rows: subscribedRows } = academicYear
+        ? await client.query(
+            'SELECT subject_name FROM school_subjects WHERE school_id = $1 AND grade = $2 AND academic_year = $3',
+            [school_id, grade.trim(), academicYear]
+          )
+        : { rows: [] as { subject_name: string }[] }
+
+      let subjects: { name: string }[]
+      if (subscribedRows.length > 0) {
+        subjects = subscribedRows.map((r) => ({ name: r.subject_name }))
+      } else {
+        const { rows: currRows } = await client.query(
+          'SELECT curriculum_type FROM curriculum_assignments WHERE school_id=$1 AND grade=$2',
+          [school_id, grade.trim()]
+        )
+        const curriculumType: string = currRows[0]?.curriculum_type ?? 'CBSE'
+        subjects = getSubjectsForGrade(curriculumType, grade.trim())
+      }
 
       let subjectsAssigned = 0
+      const unmatchedSubjects: string[] = []
       if (subjects.length > 0) {
         // 3. Fetch active teaching staff for teacher auto-matching
         const { rows: staff } = await client.query(
@@ -90,6 +124,12 @@ export async function POST(req: NextRequest) {
 
         for (const subj of subjects) {
           const teacherId = matchTeacher(subj.name, pool4Match)
+          // Fuzzy-matches a teacher's free-text "subject" field (set at
+          // onboarding) against this subject name — a spelling variant like
+          // "Mathematics" vs "Maths" won't match. Track that here instead of
+          // letting it pass silently, so the admin is told to assign manually
+          // rather than discovering an unstaffed subject later.
+          if (!teacherId) unmatchedSubjects.push(subj.name)
           await client.query(
             `INSERT INTO class_subjects (class_id, subject_name, teacher_id, periods_per_week)
              VALUES ($1, $2, $3, 4)
@@ -102,7 +142,7 @@ export async function POST(req: NextRequest) {
 
       await client.query('COMMIT')
       invalidateCache(`classes:${school_id}`)
-      return NextResponse.json({ ...newClass, subjects_assigned: subjectsAssigned }, { status: 201 })
+      return NextResponse.json({ ...newClass, subjects_assigned: subjectsAssigned, unmatched_subjects: unmatchedSubjects }, { status: 201 })
 
     } catch (err) {
       await client.query('ROLLBACK')

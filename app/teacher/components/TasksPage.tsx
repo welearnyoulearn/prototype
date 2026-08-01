@@ -19,9 +19,12 @@ type ClassOption = {
   class_teacher_name: string | null
 }
 
-type TimetableSlot = {
-  grade: string | null
-  section: string | null
+type ClassSubjectAssignment = {
+  id: number
+  subject_name: string
+  class_id: number
+  grade: string
+  section: string
 }
 
 type Props = {
@@ -36,9 +39,9 @@ export default function TasksPage({ teacher, schoolId }: Props) {
 
   useEffect(() => {
     Promise.all([
-      fetch(`/api/timetable?teacher_id=${teacher.id}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
+      fetch(`/api/teachers/${teacher.id}/class-subjects`).then(r => r.json()).catch(() => []),
       fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()).catch(() => []),
-    ]).then(([timetable, allClasses]: [TimetableSlot[], ClassOption[]]) => {
+    ]).then(([classSubjects, allClasses]: [ClassSubjectAssignment[], ClassOption[]]) => {
       // Build set of classes this teacher is associated with
       const classMap = new Map<string, ClassOption>()
 
@@ -50,12 +53,13 @@ export default function TasksPage({ teacher, schoolId }: Props) {
         if (cls) classMap.set(`${cls.grade}-${cls.section}`, cls)
       }
 
-      // Subject teacher classes from timetable
-      timetable.forEach((slot: TimetableSlot) => {
-        if (!slot.grade || !slot.section) return
-        const key = `${slot.grade}-${slot.section}`
+      // Subject teacher classes — from Class Management's class_subjects
+      // assignment, not the timetable.
+      classSubjects.forEach((a: ClassSubjectAssignment) => {
+        if (!a.grade || !a.section) return
+        const key = `${a.grade}-${a.section}`
         if (!classMap.has(key)) {
-          const cls = allClasses.find(c => c.grade === slot.grade && c.section === slot.section)
+          const cls = allClasses.find(c => c.id === a.class_id)
           if (cls) classMap.set(key, cls)
         }
       })
@@ -93,7 +97,7 @@ export default function TasksPage({ teacher, schoolId }: Props) {
             </svg>
           </div>
           <h3 className="text-lg font-semibold text-gray-700 mb-2">No Classes Found</h3>
-          <p className="text-gray-400 text-sm">You have no class assignments yet. Ask admin to set up your timetable.</p>
+          <p className="text-gray-400 text-sm">You have no class assignments yet. Ask your school admin to assign you a subject in Class Management.</p>
         </div>
       </div>
     )

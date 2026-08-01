@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { useFeature } from '@/app/school-admin/features-context'
+import { useFeature } from '@/lib/features-context'
 import { GRADE_SEQUENCE, FINAL_GRADE } from '@/lib/grades'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
