@@ -6,11 +6,15 @@ import { Pool, types } from 'pg'
 // instead of "2026-03-31", causing a persistent one-day-behind display bug.
 types.setTypeParser(types.builtins.DATE, (val: string) => val)
 
-// Auto-detect local vs Supabase: skip SSL for localhost connections
+// Skip SSL only for an actual local Postgres — a local dev server almost
+// always points DATABASE_URL at remote Supabase, so "local DB" and "local
+// dev machine" are different things and must not share one flag.
 const dbUrl = process.env.DATABASE_URL ?? ''
-const isLocal = dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1')
+const isLocalDb = dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1')
 // Vercel serverless: each function instance is isolated — 1 connection is enough,
-// keeps us well under Supabase PgBouncer's session-mode pool_size limit.
+// keeps us well under Supabase PgBouncer's session-mode pool_size limit. A local
+// dev machine is a single long-lived process serving one developer, so it can
+// hold a real pool instead of contending for 1 connection across every request.
 const isVercel = process.env.VERCEL === '1'
 
 // If individual params are set (avoids special-char URL encoding issues on Vercel),
@@ -23,16 +27,16 @@ const poolConfig = (process.env.PGHOST)
       user:     process.env.PGUSER,
       password: process.env.PGPASSWORD,
       ssl: { rejectUnauthorized: false },
-      max: 1,
+      max: isVercel ? 1 : 10,
       idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 10000,
     }
   : {
       connectionString: dbUrl,
-      max: isLocal ? 10 : 1,
+      max: isVercel ? 1 : 10,
       idleTimeoutMillis: isVercel ? 10000 : 30000,
-      connectionTimeoutMillis: isLocal ? 5000 : 10000,
-      ssl: isLocal ? false : { rejectUnauthorized: false },
+      connectionTimeoutMillis: isVercel ? 10000 : 5000,
+      ssl: isLocalDb ? false : { rejectUnauthorized: false },
     }
 
 const pool = new Pool(poolConfig)
@@ -1036,34 +1040,26 @@ export async function initDB() {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_teacher_ai_sessions_teacher ON teacher_ai_sessions(teacher_id, created_at DESC)`,
 
-    // ── HOD (Head of Department) assignments ─────────────────────────────────────
-    `CREATE TABLE IF NOT EXISTS department_hods (
-      id SERIAL PRIMARY KEY,
-      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
-      department VARCHAR(100) NOT NULL,
-      teacher_id INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
-      class_ids INTEGER[] NOT NULL DEFAULT '{}',
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_department_hods_school ON department_hods(school_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_department_hods_teacher ON department_hods(teacher_id)`,
-    `ALTER TABLE department_hods DROP CONSTRAINT IF EXISTS department_hods_school_id_department_key`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_department_hods_school_dept_teacher ON department_hods(school_id, department, teacher_id)`,
+    // HOD (Head of Department) management was removed — class_subjects
+    // (class + subject + teacher) is now the single source of truth for
+    // teacher syllabus visibility. department_hods was never wired to a live
+    // API route or UI beyond the orphaned HODSyllabus.tsx component.
+    `DROP TABLE IF EXISTS department_hods`,
 
-    // ── Extend syllabus_topics with HOD-governance fields ─────────────────────────
+    // ── Extend syllabus_topics with progress-tracking fields ──────────────────
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS target_date DATE`,
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS delay_reason TEXT`,
-    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS hod_remark TEXT`,
-    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS hod_remark_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL`,
-    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS hod_remark_at TIMESTAMPTZ`,
+    // HOD management was removed — no live code reads/writes these.
+    `ALTER TABLE syllabus_topics DROP COLUMN IF EXISTS hod_remark`,
+    `ALTER TABLE syllabus_topics DROP COLUMN IF EXISTS hod_remark_by`,
+    `ALTER TABLE syllabus_topics DROP COLUMN IF EXISTS hod_remark_at`,
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS last_teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL`,
 
     // ── Soft-delete for classes ───────────────────────────────────────────────
     `ALTER TABLE classes ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
     `CREATE INDEX IF NOT EXISTS idx_classes_deleted ON classes(deleted_at) WHERE deleted_at IS NOT NULL`,
 
-    // ── Syllabus publish workflow: HODs load → review → publish ───────────────
+    // ── Syllabus publish workflow: load → review → publish ────────────────────
     // Default TRUE so existing topics stay visible. Board-load sets FALSE (draft).
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT TRUE`,
     `CREATE INDEX IF NOT EXISTS idx_syllabus_published ON syllabus_topics(class_id, subject, published)`,
@@ -1373,7 +1369,177 @@ export async function initDB() {
   )
 }
 
+// ── Syllabus system: master curriculum library + per-school overlay ──────────
+// Declared here and run from runIncrementalMigrations() so BOTH a fresh bootstrap
+// and an already-provisioned database (which early-returns before the bootstrap)
+// end up with these tables. All statements are idempotent.
+const SYLLABUS_SCHEMA: string[] = [
+
+    // ── Global Master Curriculum tables ────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS master_subjects (
+      id SERIAL PRIMARY KEY,
+      board VARCHAR(50) NOT NULL,
+      grade VARCHAR(20) NOT NULL,
+      subject_name VARCHAR(100) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(board, grade, subject_name)
+    )`,
+    // Extra Subjects (Dance, Music, Art, ...) use the identical chapter/topic
+    // structure as academic subjects — 'category' just files them separately
+    // in the catalog. Extra subjects are stored under board='EXTRA' so the
+    // existing UNIQUE(board, grade, subject_name) and all board-scoped
+    // queries keep working unchanged.
+    `ALTER TABLE master_subjects ADD COLUMN IF NOT EXISTS category VARCHAR(20) NOT NULL DEFAULT 'academic'`,
+
+    `CREATE TABLE IF NOT EXISTS master_chapters (
+      id SERIAL PRIMARY KEY,
+      subject_id INTEGER NOT NULL REFERENCES master_subjects(id) ON DELETE CASCADE,
+      chapter_name VARCHAR(200) NOT NULL,
+      chapter_order INTEGER NOT NULL DEFAULT 0,
+      description TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_master_chapters_subject ON master_chapters(subject_id)`,
+
+    `CREATE TABLE IF NOT EXISTS master_topics (
+      id SERIAL PRIMARY KEY,
+      chapter_id INTEGER NOT NULL REFERENCES master_chapters(id) ON DELETE CASCADE,
+      topic_name VARCHAR(200) NOT NULL,
+      topic_order INTEGER NOT NULL DEFAULT 0,
+      content_text TEXT,
+      content_pdf_url VARCHAR(512),
+      questions JSONB DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_master_topics_chapter ON master_topics(chapter_id)`,
+
+    `CREATE TABLE IF NOT EXISTS master_resources (
+      id SERIAL PRIMARY KEY,
+      topic_id INTEGER NOT NULL REFERENCES master_topics(id) ON DELETE CASCADE,
+      resource_type VARCHAR(50) NOT NULL,
+      title VARCHAR(200) NOT NULL,
+      url VARCHAR(512) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_master_resources_topic ON master_resources(topic_id)`,
+
+    `CREATE TABLE IF NOT EXISTS master_tasks (
+      id SERIAL PRIMARY KEY,
+      chapter_id INTEGER NOT NULL REFERENCES master_chapters(id) ON DELETE CASCADE,
+      topic_id INTEGER REFERENCES master_topics(id) ON DELETE SET NULL,
+      title VARCHAR(200) NOT NULL,
+      instructions TEXT,
+      task_type VARCHAR(50) DEFAULT 'homework',
+      max_marks INTEGER DEFAULT 10,
+      is_mandatory BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_master_tasks_chapter ON master_tasks(chapter_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_master_tasks_topic ON master_tasks(topic_id)`,
+
+    // ── School Local Customized tables ──────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS school_subjects (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      master_subject_id INTEGER REFERENCES master_subjects(id) ON DELETE SET NULL,
+      subject_name VARCHAR(100) NOT NULL,
+      board VARCHAR(50),
+      grade VARCHAR(20) NOT NULL,
+      academic_year VARCHAR(20) DEFAULT '2025-26',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, grade, subject_name, academic_year)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_subjects_school ON school_subjects(school_id)`,
+    // Copied from master_subjects.category at subscribe time — kept as its
+    // own column (not a live join) since master_subjects rows can change or
+    // be deleted after a school has already subscribed.
+    `ALTER TABLE school_subjects ADD COLUMN IF NOT EXISTS category VARCHAR(20) NOT NULL DEFAULT 'academic'`,
+
+    `CREATE TABLE IF NOT EXISTS school_chapters (
+      id SERIAL PRIMARY KEY,
+      school_subject_id INTEGER NOT NULL REFERENCES school_subjects(id) ON DELETE CASCADE,
+      master_chapter_id INTEGER REFERENCES master_chapters(id) ON DELETE SET NULL,
+      chapter_name VARCHAR(200) NOT NULL,
+      chapter_order INTEGER NOT NULL DEFAULT 0,
+      is_custom BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_chapters_subject ON school_chapters(school_subject_id)`,
+
+    `CREATE TABLE IF NOT EXISTS school_topics (
+      id SERIAL PRIMARY KEY,
+      school_chapter_id INTEGER NOT NULL REFERENCES school_chapters(id) ON DELETE CASCADE,
+      master_topic_id INTEGER REFERENCES master_topics(id) ON DELETE SET NULL,
+      topic_name VARCHAR(200) NOT NULL,
+      topic_order INTEGER NOT NULL DEFAULT 0,
+      content_text TEXT,
+      content_pdf_url VARCHAR(512),
+      questions JSONB DEFAULT '[]'::jsonb,
+      is_custom BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_topics_chapter ON school_topics(school_chapter_id)`,
+
+    `CREATE TABLE IF NOT EXISTS school_resources (
+      id SERIAL PRIMARY KEY,
+      school_topic_id INTEGER NOT NULL REFERENCES school_topics(id) ON DELETE CASCADE,
+      master_resource_id INTEGER REFERENCES master_resources(id) ON DELETE SET NULL,
+      resource_type VARCHAR(50) NOT NULL,
+      title VARCHAR(200) NOT NULL,
+      url VARCHAR(512) NOT NULL,
+      is_custom BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_resources_topic ON school_resources(school_topic_id)`,
+
+    `CREATE TABLE IF NOT EXISTS school_tasks (
+      id SERIAL PRIMARY KEY,
+      school_chapter_id INTEGER NOT NULL REFERENCES school_chapters(id) ON DELETE CASCADE,
+      school_topic_id INTEGER REFERENCES school_topics(id) ON DELETE SET NULL,
+      master_task_id INTEGER REFERENCES master_tasks(id) ON DELETE SET NULL,
+      title VARCHAR(200) NOT NULL,
+      instructions TEXT,
+      task_type VARCHAR(50) DEFAULT 'homework',
+      max_marks INTEGER DEFAULT 10,
+      is_mandatory BOOLEAN DEFAULT FALSE,
+      is_active BOOLEAN DEFAULT TRUE,
+      is_custom BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      CONSTRAINT chk_mandatory_active CHECK (is_mandatory = FALSE OR is_active = TRUE)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_tasks_chapter ON school_tasks(school_chapter_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_school_tasks_topic ON school_tasks(school_topic_id)`,
+
+    `CREATE TABLE IF NOT EXISTS school_topic_progress (
+      id SERIAL PRIMARY KEY,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      school_topic_id INTEGER NOT NULL REFERENCES school_topics(id) ON DELETE CASCADE,
+      status VARCHAR(20) DEFAULT 'pending',
+      covered_date DATE,
+      covered_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(class_id, school_topic_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_topic_progress_class ON school_topic_progress(class_id)`,
+
+    // Progress-tracking fields the syllabus GET/PATCH routes select — must
+    // exist alongside the table itself (the CREATE above predates them).
+    `ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS target_date DATE`,
+    `ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS delay_reason TEXT`,
+    // HOD management was removed — these columns were only ever read/written
+    // by the orphaned HODSyllabus.tsx component.
+    `ALTER TABLE school_topic_progress DROP COLUMN IF EXISTS hod_remark`,
+    `ALTER TABLE school_topic_progress DROP COLUMN IF EXISTS hod_remark_by`,
+    `ALTER TABLE school_topic_progress DROP COLUMN IF EXISTS hod_remark_at`,
+    `ALTER TABLE school_subjects ADD COLUMN IF NOT EXISTS academic_year VARCHAR(20) DEFAULT '2025-26'`,
+    `ALTER TABLE school_subjects DROP CONSTRAINT IF EXISTS school_subjects_school_id_grade_subject_name_key`,
+]
+
 async function runIncrementalMigrations() {
+  // Syllabus system (master_* + school_*) — idempotent, safe on fresh and existing DBs
+  for (const stmt of SYLLABUS_SCHEMA) await pool.query(stmt)
+
   await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS board VARCHAR(20)`)
 
   await pool.query(`ALTER TABLE parents ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)`)
@@ -1534,6 +1700,34 @@ async function runIncrementalMigrations() {
       reopened_at    TIMESTAMPTZ,
       reopen_reason  TEXT,
       UNIQUE(school_id, academic_year)
+    )
+  `)
+  // Only ever created inline in category-assignments/route.ts, but categories/route.ts's
+  // DELETE unconditionally deletes from it — so deleting a fee category on any database
+  // where category-assignments had never been hit 500s with "relation does not exist".
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS student_fee_category_assignments (
+      id               SERIAL PRIMARY KEY,
+      school_id        INTEGER NOT NULL,
+      fee_category_id  INTEGER NOT NULL REFERENCES fee_categories(id) ON DELETE CASCADE,
+      student_id       INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      academic_year    TEXT    NOT NULL DEFAULT '2025-26',
+      amount           NUMERIC(10,2) NOT NULL DEFAULT 0,
+      created_at       TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS student_fee_assignment_history (
+      id               SERIAL PRIMARY KEY,
+      school_id        INTEGER NOT NULL,
+      student_id       INTEGER NOT NULL,
+      fee_category_id  INTEGER NOT NULL,
+      academic_year    TEXT    NOT NULL,
+      old_amount       NUMERIC(10,2),
+      new_amount       NUMERIC(10,2),
+      change_type      TEXT    NOT NULL DEFAULT 'update',
+      changed_by       TEXT    NOT NULL DEFAULT 'Admin',
+      changed_at       TIMESTAMPTZ DEFAULT NOW()
     )
   `)
   // Previously self-healed independently in upi-id/route.ts (x2) and upi-qr/route.ts.

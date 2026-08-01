@@ -16,6 +16,12 @@ export async function GET(req: NextRequest) {
     if (!school_id) {
       return NextResponse.json({ error: 'school_id required' }, { status: 400 })
     }
+    // getAnySession() only confirms SOME valid login exists — without this,
+    // a teacher/student logged into School A could pass School B's id here
+    // and read School B's task list, teacher names, and submission counts.
+    if (session.schoolId !== parseInt(school_id)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     // Build WHERE clause dynamically
     const conditions: string[] = ['t.school_id = $1']

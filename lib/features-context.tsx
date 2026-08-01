@@ -2,8 +2,9 @@
 
 import { createContext, useContext } from 'react'
 
-// Set of enabled feature keys for the current school's plan.
-// Components use this to conditionally render sections.
+// Set of enabled feature keys for the current school's plan. Shared across
+// every portal (school-admin, teacher, ...) that needs to hide UI for a
+// feature the school's plan doesn't include — not school-admin-specific.
 const FeaturesContext = createContext<Set<string>>(new Set())
 
 export const FeaturesProvider = FeaturesContext.Provider
