@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { GRADE_SEQUENCE } from '@/lib/grades'
 
 type Props = { schoolId: number; refreshKey?: number }
 
@@ -68,7 +69,7 @@ function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg'
   )
 }
 
-const ALL_GRADES = Array.from({ length: 12 }, (_, i) => String(i + 1))
+const ALL_GRADES = GRADE_SEQUENCE.filter(g => /^\d+$/.test(g))
 
 // Multi-select grades dropdown
 function GradesDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {

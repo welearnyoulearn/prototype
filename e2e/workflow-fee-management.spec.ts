@@ -61,10 +61,10 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
   let adminCookie: string
 
   // Student IDs per grade
-  let studentA: number  // grade 10, active
-  let studentB: number  // grade 10, active (sibling-parent test)
-  let studentC: number  // grade 11, active  (different grade)
-  let studentD: number  // grade 12, active  (leaver — cannot carry)
+  let studentA: number  // grade 9, active
+  let studentB: number  // grade 9, active (sibling-parent test)
+  let studentC: number  // grade 8, active  (different grade)
+  let studentD: number  // grade 10 (final grade), active  (leaver — cannot carry)
 
   // Fee category IDs
   let catMonthly: number    // Tuition — monthly, fixed
@@ -120,10 +120,10 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       const d = data as { students: Array<{ id: number }> }
       return d.students[0].id
     }
-    studentA = await enroll('Alpha Student', '10', 1)
-    studentB = await enroll('Beta Student',  '10', 2)
-    studentC = await enroll('Gamma Student', '11', 1)
-    studentD = await enroll('Delta Student', '12', 1)
+    studentA = await enroll('Alpha Student', '9', 1)
+    studentB = await enroll('Beta Student',  '9', 2)
+    studentC = await enroll('Gamma Student', '8', 1)
+    studentD = await enroll('Delta Student', '10', 1)
 
     // Trigger year-end route once so fee_year_close table is created (it's created inline there)
     await api(`/api/fees/year-end?school_id=${schoolId}&academic_year=${AY}`, 'GET', undefined, adminCookie).catch(() => {})
@@ -266,34 +266,34 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
   // SECTION 2 — FEE STRUCTURES
   // ══════════════════════════════════════════════════════════════════════════
 
-  test('FS-001: Set monthly structure for grade 10 (₹5000)', async () => {
+  test('FS-001: Set monthly structure for grade 9 (₹5000)', async () => {
     const { status, data } = await api('/api/fees/structures', 'POST', {
       school_id: schoolId, academic_year: AY,
-      structures: [{ fee_category_id: catMonthly, grade: '10', amount: 5000, due_day: 10 }],
+      structures: [{ fee_category_id: catMonthly, grade: '9', amount: 5000, due_day: 10 }],
     }, adminCookie)
     expect(status).toBe(201)
     const d = data as Array<{ amount: string }>
     expect(parseFloat(d[0].amount)).toBe(5000)
   })
 
-  test('FS-002: Set monthly structure for grade 11 and 12', async () => {
+  test('FS-002: Set monthly structure for grade 8 and 10', async () => {
     const { status } = await api('/api/fees/structures', 'POST', {
       school_id: schoolId, academic_year: AY,
       structures: [
-        { fee_category_id: catMonthly, grade: '11', amount: 5500, due_day: 10 },
-        { fee_category_id: catMonthly, grade: '12', amount: 6000, due_day: 10 },
+        { fee_category_id: catMonthly, grade: '8', amount: 5500, due_day: 10 },
+        { fee_category_id: catMonthly, grade: '10', amount: 6000, due_day: 10 },
       ],
     }, adminCookie)
     expect(status).toBe(201)
   })
 
-  test('FS-003: Set quarterly structure for grade 10 (₹3000)', async () => {
+  test('FS-003: Set quarterly structure for grade 9 (₹3000)', async () => {
     const { status } = await api('/api/fees/structures', 'POST', {
       school_id: schoolId, academic_year: AY,
       structures: [
+        { fee_category_id: catQuarterly, grade: '9', amount: 3000, due_day: 1 },
+        { fee_category_id: catQuarterly, grade: '8', amount: 3000, due_day: 1 },
         { fee_category_id: catQuarterly, grade: '10', amount: 3000, due_day: 1 },
-        { fee_category_id: catQuarterly, grade: '11', amount: 3000, due_day: 1 },
-        { fee_category_id: catQuarterly, grade: '12', amount: 3000, due_day: 1 },
       ],
     }, adminCookie)
     expect(status).toBe(201)
@@ -303,9 +303,9 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
     const { status } = await api('/api/fees/structures', 'POST', {
       school_id: schoolId, academic_year: AY,
       structures: [
+        { fee_category_id: catAnnual, grade: '9', amount: 2000, due_day: 5 },
+        { fee_category_id: catAnnual, grade: '8', amount: 2000, due_day: 5 },
         { fee_category_id: catAnnual, grade: '10', amount: 2000, due_day: 5 },
-        { fee_category_id: catAnnual, grade: '11', amount: 2000, due_day: 5 },
-        { fee_category_id: catAnnual, grade: '12', amount: 2000, due_day: 5 },
       ],
     }, adminCookie)
     expect(status).toBe(201)
@@ -315,7 +315,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
     // Variable category still needs a structure row so generate knows the due_day
     const { status } = await api('/api/fees/structures', 'POST', {
       school_id: schoolId, academic_year: AY,
-      structures: [{ fee_category_id: catVariable, grade: '10', amount: 0, due_day: 15 }],
+      structures: [{ fee_category_id: catVariable, grade: '9', amount: 0, due_day: 15 }],
     }, adminCookie)
     expect(status).toBe(201)
   })
@@ -323,7 +323,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
   test('FS-006: Upsert existing structure updates amount', async () => {
     const { status, data } = await api('/api/fees/structures', 'POST', {
       school_id: schoolId, academic_year: AY,
-      structures: [{ fee_category_id: catMonthly, grade: '10', amount: 5000, due_day: 10 }],
+      structures: [{ fee_category_id: catMonthly, grade: '9', amount: 5000, due_day: 10 }],
     }, adminCookie)
     expect(status).toBe(201)
     const d = data as Array<{ amount: string }>
@@ -369,7 +369,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
 
   test('VA-002: GET assignments returns assigned students', async () => {
     const { status, data } = await api(
-      `/api/fees/category-assignments?school_id=${schoolId}&grade=10&academic_year=${AY}`,
+      `/api/fees/category-assignments?school_id=${schoolId}&grade=9&academic_year=${AY}`,
       'GET', undefined, adminCookie
     )
     expect(status).toBe(200)
@@ -381,7 +381,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
 
   test('VA-003: StudentB not assigned — should get no variable entries', async () => {
     const { data } = await api(
-      `/api/fees/category-assignments?school_id=${schoolId}&grade=10&academic_year=${AY}`,
+      `/api/fees/category-assignments?school_id=${schoolId}&grade=9&academic_year=${AY}`,
       'GET', undefined, adminCookie
     )
     const d = data as { amounts: Array<{ student_id: number; fee_category_id: number }> }
@@ -469,7 +469,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
   test('FG-007: Generate for specific grade only', async ({ }, testInfo) => {
     testInfo.setTimeout(60000)
     const { status, data } = await api('/api/fees/generate', 'POST', {
-      school_id: schoolId, academic_year: AY, grade: '10',
+      school_id: schoolId, academic_year: AY, grade: '9',
     }, adminCookie)
     expect([200, 201]).toContain(status)
     const d = data as { created: number; skipped: number }
@@ -553,13 +553,13 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
     d.forEach(e => expect(e.balance).toBeDefined())
   })
 
-  test('LD-002: Filter by grade=10 returns only grade 10 entries', async () => {
+  test('LD-002: Filter by grade=9 returns only grade 9 entries', async () => {
     const { data } = await api(
-      `/api/fees/ledger?school_id=${schoolId}&academic_year=${AY}&grade=10`,
+      `/api/fees/ledger?school_id=${schoolId}&academic_year=${AY}&grade=9`,
       'GET', undefined, adminCookie
     )
     const d = data as Array<{ grade: string }>
-    expect(d.every(e => e.grade === '10')).toBe(true)
+    expect(d.every(e => e.grade === '9')).toBe(true)
   })
 
   test('LD-003: Filter by student_id returns only that student', async () => {
@@ -863,7 +863,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
   // ══════════════════════════════════════════════════════════════════════════
 
   test('WV-001: Full waiver on unpaid entry → status=waived', async () => {
-    // Get a fresh unpaid ledger entry for studentD (grade 12)
+    // Get a fresh unpaid ledger entry for studentD (grade 10, the final grade)
     const { data } = await api(
       `/api/fees/ledger?school_id=${schoolId}&student_id=${studentD}`,
       'GET', undefined, adminCookie
@@ -1153,7 +1153,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
     expect(d.target_year).toBeTruthy()
   })
 
-  test('YE-002: Grade 12 student marked as leaver', async () => {
+  test('YE-002: Final-grade student marked as leaver', async () => {
     const { data } = await api(
       `/api/fees/year-end?school_id=${schoolId}&academic_year=${AY}`,
       'GET', undefined, adminCookie
@@ -1175,7 +1175,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
     expect(d.target_year).toBe(AY_NEXT)
   })
 
-  test('YE-004: Carry forward blocked for grade 12 student', async () => {
+  test('YE-004: Carry forward blocked for final-grade student', async () => {
     // Create next academic year record (required by year-end apply route)
     const nextYearStart = `20${AY_NEXT.slice(2, 4)}-04-01`
     const nextYearEnd   = `20${AY_NEXT.slice(5, 7)}-03-31`
@@ -1338,7 +1338,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
     // Here test that zero fixed structure creates entries with amount_due=0
     await api('/api/fees/structures', 'POST', {
       school_id: schoolId, academic_year: AY,
-      structures: [{ fee_category_id: catAnnual, grade: '10', amount: 0, due_day: 5 }],
+      structures: [{ fee_category_id: catAnnual, grade: '9', amount: 0, due_day: 5 }],
     }, adminCookie)
     // amount_due should reflect the structure
     const { data } = await api(
