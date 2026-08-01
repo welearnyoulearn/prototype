@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requirePlatformAdmin } from '@/lib/auth'
 
 // GET /api/platform/subjects/[id]/chapters
 export async function GET(
@@ -25,6 +26,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: subjectId } = await params
+  if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   try {
     const { id, chapter_name, chapter_order = 0, description = '' } = await req.json()
     if (!chapter_name) {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { resolveAcademicYear } from '@/lib/academicYear'
+import { requireSyllabusAccess, requireSyllabusWriteAccess } from '@/lib/auth'
 
 // GET /api/syllabus?school_id=&class_id=&subject=
 // Returns syllabus topics grouped by subject > chapter > topics with coverage stats.
@@ -13,6 +14,7 @@ export async function GET(req: NextRequest) {
   if (!school_id || !class_id) {
     return NextResponse.json({ error: 'school_id and class_id required' }, { status: 400 })
   }
+  if (!await requireSyllabusAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
     await ensureDB()
@@ -147,6 +149,7 @@ export async function DELETE(req: NextRequest) {
   if (!school_id || !class_id || !subject || !chapter) {
     return NextResponse.json({ error: 'school_id, class_id, subject, chapter_name required' }, { status: 400 })
   }
+  if (!await requireSyllabusWriteAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
     await ensureDB()
@@ -217,6 +220,7 @@ export async function POST(req: NextRequest) {
       if (!school_id || !class_id || !subject || !chapter_name || !topic_name) {
         return NextResponse.json({ error: 'school_id, class_id, subject, chapter_name, topic_name required' }, { status: 400 })
       }
+      if (!await requireSyllabusWriteAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
       // 1. Fetch class grade
       const classRes = await pool.query(

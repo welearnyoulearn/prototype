@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { parseSyllabusBulk } from '@/lib/syllabus/bulk-import-schema'
+import { requirePlatformAdmin } from '@/lib/auth'
 
 // POST /api/platform/syllabus/bulk-import
 // body: { subject_id: number, mode?: 'append' | 'replace', json: string }
@@ -13,6 +14,7 @@ import { parseSyllabusBulk } from '@/lib/syllabus/bulk-import-schema'
 // Ported from the Ulearn prototype's bulkImportSyllabus. Runs in a single
 // transaction so a bad row rolls the whole import back.
 export async function POST(req: NextRequest) {
+  if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   const client = await pool.connect()
   try {
     await ensureDB()

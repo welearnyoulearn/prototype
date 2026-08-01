@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { requireSyllabusWriteAccess } from '@/lib/auth'
 
 // PATCH /api/syllabus/[id] — update status, target dates, delay reasons, topic details
 // Body: { school_id, class_id?, status?, covered_by?, topic_name?, topic_order?,
@@ -18,6 +19,7 @@ export async function PATCH(
   } = body
 
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+  if (!await requireSyllabusWriteAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
     const isUpdatingProgress = (
@@ -147,6 +149,7 @@ export async function DELETE(
   const school_id = req.nextUrl.searchParams.get('school_id')
 
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+  if (!await requireSyllabusWriteAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
     // 1. Fetch topic

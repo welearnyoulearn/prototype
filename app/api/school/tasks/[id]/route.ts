@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireSyllabusWriteAccess } from '@/lib/auth'
 
 // PATCH /api/school/tasks/[id]
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -14,6 +15,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: 'Task not found' }, { status: 404 })
     }
     const task = taskRes.rows[0]
+
+    const { rows: ownerRows } = await pool.query(
+      `SELECT ss.school_id FROM school_chapters sc
+       JOIN school_subjects ss ON ss.id = sc.school_subject_id
+       WHERE sc.id = $1`,
+      [task.school_chapter_id]
+    )
+    if (!await requireSyllabusWriteAccess(ownerRows[0]?.school_id ?? null)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     let updatedRow
 

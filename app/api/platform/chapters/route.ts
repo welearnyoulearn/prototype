@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requirePlatformAdmin } from '@/lib/auth'
 
 // POST /api/platform/chapters
 export async function POST(req: NextRequest) {
+  if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   try {
     const { id, subject_id, chapter_name, chapter_order = 0, description = '' } = await req.json()
     if (!subject_id || !chapter_name) {
@@ -44,6 +46,7 @@ export async function DELETE(req: NextRequest) {
   if (!id) {
     return NextResponse.json({ error: 'id required' }, { status: 400 })
   }
+  if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
     await pool.query('DELETE FROM master_chapters WHERE id = $1', [id])

@@ -1,5 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireSyllabusWriteAccess } from '@/lib/auth'
+
+// Resolve the school_id that owns a school_chapters/school_subjects row, so
+// callers can be tenant-checked before any write — these routes only ever
+// receive school_subject_id/chapter id, never school_id directly.
+async function schoolIdForSubject(schoolSubjectId: number): Promise<number | null> {
+  const { rows } = await pool.query('SELECT school_id FROM school_subjects WHERE id = $1', [schoolSubjectId])
+  return rows[0]?.school_id ?? null
+}
+async function schoolIdForChapter(chapterId: number): Promise<number | null> {
+  const { rows } = await pool.query(
+    `SELECT ss.school_id FROM school_chapters sc
+     JOIN school_subjects ss ON ss.id = sc.school_subject_id
+     WHERE sc.id = $1`,
+    [chapterId]
+  )
+  return rows[0]?.school_id ?? null
+}
 
 // POST /api/school/custom/chapters
 export async function POST(req: NextRequest) {
@@ -13,6 +31,8 @@ export async function POST(req: NextRequest) {
       if (chapCheck.rowCount === 0) {
         return NextResponse.json({ error: 'Chapter not found' }, { status: 404 })
       }
+      const ownerSchoolId = await schoolIdForChapter(id)
+      if (!await requireSyllabusWriteAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       // Allow editing of both custom and global board chapters (relaxation for school admins)
 
       const res = await pool.query(
@@ -28,6 +48,8 @@ export async function POST(req: NextRequest) {
       if (!school_subject_id || !chapter_name) {
         return NextResponse.json({ error: 'school_subject_id and chapter_name are required' }, { status: 400 })
       }
+      const ownerSchoolId = await schoolIdForSubject(school_subject_id)
+      if (!await requireSyllabusWriteAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
       const res = await pool.query(
         `INSERT INTO school_chapters (school_subject_id, chapter_name, chapter_order, is_custom)
@@ -58,6 +80,8 @@ export async function DELETE(req: NextRequest) {
     if (!check.rows[0].is_custom) {
       return NextResponse.json({ error: 'Cannot delete global board-mandated chapters' }, { status: 403 })
     }
+    const ownerSchoolId = await schoolIdForChapter(Number(id))
+    if (!await requireSyllabusWriteAccess(ownerSchoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     await pool.query('DELETE FROM school_chapters WHERE id = $1', [id])
     return NextResponse.json({ ok: true })
