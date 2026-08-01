@@ -358,7 +358,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     await fillRow(page, {
       rollNo: '1', lastName: 'Cred', firstName: 'Test',
       email: `credtest${ts}@student.com`,
-      grade: '12', section: 'A',
+      grade: '10', section: 'A',
       parentName: 'Cred Parent', parentPhone: phone(12),
       parentEmail: `credparent${ts}@parent.com`,
     })
@@ -385,7 +385,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     await fillRow(page, {
       rollNo: '20', lastName: 'Reset', firstName: 'Test',
       email: `resettest${ts}@student.com`,
-      grade: '12', section: 'B',
+      grade: '10', section: 'B',
       parentName: 'Reset Parent', parentPhone: phone(20),
     })
     await page.getByTestId('enroll-students-btn').click()
