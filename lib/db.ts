@@ -2012,4 +2012,70 @@ async function runIncrementalMigrations() {
   // ── Fee receipt branding (logo reuses existing logo_url; header is a list of styled blocks) ──
   await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS receipt_header_blocks JSONB DEFAULT '[]'`).catch(() => {})
   await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS logo_align VARCHAR(10) DEFAULT 'center'`).catch(() => {})
+
+  // ── School Expenses — tracks money the school spends (salaries, utilities,
+  // maintenance, supplies, ...), the mirror of Fee Management which tracks
+  // money collected from students. Fully separate tables/routes/UI; nothing
+  // here is read or written by any Fee Management code path.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_categories (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      name VARCHAR(100) NOT NULL,
+      is_system BOOLEAN NOT NULL DEFAULT FALSE,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, name)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_expense_categories_school ON expense_categories(school_id)`).catch(() => {})
+
+  await pool.query(`CREATE SEQUENCE IF NOT EXISTS voucher_number_seq START 1000`).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expenses (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      category_id INTEGER NOT NULL REFERENCES expense_categories(id) ON DELETE RESTRICT,
+      title VARCHAR(200) NOT NULL,
+      payee_name VARCHAR(150),
+      amount NUMERIC(10,2) NOT NULL,
+      expense_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      payment_mode VARCHAR(20) NOT NULL DEFAULT 'cash',
+      transaction_ref VARCHAR(200),
+      notes TEXT,
+      voucher_number VARCHAR(50) UNIQUE,
+      recorded_by_name VARCHAR(100),
+      recorded_by_id INTEGER,
+      is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_expenses_school_date ON expenses(school_id, expense_date DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category_id)`).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_attachments (
+      id SERIAL PRIMARY KEY,
+      expense_id INTEGER NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+      file_url TEXT NOT NULL,
+      file_name VARCHAR(255),
+      uploaded_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_expense_attachments_expense ON expense_attachments(expense_id)`).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_audit_log (
+      id SERIAL PRIMARY KEY,
+      expense_id INTEGER NOT NULL,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      action VARCHAR(20) NOT NULL,
+      changed_by_name VARCHAR(100),
+      changes JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_expense_audit_expense ON expense_audit_log(expense_id, created_at DESC)`).catch(() => {})
 }
