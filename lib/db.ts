@@ -1678,6 +1678,15 @@ async function runIncrementalMigrations() {
   // directly to each student's ledger by year-rollover/year-end — they must never be
   // gated behind the per-grade fee_structures setup that real fixed fee heads require.
   await pool.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE`)
+  // Backfill: "Previous Year Dues"/"Passout Dues" categories created BEFORE the
+  // is_system column existed defaulted to FALSE, so they kept showing up as a
+  // manageable fee-head card in the Fee Plan setup grid (which already filters
+  // out is_system categories everywhere) until that school's next Year Rollover
+  // or Year-End close happened to self-heal the flag. Year-rollover/year-end
+  // already correct this going forward (UPDATE ... SET is_system = TRUE on
+  // every run) — this just applies that same correction immediately instead
+  // of waiting for the next rollover event.
+  await pool.query(`UPDATE fee_categories SET is_system = TRUE WHERE name IN ('Previous Year Dues', 'Passout Dues') AND is_system = FALSE`)
   // Previously only ever created inline in year-end/route.ts (ENSURE_CLOSE) — other
   // routes that check whether a year is closed (payments/cancel, ledger/[id]) wrapped
   // the query in .catch(() => ({rows:[]})), so a missing table silently failed the
