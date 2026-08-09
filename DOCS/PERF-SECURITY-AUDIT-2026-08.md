@@ -1,7 +1,7 @@
 # Performance & Security Audit — August 2026
 
-**Branch:** `feature/perf-security-audit` (off `dev` @ `413a876`)
-**Status:** work in progress — nothing committed, nothing deployed
+**Branch:** `feature/perf-security-audit` (off `dev` @ `413a876`) → **PR #83**
+**Status:** pushed, awaiting review. Not deployed.
 **Scope:** login latency, app-wide performance, pagination, data leaks, data integrity
 
 ---
@@ -10,13 +10,15 @@
 
 | | Count |
 |---|---|
-| ✅ Fixed and verified | 13 |
+| ✅ Fixed and verified | 17 (13 first wave + 4 P0 security, second wave) |
 | 🟡 Fixed but not yet user-visible | 1 (pagination has no UI consumers) |
-| 🔴 Found, still open — **P0 security** | 4 |
 | 🟠 Found, still open — performance | 9 |
 | ⛔ Blocked (needs API work first) | 2 screens |
+| ⚙️ Needs a dashboard change, not code | 1 (function region) |
 
-**Biggest single finding:** functions run in Washington DC while the database sits in Mumbai — **~200ms on every query**, multiplying every other latency problem here by roughly 4×. One line of config fixes it. See [Infrastructure](#-infrastructure--cross-region-latency-the-multiplier-on-everything-else).
+**Biggest single finding:** functions run in Washington DC while the database sits in Mumbai — **~200ms on every query**, multiplying every other latency problem here by roughly 4×. Fix it in the Vercel dashboard, **not** in `vercel.json` — see [Infrastructure](#-infrastructure--cross-region-latency-the-multiplier-on-everything-else) for why that distinction matters.
+
+**Also note: this repository is public.** That made the committed `JWT_SECRET` fallback (item 3) internet-readable, not merely repo-readable. If production ever ran without `JWT_SECRET` set, rotate it.
 
 **Second thing to know:** the original brief was "add pagination everywhere to fix slowness." That turned out to be the wrong lever. Pagination is now *available* on six endpoints but **no screen uses it yet**, and most screens **cannot** use it safely without server-side aggregation work first. The latency wins actually delivered came from elsewhere — cold-start migrations and an N+1 collapse.
 
@@ -116,13 +118,18 @@ That's ~12,000 km each way — **roughly 200ms per DB round-trip**, paid on ever
 | `fees/stats` (10 sequential) | ~0.5s | **~2s** |
 | Any trivial single query | ~50ms | **~200ms floor** |
 
-**Fix applied:** `"regions": ["bom1"]` added to `vercel.json` (Vercel's Mumbai region — same AWS region as the DB, single-digit-ms RTT). Users are in India too, so this shortens the browser hop as well. **Not yet deployed.**
+### How to fix it — via the Vercel dashboard, NOT `vercel.json`
 
-**Before merging, verify:**
-- **Your Vercel plan allows setting the function region.** A single region is generally settable on Hobby; multi-region needs Pro. If `regions` in `vercel.json` is rejected, set the default region in Vercel project settings instead.
-- **A dashboard-level region setting doesn't already conflict.** The dashboard value and `vercel.json` should agree.
-- **Cron jobs still behave** — the three in `vercel.json` are unaffected by region, but worth a smoke test.
-- **Measure before and after.** These are arithmetic estimates from distance, not measurements. Time one login and one Fees-tab load in production before and after the switch.
+**Do this in the dashboard**, for each of the two Vercel projects (`prototype` and `wlyl-dev`):
+
+> Project → Settings → Functions → **Function Region** → **Mumbai, India (bom1)** → redeploy
+
+Why not `vercel.json`: adding `"regions": ["bom1"]` there was tried on PR #83 and **broke both deployments**. Vercel validates `vercel.json` against a strict schema — the failing check linked to the project-configuration docs, the signature of a schema rejection. Two things were wrong at once: a `"//regions"` pseudo-comment key (JSON has no comments, and unrecognized top-level properties are rejected), and `regions` itself, which is plan-gated. The dashboard setting achieves the same result, works on every plan, and can't break a build. `vercel.json` was reverted to its original contents.
+
+**After changing it:**
+- **Measure.** The figures above are arithmetic from distance, not measurements. Time one login and one Fees-tab load before and after.
+- **Smoke-test the three cron jobs** in `vercel.json` — unaffected by region in principle, worth confirming.
+- **Keep it with the database.** If the DB region ever changes, change this too.
 
 **Do not solve this by moving the database to the US.** Users are in India, so it would worsen the browser hop, and Indian student data plausibly falls under the DPDP Act 2023 — data residency is a reason to keep the DB in `ap-south-1` and move compute to it, which is what this change does.
 
