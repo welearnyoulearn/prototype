@@ -61,29 +61,74 @@ const SCHEMA_SENTINEL_TABLE  = 'classes'
 const SCHEMA_SENTINEL_COLUMN = 'deleted_at'
 const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 
+// ⚠️ BUMP THIS every time you add, change or remove a statement in
+// SYLLABUS_SCHEMA or runIncrementalMigrations(). ⚠️
+//
+// Once a database records this number, initDB() stops running the ~115 idempotent
+// migration statements altogether — so a new migration added WITHOUT bumping this
+// silently never runs anywhere, and you will chase a "column does not exist" 500
+// that reproduces on production but never locally against a fresh DB.
+// Adding a migration statement and bumping this number is ONE change, not two.
+const SCHEMA_VERSION = 1
+
+// Records the schema level this build finished applying, on the same row as the
+// bootstrap marker (no extra row, no extra round-trip to read it back).
+// ON CONFLICT DO UPDATE + GREATEST keeps concurrent cold starts safe: several
+// serverless instances may finish migrating at once, and during a rolling deploy an
+// instance still running older code must not lower the recorded number — its
+// statements are a subset of the newer build's, so the higher value stays truthful.
+// GREATEST ignores NULL, so the first write over a pre-versioning row also works.
+async function recordSchemaVersion(): Promise<void> {
+  await pool.query(`
+    INSERT INTO app_bootstrap_state (key, schema_version) VALUES ($1, $2)
+    ON CONFLICT (key) DO UPDATE
+      SET schema_version = GREATEST(app_bootstrap_state.schema_version, EXCLUDED.schema_version),
+          completed_at   = NOW()
+  `, [BOOTSTRAP_MARKER_KEY, SCHEMA_VERSION])
+}
+
+type BootstrapState = {
+  tables_exist: boolean
+  bootstrapped: boolean
+  schema_version: number | null
+}
+
 export async function initDB() {
+  // Two statements, one simple query = one round-trip. The ALTER back-fills the
+  // version column onto databases that were bootstrapped before versioning existed.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS app_bootstrap_state (
       key TEXT PRIMARY KEY,
       completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
+    );
+    ALTER TABLE app_bootstrap_state ADD COLUMN IF NOT EXISTS schema_version INTEGER;
   `)
 
-  // Check if core tables exist — on a fresh DB we must create them before any ALTER TABLE
-  const tablesExist = await pool.query(`
-    SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = 'schools' LIMIT 1
-  `)
-  const isFreshDB = tablesExist.rows.length === 0
+  // Every fact the branch below needs, in a single round-trip:
+  //  - do the core tables exist at all (a fresh DB must CREATE before any ALTER)?
+  //  - has the one-time bootstrap completed?
+  //  - what schema level did the last successful migration run record?
+  const state = (await pool.query<BootstrapState>(`
+    SELECT
+      EXISTS (SELECT 1 FROM information_schema.tables
+              WHERE table_schema = 'public' AND table_name = 'schools') AS tables_exist,
+      EXISTS (SELECT 1 FROM app_bootstrap_state WHERE key = $1)         AS bootstrapped,
+      (SELECT schema_version FROM app_bootstrap_state WHERE key = $1)   AS schema_version
+  `, [BOOTSTRAP_MARKER_KEY])).rows[0]
 
-  const bootstrap = await pool.query(
-    `SELECT 1 FROM app_bootstrap_state WHERE key = $1 LIMIT 1`,
-    [BOOTSTRAP_MARKER_KEY]
-  )
+  const isFreshDB = !state.tables_exist
 
-  if (!isFreshDB && bootstrap.rows.length > 0) {
-    // Schema fully bootstrapped — run only incremental migrations
+  if (!isFreshDB && state.bootstrapped) {
+    // Steady state. Every migration statement below is idempotent, so on an
+    // up-to-date database they are ~115 no-ops — but on Vercel (max: 1 connection)
+    // they serialise ahead of the request's real query on EVERY cold start, which
+    // is the "loading late while login" the first request pays for. Skipping them
+    // takes a cold start from ~115 round-trips to the 2 already spent above.
+    // schema_version IS NULL = an existing production DB that predates versioning:
+    // it must migrate once, then record the version and take the fast path after.
+    if ((state.schema_version ?? 0) >= SCHEMA_VERSION) return
     await runIncrementalMigrations()
+    await recordSchemaVersion()
     return
   }
 
@@ -98,10 +143,7 @@ export async function initDB() {
     `, [SCHEMA_SENTINEL_TABLE, SCHEMA_SENTINEL_COLUMN])
     if (rows.length > 0) {
       await runIncrementalMigrations()
-      await pool.query(
-        `INSERT INTO app_bootstrap_state (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
-        [BOOTSTRAP_MARKER_KEY]
-      )
+      await recordSchemaVersion()
       return
     }
   }
@@ -1363,10 +1405,9 @@ export async function initDB() {
   // Run incremental migrations after bootstrap
   await runIncrementalMigrations()
 
-  await pool.query(
-    `INSERT INTO app_bootstrap_state (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
-    [BOOTSTRAP_MARKER_KEY]
-  )
+  // Writes the bootstrap marker AND the schema level in one statement, so a
+  // freshly created database takes the fast path from its very next cold start.
+  await recordSchemaVersion()
 }
 
 // ── Syllabus system: master curriculum library + per-school overlay ──────────
@@ -1761,11 +1802,24 @@ async function runIncrementalMigrations() {
 
   // ── School roll number (class roll number assigned by school) ─────────────────
   await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS school_roll_number INTEGER`)
+  // This is what actually makes the roll-number duplicate check in
+  // POST /api/students race-proof: two concurrent inserts of the same roll number
+  // both pass the app-level SELECT, and only this index stops both from committing.
+  // It CAN fail on a database that already holds duplicates — and an uncaught
+  // failure here aborts initDB, which (with the SCHEMA_VERSION fast path) would
+  // leave every cold start retrying the full migration run forever, i.e. the whole
+  // app down over one dirty table. Log and continue instead: the app-level check
+  // still holds the line, and the failure is visible in the function logs.
+  // Deliberately NOT auto-de-duplicated the way parents are above — that fix
+  // DELETEs rows, which is acceptable for a duplicated parent contact record and
+  // absolutely not for a student.
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_students_school_roll_unique
       ON students(school_id, grade, section, school_roll_number)
       WHERE school_roll_number IS NOT NULL
-  `)
+  `).catch((e: unknown) => {
+    console.error('[db] idx_students_school_roll_unique not created — duplicate roll numbers exist', e)
+  })
   // Drop UNIQUE constraint on fee_payments.receipt_number to allow multi-entry receipts
   await pool.query(`
     DO $$ BEGIN
@@ -1860,6 +1914,40 @@ async function runIncrementalMigrations() {
     CREATE INDEX IF NOT EXISTS idx_parents_email_lower
       ON parents(LOWER(email))
       WHERE email IS NOT NULL
+  `).catch(() => {})
+
+  // ── Hot-path indexes on the core tables ──────────────────────────────────────
+  // Every index below is justified by a real query; nothing speculative, because
+  // each one is paid for on every INSERT/UPDATE to these very write-heavy tables.
+  //
+  // students had NO index on school_id at all — GET /api/students builds
+  // `WHERE school_id = $1 [AND grade = $2 [AND section = $3]]` (the params are
+  // appended in exactly that order), so every roster fetch sequentially scanned
+  // every student on the platform. One index in that column order serves all
+  // three shapes, plus the grades_only variant which filters school_id alone.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_students_school_grade_section
+      ON students(school_id, grade, section)
+  `).catch(() => {})
+  // teachers only had (employee_id, school_id) — wrong leading column for the
+  // `WHERE school_id = $1` lookups that dominate this table (GET /api/teachers
+  // staff directory, admin overview counts, doubts auto-routing, schools list
+  // teacher_count subqueries). None of those know an employee_id.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_teachers_school ON teachers(school_id)
+  `).catch(() => {})
+  // attendance's only index leads with student_id, so the two predicates the
+  // attendance screens actually use both fell back to a sequential scan of a table
+  // that grows by (students × days × sessions):
+  //   class_id + date  — GET /api/attendance single-day, summary, previous
+  //                      (previous/monthly use the class_id prefix alone)
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_attendance_class_date ON attendance(class_id, date)
+  `).catch(() => {})
+  //   school_id + date — the all-classes dashboard (`a.school_id = $1 AND a.date = $2`)
+  //                      and the analytics trends, which scan school_id + a date range
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_attendance_school_date ON attendance(school_id, date)
   `).catch(() => {})
 
   // ── Per-school feature overrides (self-heal) ───────────────────────────────────
