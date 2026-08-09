@@ -21,7 +21,6 @@ export const ALL_FEATURES = [
   { key: 'briefing',           label: 'Daily Briefing',                  category: 'Analytics' },
   { key: 'analysis',           label: 'Studentâ€“Teacher Analysis',        category: 'Analytics' },
   { key: 'class-analytics',    label: 'Class Analytics',                 category: 'Analytics' },
-  { key: 'academic-analytics', label: 'Academic Analytics',              category: 'Analytics' },
 
   // â”€â”€ Communication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   { key: 'announcements',      label: 'Announcement Board',              category: 'Communication' },
