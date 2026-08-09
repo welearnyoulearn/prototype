@@ -7,6 +7,9 @@ import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
 import { useRouter, useSearchParams } from 'next/navigation'
 import AppLoader from '../components/AppLoader'
+import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
+import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 
 // Always-loaded (small, needed immediately)
 import Overview from './components/Overview'
@@ -270,6 +273,8 @@ function SchoolAdmin() {
   const [staffRefreshKey, setStaffRefreshKey] = useState(0)
   const [studentRefreshKey, setStudentRefreshKey] = useState(0)
 
+  const trackOpen = useFeatureTracking('school-admin')
+
   const navigateTo = useCallback((key: string) => {
     setActiveNav(key)
     setVisited(prev => new Set([...prev, key]))
@@ -279,10 +284,19 @@ function SchoolAdmin() {
     const params = new URLSearchParams(window.location.search)
     params.set('tab', key)
     router.replace(`/school-admin?${params.toString()}`, { scroll: false })
-  }, [router])
+    trackOpen(key)
+  }, [router, trackOpen])
+
+  useUsageHeartbeat()
 
   async function handleLogout() {
-    await fetch('/api/auth/logout', { method: 'POST' })
+    const usageSessionId = getUsageSessionId()
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usageSessionId }),
+    })
+    clearUsageSessionId()
     router.push('/login')
   }
 
@@ -353,9 +367,16 @@ function SchoolAdmin() {
   const isStaffAccount = myRole === 'principal' || myRole === 'vice_principal'
 
   // Only show nav items that are enabled in platform feature config for this tier
-  // Staff accounts (principal/vice_principal) don't see Settings — they get a Profile page instead
+  // Staff accounts (principal/vice_principal) don't see Settings — they get a Profile page instead.
+  // Syllabus Tracking isn't its own togglable feature — it's not a separate
+  // thing a plan can include/exclude on its own, it's just the reporting view
+  // over whatever a school already subscribed to via Syllabus Customizer. It
+  // rides on 'curriculum's enablement instead of a 'syllabus-tracking' key
+  // (which was never in ALL_FEATURES / plan_features, so checking it directly
+  // here would have made this tab permanently invisible to every school).
   const enabledNavItems = NAV_ITEMS.filter(item =>
-    tier !== 'none' && enabledFeatures.has(item.key) &&
+    tier !== 'none' &&
+    enabledFeatures.has(item.key === 'syllabus-tracking' ? 'curriculum' : item.key) &&
     !(isStaffAccount && item.key === 'settings')
   )
 

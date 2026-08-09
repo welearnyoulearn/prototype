@@ -2175,4 +2175,96 @@ async function runIncrementalMigrations() {
     )
   `).catch(() => {})
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_expense_audit_expense ON expense_audit_log(expense_id, created_at DESC)`).catch(() => {})
+
+  // ── Platform usage analytics — login/session tracking across all 5 roles ──
+  // Deliberately separate from Watchline (request_logs/error_events), which
+  // is opt-in per school, API-call-only, and short-retention by design for
+  // debugging. Usage analytics needs the opposite: always-on for every
+  // school, tracks actual login events + active time (not API traffic), and
+  // needs months of history for trend charts, so it gets its own table with
+  // its own (longer) retention rather than overloading Watchline's purpose.
+  //
+  // actor_id/role are a polymorphic pair, not a hard FK — school_admin and
+  // platform_admin live in `users`, but teacher/student/parent each have
+  // their own separate identity table, so no single FK target exists (same
+  // reason platform_audit_log.actor_id has no cross-role FK either).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS usage_sessions (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
+      actor_id INTEGER NOT NULL,
+      actor_role VARCHAR(20) NOT NULL,   -- school_admin|principal|vice_principal|teacher|student|parent|platform_admin
+      actor_name VARCHAR(200),
+      started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      ended_at TIMESTAMPTZ,
+      duration_seconds INTEGER
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_sessions_school ON usage_sessions(school_id, started_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_sessions_actor ON usage_sessions(actor_role, actor_id, started_at DESC)`).catch(() => {})
+  // Heartbeats update last_seen_at frequently — an open index on that alone
+  // would churn constantly, so it's intentionally NOT indexed separately;
+  // the rollup job scans by started_at/ended_at instead.
+
+  // Pre-aggregated daily rollup so the dashboard never scans raw session rows
+  // (each portal's heartbeat can produce a lot of rows over time, and the
+  // Supabase pool here is connection-constrained — see CLAUDE.md — so the
+  // dashboard's normal-path queries hit this small summary table, not the
+  // raw event log).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS usage_daily_rollup (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
+      day DATE NOT NULL,
+      actor_role VARCHAR(20) NOT NULL,
+      login_count INTEGER NOT NULL DEFAULT 0,
+      unique_actors INTEGER NOT NULL DEFAULT 0,
+      total_duration_seconds INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(school_id, day, actor_role)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_rollup_school_day ON usage_daily_rollup(school_id, day DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_rollup_day ON usage_daily_rollup(day DESC)`).catch(() => {})
+
+  // ── Feature-level usage — which module/tab each portal actually opens ──
+  // usage_sessions only proves someone logged in, not what they used. Every
+  // portal already funnels tab switches through one navigateTo(key) function
+  // (school-admin, teacher, student, parent), so a single tracking call there
+  // captures every feature open with no per-button wiring. nav_key reuses
+  // each portal's existing key strings as-is (school-admin's already match
+  // lib/features.ts's ALL_FEATURES keys 1:1; teacher/student/parent keys are
+  // portal-local and scoped by portal + actor_role, not force-fit into that
+  // catalog). Raw events kept short-retention-ish via the same
+  // pre-aggregated-rollup pattern as usage_sessions, for the same reason:
+  // the dashboard should never scan raw per-click rows.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feature_usage_events (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
+      actor_id INTEGER NOT NULL,
+      actor_role VARCHAR(20) NOT NULL,
+      portal VARCHAR(20) NOT NULL,   -- school-admin|teacher|student|parent|platform-admin
+      nav_key VARCHAR(60) NOT NULL,  -- e.g. 'fee-management', 'syllabus', 'my-classes'
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_events_school ON feature_usage_events(school_id, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_events_key ON feature_usage_events(nav_key, created_at DESC)`).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feature_usage_daily_rollup (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
+      day DATE NOT NULL,
+      portal VARCHAR(20) NOT NULL,
+      nav_key VARCHAR(60) NOT NULL,
+      actor_role VARCHAR(20) NOT NULL,
+      open_count INTEGER NOT NULL DEFAULT 0,
+      unique_actors INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(school_id, day, portal, nav_key, actor_role)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_rollup_school_day ON feature_usage_daily_rollup(school_id, day DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_rollup_key_day ON feature_usage_daily_rollup(nav_key, day DESC)`).catch(() => {})
 }
