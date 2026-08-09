@@ -285,7 +285,18 @@ function SchoolAdmin() {
         if (!schoolRoles.includes(me.role) || !me.school_id) { router.push('/login?role=school'); return }
         setMyRole(me.role)
 
-        const schoolRes = await fetch(`/api/schools/${me.school_id}`)
+        // School and subscription both depend only on me.school_id, not on each
+        // other — fire them together so the dashboard waits one round-trip
+        // instead of two. allSettled (not all) so one failing fetch doesn't
+        // reject the other's handling: the school fetch still falls back below
+        // and the subscription still degrades to tier 'none'.
+        const [schoolSettled, subSettled] = await Promise.allSettled([
+          fetch(`/api/schools/${me.school_id}`),
+          fetch(`/api/schools/${me.school_id}/subscription`),
+        ])
+
+        if (schoolSettled.status === 'rejected') throw schoolSettled.reason
+        const schoolRes = schoolSettled.value
         const school = schoolRes.ok
           ? await schoolRes.json()
           : { id: me.school_id, name: me.school_name, type: '', city: '', country: '', status: 'active' }
@@ -303,8 +314,8 @@ function SchoolAdmin() {
 
         // Load subscription + features before showing UI — prevents "No Plan Assigned" flash
         try {
-          const subRes = await fetch(`/api/schools/${school.id}/subscription`)
-          const subData = await subRes.json()
+          if (subSettled.status === 'rejected') throw subSettled.reason
+          const subData = await subSettled.value.json()
           const t: Tier = subData.tier || 'none'
           setTier(t)
           if (t !== 'none') {

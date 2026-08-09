@@ -1,5 +1,7 @@
 {
   "framework": "nextjs",
+  "//regions": "Supabase lives in AWS ap-south-1 (Mumbai). Without this, functions default to iad1 (Washington DC) and every DB round-trip crosses ~12,000 km — roughly 200ms each, paid per query, on a pool capped at 1 connection. bom1 is Vercel's Mumbai region: same-region RTT is single-digit ms. Users are in India too, so this shortens the browser hop as well. If the DB ever moves, move this with it.",
+  "regions": ["bom1"],
   "crons": [
     {
       "path": "/api/cron/weekly-test",

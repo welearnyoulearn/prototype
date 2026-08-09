@@ -2,18 +2,35 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import AppLoader from '../components/AppLoader'
 import { FeaturesProvider } from '@/lib/features-context'
-import SmartSnapshot from './components/SmartSnapshot'
-import ClassView from './components/ClassView'
-import FullTimetable from './components/FullTimetable'
-import TeacherLeave from './components/TeacherLeave'
-import TeacherProfile from './components/TeacherProfile'
-import Attendance from './components/Attendance'
-import MyStudents from './components/MyStudents'
-import MyClasses from './components/MyClasses'
-import TeacherSyllabus from './components/TeacherSyllabus'
 import NotificationBell from '../components/NotificationBell'
+
+// Always-loaded (landing tab, and small enough not to be worth its own chunk)
+import SmartSnapshot from './components/SmartSnapshot'
+import TeacherSyllabus from './components/TeacherSyllabus'
+
+// Lazy-loaded — only downloaded when first opened
+function ModuleSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      <div className="h-8 bg-gray-100 rounded-xl w-48" />
+      <div className="grid grid-cols-3 gap-4">
+        {[1,2,3].map(i => <div key={i} className="h-28 bg-gray-100 rounded-2xl" />)}
+      </div>
+      <div className="h-64 bg-gray-100 rounded-2xl" />
+    </div>
+  )
+}
+// Turbopack requires inline object literals for next/dynamic options
+const ClassView      = dynamic(() => import('./components/ClassView'),      { loading: () => <ModuleSkeleton /> })
+const FullTimetable  = dynamic(() => import('./components/FullTimetable'),  { loading: () => <ModuleSkeleton /> })
+const TeacherLeave   = dynamic(() => import('./components/TeacherLeave'),   { loading: () => <ModuleSkeleton /> })
+const TeacherProfile = dynamic(() => import('./components/TeacherProfile'), { loading: () => <ModuleSkeleton /> })
+const Attendance     = dynamic(() => import('./components/Attendance'),     { loading: () => <ModuleSkeleton /> })
+const MyStudents     = dynamic(() => import('./components/MyStudents'),     { loading: () => <ModuleSkeleton /> })
+const MyClasses      = dynamic(() => import('./components/MyClasses'),      { loading: () => <ModuleSkeleton /> })
 
 type Teacher = {
   id: number
