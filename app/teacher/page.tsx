@@ -6,6 +6,9 @@ import dynamic from 'next/dynamic'
 import AppLoader from '../components/AppLoader'
 import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
+import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
+import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
 import SmartSnapshot from './components/SmartSnapshot'
@@ -102,10 +105,13 @@ export default function TeacherPortal() {
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
   const [classViewOpenExamId, setClassViewOpenExamId] = useState<number | undefined>(undefined)
 
+  const trackOpen = useFeatureTracking('teacher')
+
   function navigateTo(key: string) {
     setActiveNav(key)
     setVisitedNav(prev => new Set([...prev, key]))
     setSidebarOpen(false)
+    trackOpen(key)
   }
 
   function handleNavigate(key: string, payload?: { examId?: number; classId?: number; tab?: string }) {
@@ -127,8 +133,16 @@ export default function TeacherPortal() {
     }
   }
 
+  useUsageHeartbeat()
+
   const handleLogout = useCallback(async () => {
-    await fetch('/api/teacher/auth/logout', { method: 'POST' })
+    const usageSessionId = getUsageSessionId()
+    await fetch('/api/teacher/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usageSessionId }),
+    })
+    clearUsageSessionId()
     router.push('/teacher/login')
   }, [router])
 

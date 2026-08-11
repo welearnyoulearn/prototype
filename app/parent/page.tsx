@@ -6,6 +6,9 @@ import AppLoader from '../components/AppLoader'
 import Link from 'next/link'
 import { TRANSLATIONS, type Lang } from './translations'
 import ParentSyllabus from './components/ParentSyllabus'
+import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
+import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Child = { id: number; name: string; grade: string; section: string; roll_number: string; school_id: number }
@@ -167,10 +170,13 @@ export default function ParentDashboard() {
   function changeLang(l: Lang) { setLang(l); localStorage.setItem('parent_lang', l) }
   const T = TRANSLATIONS[lang]
 
+  const trackOpen = useFeatureTracking('parent')
+
   function navigateTo(key: string) {
     setActiveNav(key)
     setVisited(prev => new Set([...prev, key]))
     setSidebarOpen(false)
+    trackOpen(key)
   }
 
   // ── Data loaders ─────────────────────────────────────────────────────────────
@@ -283,8 +289,16 @@ export default function ParentDashboard() {
       .finally(() => setLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useUsageHeartbeat()
+
   async function handleLogout() {
-    await fetch('/api/parent/auth/logout', { method: 'POST' }).catch(() => {})
+    const usageSessionId = getUsageSessionId()
+    await fetch('/api/parent/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usageSessionId }),
+    }).catch(() => {})
+    clearUsageSessionId()
     router.push('/parent/login')
   }
 

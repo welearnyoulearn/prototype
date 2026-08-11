@@ -213,7 +213,7 @@ export async function GET(req: NextRequest) {
   if (unmarked_classes > 0)
     alerts.push({ level: 'info', message: `${unmarked_classes} class${unmarked_classes > 1 ? 'es' : ''} haven't marked attendance today`, action: 'attendance' })
   if (lowSyllabusData.count > 0)
-    alerts.push({ level: 'info', message: `${lowSyllabusData.count} class${lowSyllabusData.count > 1 ? 'es' : ''} below 50% syllabus coverage`, action: 'academic-analytics' })
+    alerts.push({ level: 'info', message: `${lowSyllabusData.count} class${lowSyllabusData.count > 1 ? 'es' : ''} below 50% syllabus coverage`, action: 'syllabus-tracking' })
 
   alerts.sort((a, b) => {
     const order = { critical: 0, warning: 1, info: 2 }

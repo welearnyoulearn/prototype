@@ -2,8 +2,69 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { sendMail } from '@/lib/email'
 import { buildHealth } from '@/lib/watchline'
+import { closeStaleSessions } from '@/lib/usageTracking'
 
 const ADMIN_EMAIL = 'kowsik@welearnyoulearn.com'
+
+// Closes any usage_sessions left open by a heartbeat that never came back
+// (tab closed, laptop slept, etc.), then folds the day's now-finalized
+// sessions into usage_daily_rollup so the analytics dashboard only ever
+// scans a handful of summary rows per school/day instead of raw sessions.
+// Runs as part of the same daily cron as log cleanup — no separate cron
+// entry needed, and both are cheap, idempotent maintenance jobs.
+async function runUsageRollup() {
+  const closed = await closeStaleSessions()
+
+  const { rowCount } = await pool.query(`
+    INSERT INTO usage_daily_rollup (school_id, day, actor_role, login_count, unique_actors, total_duration_seconds)
+    SELECT
+      school_id,
+      started_at::date AS day,
+      actor_role,
+      COUNT(*) AS login_count,
+      COUNT(DISTINCT actor_id) AS unique_actors,
+      COALESCE(SUM(duration_seconds), 0) AS total_duration_seconds
+    FROM usage_sessions
+    WHERE ended_at IS NOT NULL
+      AND started_at::date < CURRENT_DATE
+      AND started_at::date >= CURRENT_DATE - INTERVAL '2 days'
+    GROUP BY school_id, started_at::date, actor_role
+    ON CONFLICT (school_id, day, actor_role) DO UPDATE SET
+      login_count = EXCLUDED.login_count,
+      unique_actors = EXCLUDED.unique_actors,
+      total_duration_seconds = EXCLUDED.total_duration_seconds
+  `)
+
+  return { stale_sessions_closed: closed, rollup_rows_upserted: rowCount ?? 0 }
+}
+
+// Same pattern as runUsageRollup: fold yesterday-and-before's raw
+// feature_usage_events into feature_usage_daily_rollup, then delete the raw
+// rows once they're safely aggregated — the dashboard only ever reads the
+// small rollup table, so there's no reason to keep unbounded per-click rows.
+async function runFeatureUsageRollup() {
+  const { rowCount } = await pool.query(`
+    INSERT INTO feature_usage_daily_rollup (school_id, day, portal, nav_key, actor_role, open_count, unique_actors)
+    SELECT
+      school_id,
+      created_at::date AS day,
+      portal,
+      nav_key,
+      actor_role,
+      COUNT(*) AS open_count,
+      COUNT(DISTINCT actor_id) AS unique_actors
+    FROM feature_usage_events
+    WHERE created_at::date < CURRENT_DATE
+    GROUP BY school_id, created_at::date, portal, nav_key, actor_role
+    ON CONFLICT (school_id, day, portal, nav_key, actor_role) DO UPDATE SET
+      open_count = EXCLUDED.open_count,
+      unique_actors = EXCLUDED.unique_actors
+  `)
+
+  const del = await pool.query(`DELETE FROM feature_usage_events WHERE created_at::date < CURRENT_DATE`)
+
+  return { rollup_rows_upserted: rowCount ?? 0, raw_events_deleted: del.rowCount ?? 0 }
+}
 
 async function runCleanup() {
   const [r1, r2, r3] = await Promise.all([
@@ -76,7 +137,9 @@ export async function GET(req: NextRequest) {
   }
   try {
     const deleted = await runCleanup()
-    return NextResponse.json({ deleted, ran_at: new Date().toISOString() })
+    const usage = await runUsageRollup().catch(e => { console.error('[log-cleanup] usage rollup failed:', e); return null })
+    const featureUsage = await runFeatureUsageRollup().catch(e => { console.error('[log-cleanup] feature usage rollup failed:', e); return null })
+    return NextResponse.json({ deleted, usage, featureUsage, ran_at: new Date().toISOString() })
   } catch (err) {
     console.error('[log-cleanup]', err)
     return NextResponse.json({ error: 'Cleanup failed' }, { status: 500 })
@@ -91,7 +154,9 @@ export async function POST(req: NextRequest) {
   }
   try {
     const deleted = await runCleanup()
-    return NextResponse.json({ deleted, ran_at: new Date().toISOString() })
+    const usage = await runUsageRollup().catch(e => { console.error('[log-cleanup] usage rollup failed:', e); return null })
+    const featureUsage = await runFeatureUsageRollup().catch(e => { console.error('[log-cleanup] feature usage rollup failed:', e); return null })
+    return NextResponse.json({ deleted, usage, featureUsage, ran_at: new Date().toISOString() })
   } catch (err) {
     console.error('[log-cleanup]', err)
     return NextResponse.json({ error: 'Cleanup failed' }, { status: 500 })

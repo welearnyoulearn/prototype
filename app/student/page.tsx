@@ -5,6 +5,9 @@ import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import AppLoader from '../components/AppLoader'
 import NotificationBell from '../components/NotificationBell'
+import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
+import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
 import StudentDashboard from './components/StudentDashboard'
@@ -89,10 +92,13 @@ export default function StudentPortal() {
   const [loading,     setLoading]     = useState(true)
   const logoutInFlight = useRef(false)
 
+  const trackOpen = useFeatureTracking('student')
+
   function navigateTo(key: string) {
     setActiveNav(key)
     setVisitedNav(prev => new Set([...prev, key]))
     setSidebarOpen(false)
+    trackOpen(key)
   }
 
   useEffect(() => {
@@ -119,10 +125,18 @@ export default function StudentPortal() {
       .finally(() => setLoading(false))
   }, [router])
 
+  useUsageHeartbeat()
+
   async function handleLogout() {
     if (logoutInFlight.current) return
     logoutInFlight.current = true
-    await fetch('/api/student/auth/logout', { method: 'POST' }).catch(() => {})
+    const usageSessionId = getUsageSessionId()
+    await fetch('/api/student/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usageSessionId }),
+    }).catch(() => {})
+    clearUsageSessionId()
     router.push('/student/login')
   }
 

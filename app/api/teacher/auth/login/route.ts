@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { verifyPassword, signTeacherToken, setTeacherAuthCookie, TeacherJWTPayload } from '@/lib/auth'
+import { recordSessionStart } from '@/lib/usageTracking'
 
 export async function POST(req: NextRequest) {
   try {
@@ -55,11 +56,19 @@ export async function POST(req: NextRequest) {
 
     await setTeacherAuthCookie(payload)
 
+    const usageSessionId = await recordSessionStart({
+      schoolId: teacher.school_id,
+      actorId: teacher.id,
+      actorRole: 'teacher',
+      actorName: teacher.name,
+    })
+
     return NextResponse.json({
       success: true,
       passwordChanged: teacher.password_changed,
       name: teacher.name,
       schoolName: teacher.school_name,
+      usageSessionId,
     })
   } catch (error) {
     console.error('[teacher/auth/login]', error)

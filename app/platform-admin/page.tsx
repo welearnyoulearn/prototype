@@ -3,6 +3,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
+import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 
 type School = {
   id: number
@@ -260,8 +262,16 @@ export default function PlatformAdmin() {
     } catch { setError('Failed to restore school') }
   }
 
+  useUsageHeartbeat()
+
   async function handleLogout() {
-    await fetch('/api/auth/logout', { method: 'POST' })
+    const usageSessionId = getUsageSessionId()
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usageSessionId }),
+    })
+    clearUsageSessionId()
     router.push('/login')
   }
 
@@ -361,6 +371,11 @@ export default function PlatformAdmin() {
             className="text-xs text-teal-700 hover:text-teal-900 border border-teal-200 bg-teal-50 hover:bg-teal-100 px-3 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-teal-500 inline-block" />
             Watchline
+          </Link>
+          <Link href="/platform-admin/usage-analytics"
+            className="text-xs text-indigo-700 hover:text-indigo-900 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 inline-block animate-pulse" />
+            Usage Analytics
           </Link>
           <button
             onClick={() => { fetchSchools(tab); fetchStats() }}

@@ -657,13 +657,34 @@ export default function FeeManagement({
   const [pbErr, setPbErr]                        = useState('')
   const [pbData, setPbData]                     = useState<PassbookData | null>(null)
   const [pbLoading, setPbLoading]               = useState(false)
-  const [pbSection, setPbSection]               = useState<'timeline' | 'bills' | 'payments' | 'waivers'>('bills')
+  const [pbSection, setPbSection]               = useState<'timeline' | 'bills' | 'payments' | 'waivers' | 'receipts'>('bills')
   // Derived passbook data filtered to the selected academic year
   const pbYearGroup = pbData?.ledger_by_year.find(y => y.academic_year === academicYear) ?? null
   const pbSummary   = pbYearGroup
     ? { total_billed: pbYearGroup.total_billed, total_paid: pbYearGroup.total_paid, total_waived: pbYearGroup.total_waived, discretionary_waived: pbYearGroup.discretionary_waived ?? pbYearGroup.total_waived, outstanding: pbYearGroup.outstanding }
     : { total_billed: 0, total_paid: 0, total_waived: 0, discretionary_waived: 0, outstanding: 0 }
   const pbPayments  = pbData?.payments.filter(p => p.bill_year === academicYear) ?? []
+  // One receipt_number can span several fee-category rows in pbPayments (one
+  // payment covering multiple categories at once) — group them here so the
+  // Print Receipts tab lists one entry per actual receipt, not one per line.
+  const pbReceipts = (() => {
+    const byReceipt = new Map<string, { receipt_number: string; paid_date: string; total: number; cancelled: boolean; lineCount: number }>()
+    for (const p of pbPayments) {
+      const existing = byReceipt.get(p.receipt_number)
+      const isCancelled = p.payment_status === 'cancelled'
+      if (existing) {
+        existing.total += isCancelled ? 0 : Number(p.amount)
+        existing.lineCount += 1
+        existing.cancelled = existing.cancelled && isCancelled
+      } else {
+        byReceipt.set(p.receipt_number, {
+          receipt_number: p.receipt_number, paid_date: p.paid_date,
+          total: isCancelled ? 0 : Number(p.amount), cancelled: isCancelled, lineCount: 1,
+        })
+      }
+    }
+    return Array.from(byReceipt.values()).sort((a, b) => new Date(b.paid_date).getTime() - new Date(a.paid_date).getTime())
+  })()
   const pbWaivers   = pbData?.waivers.filter(w => w.bill_year === academicYear) ?? []
   const pbTimeline  = pbData?.timeline.filter(t => t.academic_year === academicYear) ?? []
   const pbYearOnly  = pbYearGroup ? [pbYearGroup] : []
@@ -891,12 +912,29 @@ export default function FeeManagement({
   const [catChangelogLoading, setCatChangelogLoading] = useState(false)
 
   // ── Load academic years ──────────────────────────────────────────────────────
+  // A failed fetch (network error, 500, DB connection-pool exhaustion, etc.)
+  // must never be mistaken for "this school genuinely has zero academic
+  // years" — that misread is exactly what showed the "Create your Academic
+  // Year" first-login wizard to a school that already has real years, purely
+  // because one transient request failed. r.ok distinguishes "the request
+  // succeeded and truly returned nothing" from "the request itself failed."
   const loadAcademicYears = useCallback(() => {
     Promise.all([
       fetch(`/api/academic-year/current?school_id=${schoolId}`).then(r => r.ok ? r.json() : null),
-      fetch(`/api/academic-years?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
+      fetch(`/api/academic-years?school_id=${schoolId}`).then(r => r.ok ? { ok: true, data: r.json() } : { ok: false, data: null }),
       fetch(`/api/fees/year-rollover?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
-    ]).then(([current, all, closed]) => {
+    ]).then(async ([current, yearsResult, closed]) => {
+      if (!yearsResult.ok) {
+        // The years list itself failed to load — show a retry banner, never
+        // the "no years exist yet" wizard, and leave whatever state was
+        // already on screen alone rather than clearing it out from under the
+        // admin.
+        setLoadError('academicYears', 'Could not load academic years — try refreshing')
+        return
+      }
+      clearLoadError('academicYears')
+
+      const all = await yearsResult.data
       const allYears: { label: string; end_date: string }[] = Array.isArray(all) ? all : []
       const labels: string[] = allYears.map((y) => y.label)
       const cur: string = current?.label ?? labels[0] ?? ''
@@ -905,7 +943,8 @@ export default function FeeManagement({
       const closedSet = new Set<string>(Array.isArray(closed) ? closed.map((c: { academic_year: string }) => c.academic_year) : [])
       setClosedYears(closedSet)
 
-      // Show first-login wizard if no academic years exist yet
+      // Show first-login wizard only now that we know the request genuinely
+      // succeeded and the school genuinely has zero academic years.
       if (labels.length === 0) {
         setShowYearWizard(true)
         return
@@ -922,7 +961,9 @@ export default function FeeManagement({
       } else {
         setDaysUntilYearEnd(null)
       }
-    }).catch(() => { setAcademicYears([]); setAcademicYear('') })
+    }).catch(() => {
+      setLoadError('academicYears', 'Network error — could not load academic years')
+    })
   }, [schoolId])
 
   useEffect(() => { loadAcademicYears() }, [loadAcademicYears])
@@ -2300,17 +2341,31 @@ export default function FeeManagement({
     setCancelWaiverBusy(false)
   }
 
-  // Print a receipt for any single completed payment from the passbook
-  function printPassbookReceipt(p: PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }) {
+  // Reprint the COMPLETE original receipt for a past transaction. One
+  // payment can cover several fee categories at once — each category lands
+  // as its own row in fee_payments (and so in pbPayments), all sharing the
+  // same receipt_number. Reprinting from a single row used to print only
+  // that one line under the shared receipt number, producing a document
+  // that didn't match what was handed out at collection time. Group every
+  // row with the same receipt_number first, so the reprint always matches
+  // the original.
+  function printReceiptByNumber(receiptNumber: string) {
     if (!pbData) return
+    const rows = pbPayments.filter(p => p.receipt_number === receiptNumber && p.payment_status !== 'cancelled')
+    if (rows.length === 0) return
     const s = pbData.student
+    const first = rows[0] as PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }
     printDualCopyReceipt({
       school_name: branding.school_name || 'Fee Receipt', logo_url: branding.logo_url, logo_align: branding.logo_align, header_blocks: branding.receipt_header_blocks,
       student_name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section || '',
-      parent_name: s.parent_name, receipt_number: p.receipt_number,
-      lines: [{ label: p.fee_head_name || p.category_name || 'Fee', period: p.period_label || '', amount: p.amount }],
-      total_paid: p.amount, payment_mode: p.payment_mode, paid_date: p.paid_date,
-      transaction_ref: p.transaction_ref, collected_by_name: p.collected_by_name, notes: p.notes,
+      parent_name: s.parent_name, receipt_number: receiptNumber,
+      lines: rows.map(r => {
+        const row = r as PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }
+        return { label: row.fee_head_name || row.category_name || 'Fee', period: row.period_label || '', amount: row.amount }
+      }),
+      total_paid: rows.reduce((sum, r) => sum + Number(r.amount), 0),
+      payment_mode: first.payment_mode, paid_date: first.paid_date,
+      transaction_ref: first.transaction_ref, collected_by_name: first.collected_by_name, notes: first.notes,
     })
   }
 
@@ -2522,6 +2577,8 @@ export default function FeeManagement({
           ))}
         </select>
       </div>
+
+      <LoadErrorBanner sectionKey="academicYears" onRetry={loadAcademicYears} />
 
       {/* ── Approaching / overdue year-end banner ── */}
       {daysUntilYearEnd !== null && daysUntilYearEnd <= 15 && !closedYears.has(academicYear) && (
@@ -4663,6 +4720,7 @@ export default function FeeManagement({
                   { key: 'payments', label: `Payments (${pbPayments.length})` },
                   { key: 'waivers',  label: `Waivers (${pbWaivers.length})` },
                   { key: 'timeline', label: 'Full Timeline' },
+                  { key: 'receipts', label: `Print Receipts (${pbReceipts.length})` },
                 ] as const).map(v => (
                   <button key={v.key} onClick={() => setPbSection(v.key)}
                     className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
@@ -4814,8 +4872,6 @@ export default function FeeManagement({
                                         openCancel(p.id, Number(p.amount), le ? Number(le.balance) : 0)
                                       }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
                                     )}
-                                    <button onClick={() => printPassbookReceipt(p)} title="Print receipt"
-                                      className="text-xs border border-indigo-200 text-indigo-600 px-2.5 py-1 rounded-lg hover:bg-indigo-50">🖨 Print</button>
                                   </div>
                                 </td>
                               </tr>
@@ -4877,6 +4933,47 @@ export default function FeeManagement({
                       </table>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* Print Receipts — one row per actual receipt_number, reprinting the
+                  complete original receipt (all fee lines that were part of that
+                  transaction), not just whichever single line was clicked. */}
+              {pbSection === 'receipts' && (
+                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                  {pbReceipts.length === 0 ? (
+                    <p className="text-sm text-gray-400 p-8 text-center">No receipts for {academicYear}.</p>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
+                          <th className="text-left px-4 py-2 font-semibold">Receipt</th>
+                          <th className="text-left px-4 py-2 font-semibold">Date</th>
+                          <th className="text-left px-4 py-2 font-semibold">Fee Lines</th>
+                          <th className="text-right px-4 py-2 font-semibold">Total</th>
+                          <th className="text-right px-4 py-2 font-semibold">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pbReceipts.map(r => (
+                          <tr key={r.receipt_number} className={`border-b border-gray-50 ${r.cancelled ? 'bg-gray-50/60' : 'hover:bg-gray-50'}`}>
+                            <td className={`px-4 py-2.5 font-mono text-xs ${r.cancelled ? 'text-gray-400 line-through' : 'text-indigo-600'}`}>{r.receipt_number}</td>
+                            <td className="px-4 py-2.5 text-gray-600">{fmtDate(r.paid_date)}</td>
+                            <td className="px-4 py-2.5 text-gray-500">{r.lineCount} {r.lineCount === 1 ? 'item' : 'items'}</td>
+                            <td className={`px-4 py-2.5 text-right font-bold ${r.cancelled ? 'text-gray-400 line-through' : 'text-green-700'}`}>{fmt(r.total)}</td>
+                            <td className="px-4 py-2.5 text-right">
+                              {r.cancelled ? (
+                                <span className="text-[10px] bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full font-medium">Cancelled</span>
+                              ) : (
+                                <button onClick={() => printReceiptByNumber(r.receipt_number)} title="Print full receipt"
+                                  className="text-xs border border-indigo-200 text-indigo-600 px-2.5 py-1 rounded-lg hover:bg-indigo-50">🖨 Print</button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               )}
 
@@ -5991,6 +6088,7 @@ export default function FeeManagement({
                   { key: 'payments', label: `Payments (${pbPayments.length})` },
                   { key: 'waivers',  label: `Waivers (${pbWaivers.length})` },
                   { key: 'timeline', label: 'Timeline' },
+                  { key: 'receipts', label: `Print Receipts (${pbReceipts.length})` },
                 ] as const).map(v => (
                   <button key={v.key} onClick={() => setPbSection(v.key)}
                     className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
@@ -6096,8 +6194,6 @@ export default function FeeManagement({
                                   </div>
                                   {!isCancelled && p.payment_status === 'completed' && (
                                     <div className="flex gap-2 flex-shrink-0">
-                                      <button onClick={() => printPassbookReceipt(p)}
-                                        className="text-xs border border-gray-200 text-gray-500 px-2.5 py-1 rounded-lg hover:bg-gray-50">🖨</button>
                                       {cancelPmtId === p.id
                                         ? <button onClick={() => setCancelPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600 px-2">Close</button>
                                         : <button onClick={() => {
@@ -6144,6 +6240,32 @@ export default function FeeManagement({
                             </Fragment>
                           )
                         })
+                      }
+                    </div>
+                  )}
+
+                  {/* Print Receipts — one row per actual receipt_number, reprinting the
+                      complete original receipt rather than a single fee line. */}
+                  {pbSection === 'receipts' && (
+                    <div className="space-y-2">
+                      {pbReceipts.length === 0
+                        ? <p className="text-sm text-gray-400 text-center py-8">No receipts for {academicYear}.</p>
+                        : pbReceipts.map(r => (
+                          <div key={r.receipt_number} className={`rounded-xl border px-4 py-3 flex items-center justify-between gap-3 ${r.cancelled ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-gray-100'}`}>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-mono text-xs font-semibold text-indigo-600">{r.receipt_number}</span>
+                                {r.cancelled && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Cancelled</span>}
+                              </div>
+                              <p className={`text-lg font-bold mt-0.5 ${r.cancelled ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{fmt(r.total)}</p>
+                              <p className="text-xs text-gray-400 mt-0.5">{fmtDate(r.paid_date)} · {r.lineCount} {r.lineCount === 1 ? 'item' : 'items'}</p>
+                            </div>
+                            {!r.cancelled && (
+                              <button onClick={() => printReceiptByNumber(r.receipt_number)}
+                                className="text-xs border border-gray-200 text-gray-500 px-2.5 py-1 rounded-lg hover:bg-gray-50 flex-shrink-0">🖨 Print</button>
+                            )}
+                          </div>
+                        ))
                       }
                     </div>
                   )}
