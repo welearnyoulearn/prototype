@@ -87,9 +87,22 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   try {
-    const { board, grade, subject_name, category } = await req.json()
+    const { board, grade, subject_name: rawSubjectName, category } = await req.json()
+    const subject_name = typeof rawSubjectName === 'string' ? rawSubjectName.trim() : rawSubjectName
     if (!board || !grade || !subject_name) {
       return NextResponse.json({ error: 'board, grade, and subject_name are required' }, { status: 400 })
+    }
+
+    // Whitespace/casing variants (e.g. "Science" vs "Science ") would each
+    // satisfy the exact-string UNIQUE(board, grade, subject_name) constraint
+    // as distinct rows — reuse an existing normalized match instead of
+    // letting a repeated import silently create a near-duplicate subject.
+    const existing = await pool.query(
+      `SELECT * FROM master_subjects WHERE board = $1 AND grade = $2 AND LOWER(TRIM(subject_name)) = LOWER(TRIM($3))`,
+      [board, grade, subject_name]
+    )
+    if (existing.rows.length > 0) {
+      return NextResponse.json({ subject: existing.rows[0] })
     }
 
     const { rows } = await pool.query(

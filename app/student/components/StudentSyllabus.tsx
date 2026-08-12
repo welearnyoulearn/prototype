@@ -30,9 +30,74 @@ type Topic = {
 type Chapter = {
   chapter_name: string
   chapter_order: number
+  semester?: string | null
+  book_type?: string | null
+  audience?: string | null
+  book_name?: string | null
   total: number
   covered: number
   topics: Topic[]
+}
+
+const BOOK_TYPE_LABELS: Record<string, string> = { textbook: 'Text Book', handbook: 'Hand Book', workbook: 'Work Book' }
+const AUDIENCE_LABELS: Record<string, string> = { teacher: 'Teacher Edition', both: 'Teacher & Student' }
+
+/** Majority-audience badge for a book tab label — purely cosmetic, never hides anything. */
+function audienceBadge(groupChapters: Chapter[]): string | null {
+  const counts: Record<string, number> = {}
+  for (const c of groupChapters) {
+    const a = c.audience || 'student'
+    counts[a] = (counts[a] || 0) + 1
+  }
+  const majority = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+  if (!majority || majority[0] === 'student') return null
+  return AUDIENCE_LABELS[majority[0]] || null
+}
+
+// A "book" a chapter belongs to is (book_type, book_name) — book_type alone
+// can't tell two different Text Books apart. When only one book exists for
+// a type, its tab keeps the generic label; once a second book shares that
+// type, each gets its own tab labeled with its actual name.
+type BookGroup = { key: string; label: string; chapters: Chapter[] }
+
+function bookGroupKey(bookType: string | null | undefined, bookName: string | null | undefined): string {
+  return `${bookType || 'textbook'}::${bookName || ''}`
+}
+
+function computeBookGroups(chapters: Chapter[]): BookGroup[] {
+  const byType = new Map<string, Map<string, Chapter[]>>()
+  for (const c of chapters) {
+    const bt = c.book_type || 'textbook'
+    const bn = c.book_name || ''
+    if (!byType.has(bt)) byType.set(bt, new Map())
+    const byName = byType.get(bt)!
+    if (!byName.has(bn)) byName.set(bn, [])
+    byName.get(bn)!.push(c)
+  }
+  const groups: BookGroup[] = []
+  // Fixed order (not Map insertion order, which would depend on whatever
+  // order chapters happen to arrive in) so tabs appear the same way here as
+  // in the platform-admin curriculum page.
+  for (const bt of ['textbook', 'handbook', 'workbook']) {
+    const byName = byType.get(bt)
+    if (!byName) continue
+    const entries = Array.from(byName.entries())
+    if (entries.length === 1) {
+      const [bn, chs] = entries[0]
+      groups.push({ key: bookGroupKey(bt, bn), label: BOOK_TYPE_LABELS[bt] || bt, chapters: chs })
+    } else {
+      let unnamedCount = 0
+      for (const [bn, chs] of entries) {
+        if (!bn) {
+          unnamedCount += 1
+          groups.push({ key: bookGroupKey(bt, bn), label: `${BOOK_TYPE_LABELS[bt] || bt} ${unnamedCount}`, chapters: chs })
+        } else {
+          groups.push({ key: bookGroupKey(bt, bn), label: bn, chapters: chs })
+        }
+      }
+    }
+  }
+  return groups
 }
 
 type Subject = {
@@ -43,9 +108,12 @@ type Subject = {
   chapters: Chapter[]
 }
 
+type Material = { id: number; material_type: 'textbook'; title: string; file_url: string }
+
 type Props = {
   schoolId: number
   classId: number
+  grade: string
 }
 
 function parseQuestions(raw: Topic['questions']): Question[] {
@@ -59,10 +127,11 @@ function parseQuestions(raw: Topic['questions']): Question[] {
   }
 }
 
-export default function StudentSyllabus({ schoolId, classId }: Props) {
+export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [loading, setLoading] = useState(true)
   const [activeSubject, setActiveSubject] = useState('')
+  const [activeBookKey, setActiveBookKey] = useState('')
   const [activeTopic, setActiveTopic] = useState<Topic | null>(null)
 
   // Inline quiz-taking — ports the Ulearn prototype's openQuiz/submitQuiz: shuffle
@@ -78,6 +147,7 @@ export default function StudentSyllabus({ schoolId, classId }: Props) {
   // submission API). Scores here reset on page refresh; wire this to a real
   // endpoint once the backend adds one instead of fabricating one here.
   const [quizScores, setQuizScores] = useState<Record<number, number>>({})
+  const [materials, setMaterials] = useState<Material[]>([])
 
   const { toast, flash } = useToast()
 
@@ -93,6 +163,17 @@ export default function StudentSyllabus({ schoolId, classId }: Props) {
       })
       .catch(() => setLoading(false))
   }, [schoolId, classId])
+
+  // Textbooks uploaded once per subject on the platform side — students only
+  // ever see the 'textbook' type, never handbooks.
+  useEffect(() => {
+    if (!grade || !activeSubject) { setMaterials([]); return }
+    const params = new URLSearchParams({ school_id: String(schoolId), grade, subject_name: activeSubject })
+    fetch(`/api/school/subjects/materials?${params}`)
+      .then(r => r.json())
+      .then(data => setMaterials(Array.isArray(data) ? data : []))
+      .catch(() => setMaterials([]))
+  }, [schoolId, grade, activeSubject])
 
   function openQuiz(topic: Topic) {
     const bank = parseQuestions(topic.questions)
@@ -146,6 +227,31 @@ export default function StudentSyllabus({ schoolId, classId }: Props) {
 
   const subjectNames = subjects.map(s => s.subject)
   const subject = subjects.find(s => s.subject === activeSubject) ?? subjects[0]
+
+  // Books this subject actually has chapters for — only shown as a switcher
+  // when there's more than one (subjects that were never split by book
+  // render exactly like before).
+  const bookGroups = computeBookGroups(subject.chapters)
+  const effectiveBookKey = bookGroups.some(g => g.key === activeBookKey) ? activeBookKey : bookGroups[0]?.key ?? ''
+  const effectiveGroup = bookGroups.find(g => g.key === effectiveBookKey) ?? null
+  const chaptersForBook = bookGroups.length > 1 && effectiveGroup ? effectiveGroup.chapters : subject.chapters
+  const bookTabLabel = (g: BookGroup) => {
+    const badge = audienceBadge(g.chapters)
+    return `${g.label}${badge ? ` · ${badge}` : ''}`
+  }
+
+  // Group chapters by semester when the subject uses them — falls back to a
+  // single flat bucket (no header) for subjects that don't split by semester.
+  const semesterGroups: { semester: string | null; chapters: Chapter[] }[] = chaptersForBook.some(c => c.semester)
+    ? Object.values(
+        chaptersForBook.reduce((acc, ch) => {
+          const key = ch.semester || ' none'
+          if (!acc[key]) acc[key] = { semester: ch.semester || null, chapters: [] }
+          acc[key].chapters.push(ch)
+          return acc
+        }, {} as Record<string, { semester: string | null; chapters: Chapter[] }>)
+      )
+    : [{ semester: null, chapters: chaptersForBook }]
 
   // ── Quiz-taking panel ──
   if (quizTopic) {
@@ -208,6 +314,18 @@ export default function StudentSyllabus({ schoolId, classId }: Props) {
 
       <Pills items={subjectNames} value={activeSubject} onChange={setActiveSubject} color={GREEN} />
 
+      {bookGroups.length > 1 && (
+        <Pills
+          items={bookGroups.map(g => bookTabLabel(g))}
+          value={effectiveGroup ? bookTabLabel(effectiveGroup) : ''}
+          onChange={(label) => {
+            const g = bookGroups.find(x => bookTabLabel(x) === label)
+            if (g) setActiveBookKey(g.key)
+          }}
+          color={GREEN}
+        />
+      )}
+
       <UlearnCard className="p-4 flex items-center justify-between gap-4" borderColor={BORDER}>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium mb-1.5 truncate" style={{ color: INK }}>
@@ -221,13 +339,31 @@ export default function StudentSyllabus({ schoolId, classId }: Props) {
         </div>
       </UlearnCard>
 
+      {materials.length > 0 && (
+        <UlearnCard className="p-4" borderColor={BORDER}>
+          <div className="text-sm font-medium mb-2" style={{ color: INK }}>Textbook</div>
+          <div className="space-y-2">
+            {materials.map(m => (
+              <a key={m.id} href={m.file_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg hover:underline" style={{ background: SURFACE, color: GREEN }}>
+                <BookOpen size={14} className="shrink-0" /> {m.title}
+              </a>
+            ))}
+          </div>
+        </UlearnCard>
+      )}
+
       {allLocked && (
         <UlearnCard className="p-4 text-center text-sm text-gray-400" borderColor={BORDER}>
           Nothing unlocked in {subject.subject} yet — your teacher hasn&apos;t marked any topics as taught.
         </UlearnCard>
       )}
 
-      {subject.chapters.map(ch => (
+      {semesterGroups.map(group => (
+        <div key={group.semester ?? '__none__'} className="space-y-4">
+          {group.semester && (
+            <h3 className="text-xs font-bold uppercase tracking-widest px-1" style={{ color: GREEN }}>{group.semester}</h3>
+          )}
+          {group.chapters.map(ch => (
         <UlearnCard key={ch.chapter_name} className="p-4" borderColor={BORDER}>
           <div className="flex items-center gap-2 mb-3">
             <BookOpen size={16} style={{ color: GREEN }} />
@@ -291,6 +427,8 @@ export default function StudentSyllabus({ schoolId, classId }: Props) {
             })}
           </div>
         </UlearnCard>
+          ))}
+        </div>
       ))}
 
       {activeTopic && (

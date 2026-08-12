@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useState, useCallback, useMemo, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useFeature } from '@/lib/features-context'
 import { GRADE_SEQUENCE, FINAL_GRADE } from '@/lib/grades'
 
@@ -565,8 +565,6 @@ export default function FeeManagement({
   const [showPaymentsId, setShowPaymentsId]     = useState<number | null>(null)
 
   // Collect (inline from ledger or search)
-  const [collectSearch, setCollectSearch]   = useState('')
-  const [collectEntries, setCollectEntries] = useState<LedgerEntry[]>([])
   const [collectLoading, setCollectLoading] = useState(false)
   const [selectedEntry, setSelectedEntry]   = useState<LedgerEntry | null>(null)
   const [payAmount, setPayAmount]           = useState('')
@@ -1235,34 +1233,6 @@ export default function FeeManagement({
     if (r.ok) setCategories(prev => prev.map(c => c.id === catId ? { ...c, is_active: true } : c))
   }
 
-  const filteredLedger = ledger.filter(e => {
-    const q = ledgerSearch.trim().toLowerCase()
-    return !q || [
-      e.student_name, e.roll_number,
-      e.school_roll_number != null ? String(e.school_roll_number) : '',
-      e.grade, e.section, e.email, e.phone,
-      e.parent_name, e.parent_phone, e.parent_email,
-    ].some(v => (v || '').toLowerCase().includes(q))
-  })
-
-  // ── Collect: search students ─────────────────────────────────────────────────
-  // Filter from already-loaded ledger state — no extra fetch on each keystroke
-  function searchStudent(q: string) {
-    if (!q.trim() || !academicYear) { setCollectEntries([]); return }
-    const ql = q.trim().toLowerCase()
-    setCollectEntries(
-      ledger.filter(e =>
-        [
-          e.student_name, e.roll_number,
-          e.school_roll_number != null ? String(e.school_roll_number) : '',
-          e.grade, e.section, e.email, e.phone,
-          e.parent_name, e.parent_phone, e.parent_email,
-        ].some(v => (v || '').toLowerCase().includes(ql))
-        && e.status !== 'paid' && e.status !== 'waived'
-      )
-    )
-  }
-
   function openCollect(entry: LedgerEntry) {
     setSelectedEntry(entry)
     setPayAmount(String(entry.balance > 0 ? entry.balance : entry.amount_due))
@@ -1300,7 +1270,6 @@ export default function FeeManagement({
       })
       if (r.ok) {
         setShowWaiver(false); setSelectedEntry(null)
-        setCollectSearch(''); setCollectEntries([])
         setOpenStudentId(null); setShowCollectForm(false); setCollectChecked(new Set())
         loadStats(); loadLedger()
         if (reportData !== null) loadReports()
@@ -1995,7 +1964,11 @@ export default function FeeManagement({
     all_entries: LedgerEntry[]
     has_overdue: boolean; never_paid: boolean
   }
-  const studentRows: StudentRow[] = (() => {
+  // Memoized: this re-groups the whole school's ledger into per-student rows,
+  // so without useMemo it re-ran on every render — including every keystroke
+  // in the Collect-tab search box — for a dataset that scales with the
+  // school's entire fee history.
+  const studentRows: StudentRow[] = useMemo(() => {
     const map = new Map<number, StudentRow>()
     for (const e of ledger) {
       let row = map.get(e.student_id)
@@ -2027,12 +2000,26 @@ export default function FeeManagement({
     // still clutters their former grade's list. They're surfaced separately via the
     // Leavers & Dues tab and the Passout Students panel instead.
     return Array.from(map.values()).filter(r => r.student_status === 'active')
-  })()
+  }, [ledger])
 
   // Grade-only filtered rows — used for chip counts so they reflect grade selection but not search/status
-  const gradeFilteredRows = ledgerGrade ? studentRows.filter(r => r.grade === ledgerGrade) : studentRows
+  const gradeFilteredRows = useMemo(
+    () => ledgerGrade ? studentRows.filter(r => r.grade === ledgerGrade) : studentRows,
+    [studentRows, ledgerGrade]
+  )
 
-  const collectionFiltered = studentRows.filter(r => {
+  // The 5 status-chip counts below all used to run their own inline
+  // `.filter().length` pass over gradeFilteredRows on every render — computed
+  // once here instead.
+  const statusCounts = useMemo(() => ({
+    all: gradeFilteredRows.length,
+    overdue: gradeFilteredRows.filter(r => r.has_overdue && r.outstanding > 0).length,
+    partial: gradeFilteredRows.filter(r => r.total_paid > 0 && r.outstanding > 0).length,
+    never: gradeFilteredRows.filter(r => r.never_paid && r.outstanding > 0).length,
+    clear: gradeFilteredRows.filter(r => r.outstanding <= 0).length,
+  }), [gradeFilteredRows])
+
+  const collectionFiltered = useMemo(() => studentRows.filter(r => {
     if (ledgerGrade && r.grade !== ledgerGrade) return false
     if (ledgerSearch) {
       const q = ledgerSearch.trim().toLowerCase()
@@ -2049,7 +2036,7 @@ export default function FeeManagement({
     if (ledgerStatus === 'never') return r.never_paid && r.outstanding > 0
     if (ledgerStatus === 'clear') return r.outstanding <= 0
     return true
-  })
+  }), [studentRows, ledgerGrade, ledgerSearch, ledgerStatus])
 
   const openStudent = collectionFiltered.find(r => r.student_id === openStudentId)
     || studentRows.find(r => r.student_id === openStudentId)
@@ -2513,7 +2500,7 @@ export default function FeeManagement({
             setAcademicYear(e.target.value)
             // Reset view state that is year-scoped
             setPbData(null); setPbErr('')
-            setOpenStudentId(null); setCollectEntries([]); setCollectSearch('')
+            setOpenStudentId(null)
           }}
           className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
@@ -3911,11 +3898,11 @@ export default function FeeManagement({
               {/* Quick filter chips */}
               <div className="flex gap-2 flex-wrap">
                 {([
-                  { key: '',        label: `All Students (${gradeFilteredRows.length})` },
-                  { key: 'overdue', label: `Overdue (${gradeFilteredRows.filter(r => r.has_overdue && r.outstanding > 0).length})` },
-                  { key: 'partial', label: `Partially Paid (${gradeFilteredRows.filter(r => r.total_paid > 0 && r.outstanding > 0).length})` },
-                  { key: 'never',   label: `Never Paid (${gradeFilteredRows.filter(r => r.never_paid && r.outstanding > 0).length})` },
-                  { key: 'clear',   label: `Fully Cleared (${gradeFilteredRows.filter(r => r.outstanding <= 0).length})` },
+                  { key: '',        label: `All Students (${statusCounts.all})` },
+                  { key: 'overdue', label: `Overdue (${statusCounts.overdue})` },
+                  { key: 'partial', label: `Partially Paid (${statusCounts.partial})` },
+                  { key: 'never',   label: `Never Paid (${statusCounts.never})` },
+                  { key: 'clear',   label: `Fully Cleared (${statusCounts.clear})` },
                 ] as const).map(f => (
                   <button key={f.key} onClick={() => setLedgerStatus(f.key)}
                     className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${

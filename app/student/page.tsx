@@ -11,6 +11,7 @@ import StudentMarks from './components/StudentMarks'
 import StudentTimetable from './components/StudentTimetable'
 import StudentSyllabus from './components/StudentSyllabus'
 import NotificationBell from '../components/NotificationBell'
+import DigitalLibrary from '../components/library/DigitalLibrary'
 
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
@@ -28,6 +29,7 @@ const NAV_SECTIONS: NavSection[] = [
       { key: 'dashboard', label: 'Dashboard',    icon: '🏠' },
       { key: 'timetable', label: 'My Timetable', icon: '🗓️' },
       { key: 'syllabus',  label: 'Syllabus',     icon: '📚' },
+      { key: 'library',   label: 'Digital Library', icon: '📖' },
     ],
   },
   {
@@ -257,7 +259,8 @@ export default function StudentPortal() {
             {visitedNav.has('doubts')      && <div hidden={activeNav !== 'doubts'}><StudentDoubts student={student} classId={classId} schoolId={student.school_id} /></div>}
             {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={student.school_id} classId={classId} /></div>}
             {visitedNav.has('timetable')   && <div hidden={activeNav !== 'timetable'}><StudentTimetable classId={classId} schoolId={student.school_id} grade={student.grade} section={student.section} /></div>}
-            {visitedNav.has('syllabus')    && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={student.school_id} classId={classId} /></div>}
+            {visitedNav.has('syllabus')    && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={student.school_id} classId={classId} grade={student.grade} /></div>}
+            {visitedNav.has('library')     && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}`} /></div>}
             {visitedNav.has('profile')     && <div hidden={activeNav !== 'profile'}><StudentProfile student={student} /></div>}
           </div>
         </main>

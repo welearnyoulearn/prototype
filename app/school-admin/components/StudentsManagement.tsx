@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 
 type Props = { schoolId: number; refreshKey?: number }
 
@@ -570,25 +570,28 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
     }
   }
 
-  const activeStudents = students.filter(s => s.status === 'active' || !s.status)
-  const inactiveStudents = students.filter(s => s.status === 'inactive')
+  // Memoized — the whole roster gets re-filtered/re-grouped on every search
+  // keystroke and every grade/section/status filter click, so without this
+  // it re-scans the full student list on every render for no reason.
+  const activeStudents = useMemo(() => students.filter(s => s.status === 'active' || !s.status), [students])
+  const inactiveStudents = useMemo(() => students.filter(s => s.status === 'inactive'), [students])
 
   const displayStudents = statusFilter === 'active' ? activeStudents
     : statusFilter === 'inactive' ? inactiveStudents
     : statusFilter === 'duplicates' ? activeStudents
     : students
 
-  const grades = ['all', ...Array.from(new Set(displayStudents.map(s => s.grade).filter(Boolean)))
-    .sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))]
+  const grades = useMemo(() => ['all', ...Array.from(new Set(displayStudents.map(s => s.grade).filter(Boolean)))
+    .sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))], [displayStudents])
   // Sections are already normalised to uppercase; show only sections for the selected grade
-  const sections = ['all', ...Array.from(new Set(
+  const sections = useMemo(() => ['all', ...Array.from(new Set(
     displayStudents
       .filter(s => gradeFilter === 'all' || s.grade === gradeFilter)
       .map(s => (s.section ?? '').toUpperCase())
       .filter(Boolean)
-  )).sort()]
+  )).sort()], [displayStudents, gradeFilter])
 
-  const filtered = displayStudents.filter(s => {
+  const filtered = useMemo(() => displayStudents.filter(s => {
     const sec = (s.section ?? '').toUpperCase()
     const matchesGrade   = gradeFilter === 'all' || s.grade === gradeFilter
     const matchesSection = sectionFilter === 'all' || sec === sectionFilter.toUpperCase()
@@ -596,16 +599,19 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
       (s.roll_number || '').toLowerCase().includes(search.toLowerCase()) ||
       (s.school_roll_number != null && String(s.school_roll_number).includes(search))
     return matchesGrade && matchesSection && matchesSearch
-  })
+  }), [displayStudents, gradeFilter, sectionFilter, search])
 
   // Group by grade-section, sort numerically by grade then alphabetically by section
-  const grouped: Record<string, Student[]> = {}
-  filtered.forEach(s => {
-    const sec = (s.section ?? '').toUpperCase()
-    const key = s.grade && sec ? `Grade ${s.grade} – Section ${sec}` : s.grade ? `Grade ${s.grade}` : 'Unassigned'
-    if (!grouped[key]) grouped[key] = []
-    grouped[key].push(s)
-  })
+  const grouped: Record<string, Student[]> = useMemo(() => {
+    const g: Record<string, Student[]> = {}
+    filtered.forEach(s => {
+      const sec = (s.section ?? '').toUpperCase()
+      const key = s.grade && sec ? `Grade ${s.grade} – Section ${sec}` : s.grade ? `Grade ${s.grade}` : 'Unassigned'
+      if (!g[key]) g[key] = []
+      g[key].push(s)
+    })
+    return g
+  }, [filtered])
 
   function sortGroupKey(a: string, b: string) {
     const ga = parseInt(a.match(/Grade (\d+)/)?.[1] ?? '0')
