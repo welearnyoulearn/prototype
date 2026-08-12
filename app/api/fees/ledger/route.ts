@@ -5,7 +5,18 @@ import { gradeOrderSql } from '@/lib/grades'
 import { withWatchline } from '@/lib/logger'
 import { resolveAcademicYear } from '@/lib/academicYear'
 
+// Hard ceiling on rows per request so a ledger can never come back unbounded.
+const MAX_LIMIT = 500
+
+// Non-negative integer query param. Absent => fallback; malformed => NaN so the
+// caller can reject it (Math.min/clamping keeps NaN, which Number.isInteger catches).
+function parseCount(raw: string | null, fallback: number): number {
+  if (raw === null) return fallback
+  return /^\d+$/.test(raw) ? Number(raw) : NaN
+}
+
 // GET /api/fees/ledger?school_id=X&academic_year=2025-26&grade=8&status=overdue&student_id=Y
+//   &limit=&offset=  (optional — see the opt-in note below)
 async function handleGET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
@@ -65,6 +76,33 @@ async function handleGET(req: NextRequest) {
         ? `EXISTS(SELECT 1 FROM student_fee_ledger_edits e WHERE e.ledger_id = l.id) AS has_edits`
         : `FALSE AS has_edits`
 
+      const where = `WHERE ${conditions.join(' AND ')}`
+      // Both JOINs are on primary keys (students.id, fee_categories.id), so they
+      // filter but never multiply rows — the count below reuses the exact same
+      // FROM/JOIN/WHERE and therefore agrees with the rows returned.
+      const from = `FROM student_fee_ledger l
+         JOIN students s ON s.id = l.student_id
+         JOIN fee_categories fc ON fc.id = l.fee_category_id`
+
+      // Pagination is strictly OPT-IN: with no limit/offset the response stays
+      // unbounded and identically shaped. A default cap was tried and reverted —
+      // the fee screens fetch the whole ledger and aggregate over it (collected vs
+      // outstanding totals), so a silent LIMIT would quietly report WRONG amounts
+      // for any school past the cap. See app/api/students/route.ts for the same note.
+      const paginated = p.has('limit') || p.has('offset')
+      let pageClause = ''
+      let limit = 0
+      let offset = 0
+      if (paginated) {
+        limit = Math.min(parseCount(p.get('limit'), MAX_LIMIT), MAX_LIMIT)
+        offset = parseCount(p.get('offset'), 0)
+        if (!Number.isInteger(limit) || !Number.isInteger(offset)) {
+          return NextResponse.json({ error: 'limit and offset must be non-negative integers' }, { status: 400 })
+        }
+        values.push(limit, offset)
+        pageClause = `LIMIT $${values.length - 1} OFFSET $${values.length}`
+      }
+
       const { rows } = await pool.query(
         `SELECT
            l.*,
@@ -79,14 +117,20 @@ async function handleGET(req: NextRequest) {
            GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS balance,
            (CURRENT_DATE - l.due_date) AS days_overdue,
            ${hasEditsCol}
-         FROM student_fee_ledger l
-         JOIN students s ON s.id = l.student_id
-         JOIN fee_categories fc ON fc.id = l.fee_category_id
-         WHERE ${conditions.join(' AND ')}
-         ORDER BY l.due_date, ${gradeOrderSql('s.grade')}, s.section, s.school_roll_number NULLS LAST, s.name`,
+         ${from}
+         ${where}
+         ORDER BY l.due_date, ${gradeOrderSql('s.grade')}, s.section, s.school_roll_number NULLS LAST, s.name, l.id
+         ${pageClause}`,
         values
       )
-      return NextResponse.json(rows)
+      if (!paginated) return NextResponse.json(rows)
+
+      // Only paginated callers pay for the count.
+      const { rows: [{ total }] } = await pool.query<{ total: number }>(
+        `SELECT COUNT(*)::int AS total ${from} ${where}`,
+        values.slice(0, values.length - 2)
+      )
+      return NextResponse.json({ data: rows, limit, offset, total })
     } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
 } catch (err: unknown) {
     console.error('[API]', err)

@@ -530,7 +530,7 @@ export function SyllabusTracking({
   // subject for their own class regardless (kept — a common real-school
   // expectation); everyone else is gated strictly to their assignments.
   allowedSubjects?: string[]
-  onGoToHomework: () => void
+  onGoToHomework: (prefill?: { title: string; subject: string }) => void
 }) {
   const [subjects, setSubjects] = useState<SylSubject[]>([])
   const [selectedSubject, setSelectedSubject] = useState<string>('')
@@ -837,7 +837,7 @@ export function SyllabusTracking({
             <span className="font-semibold" style={{ color: INK }}>{selectedSubject}</span>
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-500">{currentSubject.covered}/{currentSubject.total} topics taught</span>
-              <button onClick={onGoToHomework}
+              <button onClick={() => onGoToHomework()}
                 data-testid="syllabus-add-homework-btn"
                 className="flex items-center gap-1.5 px-3 py-1.5 text-white rounded-lg text-xs font-semibold transition-colors" style={{ background: INK }}>
                 <Sparkles size={13} />
@@ -878,7 +878,7 @@ export function SyllabusTracking({
         <div className="mb-4 rounded-2xl px-5 py-3 flex items-center justify-between" style={{ background: '#FCEBEB' }}>
           <p className="text-sm" style={{ color: '#791F1F' }}>AI suggestion failed. Use the Homework tab to add manually.</p>
           <div className="flex gap-2 items-center">
-            <button onClick={onGoToHomework} data-testid="syllabus-suggest-error-homework-btn" className="text-xs px-3 py-1.5 text-white rounded-lg font-medium" style={{ background: INK }}>Add Homework</button>
+            <button onClick={() => onGoToHomework()} data-testid="syllabus-suggest-error-homework-btn" className="text-xs px-3 py-1.5 text-white rounded-lg font-medium" style={{ background: INK }}>Add Homework</button>
             <button onClick={() => setSuggestError(false)} data-testid="syllabus-suggest-error-dismiss" className="opacity-60 hover:opacity-100" style={{ color: '#791F1F' }}><X size={16} /></button>
           </div>
         </div>
@@ -984,16 +984,6 @@ export function SyllabusTracking({
 
                       return (
                         <div key={topic.id} className="w-full px-5 py-3 flex items-center gap-3" style={{ borderColor: SURFACE }}>
-                          {/* Mark taught toggle */}
-                          <button
-                            onClick={() => markCovered(topic)}
-                            disabled={isMarking}
-                            title={isCovered ? 'Mark as pending' : 'Mark taught'}
-                            data-testid={`syllabus-mark-taught-${topic.id}`}
-                            className="w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors"
-                            style={{ background: isCovered ? GREEN : 'white', borderColor: isCovered ? GREEN : GOLD, opacity: isMarking ? 0.5 : 1 }}>
-                            {isCovered && <Check size={12} className="text-white" />}
-                          </button>
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-xs font-bold text-gray-300">{tIdx + 1}.</span>
@@ -1002,6 +992,30 @@ export function SyllabusTracking({
                               </span>
                               <StatusPill status={isCovered ? 'taught' : 'unlocked'} />
                               <QuizPill count={qCount} />
+                              {/* Mark Complete — labeled button, not a bare circle toggle */}
+                              <button
+                                onClick={() => markCovered(topic)}
+                                disabled={isMarking}
+                                title={isCovered ? 'Mark as pending' : 'Mark as complete'}
+                                data-testid={`syllabus-mark-taught-${topic.id}`}
+                                className="text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1"
+                                style={{
+                                  color: isCovered ? GREEN : 'white',
+                                  background: isCovered ? '#E8F8EF' : GREEN,
+                                  border: `1px solid ${GREEN}`,
+                                  opacity: isMarking ? 0.5 : 1,
+                                }}>
+                                {isCovered ? <><Check size={11} /> Completed</> : 'Mark Complete'}
+                              </button>
+                              {isCovered && (
+                                <button
+                                  onClick={() => onGoToHomework({ title: `${topic.topic_name} (${topic.chapter_name})`, subject: selectedSubject })}
+                                  data-testid={`syllabus-topic-add-homework-${topic.id}`}
+                                  className="text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1"
+                                  style={{ color: INK, background: SURFACE, border: `1px solid ${BORDER}` }}>
+                                  <Sparkles size={11} /> Add Homework
+                                </button>
+                              )}
                               <button
                                 onClick={() => setActiveTopic(topic)}
                                 data-testid={`syllabus-view-material-${topic.id}`}
@@ -1154,6 +1168,10 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState(initialTab && tabs.includes(initialTab) ? initialTab : tabs[0])
   const [detailStudent, setDetailStudent] = useState<Student | null>(null)
+  // Set when a syllabus topic's "Add Homework" button navigates here — read
+  // once by Tasks to open its create form pre-filled, then cleared so
+  // switching tabs manually afterward doesn't keep re-triggering it.
+  const [homeworkPrefill, setHomeworkPrefill] = useState<{ title: string; subject: string } | null>(null)
 
   // Today's timetable (for 1st period card + day-wise view)
   const [todaySlots, setTodaySlots] = useState<TimetableSlot[]>([])
@@ -2150,6 +2168,9 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           section={section}
           schoolId={schoolId}
           teacher={teacher}
+          prefillTitle={homeworkPrefill?.title}
+          prefillSubject={homeworkPrefill?.subject}
+          onPrefillConsumed={() => setHomeworkPrefill(null)}
         />
       )}
       {activeTab === 'Homework' && !teacher && (
@@ -2199,7 +2220,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           grade={grade}
           teacher={teacher}
           isClassTeacher={isClassTeacher}
-          onGoToHomework={() => setActiveTab('Homework')}
+          onGoToHomework={prefill => { setHomeworkPrefill(prefill ?? null); setActiveTab('Homework') }}
         />
       )}
 

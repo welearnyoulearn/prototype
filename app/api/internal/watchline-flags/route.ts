@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { isValidIngestSecret } from '@/lib/auth-constants'
 
 // GET /api/internal/watchline-flags
 // Returns the list of school IDs with api-monitoring enabled.
 // Called by middleware every 60 seconds to refresh its in-memory flag cache.
 // Protected by x-ingest-secret header — not public.
 export async function GET(req: NextRequest) {
-  const secret = req.headers.get('x-ingest-secret')
-  if (!secret || secret !== (process.env.INGEST_SECRET || 'watchline-internal')) {
+  // Rejects when INGEST_SECRET is unset in production — no guessable default to match,
+  // so the monitoring flags can't be read by anyone who knows the old constant.
+  if (!isValidIngestSecret(req.headers.get('x-ingest-secret'))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
   try {

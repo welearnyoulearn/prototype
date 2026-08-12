@@ -2,16 +2,36 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import AppLoader from '../components/AppLoader'
-import StudentDashboard from './components/StudentDashboard'
-import StudentTasks from './components/StudentTasks'
-import StudentDoubts from './components/StudentDoubts'
-import StudentProfile from './components/StudentProfile'
-import StudentMarks from './components/StudentMarks'
-import StudentTimetable from './components/StudentTimetable'
-import StudentSyllabus from './components/StudentSyllabus'
 import NotificationBell from '../components/NotificationBell'
-import DigitalLibrary from '../components/library/DigitalLibrary'
+import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
+import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
+
+// Always-loaded (landing tab, and small enough not to be worth its own chunk)
+import StudentDashboard from './components/StudentDashboard'
+import StudentProfile from './components/StudentProfile'
+
+// Lazy-loaded — only downloaded when first opened
+function ModuleSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      <div className="h-8 bg-gray-100 rounded-xl w-48" />
+      <div className="grid grid-cols-3 gap-4">
+        {[1,2,3].map(i => <div key={i} className="h-28 bg-gray-100 rounded-2xl" />)}
+      </div>
+      <div className="h-64 bg-gray-100 rounded-2xl" />
+    </div>
+  )
+}
+// Turbopack requires inline object literals for next/dynamic options
+const StudentTasks     = dynamic(() => import('./components/StudentTasks'),     { loading: () => <ModuleSkeleton /> })
+const StudentDoubts    = dynamic(() => import('./components/StudentDoubts'),    { loading: () => <ModuleSkeleton /> })
+const StudentMarks     = dynamic(() => import('./components/StudentMarks'),     { loading: () => <ModuleSkeleton /> })
+const StudentTimetable = dynamic(() => import('./components/StudentTimetable'), { loading: () => <ModuleSkeleton /> })
+const StudentSyllabus  = dynamic(() => import('./components/StudentSyllabus'),  { loading: () => <ModuleSkeleton /> })
+const DigitalLibrary    = dynamic(() => import('../components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
 
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
@@ -74,10 +94,13 @@ export default function StudentPortal() {
   const [loading,     setLoading]     = useState(true)
   const logoutInFlight = useRef(false)
 
+  const trackOpen = useFeatureTracking('student')
+
   function navigateTo(key: string) {
     setActiveNav(key)
     setVisitedNav(prev => new Set([...prev, key]))
     setSidebarOpen(false)
+    trackOpen(key)
   }
 
   useEffect(() => {
@@ -104,10 +127,18 @@ export default function StudentPortal() {
       .finally(() => setLoading(false))
   }, [router])
 
+  useUsageHeartbeat()
+
   async function handleLogout() {
     if (logoutInFlight.current) return
     logoutInFlight.current = true
-    await fetch('/api/student/auth/logout', { method: 'POST' }).catch(() => {})
+    const usageSessionId = getUsageSessionId()
+    await fetch('/api/student/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usageSessionId }),
+    }).catch(() => {})
+    clearUsageSessionId()
     router.push('/student/login')
   }
 
