@@ -196,7 +196,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
   const [masterSubjects, setMasterSubjects] = useState<MasterSubject[]>([])
   const [subscribing, setSubscribing] = useState(false)
   const [resyncing, setResyncing] = useState(false)
-  const [selectedMasterId, setSelectedMasterId] = useState<string>('')
+  const [selectedMasterIds, setSelectedMasterIds] = useState<string[]>([])
   const [filterCategory, setFilterCategory] = useState<'academic' | 'extra'>('academic')
   const [filterBoard, setFilterBoard] = useState('CBSE')
   const [filterGrade, setFilterGrade] = useState('10')
@@ -362,6 +362,13 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
     }
   }, [filterGrade, showSubscribeModal, classes])
 
+  // Master subject list is scoped to a single board+grade+category — clear
+  // stale selections when the filters change or the modal opens/closes, so a
+  // submit never mixes subjects picked under a previous grade/board.
+  useEffect(() => {
+    setSelectedMasterIds([])
+  }, [showSubscribeModal, filterCategory, filterBoard, filterGrade])
+
   useEffect(() => {
     if (showSubscribeModal) {
       loadMasterTemplates()
@@ -383,31 +390,52 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
   }, [activeSubject, schoolId])
 
   const handleSubscribe = async () => {
-    if (!selectedMasterId) return
+    if (selectedMasterIds.length === 0) return
     setSubscribing(true)
     setError('')
     setSuccess('')
+    const remaining = [...selectedMasterIds]
+    let lastSchoolSubjectId: number | undefined
     try {
-      const res = await fetch('/api/school/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          school_id: schoolId,
-          master_subject_id: parseInt(selectedMasterId),
-          academic_year: subscribeYear || selectedYear,
-          class_ids: selectedClassIds
+      while (remaining.length > 0) {
+        const masterId = remaining[0]
+        const res = await fetch('/api/school/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            school_id: schoolId,
+            master_subject_id: parseInt(masterId),
+            academic_year: subscribeYear || selectedYear,
+            class_ids: selectedClassIds
+          })
         })
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error)
+        lastSchoolSubjectId = data.school_subject_id
+        // Drop each subject from the pending selection as soon as it clones
+        // successfully, so a later failure only leaves the un-cloned ones
+        // selected — retrying won't re-submit (and error on) ones already done.
+        remaining.shift()
+        setSelectedMasterIds([...remaining])
+      }
 
-      setSuccess('Successfully subscribed and cloned curriculum!')
+      setSuccess(
+        selectedMasterIds.length === 1
+          ? 'Successfully subscribed and cloned curriculum!'
+          : `Successfully subscribed and cloned ${selectedMasterIds.length} subjects!`
+      )
       setShowSubscribeModal(false)
-      setSelectedMasterId('')
-      // Load and set active to new subject
-      await loadSchoolSubjects(data.school_subject_id, subscribeYear || selectedYear)
+      // Load and set active to last new subject
+      await loadSchoolSubjects(lastSchoolSubjectId, subscribeYear || selectedYear)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to subscribe to subject')
+      const done = selectedMasterIds.length - remaining.length
+      setError(
+        (err instanceof Error ? err.message : 'Failed to subscribe to subject') +
+          (done > 0 ? ` (${done} of ${selectedMasterIds.length} subjects cloned before this failure)` : '')
+      )
+      if (lastSchoolSubjectId !== undefined) {
+        await loadSchoolSubjects(lastSchoolSubjectId, subscribeYear || selectedYear)
+      }
     } finally {
       setSubscribing(false)
     }
@@ -1518,7 +1546,9 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
             </div>
 
             <div className="space-y-2 mb-6">
-              <label className={labelCls}>Select Available Template Subject *</label>
+              <label className={labelCls}>
+                Select Available Template Subject{selectedMasterIds.length > 0 ? ` (${selectedMasterIds.length} selected)` : ''} *
+              </label>
 
               {masterSubjects.length === 0 ? (
                 <p className="text-xs text-gray-400 italic text-center py-4 rounded-xl border" style={{ background: SURFACE, borderColor: BORDER }}>
@@ -1530,28 +1560,36 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                     const alreadySubscribed = subjects.some(
                       s => s.master_subject_id === sub.id || (s.subject_name.toLowerCase() === sub.subject_name.toLowerCase() && s.grade === sub.grade)
                     )
+                    const isSelected = selectedMasterIds.includes(String(sub.id))
+                    const toggleSelection = () => {
+                      if (alreadySubscribed) return
+                      setSelectedMasterIds(prev =>
+                        prev.includes(String(sub.id))
+                          ? prev.filter(id => id !== String(sub.id))
+                          : [...prev, String(sub.id)]
+                      )
+                    }
 
                     return (
                       <label
                         key={sub.id}
                         className="flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all"
                         style={{
-                          background: alreadySubscribed ? SURFACE : selectedMasterId === String(sub.id) ? '#E7F3F4' : 'white',
-                          borderColor: alreadySubscribed ? BORDER : selectedMasterId === String(sub.id) ? TEAL : BORDER,
-                          color: alreadySubscribed ? '#9ca3af' : selectedMasterId === String(sub.id) ? TEAL : '#374151',
+                          background: alreadySubscribed ? SURFACE : isSelected ? '#E7F3F4' : 'white',
+                          borderColor: alreadySubscribed ? BORDER : isSelected ? TEAL : BORDER,
+                          color: alreadySubscribed ? '#9ca3af' : isSelected ? TEAL : '#374151',
                           opacity: alreadySubscribed ? 0.6 : 1,
                           cursor: alreadySubscribed ? 'not-allowed' : 'pointer',
                         }}
                       >
                         <div className="flex items-center gap-3">
                           <input
-                            data-testid={`subscribe-master-${sub.id}-radio`}
-                            type="radio"
-                            name="masterSubject"
+                            data-testid={`subscribe-master-${sub.id}-checkbox`}
+                            type="checkbox"
                             value={sub.id}
                             disabled={alreadySubscribed}
-                            checked={selectedMasterId === String(sub.id)}
-                            onChange={() => setSelectedMasterId(String(sub.id))}
+                            checked={isSelected}
+                            onChange={toggleSelection}
                             className="mt-0.5"
                           />
                           <div>
@@ -1575,7 +1613,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
               <button
                 data-testid="subscribe-modal-cancel"
                 type="button"
-                onClick={() => setShowSubscribeModal(false)}
+                onClick={() => { setShowSubscribeModal(false); setSelectedMasterIds([]) }}
                 className="px-4 py-2 text-xs font-bold text-gray-500 hover:text-gray-700"
               >
                 Cancel
@@ -1584,11 +1622,15 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                 data-testid="subscribe-modal-submit"
                 type="button"
                 onClick={handleSubscribe}
-                disabled={subscribing || !selectedMasterId}
+                disabled={subscribing || selectedMasterIds.length === 0}
                 className="text-white text-xs font-semibold px-5 py-2.5 rounded-xl disabled:opacity-50 transition-all shadow-md"
                 style={{ background: TEAL }}
               >
-                {subscribing ? 'Cloning Syllabus...' : 'Subscribe & Clone'}
+                {subscribing
+                  ? 'Cloning Syllabus...'
+                  : selectedMasterIds.length > 1
+                  ? `Subscribe & Clone (${selectedMasterIds.length})`
+                  : 'Subscribe & Clone'}
               </button>
             </div>
           </div>
