@@ -4,14 +4,27 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import {
   BookOpen, Plus, Pencil, X, Upload, ChevronRight, FileText, Sparkles,
-  HelpCircle, CheckCircle2, Layers, ArrowLeft, Trash2, Check, FolderInput, Loader2,
+  HelpCircle, CheckCircle2, Layers, ArrowLeft, Trash2, Check, FolderInput, Loader2, Download,
 } from 'lucide-react'
 import { INK, TEAL, CREAM, GREEN, PURPLE, BORDER, SURFACE } from '@/app/components/ulearn/theme'
 import { BulkImportPanel } from '@/app/components/ulearn/BulkImportPanel'
 import { Toast } from '@/app/components/ulearn/primitives'
 import { useToast } from '@/app/components/ulearn/useToast'
 import { syllabusPrompt, SYLLABUS_EXAMPLE } from '@/lib/syllabus/chatgpt-prompt'
+import { EXTRACTION_FORMAT_GUIDE } from '@/lib/syllabus/extraction-format-guide'
 import { parseSyllabusBulk } from '@/lib/syllabus/bulk-import-schema'
+
+// Downloads the folder-import JSON format spec as a .txt file the curator can
+// paste into whatever AI tool they use to extract a syllabus from a PDF.
+function downloadFormatGuide() {
+  const blob = new Blob([EXTRACTION_FORMAT_GUIDE], { type: 'text/plain' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'wlyl-syllabus-extraction-format.txt'
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 type Subject = {
   id: number
@@ -1727,13 +1740,23 @@ export default function PlatformCurriculum() {
                   <Plus size={12} /> Add
                 </button>
               </div>
-              <button
-                onClick={() => folderInputRef.current?.click()}
-                className="w-full flex items-center justify-center gap-1.5 text-[11px] font-bold px-2 py-2 rounded-lg border hover:bg-gray-50 mb-4"
-                style={{ borderColor: BORDER, color: INK }}
-              >
-                <FolderInput size={13} /> Import folder…
-              </button>
+              <div className="flex items-center gap-2 mb-4">
+                <button
+                  onClick={() => folderInputRef.current?.click()}
+                  className="flex-1 flex items-center justify-center gap-1.5 text-[11px] font-bold px-2 py-2 rounded-lg border hover:bg-gray-50"
+                  style={{ borderColor: BORDER, color: INK }}
+                >
+                  <FolderInput size={13} /> Import folder…
+                </button>
+                <button
+                  onClick={downloadFormatGuide}
+                  title="Download the JSON format spec to paste into your AI extraction tool"
+                  className="flex items-center justify-center gap-1.5 text-[11px] font-bold px-2 py-2 rounded-lg border hover:bg-gray-50 shrink-0"
+                  style={{ borderColor: BORDER, color: INK }}
+                >
+                  <Download size={13} /> Format guide
+                </button>
+              </div>
               <input
                 ref={folderInputRef}
                 type="file"
