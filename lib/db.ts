@@ -2055,6 +2055,19 @@ async function runIncrementalMigrations() {
     ON CONFLICT (feature_key, tier) DO NOTHING
   `).catch(() => {})
 
+  // Expense Tracking nav item for school-admin — same self-heal/seed pattern
+  // as library above. Without this, 'expenses' exists in ALL_FEATURES but
+  // is absent from plan_features, and /api/platform/features treats any
+  // unconfigured feature as disabled — so the Expenses tab would silently
+  // never appear in the sidebar for any school until a platform admin
+  // manually flipped it on.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES
+      ('expenses', 'basic', true), ('expenses', 'standard', true), ('expenses', 'premium', true)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+
   // ── Academic year date-order safety ────────────────────────────────────────────
   // Nothing previously stopped start_date >= end_date on academic_years.
   await pool.query(`
