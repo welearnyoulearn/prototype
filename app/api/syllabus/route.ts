@@ -39,12 +39,17 @@ export async function GET(req: NextRequest) {
         ss.subject_name AS subject,
         sc.chapter_name AS chapter_name,
         sc.chapter_order AS chapter_order,
+        sc.semester AS semester,
+        sc.book_type AS book_type,
+        sc.audience AS audience,
+        sc.book_name AS book_name,
         st.id AS id,
         st.topic_name AS topic_name,
         st.topic_order AS topic_order,
         st.content_text AS content_text,
         st.content_pdf_url AS content_pdf_url,
         st.questions AS questions,
+        st.subtopics AS subtopics,
         COALESCE((
           SELECT json_agg(json_build_object('id', r.id, 'title', r.title, 'url', r.url, 'resource_type', r.resource_type))
           FROM school_resources r
@@ -83,6 +88,10 @@ export async function GET(req: NextRequest) {
       chapters: Record<string, {
         chapter_name: string
         chapter_order: number
+        semester: string | null
+        book_type: string | null
+        audience: string | null
+        book_name: string | null
         total: number
         covered: number
         topics: any[]
@@ -101,6 +110,10 @@ export async function GET(req: NextRequest) {
         subj.chapters[chName] = {
           chapter_name: chName,
           chapter_order: row.chapter_order,
+          semester: row.semester ?? null,
+          book_type: row.book_type ?? null,
+          audience: row.audience ?? null,
+          book_name: row.book_name ?? null,
           total: 0,
           covered: 0,
           topics: [],

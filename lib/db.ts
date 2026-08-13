@@ -1575,6 +1575,59 @@ const SYLLABUS_SCHEMA: string[] = [
     `ALTER TABLE school_topic_progress DROP COLUMN IF EXISTS hod_remark_at`,
     `ALTER TABLE school_subjects ADD COLUMN IF NOT EXISTS academic_year VARCHAR(20) DEFAULT '2025-26'`,
     `ALTER TABLE school_subjects DROP CONSTRAINT IF EXISTS school_subjects_school_id_grade_subject_name_key`,
+
+    // Subject-level textbook/handbook files, uploaded once per master subject
+    // (not per-chapter) and inherited by every school subscribed to it via
+    // school_subjects.master_subject_id. Students only ever see 'textbook'
+    // rows — 'handbook' is staff-only (school admins + the subject's teachers).
+    `CREATE TABLE IF NOT EXISTS master_subject_materials (
+      id SERIAL PRIMARY KEY,
+      subject_id INTEGER NOT NULL REFERENCES master_subjects(id) ON DELETE CASCADE,
+      material_type VARCHAR(20) NOT NULL CHECK (material_type IN ('textbook', 'handbook')),
+      title VARCHAR(200) NOT NULL,
+      file_url VARCHAR(512) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_master_subject_materials_subject ON master_subject_materials(subject_id)`,
+
+    // Optional Sem 1 / Sem 2 grouping for chapters — nullable because only some
+    // subjects use semesters. Bulk-import auto-detects whichever shape is
+    // pasted (flat chapter array vs. semester-grouped) and tags chapters
+    // accordingly; everything downstream just groups by this when present and
+    // falls back to a flat list when it's null, so nothing breaks for subjects
+    // that don't use semesters.
+    `ALTER TABLE master_chapters ADD COLUMN IF NOT EXISTS semester VARCHAR(50)`,
+    `ALTER TABLE school_chapters ADD COLUMN IF NOT EXISTS semester VARCHAR(50)`,
+
+    // Subtopics are a plain text list nested under a topic (no separate
+    // identity/table — matches how curators paste them: topic -> subtopics).
+    `ALTER TABLE master_topics ADD COLUMN IF NOT EXISTS subtopics JSONB DEFAULT '[]'::jsonb`,
+    `ALTER TABLE school_topics ADD COLUMN IF NOT EXISTS subtopics JSONB DEFAULT '[]'::jsonb`,
+
+    // Which book a chapter came from (Text Book / Hand Book / Work Book),
+    // independent of semester — a subject can have several books, each with
+    // its own chapter list. Defaults to 'textbook' so pre-existing chapters
+    // (imported before this column existed) keep rendering exactly as before.
+    `ALTER TABLE master_chapters ADD COLUMN IF NOT EXISTS book_type VARCHAR(20) NOT NULL DEFAULT 'textbook' CHECK (book_type IN ('textbook','handbook','workbook'))`,
+    `ALTER TABLE school_chapters ADD COLUMN IF NOT EXISTS book_type VARCHAR(20) NOT NULL DEFAULT 'textbook' CHECK (book_type IN ('textbook','handbook','workbook'))`,
+
+    // Who a book is meant for — independent of book_type (a Hand Book is
+    // usually a teacher's edition, but that's a convenience default, not a
+    // fixed rule; any book can be marked teacher/student/both). Purely a
+    // label everywhere it's shown — it doesn't gate visibility, every portal
+    // still sees every book. Defaults to 'student' so pre-existing chapters
+    // keep behaving exactly as before.
+    `ALTER TABLE master_chapters ADD COLUMN IF NOT EXISTS audience VARCHAR(20) NOT NULL DEFAULT 'student' CHECK (audience IN ('teacher','student','both'))`,
+    `ALTER TABLE school_chapters ADD COLUMN IF NOT EXISTS audience VARCHAR(20) NOT NULL DEFAULT 'student' CHECK (audience IN ('teacher','student','both'))`,
+
+    // A subject can have more than one book of the same book_type (e.g. two
+    // different Text Books) — book_type alone can't tell them apart, so this
+    // captures the book's own name/title when known. Nullable, no default:
+    // unlike book_type/audience there's no sensible value to invent, and a
+    // NULL book_name renders identically to today (generic "Text Book" tab)
+    // until a second same-type book actually shows up for that subject.
+    `ALTER TABLE master_chapters ADD COLUMN IF NOT EXISTS book_name VARCHAR(200)`,
+    `ALTER TABLE school_chapters ADD COLUMN IF NOT EXISTS book_name VARCHAR(200)`,
 ]
 
 async function runIncrementalMigrations() {
@@ -1989,6 +2042,16 @@ async function runIncrementalMigrations() {
     VALUES
       ('student-portal', 'basic', true), ('student-portal', 'standard', true), ('student-portal', 'premium', true),
       ('parent-portal',  'basic', true), ('parent-portal',  'standard', true), ('parent-portal',  'premium', true)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+
+  // WLYL Digital Library nav item for school-admin — same self-heal/seed
+  // pattern as student-portal/parent-portal above, enabled by default so
+  // existing schools see it without a platform-admin needing to flip it on.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES
+      ('library', 'basic', true), ('library', 'standard', true), ('library', 'premium', true)
     ON CONFLICT (feature_key, tier) DO NOTHING
   `).catch(() => {})
 

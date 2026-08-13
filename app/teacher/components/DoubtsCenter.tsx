@@ -25,8 +25,6 @@ type Doubt = {
   upvote_count: number
 }
 
-type DoubtPattern = { subject: string; count: number }
-
 type Message = {
   id: number
   sender_type: 'student' | 'teacher'
@@ -102,7 +100,6 @@ export default function DoubtsCenter({ teacher, schoolId }: Props) {
   const [sending, setSending] = useState(false)
   const [closing, setClosing] = useState(false)
   const [togglingFaq, setTogglingFaq] = useState(false)
-  const [doubtPatterns, setDoubtPatterns] = useState<DoubtPattern[]>([])
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
@@ -113,28 +110,8 @@ export default function DoubtsCenter({ teacher, schoolId }: Props) {
     setLoading(false)
   }, [schoolId, teacher.id])
 
-  // Fetch doubt patterns for the teacher's class
-  const fetchPatterns = useCallback(async () => {
-    const data = await fetch(`/api/doubts?school_id=${schoolId}&teacher_id=${teacher.id}`)
-      .then(r => r.json()).catch(() => [])
-    if (!Array.isArray(data)) return
-    const cutoff = Date.now() - 7 * 24 * 3600000
-    const counts: Record<string, Set<number>> = {}
-    data.forEach((d: Doubt) => {
-      if (new Date(d.created_at).getTime() < cutoff) return
-      if (!counts[d.subject]) counts[d.subject] = new Set()
-      counts[d.subject].add(d.id)
-    })
-    const patterns = Object.entries(counts)
-      .filter(([, ids]) => ids.size >= 3)
-      .map(([subject, ids]) => ({ subject, count: ids.size }))
-      .sort((a, b) => b.count - a.count)
-    setDoubtPatterns(patterns)
-  }, [schoolId, teacher.id])
-
   useEffect(() => {
     fetchDoubts()
-    fetchPatterns()
     // Fetch teacher's timetable subjects for permission check
     fetch(`/api/timetable?school_id=${schoolId}&teacher_id=${teacher.id}`)
       .then(r => r.json()).then(data => {
@@ -143,7 +120,7 @@ export default function DoubtsCenter({ teacher, schoolId }: Props) {
           setTimetableSubjects(subs)
         }
       }).catch(() => {})
-  }, [fetchDoubts, fetchPatterns, schoolId, teacher.id])
+  }, [fetchDoubts, schoolId, teacher.id])
 
   const fetchMessages = useCallback(async (doubtId: number) => {
     const data = await fetch(`/api/doubts/${doubtId}/messages?school_id=${schoolId}`)

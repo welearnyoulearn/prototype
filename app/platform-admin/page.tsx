@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
@@ -275,8 +275,10 @@ export default function PlatformAdmin() {
     router.push('/login')
   }
 
-  // Filter + sort
-  const filtered = schools.filter(s => {
+  // Filter + sort — memoized so typing in the search box (or any unrelated
+  // re-render) doesn't re-filter/re-sort the whole schools array every time;
+  // only recomputes when the inputs that actually affect the result change.
+  const filtered = useMemo(() => schools.filter(s => {
     const q = search.toLowerCase()
     const matchSearch = !search || (
       s.name.toLowerCase().includes(q) ||
@@ -285,9 +287,9 @@ export default function PlatformAdmin() {
     )
     const matchTier = filterTier === 'all' || (s.tier || 'none') === filterTier
     return matchSearch && matchTier
-  })
+  }), [schools, search, filterTier])
 
-  const sorted = [...filtered].sort((a, b) => {
+  const sorted = useMemo(() => [...filtered].sort((a, b) => {
     const dir = sort.dir === 'asc' ? 1 : -1
     switch (sort.col) {
       case 'name':   return dir * a.name.localeCompare(b.name)
@@ -304,7 +306,7 @@ export default function PlatformAdmin() {
       }
       default: return 0
     }
-  })
+  }), [filtered, sort])
 
   // Derived stats
   const noPlanCount    = stats?.subscriptions.none ?? 0
@@ -358,6 +360,10 @@ export default function PlatformAdmin() {
           <Link href="/platform-admin/curriculum"
             className="text-xs text-purple-600 hover:text-purple-800 hover:bg-purple-100 border border-purple-200 px-3 py-1.5 rounded-lg transition-colors font-semibold bg-purple-50">
             📚 Master Syllabus
+          </Link>
+          <Link href="/platform-admin/library"
+            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors font-medium">
+            📖 Digital Library
           </Link>
           <Link href="/platform-admin/features"
             className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors font-medium">

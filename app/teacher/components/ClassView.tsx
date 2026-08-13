@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Tasks from './Tasks'
 import ClassDoubts from './ClassDoubts'
 import ExamMarks from './ExamMarks'
@@ -432,9 +432,74 @@ function sylQuestionCount(q: SylTopic['questions']): number {
 type SylChapter = {
   chapter_name: string
   chapter_order: number
+  semester?: string | null
+  book_type?: string | null
+  audience?: string | null
+  book_name?: string | null
   total: number
   covered: number
   topics: SylTopic[]
+}
+
+const BOOK_TYPE_LABELS: Record<string, string> = { textbook: 'Text Book', handbook: 'Hand Book', workbook: 'Work Book' }
+const AUDIENCE_LABELS: Record<string, string> = { teacher: 'Teacher Edition', both: 'Teacher & Student' }
+
+/** Majority-audience badge for a book tab label — purely cosmetic, never hides anything. */
+function audienceBadge(groupChapters: SylChapter[]): string | null {
+  const counts: Record<string, number> = {}
+  for (const c of groupChapters) {
+    const a = c.audience || 'student'
+    counts[a] = (counts[a] || 0) + 1
+  }
+  const majority = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+  if (!majority || majority[0] === 'student') return null
+  return AUDIENCE_LABELS[majority[0]] || null
+}
+
+// A "book" a chapter belongs to is (book_type, book_name) — book_type alone
+// can't tell two different Text Books apart. When only one book exists for
+// a type, its tab keeps the generic label; once a second book shares that
+// type, each gets its own tab labeled with its actual name.
+type BookGroup = { key: string; label: string; chapters: SylChapter[] }
+
+function bookGroupKey(bookType: string | null | undefined, bookName: string | null | undefined): string {
+  return `${bookType || 'textbook'}::${bookName || ''}`
+}
+
+function computeBookGroups(chapters: SylChapter[]): BookGroup[] {
+  const byType = new Map<string, Map<string, SylChapter[]>>()
+  for (const c of chapters) {
+    const bt = c.book_type || 'textbook'
+    const bn = c.book_name || ''
+    if (!byType.has(bt)) byType.set(bt, new Map())
+    const byName = byType.get(bt)!
+    if (!byName.has(bn)) byName.set(bn, [])
+    byName.get(bn)!.push(c)
+  }
+  const groups: BookGroup[] = []
+  // Fixed order (not Map insertion order, which would depend on whatever
+  // order chapters happen to arrive in) so tabs appear the same way here as
+  // in the platform-admin curriculum page.
+  for (const bt of ['textbook', 'handbook', 'workbook']) {
+    const byName = byType.get(bt)
+    if (!byName) continue
+    const entries = Array.from(byName.entries())
+    if (entries.length === 1) {
+      const [bn, chs] = entries[0]
+      groups.push({ key: bookGroupKey(bt, bn), label: BOOK_TYPE_LABELS[bt] || bt, chapters: chs })
+    } else {
+      let unnamedCount = 0
+      for (const [bn, chs] of entries) {
+        if (!bn) {
+          unnamedCount += 1
+          groups.push({ key: bookGroupKey(bt, bn), label: `${BOOK_TYPE_LABELS[bt] || bt} ${unnamedCount}`, chapters: chs })
+        } else {
+          groups.push({ key: bookGroupKey(bt, bn), label: bn, chapters: chs })
+        }
+      }
+    }
+  }
+  return groups
 }
 type SylSubject = {
   subject: string
@@ -469,6 +534,7 @@ export function SyllabusTracking({
 }) {
   const [subjects, setSubjects] = useState<SylSubject[]>([])
   const [selectedSubject, setSelectedSubject] = useState<string>('')
+  const [activeBookKey, setActiveBookKey] = useState<string>('')
   const [expandedChapter, setExpandedChapter] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [markingId, setMarkingId] = useState<number | null>(null)
@@ -530,6 +596,42 @@ export function SyllabusTracking({
   useEffect(() => { loadSyllabus() }, [classId, schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentSubject = subjects.find(s => s.subject === selectedSubject)
+
+  // Books this subject actually has chapters for — only shown as a switcher
+  // when there's more than one.
+  const bookGroups = currentSubject ? computeBookGroups(currentSubject.chapters) : []
+  const effectiveBookKey = bookGroups.some(g => g.key === activeBookKey) ? activeBookKey : bookGroups[0]?.key ?? ''
+  const effectiveBookGroup = bookGroups.find(g => g.key === effectiveBookKey) ?? null
+  const chaptersForBook = currentSubject
+    ? (bookGroups.length > 1 && effectiveBookGroup ? effectiveBookGroup.chapters : currentSubject.chapters)
+    : []
+
+  // Group chapters by semester when the subject uses them — falls back to a
+  // single flat bucket (no header) for subjects that don't split by semester.
+  const semesterGroups: { semester: string | null; chapters: SylChapter[] }[] = currentSubject
+    ? (chaptersForBook.some(c => c.semester)
+      ? Object.values(
+          chaptersForBook.reduce((acc, ch) => {
+            const key = ch.semester || ' none'
+            if (!acc[key]) acc[key] = { semester: ch.semester || null, chapters: [] }
+            acc[key].chapters.push(ch)
+            return acc
+          }, {} as Record<string, { semester: string | null; chapters: SylChapter[] }>)
+        )
+      : [{ semester: null, chapters: chaptersForBook }])
+    : []
+
+  // Textbooks/handbooks uploaded once per subject on the platform side —
+  // teachers see both types (unlike students, who only ever get textbooks).
+  const [materials, setMaterials] = useState<{ id: number; material_type: 'textbook' | 'handbook'; title: string; file_url: string }[]>([])
+  useEffect(() => {
+    if (!selectedSubject) { setMaterials([]); return }
+    const params = new URLSearchParams({ school_id: String(schoolId), grade, subject_name: selectedSubject })
+    fetch(`/api/school/subjects/materials?${params}`)
+      .then(r => r.json())
+      .then(data => setMaterials(Array.isArray(data) ? data : []))
+      .catch(() => setMaterials([]))
+  }, [schoolId, grade, selectedSubject])
 
   async function addCustomTopic(chapter: SylChapter) {
     const name = newTopicName.trim()
@@ -695,7 +797,7 @@ export function SyllabusTracking({
             const active = selectedSubject === s.subject
             return (
               <button key={s.subject}
-                onClick={() => { setSelectedSubject(s.subject); setSuggestion(null); setSuggestError(false); setExpandedChapter(null) }}
+                onClick={() => { setSelectedSubject(s.subject); setActiveBookKey(''); setSuggestion(null); setSuggestError(false); setExpandedChapter(null) }}
                 data-testid={`syllabus-subject-${s.subject}`}
                 className="px-4 py-2 rounded-xl text-sm font-medium border transition-colors"
                 style={{ background: active ? GOLD : 'white', color: active ? 'white' : INK, borderColor: active ? GOLD : BORDER }}>
@@ -703,6 +805,25 @@ export function SyllabusTracking({
                 <span className="ml-2 text-xs" style={{ color: active ? 'white' : '#9ca3af', opacity: active ? 0.85 : 1 }}>
                   {s.completion_pct}%
                 </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Book tabs — only when this subject has more than one book */}
+      {bookGroups.length > 1 && (
+        <div className="flex gap-2 flex-wrap mb-5">
+          {bookGroups.map(g => {
+            const active = g.key === effectiveBookKey
+            const badge = audienceBadge(g.chapters)
+            return (
+              <button key={g.key}
+                onClick={() => { setActiveBookKey(g.key); setExpandedChapter(null) }}
+                data-testid={`syllabus-booktype-${g.key}`}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors"
+                style={{ background: active ? INK : 'white', color: active ? 'white' : INK, borderColor: active ? INK : BORDER }}>
+                {g.label}{badge ? ` · ${badge}` : ''}
               </button>
             )
           })}
@@ -726,6 +847,22 @@ export function SyllabusTracking({
           </div>
           <ProgressBar pct={currentSubject.completion_pct} color={GOLD} className="w-full" />
           <p className="text-xs text-gray-400 mt-1.5">{currentSubject.completion_pct}% complete · {currentSubject.chapters.length} chapters</p>
+        </div>
+      )}
+
+      {/* Textbooks & handbooks for this subject */}
+      {materials.length > 0 && (
+        <div className="bg-white rounded-2xl border px-5 py-4 mb-5" style={{ borderColor: BORDER }}>
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Textbooks & Handbooks</p>
+          <div className="flex flex-wrap gap-2">
+            {materials.map(m => (
+              <a key={m.id} href={m.file_url} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border hover:bg-gray-50" style={{ borderColor: BORDER, color: INK }}>
+                <BookOpen size={12} style={{ color: GOLD }} /> {m.title}
+                <span className="text-[9px] uppercase opacity-60">({m.material_type})</span>
+              </a>
+            ))}
+          </div>
         </div>
       )}
 
@@ -790,8 +927,17 @@ export function SyllabusTracking({
 
       {/* Chapter accordion — textbook index style */}
       {currentSubject && (
-        <div className="space-y-2">
-          {currentSubject.chapters.map((ch, chIdx) => {
+        <div className="space-y-4">
+          {semesterGroups.map(group => (
+            <div key={group.semester ?? '__none__'} className="space-y-2">
+              {group.semester && (
+                <h3 className="text-xs font-bold uppercase tracking-widest px-1" style={{ color: GOLD }}>{group.semester}</h3>
+              )}
+              {group.chapters.map(ch => {
+            // Position within the active book (continuous across its
+            // semesters, restarts at 1 per book) — not raw chapter_order,
+            // which is one counter shared across every book on the subject.
+            const chIdx = chaptersForBook.findIndex(c => c.chapter_name === ch.chapter_name)
             const isExpanded = expandedChapter === ch.chapter_name
             const pct = ch.total > 0 ? Math.round(100 * ch.covered / ch.total) : 0
 
@@ -809,7 +955,7 @@ export function SyllabusTracking({
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-400 font-medium">Ch {ch.chapter_order}</span>
+                      <span className="text-xs text-gray-400 font-medium">Ch {chIdx + 1}</span>
                       <span className="font-semibold text-sm truncate" style={{ color: INK }}>{ch.chapter_name}</span>
                       {pct === 100 && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0" style={{ background: '#E1F5EE', color: '#085041' }}>Done</span>
@@ -990,7 +1136,9 @@ export function SyllabusTracking({
                 )}
               </div>
             )
-          })}
+              })}
+            </div>
+          ))}
         </div>
       )}
 
@@ -1194,6 +1342,31 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
       .finally(() => setMonthlyLoading(false))
   }, [activeTab, attView, attMonth, classId, schoolId])
 
+  // Index monthlyData once per fetch instead of doing a linear .find()/.filter()
+  // over the whole month's records for every (student × day × session) grid
+  // cell — for a 40-student class over 30 days that was ~2,400 scans/render.
+  // (Declared before the `loading` early return below so hook order stays
+  // stable across renders.)
+  const monthlyByKey = useMemo(() => {
+    const map = new Map<string, AttendanceRecord>()
+    for (const r of monthlyData) {
+      const dateStr = r.date?.toString().slice(0, 10)
+      const sess = r.session || 'morning'
+      map.set(`${r.student_id}|${dateStr}|${sess}`, r)
+    }
+    return map
+  }, [monthlyData])
+
+  const monthlyByStudent = useMemo(() => {
+    const map = new Map<number, AttendanceRecord[]>()
+    for (const r of monthlyData) {
+      const list = map.get(r.student_id)
+      if (list) list.push(r)
+      else map.set(r.student_id, [r])
+    }
+    return map
+  }, [monthlyData])
+
   if (loading) {
     return <div className="flex items-center justify-center h-64"><p className="text-gray-400">Loading class data...</p></div>
   }
@@ -1231,18 +1404,14 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   // Get per-session status for monthly cell
   function getMonthSessionStatus(studentId: number, day: number, sess: string) {
     const dateStr = `${attMonth}-${String(day).padStart(2, '0')}`
-    const rec = monthlyData.find((r: AttendanceRecord) =>
-      r.student_id === studentId &&
-      r.date?.toString().startsWith(dateStr) &&
-      (r.session === sess || (!r.session && sess === 'morning'))
-    )
+    const rec = monthlyByKey.get(`${studentId}|${dateStr}|${sess}`)
     return rec?.status || null
   }
 
   // % = (morning_present + afternoon_present + 0.5*late) / total_sessions_taken * 100
   function getStudentMonthPct(studentId: number) {
-    const recs = monthlyData.filter(r => r.student_id === studentId)
-    if (recs.length === 0) return null
+    const recs = monthlyByStudent.get(studentId)
+    if (!recs || recs.length === 0) return null
     const score = recs.reduce((acc, r) => {
       if (r.status === 'present') return acc + 1
       if (r.status === 'late')    return acc + 0.5

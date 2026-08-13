@@ -1544,7 +1544,7 @@ function ClassDetail({
 
         {/* ── SYLLABUS ── */}
         {tab === 'syllabus' && (
-          <StudentSyllabus schoolId={schoolId} classId={cls.id} />
+          <StudentSyllabus schoolId={schoolId} classId={cls.id} grade={cls.grade} />
         )}
       </div>
     </div>

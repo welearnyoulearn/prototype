@@ -20,6 +20,7 @@ type Topic = {
   topic_name: string
   content_text?: string
   content_pdf_url?: string
+  subtopics?: string[]
   questions?: Question[] | string | null
   resources?: Resource[] | null
   status?: string
@@ -353,6 +354,16 @@ export default function TopicContentViewer({ topic, onClose, role }: Props) {
               <div className="prose max-w-none">
                 {renderContentText(topic.content_text || '')}
               </div>
+              {topic.subtopics && topic.subtopics.length > 0 && (
+                <div>
+                  <h4 className="font-bold text-slate-700 text-xs uppercase tracking-wide mb-2">Sub-topics</h4>
+                  <ul className="space-y-1">
+                    {topic.subtopics.map((st, si) => (
+                      <li key={si} className="text-sm text-slate-600">— {st}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
 

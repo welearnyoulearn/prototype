@@ -38,10 +38,75 @@ type Chapter = {
   master_chapter_id: number | null
   chapter_name: string
   chapter_order: number
+  semester?: string | null
+  book_type?: string | null
+  audience?: string | null
+  book_name?: string | null
   is_custom: boolean
   created_at: string
   topics?: Topic[]
   tasks?: Task[]
+}
+
+const BOOK_TYPE_LABELS: Record<string, string> = { textbook: 'Text Book', handbook: 'Hand Book', workbook: 'Work Book' }
+const AUDIENCE_LABELS: Record<string, string> = { teacher: 'Teacher Edition', both: 'Teacher & Student' }
+
+/** Majority-audience badge for a book tab label — purely cosmetic, never hides anything. */
+function audienceBadge(groupChapters: Chapter[]): string | null {
+  const counts: Record<string, number> = {}
+  for (const c of groupChapters) {
+    const a = c.audience || 'student'
+    counts[a] = (counts[a] || 0) + 1
+  }
+  const majority = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+  if (!majority || majority[0] === 'student') return null
+  return AUDIENCE_LABELS[majority[0]] || null
+}
+
+// A "book" a chapter belongs to is (book_type, book_name) — book_type alone
+// can't tell two different Text Books apart. When only one book exists for
+// a type, its tab keeps the generic label; once a second book shares that
+// type, each gets its own tab labeled with its actual name.
+type BookGroup = { key: string; label: string; chapters: Chapter[] }
+
+function bookGroupKey(bookType: string | null | undefined, bookName: string | null | undefined): string {
+  return `${bookType || 'textbook'}::${bookName || ''}`
+}
+
+function computeBookGroups(chapters: Chapter[]): BookGroup[] {
+  const byType = new Map<string, Map<string, Chapter[]>>()
+  for (const c of chapters) {
+    const bt = c.book_type || 'textbook'
+    const bn = c.book_name || ''
+    if (!byType.has(bt)) byType.set(bt, new Map())
+    const byName = byType.get(bt)!
+    if (!byName.has(bn)) byName.set(bn, [])
+    byName.get(bn)!.push(c)
+  }
+  const groups: BookGroup[] = []
+  // Fixed order (not Map insertion order, which would depend on whatever
+  // order chapters happen to arrive in) so tabs appear the same way here as
+  // in the platform-admin curriculum page.
+  for (const bt of ['textbook', 'handbook', 'workbook']) {
+    const byName = byType.get(bt)
+    if (!byName) continue
+    const entries = Array.from(byName.entries())
+    if (entries.length === 1) {
+      const [bn, chs] = entries[0]
+      groups.push({ key: bookGroupKey(bt, bn), label: BOOK_TYPE_LABELS[bt] || bt, chapters: chs })
+    } else {
+      let unnamedCount = 0
+      for (const [bn, chs] of entries) {
+        if (!bn) {
+          unnamedCount += 1
+          groups.push({ key: bookGroupKey(bt, bn), label: `${BOOK_TYPE_LABELS[bt] || bt} ${unnamedCount}`, chapters: chs })
+        } else {
+          groups.push({ key: bookGroupKey(bt, bn), label: bn, chapters: chs })
+        }
+      }
+    }
+  }
+  return groups
 }
 
 type Topic = {
@@ -52,6 +117,7 @@ type Topic = {
   topic_order: number
   content_text: string | null
   content_pdf_url: string | null
+  subtopics?: string[]
   is_custom: boolean
   created_at: string
   resources?: Resource[]
@@ -91,6 +157,13 @@ type MasterSubject = {
   subject_name: string
 }
 
+type Material = {
+  id: number
+  material_type: 'textbook' | 'handbook'
+  title: string
+  file_url: string
+}
+
 const inputCls =
   'w-full bg-white border rounded-xl px-3 py-2 text-sm text-[#0F2A3F] placeholder-gray-400 focus:outline-none focus:ring-2'
 const labelCls = 'block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide'
@@ -102,9 +175,11 @@ const EXTRA_BOARD = 'EXTRA'
 export default function CurriculumCustomizer({ schoolId }: Props) {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [activeSubject, setActiveSubject] = useState<Subject | null>(null)
+  const [activeBookKey, setActiveBookKey] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [materials, setMaterials] = useState<Material[]>([])
 
   // Academic Years state
   const [academicYears, setAcademicYears] = useState<{ id: number; label: string; is_current: boolean }[]>([])
@@ -292,6 +367,20 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       loadMasterTemplates()
     }
   }, [showSubscribeModal, filterCategory, filterBoard, filterGrade, loadMasterTemplates])
+
+  // Textbooks/handbooks uploaded once per subject on the platform side.
+  useEffect(() => {
+    if (!activeSubject) { setMaterials([]); return }
+    const params = new URLSearchParams({
+      school_id: String(schoolId),
+      grade: activeSubject.grade,
+      subject_name: activeSubject.subject_name,
+    })
+    fetch(`/api/school/subjects/materials?${params}`)
+      .then(r => r.json())
+      .then(data => setMaterials(Array.isArray(data) ? data : []))
+      .catch(() => setMaterials([]))
+  }, [activeSubject, schoolId])
 
   const handleSubscribe = async () => {
     if (!selectedMasterId) return
@@ -620,6 +709,29 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
     }
   }
 
+  // Books this subject actually has chapters for — only shown as a switcher
+  // when there's more than one.
+  const allChapters = (activeSubject?.chapters ?? []).slice().sort((a, b) => a.chapter_order - b.chapter_order)
+  const bookGroups = computeBookGroups(allChapters)
+  const effectiveBookKey = bookGroups.some(g => g.key === activeBookKey) ? activeBookKey : bookGroups[0]?.key ?? ''
+  const effectiveBookGroup = bookGroups.find(g => g.key === effectiveBookKey) ?? null
+  const sortedChapters = bookGroups.length > 1 && effectiveBookGroup ? effectiveBookGroup.chapters : allChapters
+
+  // Group chapters by semester when the subject uses them — falls back to a
+  // single flat bucket (no header) for subjects that don't split by semester,
+  // mirroring platform-admin's curriculum page.
+  const hasSemesters = sortedChapters.some(c => c.semester)
+  const semesterGroups: { semester: string | null; chapters: Chapter[] }[] = hasSemesters
+    ? Object.values(
+        sortedChapters.reduce((acc, ch) => {
+          const key = ch.semester || ' none'
+          if (!acc[key]) acc[key] = { semester: ch.semester || null, chapters: [] }
+          acc[key].chapters.push(ch)
+          return acc
+        }, {} as Record<string, { semester: string | null; chapters: Chapter[] }>)
+      )
+    : [{ semester: null, chapters: sortedChapters }]
+
   return (
     <div className="space-y-6">
       {/* Subject Header / Action Group */}
@@ -884,16 +996,58 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                   )}
                 </div>
 
+                {/* Textbooks & Handbooks — uploaded once per subject, platform-side */}
+                {materials.length > 0 && (
+                  <div className="bg-white border rounded-2xl p-5" style={{ borderColor: BORDER }}>
+                    <h5 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Textbooks & Handbooks</h5>
+                    <div className="space-y-2">
+                      {materials.map(m => (
+                        <div key={m.id} className="flex items-center gap-2 rounded-xl p-3 border" style={{ background: SURFACE, borderColor: BORDER }}>
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full uppercase shrink-0" style={m.material_type === 'textbook' ? { background: '#E6F1FB', color: '#0C447C' } : { background: '#FAEEDA', color: '#633806' }}>
+                            {m.material_type}
+                          </span>
+                          <a href={m.file_url} target="_blank" rel="noopener noreferrer" className="text-xs font-bold truncate hover:underline" style={{ color: INK }}>{m.title}</a>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Book tabs — only when this subject has more than one book */}
+                {bookGroups.length > 1 && (
+                  <div className="flex gap-2 flex-wrap">
+                    {bookGroups.map(g => {
+                      const active = g.key === effectiveBookKey
+                      const badge = audienceBadge(g.chapters)
+                      return (
+                        <button
+                          key={g.key}
+                          type="button"
+                          onClick={() => setActiveBookKey(g.key)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors"
+                          style={{ background: active ? INK : 'white', color: active ? 'white' : INK, borderColor: active ? INK : BORDER }}
+                        >
+                          {g.label}{badge ? ` · ${badge}` : ''}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+
                 {/* Chapter tree list */}
                 {(!activeSubject.chapters || activeSubject.chapters.length === 0) ? (
                   <div className="bg-white border rounded-2xl py-12 text-center text-gray-500 text-xs" style={{ borderColor: BORDER }}>
                     No chapters exist for this subject. Create a custom chapter to get started.
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    {activeSubject.chapters
-                      .sort((a, b) => a.chapter_order - b.chapter_order)
-                      .map((ch, chIdx) => {
+                  <div className="space-y-6">
+                    {semesterGroups.map(group => (
+                      <div key={group.semester ?? '__none__'} className="space-y-4">
+                        {group.semester && (
+                          <h3 className="text-xs font-bold uppercase tracking-widest" style={{ color: INK }}>{group.semester}</h3>
+                        )}
+                        {group.chapters.map(ch => {
+                        const chIdx = sortedChapters.findIndex(c => c.id === ch.id)
                         const isEditingCh = editingChapterId === ch.id
 
                         return (
@@ -946,7 +1100,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                                         </span>
                                       )}
                                     </div>
-                                    <p className="text-[10px] text-gray-400 mt-0.5">Chapter Order: {ch.chapter_order}</p>
+                                    <p className="text-[10px] text-gray-400 mt-0.5">Chapter Order: {chIdx + 1}</p>
                                   </div>
                                 )}
                               </div>
@@ -1020,7 +1174,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                                           <div className="flex items-start justify-between gap-2">
                                             <div>
                                               <p className="text-xs font-bold" style={{ color: INK }}>
-                                                {topic.topic_order}. {topic.topic_name}
+                                                {topic.topic_order + 1}. {topic.topic_name}
                                               </p>
                                               {topic.is_custom ? (
                                                 <span className="text-[8px] font-bold px-1 rounded" style={{ background: '#E1F5EE', color: '#085041' }}>
@@ -1067,6 +1221,14 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                                               <FileText size={10} />
                                               <a data-testid={`topic-${topic.id}-pdf-link`} href={topic.content_pdf_url} target="_blank" rel="noreferrer" className="underline">{topic.content_pdf_url}</a>
                                             </p>
+                                          )}
+
+                                          {topic.subtopics && topic.subtopics.length > 0 && (
+                                            <ul className="mt-0.5 space-y-0.5">
+                                              {topic.subtopics.map((st, si) => (
+                                                <li key={si} className="text-[10px] text-gray-500">— {st}</li>
+                                              ))}
+                                            </ul>
                                           )}
 
                                           {/* Resources list inside topic */}
@@ -1219,7 +1381,9 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                             </div>
                           </div>
                         )
-                      })}
+                        })}
+                      </div>
+                    ))}
                   </div>
                 )}
               </>

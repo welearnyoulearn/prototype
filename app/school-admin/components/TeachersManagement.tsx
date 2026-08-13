@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 
 type Props = { schoolId: number; refreshKey?: number }
@@ -397,29 +397,32 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     setTeacherAnalytics(null)
   }
 
-  const byType = teachers.filter(t => (t.staff_type || 'teaching') === tab)
-  const byStatus = statusFilter === 'all'
+  const byType = useMemo(() => teachers.filter(t => (t.staff_type || 'teaching') === tab), [teachers, tab])
+  const byStatus = useMemo(() => statusFilter === 'all'
     ? byType.filter(t => t.status !== 'removed')
     : statusFilter === 'removed'
     ? byType.filter(t => t.status === 'removed')
-    : byType.filter(t => t.status === statusFilter)
-  const departments = ['all', ...Array.from(new Set(byStatus.map(t => t.department).filter(Boolean)))]
+    : byType.filter(t => t.status === statusFilter), [byType, statusFilter])
+  const departments = useMemo(() => ['all', ...Array.from(new Set(byStatus.map(t => t.department).filter(Boolean)))], [byStatus])
 
-  const filtered = byStatus.filter(t => {
+  const filtered = useMemo(() => byStatus.filter(t => {
     const matchesDept = deptFilter === 'all' || t.department === deptFilter
     const matchesSearch = !search || t.name.toLowerCase().includes(search.toLowerCase()) ||
       (t.employee_id || '').toLowerCase().includes(search.toLowerCase())
     return matchesDept && matchesSearch
-  })
+  }), [byStatus, deptFilter, search])
 
-  const grouped: Record<string, Teacher[]> = {}
-  if (tab === 'teaching') {
-    filtered.forEach(t => {
-      const key = t.department || 'General'
-      if (!grouped[key]) grouped[key] = []
-      grouped[key].push(t)
-    })
-  }
+  const grouped: Record<string, Teacher[]> = useMemo(() => {
+    const g: Record<string, Teacher[]> = {}
+    if (tab === 'teaching') {
+      filtered.forEach(t => {
+        const key = t.department || 'General'
+        if (!g[key]) g[key] = []
+        g[key].push(t)
+      })
+    }
+    return g
+  }, [filtered, tab])
 
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300'
 

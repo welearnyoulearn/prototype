@@ -51,10 +51,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     for (const masterChap of missingChapters) {
       const schoolChapRes = await client.query(
-        `INSERT INTO school_chapters (school_subject_id, master_chapter_id, chapter_name, chapter_order, is_custom)
-         VALUES ($1, $2, $3, $4, FALSE)
+        `INSERT INTO school_chapters (school_subject_id, master_chapter_id, chapter_name, chapter_order, is_custom, semester, book_type, audience, book_name)
+         VALUES ($1, $2, $3, $4, FALSE, $5, $6, $7, $8)
          RETURNING id`,
-        [schoolSubjectId, masterChap.id, masterChap.chapter_name, masterChap.chapter_order],
+        [schoolSubjectId, masterChap.id, masterChap.chapter_name, masterChap.chapter_order, masterChap.semester, masterChap.book_type, masterChap.audience, masterChap.book_name],
       )
       const schoolChapterId = schoolChapRes.rows[0].id
       chaptersAdded += 1
@@ -68,10 +68,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
       for (const masterTopic of masterTopicsRes.rows) {
         const schoolTopicRes = await client.query(
-          `INSERT INTO school_topics (school_chapter_id, master_topic_id, topic_name, topic_order, content_text, content_pdf_url, questions, is_custom)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE)
+          `INSERT INTO school_topics (school_chapter_id, master_topic_id, topic_name, topic_order, content_text, content_pdf_url, questions, subtopics, is_custom)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, FALSE)
            RETURNING id`,
-          [schoolChapterId, masterTopic.id, masterTopic.topic_name, masterTopic.topic_order, masterTopic.content_text, masterTopic.content_pdf_url, JSON.stringify(masterTopic.questions || [])],
+          [schoolChapterId, masterTopic.id, masterTopic.topic_name, masterTopic.topic_order, masterTopic.content_text, masterTopic.content_pdf_url, JSON.stringify(masterTopic.questions || []), JSON.stringify(masterTopic.subtopics || [])],
         )
         const schoolTopicId = schoolTopicRes.rows[0].id
         topicIdMap[masterTopic.id] = schoolTopicId
