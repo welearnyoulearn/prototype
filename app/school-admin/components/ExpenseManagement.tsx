@@ -19,6 +19,12 @@ type Expense = {
 
 type Attachment = { id: number; file_url: string; file_name: string | null }
 
+type AuditRow = {
+  id: number; expense_id: number; action: string; changed_by_name: string | null
+  changes: Record<string, unknown> | null; created_at: string
+  expense_title: string | null; voucher_number: string | null
+}
+
 type Metrics = {
   total_spent: number; entry_count: number; previous_period_total: number
   trend_pct: number | null
@@ -36,6 +42,33 @@ const PAYMENT_MODES = [
   { value: 'cheque', label: 'Cheque' },
 ]
 
+const PAYMENT_MODE_COLORS: Record<string, string> = {
+  cash: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  bank_transfer: 'bg-sky-50 text-sky-700 border-sky-200',
+  upi: 'bg-violet-50 text-violet-700 border-violet-200',
+  cheque: 'bg-amber-50 text-amber-700 border-amber-200',
+}
+
+const CATEGORY_COLORS = [
+  { bar: 'bg-indigo-500', dot: 'bg-indigo-500' },
+  { bar: 'bg-emerald-500', dot: 'bg-emerald-500' },
+  { bar: 'bg-amber-500', dot: 'bg-amber-500' },
+  { bar: 'bg-rose-500', dot: 'bg-rose-500' },
+  { bar: 'bg-sky-500', dot: 'bg-sky-500' },
+  { bar: 'bg-violet-500', dot: 'bg-violet-500' },
+  { bar: 'bg-teal-500', dot: 'bg-teal-500' },
+  { bar: 'bg-orange-500', dot: 'bg-orange-500' },
+]
+
+type Toast = { id: number; message: string; type: 'success' | 'error' }
+
+// Stable per-category color, keyed by id rather than list position — a category's
+// color would otherwise shift between the Dashboard (sorted by spend) and the
+// Categories tab (sorted by name).
+function categoryColor(id: number) {
+  return CATEGORY_COLORS[id % CATEGORY_COLORS.length]
+}
+
 const fmt = (n: number) => `₹${Number(n).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 
@@ -43,10 +76,20 @@ function todayStr() { return new Date().toISOString().slice(0, 10) }
 function monthStartStr() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01` }
 
 export default function ExpenseManagement({ schoolId }: Props) {
-  const [tab, setTab] = useState<'dashboard' | 'expenses' | 'categories'>('dashboard')
+  const [tab, setTab] = useState<'dashboard' | 'expenses' | 'categories' | 'audit'>('dashboard')
   const [adminName, setAdminName] = useState('')
   const [adminId, setAdminId] = useState<number | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
+  const [showForm, setShowForm] = useState(false)
+  const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0)
+  const [listRefreshKey, setListRefreshKey] = useState(0)
+  const [toasts, setToasts] = useState<Toast[]>([])
+
+  const notify = useCallback((message: string, type: 'success' | 'error' = 'success') => {
+    const id = Date.now() + Math.random()
+    setToasts(t => [...t, { id, message, type }])
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3200)
+  }, [])
 
   useEffect(() => {
     fetch('/api/auth/me').then(r => r.ok ? r.json() : null).then(d => {
@@ -64,43 +107,84 @@ export default function ExpenseManagement({ schoolId }: Props) {
     return () => clearTimeout(t)
   }, [loadCategories])
 
+  function handleLogged() {
+    setShowForm(false)
+    loadCategories()
+    setDashboardRefreshKey(k => k + 1)
+    setListRefreshKey(k => k + 1)
+    notify('Expense logged successfully')
+  }
+
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
           <h2 className="text-lg font-bold text-gray-800">Expenses</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Track what the school spends — salaries, utilities, maintenance, supplies, and more</p>
+          <button
+            onClick={() => setShowForm(true)}
+            data-testid="expenses-quick-add-btn"
+            className="bg-gradient-to-br from-indigo-600 to-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all duration-150 flex items-center gap-1.5"
+          >
+            <span className="text-base leading-none">+</span> Add Expense
+          </button>
         </div>
         <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-          {(['dashboard', 'expenses', 'categories'] as const).map(t => (
+          {(['dashboard', 'expenses', 'categories', 'audit'] as const).map(t => (
             <button
               key={t}
               data-testid={`expenses-tab-${t}`}
               onClick={() => setTab(t)}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors capitalize ${
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-150 capitalize ${
                 tab === t ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
               }`}
             >
-              {t === 'dashboard' ? 'Dashboard' : t === 'expenses' ? 'All Expenses' : 'Categories'}
+              {t === 'dashboard' ? 'Dashboard' : t === 'expenses' ? 'All Expenses' : t === 'categories' ? 'Categories' : 'Audit Log'}
             </button>
           ))}
         </div>
       </div>
 
-      {tab === 'dashboard' && <DashboardView schoolId={schoolId} />}
+      {tab === 'dashboard' && <DashboardView schoolId={schoolId} refreshKey={dashboardRefreshKey} />}
       {tab === 'expenses' && (
-        <ExpensesListView schoolId={schoolId} categories={categories} adminName={adminName} adminId={adminId} onCategoriesChanged={loadCategories} />
+        <ExpensesListView
+          schoolId={schoolId} categories={categories} adminName={adminName} adminId={adminId}
+          onCategoriesChanged={loadCategories} notify={notify} refreshKey={listRefreshKey}
+        />
       )}
       {tab === 'categories' && (
-        <CategoriesView schoolId={schoolId} categories={categories} onChanged={loadCategories} />
+        <CategoriesView schoolId={schoolId} categories={categories} onChanged={loadCategories} notify={notify} />
       )}
+      {tab === 'audit' && <AuditLogView schoolId={schoolId} />}
+
+      {showForm && (
+        <ExpenseFormModal
+          schoolId={schoolId} categories={categories} adminName={adminName} adminId={adminId}
+          editing={null}
+          onClose={() => setShowForm(false)}
+          onSaved={handleLogged}
+        />
+      )}
+
+      <div className="fixed bottom-5 right-5 z-[60] flex flex-col gap-2 items-end">
+        {toasts.map(t => (
+          <div
+            key={t.id}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium text-white animate-[fadeIn_0.15s_ease-out] ${
+              t.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'
+            }`}
+          >
+            <span className="text-base leading-none">{t.type === 'success' ? '✓' : '⚠'}</span>
+            {t.message}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
 // ── Dashboard ──────────────────────────────────────────────────────────────────
 
-function DashboardView({ schoolId }: { schoolId: number }) {
+function DashboardView({ schoolId, refreshKey }: { schoolId: number; refreshKey: number }) {
   const [range, setRange] = useState<'month' | 'week' | 'custom'>('month')
   const [customFrom, setCustomFrom] = useState(monthStartStr())
   const [customTo, setCustomTo] = useState(todayStr())
@@ -123,7 +207,7 @@ function DashboardView({ schoolId }: { schoolId: number }) {
   useEffect(() => {
     const t = setTimeout(() => { load() }, 0)
     return () => clearTimeout(t)
-  }, [load])
+  }, [load, refreshKey])
 
   return (
     <div className="space-y-4">
@@ -150,22 +234,36 @@ function DashboardView({ schoolId }: { schoolId: number }) {
       {!loading && metrics && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-              <p className="text-xs text-gray-400 mb-1">Total Spent</p>
+            <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center text-sm">💰</span>
+                <p className="text-xs text-gray-400">Total Spent</p>
+              </div>
               <p className="text-2xl font-bold text-gray-800">{fmt(metrics.total_spent)}</p>
             </div>
-            <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-              <p className="text-xs text-gray-400 mb-1">Entries</p>
+            <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-7 h-7 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center text-sm">🧾</span>
+                <p className="text-xs text-gray-400">Entries</p>
+              </div>
               <p className="text-2xl font-bold text-gray-800">{metrics.entry_count}</p>
             </div>
-            <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-              <p className="text-xs text-gray-400 mb-1">Top Category</p>
+            <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center text-sm">🏷️</span>
+                <p className="text-xs text-gray-400">Top Category</p>
+              </div>
               <p className="text-lg font-bold text-gray-800 truncate">{metrics.top_category?.name || '—'}</p>
               {metrics.top_category && <p className="text-xs text-gray-400">{fmt(metrics.top_category.total)}</p>}
             </div>
-            <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
-              <p className="text-xs text-gray-400 mb-1">vs. Previous Period</p>
-              <p className={`text-2xl font-bold ${metrics.trend_pct == null ? 'text-gray-400' : metrics.trend_pct > 0 ? 'text-red-500' : 'text-green-600'}`}>
+            <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
+              <div className="flex items-center gap-2 mb-1">
+                <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-sm ${metrics.trend_pct == null ? 'bg-gray-50 text-gray-400' : metrics.trend_pct > 0 ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-600'}`}>
+                  {metrics.trend_pct == null ? '—' : metrics.trend_pct > 0 ? '↑' : '↓'}
+                </span>
+                <p className="text-xs text-gray-400">vs. Previous Period</p>
+              </div>
+              <p className={`text-2xl font-bold ${metrics.trend_pct == null ? 'text-gray-400' : metrics.trend_pct > 0 ? 'text-red-500' : 'text-emerald-600'}`}>
                 {metrics.trend_pct == null ? '—' : `${metrics.trend_pct > 0 ? '+' : ''}${metrics.trend_pct}%`}
               </p>
             </div>
@@ -181,11 +279,15 @@ function DashboardView({ schoolId }: { schoolId: number }) {
               <div className="divide-y divide-gray-50">
                 {metrics.by_category.map(c => {
                   const pct = metrics.total_spent > 0 ? Math.round((c.total / metrics.total_spent) * 100) : 0
+                  const color = categoryColor(c.category_id)
                   return (
                     <div key={c.category_id} className="flex items-center gap-4 px-5 py-3">
-                      <span className="w-40 text-sm text-gray-700 font-medium truncate">{c.category_name}</span>
+                      <span className="flex items-center gap-2 w-40 min-w-0">
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${color.dot}`} />
+                        <span className="text-sm text-gray-700 font-medium truncate">{c.category_name}</span>
+                      </span>
                       <div className="flex-1 bg-gray-100 rounded-full h-1.5 overflow-hidden">
-                        <div className="bg-indigo-500 h-full rounded-full" style={{ width: `${pct}%` }} />
+                        <div className={`${color.bar} h-full rounded-full transition-all duration-500`} style={{ width: `${pct}%` }} />
                       </div>
                       <span className="w-24 text-right text-xs text-gray-500">{fmt(c.total)}</span>
                       <span className="w-10 text-right text-xs text-gray-400">{pct}%</span>
@@ -224,9 +326,9 @@ function DashboardView({ schoolId }: { schoolId: number }) {
 
 // ── All Expenses (list + filters + pagination) ─────────────────────────────────
 
-function ExpensesListView({ schoolId, categories, adminName, adminId, onCategoriesChanged }: {
+function ExpensesListView({ schoolId, categories, adminName, adminId, onCategoriesChanged, notify, refreshKey }: {
   schoolId: number; categories: Category[]; adminName: string; adminId: number | null
-  onCategoriesChanged: () => void
+  onCategoriesChanged: () => void; notify: (message: string, type?: 'success' | 'error') => void; refreshKey: number
 }) {
   const [filterMode, setFilterMode] = useState<'all' | 'day' | 'range' | 'month'>('all')
   const [filterDate, setFilterDate] = useState(todayStr())
@@ -260,7 +362,7 @@ function ExpensesListView({ schoolId, categories, adminName, adminId, onCategori
   useEffect(() => {
     const t = setTimeout(() => { load() }, 0)
     return () => clearTimeout(t)
-  }, [load])
+  }, [load, refreshKey])
   useEffect(() => {
     const t = setTimeout(() => { setPage(1) }, 0)
     return () => clearTimeout(t)
@@ -268,8 +370,8 @@ function ExpensesListView({ schoolId, categories, adminName, adminId, onCategori
 
   async function handleDelete(id: number) {
     if (!confirm('Remove this expense? It can be reviewed later in the audit log but will no longer count toward totals.')) return
-    await fetch(`/api/expenses/${id}?changed_by_name=${encodeURIComponent(adminName)}`, { method: 'DELETE' })
-    load()
+    const r = await fetch(`/api/expenses/${id}?changed_by_name=${encodeURIComponent(adminName)}`, { method: 'DELETE' })
+    if (r.ok) { notify('Expense removed'); load() } else { notify('Failed to remove expense', 'error') }
   }
 
   return (
@@ -309,10 +411,6 @@ function ExpensesListView({ schoolId, categories, adminName, adminId, onCategori
             className="text-xs border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50" data-testid="expenses-export-btn">
             ⬇ Export CSV
           </a>
-          <button onClick={() => { setEditing(null); setShowForm(true) }}
-            className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg text-sm font-semibold hover:bg-indigo-700" data-testid="expenses-add-btn">
-            + Log Expense
-          </button>
         </div>
       </div>
 
@@ -331,6 +429,7 @@ function ExpensesListView({ schoolId, categories, adminName, adminId, onCategori
                   <th className="text-left px-4 py-2 font-semibold">Title</th>
                   <th className="text-left px-4 py-2 font-semibold">Category</th>
                   <th className="text-left px-4 py-2 font-semibold">Payee</th>
+                  <th className="text-left px-4 py-2 font-semibold">Mode</th>
                   <th className="text-right px-4 py-2 font-semibold">Amount</th>
                   <th className="text-center px-4 py-2 font-semibold">Bills</th>
                   <th className="text-right px-4 py-2 font-semibold">Action</th>
@@ -338,12 +437,17 @@ function ExpensesListView({ schoolId, categories, adminName, adminId, onCategori
               </thead>
               <tbody>
                 {data.expenses.map(e => (
-                  <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer" onClick={() => setDetailId(e.id)} data-testid={`expenses-row-${e.id}`}>
+                  <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => setDetailId(e.id)} data-testid={`expenses-row-${e.id}`}>
                     <td className="px-4 py-2.5 font-mono text-xs text-indigo-600">{e.voucher_number}</td>
                     <td className="px-4 py-2.5 text-gray-600">{fmtDate(e.expense_date)}</td>
                     <td className="px-4 py-2.5 text-gray-800 font-medium">{e.title}</td>
                     <td className="px-4 py-2.5 text-gray-500">{e.category_name}</td>
                     <td className="px-4 py-2.5 text-gray-500">{e.payee_name || '—'}</td>
+                    <td className="px-4 py-2.5">
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium border capitalize ${PAYMENT_MODE_COLORS[e.payment_mode] || 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                        {e.payment_mode.replace('_', ' ')}
+                      </span>
+                    </td>
                     <td className="px-4 py-2.5 text-right font-bold text-gray-800">{fmt(e.amount)}</td>
                     <td className="px-4 py-2.5 text-center text-gray-400">{e.attachment_count > 0 ? `📎 ${e.attachment_count}` : '—'}</td>
                     <td className="px-4 py-2.5 text-right" onClick={ev => ev.stopPropagation()}>
@@ -374,7 +478,7 @@ function ExpensesListView({ schoolId, categories, adminName, adminId, onCategori
           schoolId={schoolId} categories={categories} adminName={adminName} adminId={adminId}
           editing={editing}
           onClose={() => setShowForm(false)}
-          onSaved={() => { setShowForm(false); load(); onCategoriesChanged() }}
+          onSaved={() => { setShowForm(false); load(); onCategoriesChanged(); notify(editing ? 'Expense updated' : 'Expense logged successfully') }}
         />
       )}
       {detailId != null && (
@@ -471,6 +575,13 @@ function ExpenseFormModal({ schoolId, categories, adminName, adminId, editing, o
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
+  // Categories can still be loading (async fetch on mount) when this modal is
+  // opened immediately after page load, leaving categoryId stuck at '' with
+  // no options rendered — sync it once the list actually arrives.
+  useEffect(() => {
+    if (!editing && !categoryId && categories.length > 0) setCategoryId(String(categories[0].id))
+  }, [editing, categoryId, categories])
+
   async function uploadFile(file: File, expenseId: number) {
     const signRes = await fetch('/api/upload/sign', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -529,80 +640,88 @@ function ExpenseFormModal({ schoolId, categories, adminName, adminId, editing, o
     }
   }
 
+  const inputBase = "mt-1 w-full border rounded-lg px-3 py-2 text-sm transition-colors focus:outline-none focus:ring-2"
+
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h3 className="text-base font-bold text-gray-800">{editing ? 'Edit Expense' : 'Log an Expense'}</h3>
+        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-indigo-50 via-white to-white rounded-t-2xl">
+          <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
+            <span className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm">💸</span>
+            {editing ? 'Edit Expense' : 'Add Expense'}
+          </h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
         </div>
         <div className="p-6 space-y-4">
           {error && <div className="bg-red-50 border border-red-200 text-red-600 text-sm px-3 py-2 rounded-lg">{error}</div>}
 
           <div>
-            <label className="text-xs font-medium text-gray-600">Title *</label>
+            <label className="text-xs font-medium text-gray-600">📝 Title *</label>
             <input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Petrol, March Electricity Bill"
-              className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" data-testid="expense-form-title" />
+              className={`${inputBase} border-gray-200 focus:border-indigo-400 focus:ring-indigo-100`} data-testid="expense-form-title" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-gray-600">Category *</label>
+              <label className="text-xs font-medium text-gray-600">🏷️ Category *</label>
               <select value={categoryId} onChange={e => setCategoryId(e.target.value)}
-                className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" data-testid="expense-form-category">
-                {categories.filter(c => c.is_active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                className={`${inputBase} border-gray-200 focus:border-amber-400 focus:ring-amber-100`} data-testid="expense-form-category">
+                {categories
+                  .filter(c => c.is_active || (editing && c.id === editing.category_id))
+                  .map(c => <option key={c.id} value={c.id}>{c.name}{!c.is_active ? ' (inactive)' : ''}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600">Amount (₹) *</label>
+              <label className="text-xs font-medium text-gray-600">💰 Amount (₹) *</label>
               <input type="number" min="0" value={amount} onChange={e => setAmount(e.target.value)}
-                className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" data-testid="expense-form-amount" />
+                className={`${inputBase} border-gray-200 focus:border-emerald-400 focus:ring-emerald-100`} data-testid="expense-form-amount" />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-gray-600">Payee</label>
+              <label className="text-xs font-medium text-gray-600">🧑 Payee</label>
               <input value={payee} onChange={e => setPayee(e.target.value)} placeholder="Who was paid"
-                className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" data-testid="expense-form-payee" />
+                className={`${inputBase} border-gray-200 focus:border-sky-400 focus:ring-sky-100`} data-testid="expense-form-payee" />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600">Date</label>
+              <label className="text-xs font-medium text-gray-600">📅 Date</label>
               <input type="date" value={date} onChange={e => setDate(e.target.value)}
-                className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" data-testid="expense-form-date" />
+                className={`${inputBase} border-gray-200 focus:border-violet-400 focus:ring-violet-100`} data-testid="expense-form-date" />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-gray-600">Payment Mode</label>
+              <label className="text-xs font-medium text-gray-600">💳 Payment Mode</label>
               <select value={mode} onChange={e => setMode(e.target.value)}
-                className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" data-testid="expense-form-mode">
+                className={`${inputBase} border-gray-200 focus:border-rose-400 focus:ring-rose-100`} data-testid="expense-form-mode">
                 {PAYMENT_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600">Reference / Cheque No.</label>
+              <label className="text-xs font-medium text-gray-600">🔖 Reference / Cheque No.</label>
               <input value={ref} onChange={e => setRef(e.target.value)}
-                className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" data-testid="expense-form-ref" />
+                className={`${inputBase} border-gray-200 focus:border-teal-400 focus:ring-teal-100`} data-testid="expense-form-ref" />
             </div>
           </div>
 
           <div>
-            <label className="text-xs font-medium text-gray-600">Notes</label>
+            <label className="text-xs font-medium text-gray-600">🗒️ Notes</label>
             <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
-              className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" data-testid="expense-form-notes" />
+              className={`${inputBase} border-gray-200 focus:border-indigo-400 focus:ring-indigo-100`} data-testid="expense-form-notes" />
           </div>
 
           <div>
-            <label className="text-xs font-medium text-gray-600">Attach Bills (optional, multiple allowed)</label>
+            <label className="text-xs font-medium text-gray-600">📎 Attach Bills (optional, multiple allowed)</label>
             <FileDropzone files={files} onChange={setFiles} />
           </div>
 
           <div className="flex gap-2 pt-2">
-            <button onClick={handleSubmit} disabled={saving}
-              className="flex-1 bg-indigo-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50" data-testid="expense-form-submit">
-              {saving ? 'Saving…' : editing ? 'Save Changes' : 'Log Expense'}
+            <button onClick={handleSubmit} disabled={saving || categories.length === 0}
+              title={categories.length === 0 ? 'Loading categories…' : undefined}
+              className="flex-1 bg-gradient-to-br from-indigo-600 to-indigo-700 text-white py-2.5 rounded-lg text-sm font-semibold shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all duration-150 disabled:opacity-50 disabled:hover:translate-y-0" data-testid="expense-form-submit">
+              {saving ? 'Saving…' : categories.length === 0 ? 'Loading…' : editing ? 'Save Changes' : 'Add Expense'}
             </button>
             <button onClick={onClose} className="px-4 py-2.5 text-sm text-gray-500">Cancel</button>
           </div>
@@ -703,7 +822,7 @@ ${expense.notes ? `<div class="val" style="margin-top:8px"><span class="lbl">Not
 
 // ── Categories management ───────────────────────────────────────────────────────
 
-function CategoriesView({ schoolId, categories, onChanged }: { schoolId: number; categories: Category[]; onChanged: () => void }) {
+function CategoriesView({ schoolId, categories, onChanged, notify }: { schoolId: number; categories: Category[]; onChanged: () => void; notify: (message: string, type?: 'success' | 'error') => void }) {
   const [showAdd, setShowAdd] = useState(false)
   const [newName, setNewName] = useState('')
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -718,17 +837,27 @@ function CategoriesView({ schoolId, categories, onChanged }: { schoolId: number;
       body: JSON.stringify({ school_id: schoolId, name: newName.trim() }),
     })
     const d = await r.json()
-    if (!r.ok) { setError(d.error || 'Failed to add category'); return }
-    setNewName(''); setShowAdd(false); onChanged()
+    if (!r.ok) { setError(d.error || 'Failed to add category'); notify(d.error || 'Failed to add category', 'error'); return }
+    setNewName(''); setShowAdd(false); onChanged(); notify('Category added')
   }
 
   async function saveRename(id: number) {
     if (!editName.trim()) return
-    await fetch(`/api/expenses/categories?id=${id}`, {
+    const r = await fetch(`/api/expenses/categories?id=${id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ school_id: schoolId, name: editName.trim() }),
     })
     setEditingId(null); onChanged()
+    notify(r.ok ? 'Category renamed' : 'Failed to rename category', r.ok ? 'success' : 'error')
+  }
+
+  async function toggleActive(cat: Category) {
+    const r = await fetch(`/api/expenses/categories?id=${cat.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ school_id: schoolId, is_active: !cat.is_active }),
+    })
+    onChanged()
+    notify(r.ok ? (cat.is_active ? 'Category deactivated' : 'Category reactivated') : 'Failed to update category', r.ok ? 'success' : 'error')
   }
 
   async function deleteCategory(cat: Category) {
@@ -736,8 +865,8 @@ function CategoriesView({ schoolId, categories, onChanged }: { schoolId: number;
     if (!confirm(`Delete "${cat.name}"? This can't be undone.`)) return
     const r = await fetch(`/api/expenses/categories?id=${cat.id}&school_id=${schoolId}`, { method: 'DELETE' })
     const d = await r.json()
-    if (!r.ok) { setError(d.error || 'Failed to delete category'); return }
-    setError(''); onChanged()
+    if (!r.ok) { setError(d.error || 'Failed to delete category'); notify(d.error || 'Failed to delete category', 'error'); return }
+    setError(''); onChanged(); notify('Category deleted')
   }
 
   return (
@@ -759,7 +888,7 @@ function CategoriesView({ schoolId, categories, onChanged }: { schoolId: number;
 
       <div className="bg-gray-50 rounded-xl p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
         {categories.map(cat => (
-          <div key={cat.id} className="bg-white rounded-xl border p-4 shadow-sm">
+          <div key={cat.id} className={`bg-white rounded-xl border p-4 shadow-sm hover:shadow-md transition-shadow ${!cat.is_active ? 'opacity-60' : ''}`}>
             <div className="flex items-start justify-between">
               {editingId === cat.id ? (
                 <div className="flex-1 flex gap-2">
@@ -769,9 +898,15 @@ function CategoriesView({ schoolId, categories, onChanged }: { schoolId: number;
                 </div>
               ) : (
                 <>
-                  <div>
-                    <p className="font-semibold text-gray-800">{cat.name}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{cat.entry_count} {cat.entry_count === 1 ? 'entry' : 'entries'} · {fmt(cat.total_spent)}</p>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${categoryColor(cat.id).dot}`} />
+                    <div className="min-w-0">
+                      <p className="font-semibold text-gray-800 truncate flex items-center gap-1.5">
+                        {cat.name}
+                        {!cat.is_active && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">Inactive</span>}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">{cat.entry_count} {cat.entry_count === 1 ? 'entry' : 'entries'} · {fmt(cat.total_spent)}</p>
+                    </div>
                   </div>
                   {!cat.is_system && (
                     <div className="flex gap-1.5 flex-shrink-0">
@@ -782,14 +917,138 @@ function CategoriesView({ schoolId, categories, onChanged }: { schoolId: number;
               )}
             </div>
             {editingId !== cat.id && !cat.is_system && (
-              <button onClick={() => deleteCategory(cat)} disabled={cat.entry_count > 0}
-                title={cat.entry_count > 0 ? `Can't delete — ${cat.entry_count} expense${cat.entry_count === 1 ? '' : 's'} logged under this category` : undefined}
-                className="mt-3 text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
-                Delete
-              </button>
+              <div className="mt-3 flex gap-1.5">
+                <button onClick={() => toggleActive(cat)}
+                  className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
+                  {cat.is_active ? 'Deactivate' : 'Reactivate'}
+                </button>
+                <button onClick={() => deleteCategory(cat)} disabled={cat.entry_count > 0}
+                  title={cat.entry_count > 0 ? `Can't delete — ${cat.entry_count} expense${cat.entry_count === 1 ? '' : 's'} logged under this category. Deactivate it instead.` : undefined}
+                  className="text-xs px-2.5 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white">
+                  Delete
+                </button>
+              </div>
             )}
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Audit Log ────────────────────────────────────────────────────────────────
+
+const AUDIT_ACTION_STYLE: Record<string, string> = {
+  created: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  edited: 'bg-amber-50 text-amber-700 border-amber-200',
+  deleted: 'bg-red-50 text-red-700 border-red-200',
+}
+
+function formatFieldValue(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '—'
+  return String(v)
+}
+
+function AuditLogView({ schoolId }: { schoolId: number }) {
+  const [data, setData] = useState<{ rows: AuditRow[]; total: number; total_pages: number } | null>(null)
+  const [page, setPage] = useState(1)
+  const pageSize = 25
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
+    try {
+      const r = await fetch(`/api/expenses/audit-log?school_id=${schoolId}&page=${page}&page_size=${pageSize}`)
+      if (r.ok) setData(await r.json())
+      else setError('Could not load audit log — try refreshing')
+    } catch { setError('Network error — audit log could not be loaded') }
+    setLoading(false)
+  }, [schoolId, page])
+
+  useEffect(() => {
+    const t = setTimeout(() => { load() }, 0)
+    return () => clearTimeout(t)
+  }, [load])
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <p className="text-sm font-semibold text-gray-700">Audit Log — Every Expense Action</p>
+          <p className="text-xs text-gray-400">Permanent record of every expense logged, edited, or removed. Cannot be deleted.</p>
+        </div>
+        <button onClick={load} className="text-xs border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50" data-testid="expenses-audit-refresh">
+          ↻ Refresh
+        </button>
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+        {loading ? (
+          <div className="text-center py-12 text-gray-400 text-sm">Loading…</div>
+        ) : error ? (
+          <div className="text-center py-12 text-red-500 text-sm">{error}</div>
+        ) : !data || data.rows.length === 0 ? (
+          <div className="text-center py-12 text-gray-400 text-sm">No expense actions recorded yet.</div>
+        ) : (
+          <>
+            <div className="overflow-x-auto max-h-[560px]">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-gray-50">
+                  <tr className="text-xs text-gray-500 border-b border-gray-100">
+                    <th className="text-left px-4 py-2 font-semibold whitespace-nowrap">Date / Time</th>
+                    <th className="text-left px-4 py-2 font-semibold">Who</th>
+                    <th className="text-left px-4 py-2 font-semibold">Action</th>
+                    <th className="text-left px-4 py-2 font-semibold">Expense</th>
+                    <th className="text-left px-4 py-2 font-semibold">Detail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map(a => (
+                    <tr key={a.id} className="border-b border-gray-50 hover:bg-gray-50" data-testid={`expenses-audit-row-${a.id}`}>
+                      <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">
+                        {new Date(a.created_at).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                      <td className="px-4 py-2.5 text-gray-700">{a.changed_by_name || '—'}</td>
+                      <td className="px-4 py-2.5">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium border capitalize ${AUDIT_ACTION_STYLE[a.action] || 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                          {a.action}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-gray-800">
+                        <span className="font-medium">{a.expense_title || `#${a.expense_id}`}</span>
+                        {a.voucher_number && <span className="block text-xs font-mono text-indigo-500">{a.voucher_number}</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-gray-500">
+                        {!a.changes ? '—' : a.action === 'edited' ? (
+                          <div className="space-y-0.5">
+                            {Object.entries(a.changes).map(([field, diff]) => {
+                              const d = diff as { from: unknown; to: unknown }
+                              return (
+                                <div key={field}><span className="font-medium text-gray-600 capitalize">{field.replace('_', ' ')}:</span> {formatFieldValue(d.from)} → {formatFieldValue(d.to)}</div>
+                              )
+                            })}
+                          </div>
+                        ) : (
+                          Object.entries(a.changes).map(([k, v]) => `${k}: ${formatFieldValue(v)}`).join(', ')
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between px-4 py-3 border-t border-gray-50">
+              <p className="text-xs text-gray-400">{data.total} total · Page {page} of {Math.max(1, data.total_pages)}</p>
+              <div className="flex gap-1.5">
+                <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}
+                  className="text-xs border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg disabled:opacity-40" data-testid="expenses-audit-page-prev">Prev</button>
+                <button disabled={page >= data.total_pages} onClick={() => setPage(p => p + 1)}
+                  className="text-xs border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg disabled:opacity-40" data-testid="expenses-audit-page-next">Next</button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
