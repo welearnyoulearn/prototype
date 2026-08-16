@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 
 type LeaderboardEntry = {
   rank: number
@@ -58,20 +58,22 @@ export default function StudentLeaderboard({ schoolId }: { schoolId: number }) {
     }
   }
 
-  const filtered = entries.filter(e =>
+  const filtered = useMemo(() => entries.filter(e =>
     !search || e.name.toLowerCase().includes(search.toLowerCase()) ||
     `${e.grade}-${e.section}`.toLowerCase().includes(search.toLowerCase())
-  )
+  ), [entries, search])
 
   // Summary stats
-  const totalWithPoints = entries.filter(e => e.total_points > 0).length
-  const topPoints = entries[0]?.total_points ?? 0
-  const avgPoints = entries.length > 0
-    ? Math.round(entries.reduce((s, e) => s + e.total_points, 0) / entries.length)
-    : 0
+  const { totalWithPoints, topPoints, avgPoints } = useMemo(() => ({
+    totalWithPoints: entries.filter(e => e.total_points > 0).length,
+    topPoints: entries[0]?.total_points ?? 0,
+    avgPoints: entries.length > 0
+      ? Math.round(entries.reduce((s, e) => s + e.total_points, 0) / entries.length)
+      : 0,
+  }), [entries])
 
   // Top 3 podium
-  const top3 = entries.slice(0, 3)
+  const top3 = useMemo(() => entries.slice(0, 3), [entries])
 
   return (
     <div className="space-y-5">

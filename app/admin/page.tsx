@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import AuthShell, { THEMES, AuthError, AuthInput, AuthButton, PasswordField } from '@/app/components/AuthShell'
+import { setUsageSessionId } from '@/lib/usageSession'
 
 export default function AdminLoginPage() {
   const router = useRouter()
@@ -30,6 +31,8 @@ export default function AdminLoginPage() {
         setError('This login is for platform administrators only')
         return
       }
+
+      setUsageSessionId(data.usageSessionId)
 
       router.push('/platform-admin')
     } catch {

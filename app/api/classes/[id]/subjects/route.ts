@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { matchTeacher } from '@/lib/matchTeacher'
 import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
+import { resolveAcademicYear } from '@/lib/academicYear'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -51,6 +52,31 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       )
       if (!cls) return NextResponse.json({ error: 'Class not found' }, { status: 404 })
 
+      // If this grade has subscribed syllabus subjects, class_subjects.subject_name
+      // must be byte-identical to school_subjects.subject_name — that string is
+      // the join key /api/syllabus and the teacher class-subjects gate use, and a
+      // free-typed variant (e.g. "Mathematics" vs the master catalog's "Maths")
+      // would silently break both with no error. Normalise to the subscribed
+      // spelling here rather than trusting the caller's casing.
+      let normalisedSubjectName = subject_name.trim()
+      const academicYear = await resolveAcademicYear(cls.school_id)
+      const subscribedRes = await pool.query(
+        'SELECT subject_name FROM school_subjects WHERE school_id = $1 AND grade = $2 AND academic_year = $3',
+        [cls.school_id, cls.grade, academicYear]
+      )
+      if (subscribedRes.rows.length > 0) {
+        const match = subscribedRes.rows.find(
+          (r) => r.subject_name.toLowerCase() === normalisedSubjectName.toLowerCase()
+        )
+        if (!match) {
+          const options = subscribedRes.rows.map((r) => r.subject_name).join(', ')
+          return NextResponse.json({
+            error: `"${subject_name.trim()}" isn't a subscribed subject for Grade ${cls.grade}. Use one of: ${options}`,
+          }, { status: 400 })
+        }
+        normalisedSubjectName = match.subject_name
+      }
+
       let resolvedTeacherId: number | null = teacher_id ? Number(teacher_id) : null
 
       // Auto-assign teacher via smart matching if none explicitly provided
@@ -67,7 +93,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           const allowed = t.teaches_grades.split(',').map((g: string) => g.trim().toUpperCase())
           return allowed.includes(cls.grade.toUpperCase())
         })
-        resolvedTeacherId = matchTeacher(subject_name.trim(), eligible.length > 0 ? eligible : staff)
+        resolvedTeacherId = matchTeacher(normalisedSubjectName, eligible.length > 0 ? eligible : staff)
       }
 
       // Insert or update subject assignment
@@ -77,7 +103,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
          ON CONFLICT (class_id, subject_name) DO UPDATE
            SET teacher_id = $3, periods_per_week = $4
          RETURNING *`,
-        [id, subject_name.trim(), resolvedTeacherId, ppw]
+        [id, normalisedSubjectName, resolvedTeacherId, ppw]
       )
 
       // If timetable already exists for this class, propagate teacher assignment (conflict-safe)
@@ -98,7 +124,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
                  AND other.teacher_id    = $1
                  AND other.is_break = FALSE
              )`,
-          [resolvedTeacherId, id, subject_name.trim()]
+          [resolvedTeacherId, id, normalisedSubjectName]
         )
       }
 
@@ -131,7 +157,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (!subject_id) return NextResponse.json({ error: 'subject_id required' }, { status: 400 })
 
       const { rows: [sub] } = await pool.query(
-        `SELECT cs.subject_name, c.school_id FROM class_subjects cs
+        `SELECT cs.subject_name, c.school_id, c.grade FROM class_subjects cs
          JOIN classes c ON c.id = cs.class_id WHERE cs.id = $1 AND cs.class_id = $2`,
         [subject_id, id]
       )
@@ -140,8 +166,29 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const updates: string[] = []
       const values: (string | number | null)[] = []
 
-      const newName = subject_name?.trim() || null
+      let newName = subject_name?.trim() || null
       if (newName && newName !== sub.subject_name) {
+        // Same rule as adding a subject: if this grade has subscribed
+        // syllabus subjects, the name must match one exactly (case-insensitive,
+        // normalised to the subscribed spelling) — a rename can't drift the
+        // class_subjects/school_subjects join key out of sync.
+        const academicYear = await resolveAcademicYear(sub.school_id)
+        const subscribedRes = await pool.query(
+          'SELECT subject_name FROM school_subjects WHERE school_id = $1 AND grade = $2 AND academic_year = $3',
+          [sub.school_id, sub.grade, academicYear]
+        )
+        if (subscribedRes.rows.length > 0) {
+          const match = subscribedRes.rows.find(
+            (r) => r.subject_name.toLowerCase() === newName!.toLowerCase()
+          )
+          if (!match) {
+            const options = subscribedRes.rows.map((r) => r.subject_name).join(', ')
+            return NextResponse.json({
+              error: `"${newName}" isn't a subscribed subject for Grade ${sub.grade}. Use one of: ${options}`,
+            }, { status: 400 })
+          }
+          newName = match.subject_name
+        }
         updates.push(`subject_name = $${values.length + 1}`); values.push(newName)
       }
       if (teacher_id !== undefined) {

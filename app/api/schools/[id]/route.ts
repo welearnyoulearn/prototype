@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requireFeeAccess, requirePlatformAdmin } from '@/lib/auth'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
+    if (!await requireFeeAccess(id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
       const result = await pool.query(`
         SELECT
@@ -35,6 +37,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
+    if (!await requireFeeAccess(id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
       const body = await req.json()
       const { name, type, city, country, status, phone, email, address, logo_url, logo_align, grading_scheme, board, upi_id, restore, receipt_header_blocks } = body
@@ -106,6 +109,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 // Soft delete — preserves all data, sets deleted_at timestamp
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     const { id } = await params
     try {
       const result = await pool.query(

@@ -1,10 +1,17 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Tasks from './Tasks'
 import ClassDoubts from './ClassDoubts'
 import ExamMarks from './ExamMarks'
 import { SCHEDULE } from '@/lib/schedule'
+import { BookOpen, ChevronDown, Check, Loader2, Sparkles, X, Eye, CalendarClock } from 'lucide-react'
+import TopicContentViewer from '@/app/components/TopicContentViewer'
+import { INK, GOLD, GREEN, BORDER, SURFACE } from '@/app/components/ulearn/theme'
+import { StatusPill, QuizPill, ProgressBar, Toast } from '@/app/components/ulearn/primitives'
+import { useToast } from '@/app/components/ulearn/useToast'
+import { useFeature } from '@/lib/features-context'
+import StudentDetail from './StudentDetail'
 
 type Subject = {
   id: number
@@ -17,12 +24,13 @@ type Subject = {
 type Student = {
   id: number
   name: string
-  email: string
+  email: string | null
   grade: string
   section: string
   roll_number: string
-  parent_name: string
-  parent_phone: string
+  parent_name: string | null
+  parent_phone: string | null
+  parent_email: string | null
   status: string
 }
 
@@ -90,7 +98,7 @@ type ClassSubstitute = {
   time_to: string | null
 }
 
-type TeacherObj = {
+export type TeacherObj = {
   id: number
   name: string
   subject: string
@@ -113,8 +121,8 @@ type Props = {
   openExamId?: number
 }
 
-const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Attendance', 'Timetable', 'Marks & Results', 'Homework', 'Doubts']
-const SUBJECT_TEACHER_TABS = ['My Overview', 'Marks & Results', 'Homework', 'Doubts', 'Timetable']
+const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Attendance', 'Timetable', 'Marks & Results', 'Homework', 'Doubts', 'Syllabus']
+const SUBJECT_TEACHER_TABS = ['My Overview', 'Students', 'Marks & Results', 'Homework', 'Doubts', 'Timetable', 'Syllabus']
 
 // API returns: { id, exam_name, exam_type, exam_date, status, subject_name, subject_status, max_marks, ... }
 type MyExamRow = {
@@ -389,6 +397,8 @@ function getDaysInMonth(year: number, month: number) {
 }
 
 // ─── Syllabus Tracking ────────────────────────────────────────────────────────
+type SylQuestion = { q: string; options: string[]; answer: number; source?: string }
+type SylResource = { id: number; title: string; url: string; resource_type: string }
 type SylTopic = {
   id: number
   topic_name: string
@@ -398,13 +408,98 @@ type SylTopic = {
   status: string
   covered_date: string | null
   covered_by_name: string | null
+  target_date?: string | null
+  delay_reason?: string | null
+  content_text?: string
+  content_pdf_url?: string
+  questions?: SylQuestion[] | string | null
+  resources?: SylResource[] | null
+}
+
+// `questions` may arrive as a JSON array or a raw string depending on the DB
+// driver's json handling; TopicContentViewer parses the same way — mirrored
+// here purely for the QuizPill count (no new data, just a real existing field).
+function sylQuestionCount(q: SylTopic['questions']): number {
+  if (!q) return 0
+  if (Array.isArray(q)) return q.length
+  try {
+    const parsed = JSON.parse(q)
+    return Array.isArray(parsed) ? parsed.length : 0
+  } catch {
+    return 0
+  }
 }
 type SylChapter = {
   chapter_name: string
   chapter_order: number
+  semester?: string | null
+  book_type?: string | null
+  audience?: string | null
+  book_name?: string | null
   total: number
   covered: number
   topics: SylTopic[]
+}
+
+const BOOK_TYPE_LABELS: Record<string, string> = { textbook: 'Text Book', handbook: 'Hand Book', workbook: 'Work Book' }
+const AUDIENCE_LABELS: Record<string, string> = { teacher: 'Teacher Edition', both: 'Teacher & Student' }
+
+/** Majority-audience badge for a book tab label — purely cosmetic, never hides anything. */
+function audienceBadge(groupChapters: SylChapter[]): string | null {
+  const counts: Record<string, number> = {}
+  for (const c of groupChapters) {
+    const a = c.audience || 'student'
+    counts[a] = (counts[a] || 0) + 1
+  }
+  const majority = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
+  if (!majority || majority[0] === 'student') return null
+  return AUDIENCE_LABELS[majority[0]] || null
+}
+
+// A "book" a chapter belongs to is (book_type, book_name) — book_type alone
+// can't tell two different Text Books apart. When only one book exists for
+// a type, its tab keeps the generic label; once a second book shares that
+// type, each gets its own tab labeled with its actual name.
+type BookGroup = { key: string; label: string; chapters: SylChapter[] }
+
+function bookGroupKey(bookType: string | null | undefined, bookName: string | null | undefined): string {
+  return `${bookType || 'textbook'}::${bookName || ''}`
+}
+
+function computeBookGroups(chapters: SylChapter[]): BookGroup[] {
+  const byType = new Map<string, Map<string, SylChapter[]>>()
+  for (const c of chapters) {
+    const bt = c.book_type || 'textbook'
+    const bn = c.book_name || ''
+    if (!byType.has(bt)) byType.set(bt, new Map())
+    const byName = byType.get(bt)!
+    if (!byName.has(bn)) byName.set(bn, [])
+    byName.get(bn)!.push(c)
+  }
+  const groups: BookGroup[] = []
+  // Fixed order (not Map insertion order, which would depend on whatever
+  // order chapters happen to arrive in) so tabs appear the same way here as
+  // in the platform-admin curriculum page.
+  for (const bt of ['textbook', 'handbook', 'workbook']) {
+    const byName = byType.get(bt)
+    if (!byName) continue
+    const entries = Array.from(byName.entries())
+    if (entries.length === 1) {
+      const [bn, chs] = entries[0]
+      groups.push({ key: bookGroupKey(bt, bn), label: BOOK_TYPE_LABELS[bt] || bt, chapters: chs })
+    } else {
+      let unnamedCount = 0
+      for (const [bn, chs] of entries) {
+        if (!bn) {
+          unnamedCount += 1
+          groups.push({ key: bookGroupKey(bt, bn), label: `${BOOK_TYPE_LABELS[bt] || bt} ${unnamedCount}`, chapters: chs })
+        } else {
+          groups.push({ key: bookGroupKey(bt, bn), label: bn, chapters: chs })
+        }
+      }
+    }
+  }
+  return groups
 }
 type SylSubject = {
   subject: string
@@ -422,18 +517,24 @@ type HomeworkSuggestion = {
   topicId: number
 }
 
-function SyllabusTracking({
-  classId, schoolId, grade, teacher, isClassTeacher, onGoToHomework,
+export function SyllabusTracking({
+  classId, schoolId, grade, teacher, isClassTeacher, allowedSubjects, onGoToHomework,
 }: {
   classId: number
   schoolId: number
   grade: string
   teacher: TeacherObj | undefined
   isClassTeacher: boolean
-  onGoToHomework: () => void
+  // Subject names this teacher is assigned to for this class via
+  // Class Management's class_subjects table. Class teachers see every
+  // subject for their own class regardless (kept — a common real-school
+  // expectation); everyone else is gated strictly to their assignments.
+  allowedSubjects?: string[]
+  onGoToHomework: (prefill?: { title: string; subject: string }) => void
 }) {
   const [subjects, setSubjects] = useState<SylSubject[]>([])
   const [selectedSubject, setSelectedSubject] = useState<string>('')
+  const [activeBookKey, setActiveBookKey] = useState<string>('')
   const [expandedChapter, setExpandedChapter] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [markingId, setMarkingId] = useState<number | null>(null)
@@ -442,7 +543,25 @@ function SyllabusTracking({
   const [suggestError, setSuggestError] = useState(false)
   const [assigning, setAssigning] = useState(false)
   const [assignedMsg, setAssignedMsg] = useState('')
+  const [activeTopic, setActiveTopic] = useState<SylTopic | null>(null)
   const suggestionRef = useRef<HTMLDivElement>(null)
+  const { toast, flash } = useToast()
+
+  // Add-custom-topic form — one open at a time, keyed by chapter name so a
+  // teacher can add topics to a chapter before or after marking others taught,
+  // same as school-admin's per-chapter "+ Custom Topic" in the Syllabus
+  // Customizer. Uses POST /api/syllabus, which finds-or-creates the chapter
+  // by name, so it works even for a chapter that has zero topics yet.
+  const [addTopicChapter, setAddTopicChapter] = useState<string | null>(null)
+  const [newTopicName, setNewTopicName] = useState('')
+  const [addingTopic, setAddingTopic] = useState(false)
+
+  // Inline target-date/delay-reason editor — one topic at a time, matching
+  // the add-custom-topic pattern above (keyed by topic id instead of chapter).
+  const [scheduleTopicId, setScheduleTopicId] = useState<number | null>(null)
+  const [scheduleDate, setScheduleDate] = useState('')
+  const [scheduleReason, setScheduleReason] = useState('')
+  const [savingSchedule, setSavingSchedule] = useState(false)
 
   // Scroll suggestion banner into view whenever it appears
   useEffect(() => {
@@ -457,9 +576,14 @@ function SyllabusTracking({
       const subjectParam = selectedSubject ? `&subject=${encodeURIComponent(selectedSubject)}` : ''
       const res = await fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}${subjectParam}`)
       const data = await res.json()
-      const list: SylSubject[] = Array.isArray(data.subjects) ? data.subjects : []
+      const fetched: SylSubject[] = Array.isArray(data.subjects) ? data.subjects : []
+      // Class teachers see every subject for their own class; everyone else
+      // is gated to exactly what Class Management assigned them.
+      const list = (!isClassTeacher && allowedSubjects)
+        ? fetched.filter(s => allowedSubjects.includes(s.subject))
+        : fetched
       setSubjects(list)
-      // Auto-select: subject teacher gets their own subject, class teacher gets first
+      // Auto-select: first (and usually only) subject this teacher is allowed to see
       if (!selectedSubject && list.length > 0) {
         const own = teacher && !isClassTeacher ? list.find(s => s.subject === teacher.subject) : null
         setSelectedSubject(own ? own.subject : list[0].subject)
@@ -467,12 +591,109 @@ function SyllabusTracking({
     } finally {
       setLoading(false)
     }
-  }, [classId, schoolId, selectedSubject, teacher, isClassTeacher])
+  }, [classId, schoolId, selectedSubject, teacher, isClassTeacher, allowedSubjects])
 
   useEffect(() => { loadSyllabus() }, [classId, schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentSubject = subjects.find(s => s.subject === selectedSubject)
 
+  // Books this subject actually has chapters for — only shown as a switcher
+  // when there's more than one.
+  const bookGroups = currentSubject ? computeBookGroups(currentSubject.chapters) : []
+  const effectiveBookKey = bookGroups.some(g => g.key === activeBookKey) ? activeBookKey : bookGroups[0]?.key ?? ''
+  const effectiveBookGroup = bookGroups.find(g => g.key === effectiveBookKey) ?? null
+  const chaptersForBook = currentSubject
+    ? (bookGroups.length > 1 && effectiveBookGroup ? effectiveBookGroup.chapters : currentSubject.chapters)
+    : []
+
+  // Group chapters by semester when the subject uses them — falls back to a
+  // single flat bucket (no header) for subjects that don't split by semester.
+  const semesterGroups: { semester: string | null; chapters: SylChapter[] }[] = currentSubject
+    ? (chaptersForBook.some(c => c.semester)
+      ? Object.values(
+          chaptersForBook.reduce((acc, ch) => {
+            const key = ch.semester || ' none'
+            if (!acc[key]) acc[key] = { semester: ch.semester || null, chapters: [] }
+            acc[key].chapters.push(ch)
+            return acc
+          }, {} as Record<string, { semester: string | null; chapters: SylChapter[] }>)
+        )
+      : [{ semester: null, chapters: chaptersForBook }])
+    : []
+
+  // Textbooks/handbooks uploaded once per subject on the platform side —
+  // teachers see both types (unlike students, who only ever get textbooks).
+  const [materials, setMaterials] = useState<{ id: number; material_type: 'textbook' | 'handbook'; title: string; file_url: string }[]>([])
+  useEffect(() => {
+    if (!selectedSubject) { setMaterials([]); return }
+    const params = new URLSearchParams({ school_id: String(schoolId), grade, subject_name: selectedSubject })
+    fetch(`/api/school/subjects/materials?${params}`)
+      .then(r => r.json())
+      .then(data => setMaterials(Array.isArray(data) ? data : []))
+      .catch(() => setMaterials([]))
+  }, [schoolId, grade, selectedSubject])
+
+  async function addCustomTopic(chapter: SylChapter) {
+    const name = newTopicName.trim()
+    if (!name) return
+    setAddingTopic(true)
+    try {
+      const res = await fetch('/api/syllabus', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId,
+          class_id: classId,
+          subject: selectedSubject,
+          chapter_name: chapter.chapter_name,
+          chapter_order: chapter.chapter_order,
+          topic_name: name,
+          topic_order: chapter.topics.length,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to add topic')
+      flash(`"${name}" added to ${chapter.chapter_name}`)
+      setNewTopicName('')
+      await loadSyllabus()
+    } catch (err: unknown) {
+      flash(err instanceof Error ? err.message : 'Failed to add topic')
+    } finally {
+      setAddingTopic(false)
+    }
+  }
+
+  async function saveSchedule(topic: SylTopic) {
+    setSavingSchedule(true)
+    try {
+      await fetch(`/api/syllabus/${topic.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId, class_id: classId,
+          target_date: scheduleDate || null,
+          delay_reason: scheduleReason || null,
+        }),
+      })
+      flash(`Schedule updated for "${topic.topic_name}"`)
+      setScheduleTopicId(null)
+      await loadSyllabus()
+    } catch {
+      flash('Failed to update schedule')
+    } finally {
+      setSavingSchedule(false)
+    }
+  }
+
+  // "Mark taught" — flips school_topic_progress.status between covered/pending
+  // via PATCH /api/syllabus/:id, the only real progress state the API supports.
+  // TODO(syllabus-unlock): the Ulearn prototype's "mark taught auto-unlocks the
+  // next topic + opens its quiz to students" has no backing today — there is no
+  // locked/unlocked column, ordering gate, or quiz-visibility gate in the schema
+  // or API (TopicContentViewer already shows every topic's quiz unconditionally
+  // to students regardless of status). Marking a topic taught here only updates
+  // this topic's own progress row; it does not lock/unlock siblings. Needs new
+  // schema + API work before that flow can be real.
   async function markCovered(topic: SylTopic) {
     if (!teacher) return
     const newStatus = topic.status === 'covered' ? 'pending' : 'covered'
@@ -482,8 +703,9 @@ function SyllabusTracking({
       await fetch(`/api/syllabus/${topic.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, status: newStatus, covered_by: teacher.id }),
+        body: JSON.stringify({ school_id: schoolId, class_id: classId, status: newStatus, covered_by: teacher.id }),
       })
+      flash(newStatus === 'covered' ? `"${topic.topic_name}" marked taught` : `"${topic.topic_name}" marked pending`)
       // Reload to sync counts
       const subjectParam = `&subject=${encodeURIComponent(selectedSubject)}`
       const res = await fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}${subjectParam}`)
@@ -551,19 +773,17 @@ function SyllabusTracking({
 
   if (loading) return (
     <div className="py-16 text-center">
-      <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+      <Loader2 size={22} className="animate-spin mx-auto mb-3" style={{ color: GOLD }} />
       <p className="text-gray-400 text-sm">Loading syllabus...</p>
     </div>
   )
 
   if (subjects.length === 0) return (
-    <div className="bg-white rounded-xl border border-dashed border-gray-300 py-14 text-center">
-      <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center mx-auto mb-3">
-        <svg className="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-        </svg>
+    <div className="bg-white rounded-2xl border border-dashed py-14 text-center" style={{ borderColor: BORDER }}>
+      <div className="w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-3" style={{ background: '#FCEBDB' }}>
+        <BookOpen size={22} style={{ color: GOLD }} />
       </div>
-      <p className="text-gray-500 font-medium mb-1">No syllabus loaded yet</p>
+      <p className="font-medium mb-1" style={{ color: INK }}>No syllabus loaded yet</p>
       <p className="text-gray-400 text-sm">Ask the school admin to load the board syllabus in School Settings.</p>
     </div>
   )
@@ -573,87 +793,124 @@ function SyllabusTracking({
       {/* Subject tabs */}
       {subjects.length > 1 && (
         <div className="flex gap-2 flex-wrap mb-5">
-          {subjects.map(s => (
-            <button key={s.subject}
-              onClick={() => { setSelectedSubject(s.subject); setSuggestion(null); setSuggestError(false); setExpandedChapter(null) }}
-              className={`px-4 py-2 rounded-xl text-sm font-medium border transition-colors ${
-                selectedSubject === s.subject
-                  ? 'bg-blue-600 text-white border-blue-600'
-                  : 'bg-white text-gray-700 border-gray-200 hover:border-blue-300 hover:text-blue-600'
-              }`}>
-              {s.subject}
-              <span className={`ml-2 text-xs ${selectedSubject === s.subject ? 'text-blue-200' : 'text-gray-400'}`}>
-                {s.completion_pct}%
-              </span>
-            </button>
-          ))}
+          {subjects.map(s => {
+            const active = selectedSubject === s.subject
+            return (
+              <button key={s.subject}
+                onClick={() => { setSelectedSubject(s.subject); setActiveBookKey(''); setSuggestion(null); setSuggestError(false); setExpandedChapter(null) }}
+                data-testid={`syllabus-subject-${s.subject}`}
+                className="px-4 py-2 rounded-xl text-sm font-medium border transition-colors"
+                style={{ background: active ? GOLD : 'white', color: active ? 'white' : INK, borderColor: active ? GOLD : BORDER }}>
+                {s.subject}
+                <span className="ml-2 text-xs" style={{ color: active ? 'white' : '#9ca3af', opacity: active ? 0.85 : 1 }}>
+                  {s.completion_pct}%
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Book tabs — only when this subject has more than one book */}
+      {bookGroups.length > 1 && (
+        <div className="flex gap-2 flex-wrap mb-5">
+          {bookGroups.map(g => {
+            const active = g.key === effectiveBookKey
+            const badge = audienceBadge(g.chapters)
+            return (
+              <button key={g.key}
+                onClick={() => { setActiveBookKey(g.key); setExpandedChapter(null) }}
+                data-testid={`syllabus-booktype-${g.key}`}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors"
+                style={{ background: active ? INK : 'white', color: active ? 'white' : INK, borderColor: active ? INK : BORDER }}>
+                {g.label}{badge ? ` · ${badge}` : ''}
+              </button>
+            )
+          })}
         </div>
       )}
 
       {/* Overall progress bar */}
       {currentSubject && (
-        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4 mb-5">
+        <div className="bg-white rounded-2xl border px-5 py-4 mb-5" style={{ borderColor: BORDER }}>
           <div className="flex items-center justify-between mb-2">
-            <span className="font-semibold text-gray-800">{selectedSubject}</span>
+            <span className="font-semibold" style={{ color: INK }}>{selectedSubject}</span>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">{currentSubject.covered}/{currentSubject.total} topics covered</span>
-              <button onClick={onGoToHomework}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold transition-colors">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
+              <span className="text-sm text-gray-500">{currentSubject.covered}/{currentSubject.total} topics taught</span>
+              <button onClick={() => onGoToHomework()}
+                data-testid="syllabus-add-homework-btn"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-white rounded-lg text-xs font-semibold transition-colors" style={{ background: INK }}>
+                <Sparkles size={13} />
                 Add Homework
               </button>
             </div>
           </div>
-          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div className="h-full bg-blue-500 rounded-full transition-all"
-              style={{ width: `${currentSubject.completion_pct}%` }} />
-          </div>
+          <ProgressBar pct={currentSubject.completion_pct} color={GOLD} className="w-full" />
           <p className="text-xs text-gray-400 mt-1.5">{currentSubject.completion_pct}% complete · {currentSubject.chapters.length} chapters</p>
+        </div>
+      )}
+
+      {/* Textbooks & handbooks for this subject */}
+      {materials.length > 0 && (
+        <div className="bg-white rounded-2xl border px-5 py-4 mb-5" style={{ borderColor: BORDER }}>
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Textbooks & Handbooks</p>
+          <div className="flex flex-wrap gap-2">
+            {materials.map(m => (
+              <a key={m.id} href={m.file_url} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border hover:bg-gray-50" style={{ borderColor: BORDER, color: INK }}>
+                <BookOpen size={12} style={{ color: GOLD }} /> {m.title}
+                <span className="text-[9px] uppercase opacity-60">({m.material_type})</span>
+              </a>
+            ))}
+          </div>
         </div>
       )}
 
       {/* AI homework suggestion */}
       <div ref={suggestionRef}>
       {suggestLoading && (
-        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 flex items-center gap-3">
-          <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-          <p className="text-sm text-amber-700">Generating AI homework suggestion...</p>
+        <div className="mb-4 rounded-2xl px-5 py-4 flex items-center gap-3 border" style={{ background: '#FCEBDB', borderColor: GOLD }}>
+          <Loader2 size={16} className="animate-spin flex-shrink-0" style={{ color: GOLD }} />
+          <p className="text-sm" style={{ color: '#8A4B12' }}>Generating AI homework suggestion...</p>
         </div>
       )}
       {suggestError && !suggestLoading && (
-        <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-5 py-3 flex items-center justify-between">
-          <p className="text-sm text-red-600">AI suggestion failed. Use the Homework tab to add manually.</p>
-          <div className="flex gap-2">
-            <button onClick={onGoToHomework} className="text-xs px-3 py-1.5 bg-slate-800 text-white rounded-lg font-medium">Add Homework</button>
-            <button onClick={() => setSuggestError(false)} className="text-red-400 hover:text-red-600 text-lg leading-none">✕</button>
+        <div className="mb-4 rounded-2xl px-5 py-3 flex items-center justify-between" style={{ background: '#FCEBEB' }}>
+          <p className="text-sm" style={{ color: '#791F1F' }}>AI suggestion failed. Use the Homework tab to add manually.</p>
+          <div className="flex gap-2 items-center">
+            <button onClick={() => onGoToHomework()} data-testid="syllabus-suggest-error-homework-btn" className="text-xs px-3 py-1.5 text-white rounded-lg font-medium" style={{ background: INK }}>Add Homework</button>
+            <button onClick={() => setSuggestError(false)} data-testid="syllabus-suggest-error-dismiss" className="opacity-60 hover:opacity-100" style={{ color: '#791F1F' }}><X size={16} /></button>
           </div>
         </div>
       )}
       {suggestion && !suggestLoading && (
-        <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl px-5 py-4">
+        <div className="mb-5 rounded-2xl px-5 py-4 border" style={{ background: '#FCEBDB', borderColor: GOLD }}>
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">AI Homework Suggestion</p>
-              <p className="font-semibold text-gray-900 text-sm">{suggestion.title}</p>
-              <p className="text-xs text-gray-600 mt-1 leading-relaxed">{suggestion.instructions}</p>
+              <p className="text-xs font-bold uppercase tracking-wide mb-1 flex items-center gap-1.5" style={{ color: '#8A4B12' }}>
+                <Sparkles size={12} /> AI Homework Suggestion
+              </p>
+              <p className="font-semibold text-sm" style={{ color: INK }}>{suggestion.title}</p>
+              <p className="text-xs mt-1 leading-relaxed" style={{ color: '#4b5563' }}>{suggestion.instructions}</p>
               <div className="flex gap-3 mt-2">
-                <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">{suggestion.estimated_time_minutes} min</span>
-                <span className="text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">{suggestion.max_marks} marks</span>
+                <span className="text-xs px-2 py-0.5 rounded-full" style={{ color: '#8A4B12', background: 'white' }}>{suggestion.estimated_time_minutes} min</span>
+                <span className="text-xs px-2 py-0.5 rounded-full" style={{ color: '#8A4B12', background: 'white' }}>{suggestion.max_marks} marks</span>
               </div>
             </div>
             <div className="flex flex-col gap-2 flex-shrink-0">
               <button onClick={assignHomework} disabled={assigning}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-sm font-semibold disabled:opacity-50">
+                data-testid="syllabus-assign-homework-btn"
+                className="px-4 py-2 text-white rounded-xl text-sm font-semibold disabled:opacity-50" style={{ background: GOLD }}>
                 {assigning ? 'Assigning...' : 'Assign to All'}
               </button>
               <button onClick={() => { setSuggestion(null); onGoToHomework() }}
-                className="px-4 py-2 border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl text-sm font-medium">
-                ✏️ Edit Manually
+                data-testid="syllabus-edit-manually-btn"
+                className="px-4 py-2 border rounded-xl text-sm font-medium" style={{ borderColor: BORDER, color: INK, background: SURFACE }}>
+                Edit Manually
               </button>
               <button onClick={() => setSuggestion(null)}
-                className="px-4 py-2 border border-gray-200 text-gray-400 rounded-xl text-sm hover:bg-gray-50">
+                data-testid="syllabus-suggest-dismiss"
+                className="px-4 py-2 border rounded-xl text-sm hover:bg-gray-50" style={{ borderColor: BORDER, color: '#6b7280' }}>
                 Dismiss
               </button>
             </div>
@@ -661,115 +918,260 @@ function SyllabusTracking({
         </div>
       )}
       {assignedMsg && (
-        <div className="mb-4 bg-emerald-50 border border-emerald-200 rounded-xl px-5 py-3 flex items-center justify-between">
-          <p className="text-sm text-emerald-700 font-medium">{assignedMsg}</p>
-          <button onClick={() => setAssignedMsg('')} className="text-emerald-400 hover:text-emerald-600 text-lg leading-none">✕</button>
+        <div className="mb-4 rounded-2xl px-5 py-3 flex items-center justify-between" style={{ background: '#E1F5EE' }}>
+          <p className="text-sm font-medium" style={{ color: '#085041' }}>{assignedMsg}</p>
+          <button onClick={() => setAssignedMsg('')} data-testid="syllabus-assignedmsg-dismiss" className="opacity-60 hover:opacity-100" style={{ color: '#085041' }}><X size={16} /></button>
         </div>
       )}
       </div>
 
       {/* Chapter accordion — textbook index style */}
       {currentSubject && (
-        <div className="space-y-2">
-          {currentSubject.chapters.map((ch, chIdx) => {
+        <div className="space-y-4">
+          {semesterGroups.map(group => (
+            <div key={group.semester ?? '__none__'} className="space-y-2">
+              {group.semester && (
+                <h3 className="text-xs font-bold uppercase tracking-widest px-1" style={{ color: GOLD }}>{group.semester}</h3>
+              )}
+              {group.chapters.map(ch => {
+            // Position within the active book (continuous across its
+            // semesters, restarts at 1 per book) — not raw chapter_order,
+            // which is one counter shared across every book on the subject.
+            const chIdx = chaptersForBook.findIndex(c => c.chapter_name === ch.chapter_name)
             const isExpanded = expandedChapter === ch.chapter_name
             const pct = ch.total > 0 ? Math.round(100 * ch.covered / ch.total) : 0
 
             return (
-              <div key={ch.chapter_name} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div key={ch.chapter_name} className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: BORDER }}>
                 {/* Chapter header */}
                 <button
                   onClick={() => setExpandedChapter(isExpanded ? null : ch.chapter_name)}
+                  data-testid={`syllabus-chapter-toggle-${chIdx}`}
                   className="w-full px-5 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors text-left">
                   {/* Chapter number badge */}
-                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm font-black flex-shrink-0 ${
-                    pct === 100 ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-50 text-blue-700'
-                  }`}>
+                  <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-black flex-shrink-0"
+                    style={{ background: pct === 100 ? '#E1F5EE' : '#FCEBDB', color: pct === 100 ? '#085041' : '#8A4B12' }}>
                     {chIdx + 1}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-400 font-medium">Ch {ch.chapter_order}</span>
-                      <span className="font-semibold text-gray-900 text-sm truncate">{ch.chapter_name}</span>
+                      <span className="text-xs text-gray-400 font-medium">Ch {chIdx + 1}</span>
+                      <span className="font-semibold text-sm truncate" style={{ color: INK }}>{ch.chapter_name}</span>
                       {pct === 100 && (
-                        <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0">Done</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0" style={{ background: '#E1F5EE', color: '#085041' }}>Done</span>
                       )}
                     </div>
                     <div className="flex items-center gap-3 mt-1.5">
-                      <div className="flex-1 max-w-[160px] h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full transition-all ${pct === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`}
-                          style={{ width: `${pct}%` }} />
-                      </div>
+                      <ProgressBar pct={pct} color={pct === 100 ? GREEN : GOLD} className="flex-1 max-w-[160px]" />
                       <span className="text-xs text-gray-400">{ch.covered}/{ch.total}</span>
                     </div>
                   </div>
-                  <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-                    fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
+                  <ChevronDown size={16} className="text-gray-400 flex-shrink-0 transition-transform" style={{ transform: isExpanded ? 'rotate(180deg)' : undefined }} />
                 </button>
 
                 {/* Topics list */}
-                {isExpanded && (
-                  <div className="border-t border-gray-100 divide-y divide-gray-50">
+                {isExpanded && ch.topics.length === 0 && (
+                  <div className="border-t px-5 py-4 text-xs text-gray-400 italic" style={{ borderColor: BORDER }}>
+                    No topics added to this chapter yet.
+                  </div>
+                )}
+                {isExpanded && ch.topics.length > 0 && (
+                  <div className="border-t divide-y" style={{ borderColor: BORDER }}>
                     {ch.topics.map((topic, tIdx) => {
                       const isCovered = topic.status === 'covered'
                       const isMarking = markingId === topic.id
+                      const qCount = sylQuestionCount(topic.questions)
 
                       return (
-                        <button
-                          key={topic.id}
-                          onClick={() => markCovered(topic)}
-                          disabled={isMarking}
-                          className={`w-full px-5 py-3 flex items-center gap-3 text-left transition-colors ${
-                            isCovered ? 'hover:bg-emerald-50/50' : 'hover:bg-blue-50/40'
-                          } ${isMarking ? 'opacity-50' : ''}`}>
-                          {/* Topic check circle */}
-                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-                            isCovered ? 'bg-emerald-500 border-emerald-500' : 'border-gray-300 hover:border-blue-400'
-                          }`}>
-                            {isCovered && (
-                              <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                          </div>
+                        <div key={topic.id} className="w-full px-5 py-3 flex items-center gap-3" style={{ borderColor: SURFACE }}>
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="text-xs font-bold text-gray-300">{tIdx + 1}.</span>
-                              <span className={`text-sm ${isCovered ? 'text-gray-400 line-through' : 'text-gray-800 font-medium'}`}>
+                              <span className="text-sm" style={{ color: isCovered ? '#9ca3af' : INK, fontWeight: isCovered ? 400 : 500, textDecoration: isCovered ? 'line-through' : undefined }}>
                                 {topic.topic_name}
                               </span>
+                              <StatusPill status={isCovered ? 'taught' : 'unlocked'} />
+                              <QuizPill count={qCount} />
+                              {/* Mark Complete — labeled button, not a bare circle toggle */}
+                              <button
+                                onClick={() => markCovered(topic)}
+                                disabled={isMarking}
+                                title={isCovered ? 'Mark as pending' : 'Mark as complete'}
+                                data-testid={`syllabus-mark-taught-${topic.id}`}
+                                className="text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1"
+                                style={{
+                                  color: isCovered ? GREEN : 'white',
+                                  background: isCovered ? '#E8F8EF' : GREEN,
+                                  border: `1px solid ${GREEN}`,
+                                  opacity: isMarking ? 0.5 : 1,
+                                }}>
+                                {isCovered ? <><Check size={11} /> Completed</> : 'Mark Complete'}
+                              </button>
+                              {isCovered && (
+                                <button
+                                  onClick={() => onGoToHomework({ title: `${topic.topic_name} (${topic.chapter_name})`, subject: selectedSubject })}
+                                  data-testid={`syllabus-topic-add-homework-${topic.id}`}
+                                  className="text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1"
+                                  style={{ color: INK, background: SURFACE, border: `1px solid ${BORDER}` }}>
+                                  <Sparkles size={11} /> Add Homework
+                                </button>
+                              )}
+                              <button
+                                onClick={() => setActiveTopic(topic)}
+                                data-testid={`syllabus-view-material-${topic.id}`}
+                                className="text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1"
+                                style={{ color: GOLD, background: '#FCEBDB', border: `1px solid ${GOLD}` }}>
+                                <Eye size={11} /> View Material
+                              </button>
+                              {!isCovered && (
+                                <button
+                                  onClick={() => {
+                                    setScheduleTopicId(scheduleTopicId === topic.id ? null : topic.id)
+                                    setScheduleDate(topic.target_date || '')
+                                    setScheduleReason(topic.delay_reason || '')
+                                  }}
+                                  data-testid={`syllabus-schedule-btn-${topic.id}`}
+                                  className="text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1"
+                                  style={{ color: '#6b7280', background: SURFACE, border: `1px solid ${BORDER}` }}>
+                                  <CalendarClock size={11} /> Schedule
+                                </button>
+                              )}
                             </div>
                             {isCovered && topic.covered_date && (
-                              <p className="text-[10px] text-emerald-500 mt-0.5 ml-5">
-                                Covered {topic.covered_date}{topic.covered_by_name ? ` · ${topic.covered_by_name}` : ''}
+                              <p className="text-[10px] mt-0.5 ml-5" style={{ color: GREEN }}>
+                                Taught {topic.covered_date}{topic.covered_by_name ? ` · ${topic.covered_by_name}` : ''}
                               </p>
+                            )}
+                            {!isCovered && (topic.target_date || topic.delay_reason) && (
+                              <p className="text-[10px] mt-0.5 ml-5" style={{ color: '#9ca3af' }}>
+                                {topic.target_date && `Target: ${topic.target_date}`}
+                                {topic.target_date && topic.delay_reason && ' · '}
+                                {topic.delay_reason && `Delay: ${topic.delay_reason}`}
+                              </p>
+                            )}
+                            {scheduleTopicId === topic.id && (
+                              <div className="flex gap-2 items-center flex-wrap mt-2 ml-5">
+                                <input
+                                  type="date"
+                                  value={scheduleDate}
+                                  onChange={e => setScheduleDate(e.target.value)}
+                                  data-testid={`syllabus-target-date-${topic.id}`}
+                                  className="border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2"
+                                  style={{ borderColor: BORDER, color: INK }}
+                                />
+                                <input
+                                  value={scheduleReason}
+                                  onChange={e => setScheduleReason(e.target.value)}
+                                  placeholder="Delay reason (optional)"
+                                  data-testid={`syllabus-delay-reason-${topic.id}`}
+                                  className="flex-1 min-w-40 border rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2"
+                                  style={{ borderColor: BORDER, color: INK }}
+                                />
+                                <button
+                                  onClick={() => saveSchedule(topic)}
+                                  disabled={savingSchedule}
+                                  data-testid={`syllabus-schedule-save-${topic.id}`}
+                                  className="text-xs font-semibold px-3 py-1 rounded-lg text-white disabled:opacity-50"
+                                  style={{ background: GOLD }}>
+                                  {savingSchedule ? 'Saving…' : 'Save'}
+                                </button>
+                                <button
+                                  onClick={() => setScheduleTopicId(null)}
+                                  className="text-xs text-gray-400 hover:text-gray-600 px-2">
+                                  Cancel
+                                </button>
+                              </div>
                             )}
                           </div>
                           {isMarking && (
-                            <div className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                            <Loader2 size={14} className="animate-spin flex-shrink-0" style={{ color: GOLD }} />
                           )}
-                        </button>
+                        </div>
                       )
                     })}
                   </div>
                 )}
+
+                {/* Add custom topic — same POST /api/syllabus used by school-admin's
+                    Syllabus Customizer, so it works whether the teacher adds one topic
+                    now and more later, or several in a row before marking anything taught. */}
+                {isExpanded && (
+                  <div className="border-t px-5 py-3" style={{ borderColor: BORDER, background: SURFACE }}>
+                    {addTopicChapter === ch.chapter_name ? (
+                      <div className="flex gap-2 items-center flex-wrap">
+                        <input
+                          autoFocus
+                          value={newTopicName}
+                          onChange={e => setNewTopicName(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && addCustomTopic(ch)}
+                          placeholder="Topic name"
+                          data-testid={`syllabus-new-topic-input-${chIdx}`}
+                          className="flex-1 min-w-40 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2"
+                          style={{ borderColor: BORDER, color: INK }}
+                        />
+                        <button
+                          onClick={() => addCustomTopic(ch)}
+                          disabled={addingTopic || !newTopicName.trim()}
+                          data-testid={`syllabus-new-topic-submit-${chIdx}`}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
+                          style={{ background: GOLD }}>
+                          {addingTopic ? 'Adding…' : 'Add'}
+                        </button>
+                        <button
+                          onClick={() => { setAddTopicChapter(null); setNewTopicName('') }}
+                          className="text-xs text-gray-400 hover:text-gray-600 px-2">
+                          Done
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { setAddTopicChapter(ch.chapter_name); setNewTopicName('') }}
+                        data-testid={`syllabus-add-topic-btn-${chIdx}`}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors"
+                        style={{ borderColor: BORDER, color: INK }}>
+                        + Custom Topic
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )
-          })}
+              })}
+            </div>
+          ))}
         </div>
       )}
+
+      {activeTopic && (
+        <TopicContentViewer
+          topic={activeTopic}
+          onClose={() => setActiveTopic(null)}
+          role="teacher"
+        />
+      )}
+
+      <Toast message={toast} />
     </div>
   )
 }
 
 export default function ClassView({ classId, grade, section, schoolId, teacherName, teacherId, isClassTeacher, teacher, onBack, initialTab, openExamId }: Props) {
-  const tabs = isClassTeacher ? CLASS_TEACHER_TABS : SUBJECT_TEACHER_TABS
+  const hasTimetableFeature = useFeature('timetable')
+  const hasAttendanceFeature = useFeature('attendance')
+  const allTabs = isClassTeacher ? CLASS_TEACHER_TABS : SUBJECT_TEACHER_TABS
+  const tabs = allTabs.filter(t =>
+    (t !== 'Timetable' || hasTimetableFeature) &&
+    (t !== 'Attendance' || hasAttendanceFeature)
+  )
   const [classDetail, setClassDetail] = useState<ClassDetail | null>(null)
   const [students, setStudents] = useState<Student[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState(initialTab && tabs.includes(initialTab) ? initialTab : tabs[0])
+  const [detailStudent, setDetailStudent] = useState<Student | null>(null)
+  // Set when a syllabus topic's "Add Homework" button navigates here — read
+  // once by Tasks to open its create form pre-filled, then cleared so
+  // switching tabs manually afterward doesn't keep re-triggering it.
+  const [homeworkPrefill, setHomeworkPrefill] = useState<{ title: string; subject: string } | null>(null)
 
   // Today's timetable (for 1st period card + day-wise view)
   const [todaySlots, setTodaySlots] = useState<TimetableSlot[]>([])
@@ -783,6 +1185,63 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   const [classSubstitutes, setClassSubstitutes] = useState<ClassSubstitute[]>([])
   // Week offset for Timetable tab (0 = current/anchor week, 1 = next week, etc.)
   const [ttWeekOffset, setTtWeekOffset] = useState(0)
+
+  // Teacher portal slot editing
+  const [editSlot, setEditSlot] = useState<TimetableSlot | null>(null)
+  const [roomVal, setRoomVal] = useState<string>('')
+  const [savingSlot, setSavingSlot] = useState(false)
+
+  const handleCellClick = (slot: TimetableSlot) => {
+    if (!teacher) return
+    if (slot.subject_name && slot.subject_name !== teacher.subject) return
+    setEditSlot(slot)
+    setRoomVal(slot.room || '')
+  }
+
+  const saveTeacherSlot = async (isClear: boolean) => {
+    if (!editSlot || !teacher) return
+    setSavingSlot(true)
+    try {
+      const payload = {
+        id: editSlot.id,
+        class_id: classId,
+        school_id: schoolId,
+        day_of_week: editSlot.day_of_week,
+        period_number: editSlot.period_number,
+        subject_name: isClear ? null : teacher.subject,
+        teacher_id: isClear ? null : teacher.id,
+        room: isClear ? null : roomVal.trim(),
+        time_from: editSlot.time_from,
+        time_to: editSlot.time_to
+      }
+      
+      const res = await fetch('/api/class-timetable', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      
+      if (res.ok) {
+        // Re-fetch all class timetable slots
+        const data = await fetch(`/api/class-timetable?class_id=${classId}&school_id=${schoolId}`).then(r => r.json())
+        const allSlots: TimetableSlot[] = Array.isArray(data) ? data : []
+        setAllTimetableSlots(allSlots)
+        // Refresh today's slots too
+        const todayDay = getToday()
+        const daySlots = allSlots.filter(s => s.day_of_week === todayDay)
+          .sort((a, b) => a.period_number - b.period_number)
+        setTodaySlots(daySlots)
+        setEditSlot(null)
+      } else {
+        alert('Failed to save slot. Please try again.')
+      }
+    } catch (err) {
+      console.error(err)
+      alert('Error updating timetable slot.')
+    } finally {
+      setSavingSlot(false)
+    }
+  }
 
   // Attendance tab state
   const [attView, setAttView] = useState<'day' | 'monthly'>('day')
@@ -883,6 +1342,31 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
       .finally(() => setMonthlyLoading(false))
   }, [activeTab, attView, attMonth, classId, schoolId])
 
+  // Index monthlyData once per fetch instead of doing a linear .find()/.filter()
+  // over the whole month's records for every (student × day × session) grid
+  // cell — for a 40-student class over 30 days that was ~2,400 scans/render.
+  // (Declared before the `loading` early return below so hook order stays
+  // stable across renders.)
+  const monthlyByKey = useMemo(() => {
+    const map = new Map<string, AttendanceRecord>()
+    for (const r of monthlyData) {
+      const dateStr = r.date?.toString().slice(0, 10)
+      const sess = r.session || 'morning'
+      map.set(`${r.student_id}|${dateStr}|${sess}`, r)
+    }
+    return map
+  }, [monthlyData])
+
+  const monthlyByStudent = useMemo(() => {
+    const map = new Map<number, AttendanceRecord[]>()
+    for (const r of monthlyData) {
+      const list = map.get(r.student_id)
+      if (list) list.push(r)
+      else map.set(r.student_id, [r])
+    }
+    return map
+  }, [monthlyData])
+
   if (loading) {
     return <div className="flex items-center justify-center h-64"><p className="text-gray-400">Loading class data...</p></div>
   }
@@ -920,18 +1404,14 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   // Get per-session status for monthly cell
   function getMonthSessionStatus(studentId: number, day: number, sess: string) {
     const dateStr = `${attMonth}-${String(day).padStart(2, '0')}`
-    const rec = monthlyData.find((r: AttendanceRecord) =>
-      r.student_id === studentId &&
-      r.date?.toString().startsWith(dateStr) &&
-      (r.session === sess || (!r.session && sess === 'morning'))
-    )
+    const rec = monthlyByKey.get(`${studentId}|${dateStr}|${sess}`)
     return rec?.status || null
   }
 
   // % = (morning_present + afternoon_present + 0.5*late) / total_sessions_taken * 100
   function getStudentMonthPct(studentId: number) {
-    const recs = monthlyData.filter(r => r.student_id === studentId)
-    if (recs.length === 0) return null
+    const recs = monthlyByStudent.get(studentId)
+    if (!recs || recs.length === 0) return null
     const score = recs.reduce((acc, r) => {
       if (r.status === 'present') return acc + 1
       if (r.status === 'late')    return acc + 0.5
@@ -989,7 +1469,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         {/* Tabs */}
         <div className="flex gap-6 mt-5 border-b border-gray-100 -mb-5">
           {tabs.map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
+            <button key={tab} onClick={() => { setActiveTab(tab); setDetailStudent(null) }}
               className={`pb-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
                 activeTab === tab ? 'border-orange-500 text-orange-600' : 'border-transparent text-gray-500 hover:text-gray-700'
               }`}>{tab}</button>
@@ -1188,7 +1668,17 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
       )}
 
       {/* ── STUDENTS TAB ────────────────────────────────────────────────────── */}
-      {activeTab === 'Students' && (
+      {activeTab === 'Students' && detailStudent && (
+        <StudentDetail
+          student={detailStudent}
+          classId={classId}
+          schoolId={schoolId}
+          backLabel={`Back to ${className} Students`}
+          onBack={() => setDetailStudent(null)}
+        />
+      )}
+
+      {activeTab === 'Students' && !detailStudent && (
         <div className="bg-white rounded-xl border border-gray-200">
           <div className="px-5 py-4 border-b border-gray-100">
             <h3 className="font-semibold text-gray-800">All Students — {className}</h3>
@@ -1209,7 +1699,8 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
               </thead>
               <tbody>
                 {students.map((student, idx) => (
-                  <tr key={student.id} className="border-b border-gray-50 hover:bg-gray-50">
+                  <tr key={student.id} onClick={() => setDetailStudent(student)}
+                    className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer">
                     <td className="px-5 py-3 text-gray-400">{idx + 1}</td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2">
@@ -1573,36 +2064,88 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                             const isMe = hasSub && teacherId && sub.substitute_teacher_id === teacherId
 
                             if (!slot) {
+                              const canSchedule = !!teacher?.subject
                               return (
                                 <td key={day} className="px-2 py-2 border-r border-gray-100 last:border-r-0">
-                                  <div className={`rounded min-h-[42px] flex items-center justify-center ${isToday ? 'bg-orange-50/30' : 'bg-gray-50'} border border-gray-100`}>
-                                    <span className="text-gray-200 text-[10px] italic">Free</span>
-                                  </div>
+                                  {canSchedule ? (
+                                    <button
+                                      onClick={() => handleCellClick({
+                                        id: 0,
+                                        period_number: schedSlot.slot,
+                                        time_from: schedSlot.time_from,
+                                        time_to: schedSlot.time_to,
+                                        subject_name: null,
+                                        teacher_name: null,
+                                        room: null,
+                                        is_break: false,
+                                        break_label: null,
+                                        day_of_week: day,
+                                        substitute_teacher_id: null,
+                                        substitute_teacher_name: null
+                                      })}
+                                      className={`w-full rounded min-h-[42px] flex items-center justify-center ${isToday ? 'bg-orange-50/30 hover:bg-orange-50' : 'bg-gray-50 hover:bg-slate-100'} border border-dashed border-slate-200 hover:border-slate-400 transition-all text-slate-400 hover:text-slate-600 font-semibold cursor-pointer`}
+                                    >
+                                      <span className="text-[10px]">+ Schedule</span>
+                                    </button>
+                                  ) : (
+                                    <div className={`rounded min-h-[42px] flex items-center justify-center ${isToday ? 'bg-orange-50/30' : 'bg-gray-50'} border border-gray-100`}>
+                                      <span className="text-gray-200 text-[10px] italic">Free</span>
+                                    </div>
+                                  )}
                                 </td>
                               )
                             }
 
+                            const isMySubject = slot.subject_name === teacher?.subject
+
                             return (
                               <td key={day} className={`px-2 py-2 border-r border-gray-100 last:border-r-0 ${isToday ? 'bg-orange-50/20' : ''}`}>
-                                <div className={`rounded px-2 py-1.5 min-h-[42px] ${hasSub ? 'bg-amber-50 border border-amber-200' : 'bg-blue-50 border border-blue-100'}`}>
-                                  <div className="flex items-start justify-between gap-1">
-                                    <p className={`font-semibold text-[11px] leading-tight ${hasSub ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-                                      {slot.subject_name || '—'}
-                                    </p>
-                                    {hasSub && <span className="text-[9px] bg-amber-400 text-white px-1 py-0.5 rounded font-bold flex-shrink-0">SUB</span>}
-                                  </div>
-                                  {hasSub ? (
-                                    <>
-                                      <p className="text-gray-300 line-through text-[10px]">{slot.teacher_name || 'No teacher'}</p>
-                                      <p className={`text-[10px] font-semibold ${isMe ? 'text-amber-600' : 'text-blue-600'}`}>
-                                        {isMe ? '★ You (Sub)' : sub.substitute_teacher_name || 'Substitute'}
+                                {isMySubject ? (
+                                  <button
+                                    onClick={() => handleCellClick(slot)}
+                                    className={`w-full text-left rounded px-2 py-1.5 min-h-[42px] transition-all hover:shadow-sm border cursor-pointer ${
+                                      hasSub ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-blue-50 border-blue-100 hover:bg-blue-100'
+                                    }`}
+                                  >
+                                    <div className="flex items-start justify-between gap-1">
+                                      <p className={`font-semibold text-[11px] leading-tight ${hasSub ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                                        {slot.subject_name || '—'}
                                       </p>
-                                    </>
-                                  ) : (
-                                    <p className="text-gray-400 text-[10px] mt-0.5">{slot.teacher_name || 'No teacher'}</p>
-                                  )}
-                                  {slot.room && <p className="text-gray-300 text-[10px]">{slot.room}</p>}
-                                </div>
+                                      {hasSub && <span className="text-[9px] bg-amber-400 text-white px-1 py-0.5 rounded font-bold flex-shrink-0">SUB</span>}
+                                    </div>
+                                    {hasSub ? (
+                                      <>
+                                        <p className="text-gray-300 line-through text-[10px]">{slot.teacher_name || 'No teacher'}</p>
+                                        <p className={`text-[10px] font-semibold ${isMe ? 'text-amber-600' : 'text-blue-600'}`}>
+                                          {isMe ? '★ You (Sub)' : sub.substitute_teacher_name || 'Substitute'}
+                                        </p>
+                                      </>
+                                    ) : (
+                                      <p className="text-gray-400 text-[10px] mt-0.5">{slot.teacher_name || 'No teacher'} (edit)</p>
+                                    )}
+                                    {slot.room && <p className="text-gray-300 text-[10px]">{slot.room}</p>}
+                                  </button>
+                                ) : (
+                                  <div className={`rounded px-2 py-1.5 min-h-[42px] border ${hasSub ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-100'}`}>
+                                    <div className="flex items-start justify-between gap-1">
+                                      <p className={`font-semibold text-[11px] leading-tight ${hasSub ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                                        {slot.subject_name || '—'}
+                                      </p>
+                                      {hasSub && <span className="text-[9px] bg-amber-400 text-white px-1 py-0.5 rounded font-bold flex-shrink-0">SUB</span>}
+                                    </div>
+                                    {hasSub ? (
+                                      <>
+                                        <p className="text-gray-300 line-through text-[10px]">{slot.teacher_name || 'No teacher'}</p>
+                                        <p className={`text-[10px] font-semibold ${isMe ? 'text-amber-600' : 'text-blue-600'}`}>
+                                          {isMe ? '★ You (Sub)' : sub.substitute_teacher_name || 'Substitute'}
+                                        </p>
+                                      </>
+                                    ) : (
+                                      <p className="text-gray-400 text-[10px] mt-0.5">{slot.teacher_name || 'No teacher'}</p>
+                                    )}
+                                    {slot.room && <p className="text-gray-300 text-[10px]">{slot.room}</p>}
+                                  </div>
+                                )}
                               </td>
                             )
                           })}
@@ -1625,6 +2168,9 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           section={section}
           schoolId={schoolId}
           teacher={teacher}
+          prefillTitle={homeworkPrefill?.title}
+          prefillSubject={homeworkPrefill?.subject}
+          onPrefillConsumed={() => setHomeworkPrefill(null)}
         />
       )}
       {activeTab === 'Homework' && !teacher && (
@@ -1666,6 +2212,95 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         </div>
       )}
 
+      {/* ── SYLLABUS TAB ────────────────────────────────────────────────────── */}
+      {activeTab === 'Syllabus' && (
+        <SyllabusTracking
+          classId={classId}
+          schoolId={schoolId}
+          grade={grade}
+          teacher={teacher}
+          isClassTeacher={isClassTeacher}
+          onGoToHomework={prefill => { setHomeworkPrefill(prefill ?? null); setActiveTab('Homework') }}
+        />
+      )}
+
+      {/* ── TEACHER EDIT TIMETABLE SLOT MODAL ── */}
+      {editSlot && teacher && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setEditSlot(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-gray-900 text-base">
+                {editSlot.id === 0 ? 'Schedule Class' : 'Edit Timetable Slot'}
+              </h3>
+              <button onClick={() => setEditSlot(null)} className="text-gray-400 hover:text-gray-600 text-xl font-bold cursor-pointer">×</button>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5 mb-4">
+              <span className="text-[11px] bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-medium">{editSlot.day_of_week}</span>
+              <span className="text-[11px] bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-medium">Period {editSlot.period_number}</span>
+              <span className="text-[11px] bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-medium">{editSlot.time_from}–{editSlot.time_to}</span>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Subject</label>
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 font-semibold">
+                  {teacher.subject}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Teacher</label>
+                <div className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 font-semibold">
+                  {teacher.name}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Room (optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Room 102, Science Lab..."
+                  value={roomVal}
+                  onChange={e => setRoomVal(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditSlot(null)}
+                  className="flex-1 py-2 border border-slate-200 text-slate-600 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={savingSlot}
+                  onClick={() => saveTeacherSlot(false)}
+                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {savingSlot ? 'Saving...' : editSlot.id === 0 ? 'Schedule' : 'Save'}
+                </button>
+              </div>
+
+              {editSlot.id !== 0 && (
+                <div className="pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    disabled={savingSlot}
+                    onClick={() => saveTeacherSlot(true)}
+                    className="w-full py-2 border border-dashed border-red-300 text-red-600 hover:bg-red-50 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    🗑 Clear Slot (Make Free)
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

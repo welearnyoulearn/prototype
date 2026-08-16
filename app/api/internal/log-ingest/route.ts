@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { logRequest, logError } from '@/lib/logger'
-
-const INGEST_SECRET = process.env.INGEST_SECRET || 'watchline-internal'
+import { isValidIngestSecret } from '@/lib/auth-constants'
 
 // POST /api/internal/log-ingest
 // Called fire-and-forget from middleware (which runs on Edge and can't use pg directly).
@@ -9,7 +8,8 @@ const INGEST_SECRET = process.env.INGEST_SECRET || 'watchline-internal'
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    if (body.secret !== INGEST_SECRET) {
+    // Rejects when INGEST_SECRET is unset in production — no guessable default to match.
+    if (!isValidIngestSecret(body.secret)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
     if (body.type === 'request') {

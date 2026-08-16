@@ -163,11 +163,14 @@ export default function StudentDoubts({ student, classId, schoolId }: Props) {
       if (pollerRef.current) clearInterval(pollerRef.current)
       return
     }
+    // 12s, not 4s — teacher replies aren't instant, so this doesn't need to
+    // be near-real-time, and a slower poll means far fewer requests over the
+    // life of an open chat (especially on mobile data).
     pollerRef.current = setInterval(() => {
       fetchMessages(selected.id).then(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
       })
-    }, 4000)
+    }, 12000)
     return () => { if (pollerRef.current) clearInterval(pollerRef.current) }
   }, [selected, fetchMessages])
 
@@ -340,7 +343,7 @@ export default function StudentDoubts({ student, classId, schoolId }: Props) {
       if (pollerRef.current) clearInterval(pollerRef.current)
       pollerRef.current = setInterval(() => {
         fetchMessages(selected.id).then(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }))
-      }, 4000)
+      }, 12000)
     }
     setReopening(false)
   }

@@ -6,11 +6,15 @@ import { Pool, types } from 'pg'
 // instead of "2026-03-31", causing a persistent one-day-behind display bug.
 types.setTypeParser(types.builtins.DATE, (val: string) => val)
 
-// Auto-detect local vs Supabase: skip SSL for localhost connections
+// Skip SSL only for an actual local Postgres — a local dev server almost
+// always points DATABASE_URL at remote Supabase, so "local DB" and "local
+// dev machine" are different things and must not share one flag.
 const dbUrl = process.env.DATABASE_URL ?? ''
-const isLocal = dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1')
+const isLocalDb = dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1')
 // Vercel serverless: each function instance is isolated — 1 connection is enough,
-// keeps us well under Supabase PgBouncer's session-mode pool_size limit.
+// keeps us well under Supabase PgBouncer's session-mode pool_size limit. A local
+// dev machine is a single long-lived process serving one developer, so it can
+// hold a real pool instead of contending for 1 connection across every request.
 const isVercel = process.env.VERCEL === '1'
 
 // If individual params are set (avoids special-char URL encoding issues on Vercel),
@@ -23,16 +27,16 @@ const poolConfig = (process.env.PGHOST)
       user:     process.env.PGUSER,
       password: process.env.PGPASSWORD,
       ssl: { rejectUnauthorized: false },
-      max: 1,
+      max: isVercel ? 1 : 10,
       idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 10000,
     }
   : {
       connectionString: dbUrl,
-      max: isLocal ? 10 : 1,
+      max: isVercel ? 1 : 10,
       idleTimeoutMillis: isVercel ? 10000 : 30000,
-      connectionTimeoutMillis: isLocal ? 5000 : 10000,
-      ssl: isLocal ? false : { rejectUnauthorized: false },
+      connectionTimeoutMillis: isVercel ? 10000 : 5000,
+      ssl: isLocalDb ? false : { rejectUnauthorized: false },
     }
 
 const pool = new Pool(poolConfig)
@@ -57,29 +61,74 @@ const SCHEMA_SENTINEL_TABLE  = 'classes'
 const SCHEMA_SENTINEL_COLUMN = 'deleted_at'
 const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 
+// ⚠️ BUMP THIS every time you add, change or remove a statement in
+// SYLLABUS_SCHEMA or runIncrementalMigrations(). ⚠️
+//
+// Once a database records this number, initDB() stops running the ~115 idempotent
+// migration statements altogether — so a new migration added WITHOUT bumping this
+// silently never runs anywhere, and you will chase a "column does not exist" 500
+// that reproduces on production but never locally against a fresh DB.
+// Adding a migration statement and bumping this number is ONE change, not two.
+const SCHEMA_VERSION = 1
+
+// Records the schema level this build finished applying, on the same row as the
+// bootstrap marker (no extra row, no extra round-trip to read it back).
+// ON CONFLICT DO UPDATE + GREATEST keeps concurrent cold starts safe: several
+// serverless instances may finish migrating at once, and during a rolling deploy an
+// instance still running older code must not lower the recorded number — its
+// statements are a subset of the newer build's, so the higher value stays truthful.
+// GREATEST ignores NULL, so the first write over a pre-versioning row also works.
+async function recordSchemaVersion(): Promise<void> {
+  await pool.query(`
+    INSERT INTO app_bootstrap_state (key, schema_version) VALUES ($1, $2)
+    ON CONFLICT (key) DO UPDATE
+      SET schema_version = GREATEST(app_bootstrap_state.schema_version, EXCLUDED.schema_version),
+          completed_at   = NOW()
+  `, [BOOTSTRAP_MARKER_KEY, SCHEMA_VERSION])
+}
+
+type BootstrapState = {
+  tables_exist: boolean
+  bootstrapped: boolean
+  schema_version: number | null
+}
+
 export async function initDB() {
+  // Two statements, one simple query = one round-trip. The ALTER back-fills the
+  // version column onto databases that were bootstrapped before versioning existed.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS app_bootstrap_state (
       key TEXT PRIMARY KEY,
       completed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
+    );
+    ALTER TABLE app_bootstrap_state ADD COLUMN IF NOT EXISTS schema_version INTEGER;
   `)
 
-  // Check if core tables exist — on a fresh DB we must create them before any ALTER TABLE
-  const tablesExist = await pool.query(`
-    SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = 'schools' LIMIT 1
-  `)
-  const isFreshDB = tablesExist.rows.length === 0
+  // Every fact the branch below needs, in a single round-trip:
+  //  - do the core tables exist at all (a fresh DB must CREATE before any ALTER)?
+  //  - has the one-time bootstrap completed?
+  //  - what schema level did the last successful migration run record?
+  const state = (await pool.query<BootstrapState>(`
+    SELECT
+      EXISTS (SELECT 1 FROM information_schema.tables
+              WHERE table_schema = 'public' AND table_name = 'schools') AS tables_exist,
+      EXISTS (SELECT 1 FROM app_bootstrap_state WHERE key = $1)         AS bootstrapped,
+      (SELECT schema_version FROM app_bootstrap_state WHERE key = $1)   AS schema_version
+  `, [BOOTSTRAP_MARKER_KEY])).rows[0]
 
-  const bootstrap = await pool.query(
-    `SELECT 1 FROM app_bootstrap_state WHERE key = $1 LIMIT 1`,
-    [BOOTSTRAP_MARKER_KEY]
-  )
+  const isFreshDB = !state.tables_exist
 
-  if (!isFreshDB && bootstrap.rows.length > 0) {
-    // Schema fully bootstrapped — run only incremental migrations
+  if (!isFreshDB && state.bootstrapped) {
+    // Steady state. Every migration statement below is idempotent, so on an
+    // up-to-date database they are ~115 no-ops — but on Vercel (max: 1 connection)
+    // they serialise ahead of the request's real query on EVERY cold start, which
+    // is the "loading late while login" the first request pays for. Skipping them
+    // takes a cold start from ~115 round-trips to the 2 already spent above.
+    // schema_version IS NULL = an existing production DB that predates versioning:
+    // it must migrate once, then record the version and take the fast path after.
+    if ((state.schema_version ?? 0) >= SCHEMA_VERSION) return
     await runIncrementalMigrations()
+    await recordSchemaVersion()
     return
   }
 
@@ -94,10 +143,7 @@ export async function initDB() {
     `, [SCHEMA_SENTINEL_TABLE, SCHEMA_SENTINEL_COLUMN])
     if (rows.length > 0) {
       await runIncrementalMigrations()
-      await pool.query(
-        `INSERT INTO app_bootstrap_state (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
-        [BOOTSTRAP_MARKER_KEY]
-      )
+      await recordSchemaVersion()
       return
     }
   }
@@ -1036,34 +1082,26 @@ export async function initDB() {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_teacher_ai_sessions_teacher ON teacher_ai_sessions(teacher_id, created_at DESC)`,
 
-    // ── HOD (Head of Department) assignments ─────────────────────────────────────
-    `CREATE TABLE IF NOT EXISTS department_hods (
-      id SERIAL PRIMARY KEY,
-      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
-      department VARCHAR(100) NOT NULL,
-      teacher_id INTEGER NOT NULL REFERENCES teachers(id) ON DELETE CASCADE,
-      class_ids INTEGER[] NOT NULL DEFAULT '{}',
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_department_hods_school ON department_hods(school_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_department_hods_teacher ON department_hods(teacher_id)`,
-    `ALTER TABLE department_hods DROP CONSTRAINT IF EXISTS department_hods_school_id_department_key`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS idx_department_hods_school_dept_teacher ON department_hods(school_id, department, teacher_id)`,
+    // HOD (Head of Department) management was removed — class_subjects
+    // (class + subject + teacher) is now the single source of truth for
+    // teacher syllabus visibility. department_hods was never wired to a live
+    // API route or UI beyond the orphaned HODSyllabus.tsx component.
+    `DROP TABLE IF EXISTS department_hods`,
 
-    // ── Extend syllabus_topics with HOD-governance fields ─────────────────────────
+    // ── Extend syllabus_topics with progress-tracking fields ──────────────────
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS target_date DATE`,
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS delay_reason TEXT`,
-    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS hod_remark TEXT`,
-    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS hod_remark_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL`,
-    `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS hod_remark_at TIMESTAMPTZ`,
+    // HOD management was removed — no live code reads/writes these.
+    `ALTER TABLE syllabus_topics DROP COLUMN IF EXISTS hod_remark`,
+    `ALTER TABLE syllabus_topics DROP COLUMN IF EXISTS hod_remark_by`,
+    `ALTER TABLE syllabus_topics DROP COLUMN IF EXISTS hod_remark_at`,
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS last_teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL`,
 
     // ── Soft-delete for classes ───────────────────────────────────────────────
     `ALTER TABLE classes ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
     `CREATE INDEX IF NOT EXISTS idx_classes_deleted ON classes(deleted_at) WHERE deleted_at IS NOT NULL`,
 
-    // ── Syllabus publish workflow: HODs load → review → publish ───────────────
+    // ── Syllabus publish workflow: load → review → publish ────────────────────
     // Default TRUE so existing topics stay visible. Board-load sets FALSE (draft).
     `ALTER TABLE syllabus_topics ADD COLUMN IF NOT EXISTS published BOOLEAN NOT NULL DEFAULT TRUE`,
     `CREATE INDEX IF NOT EXISTS idx_syllabus_published ON syllabus_topics(class_id, subject, published)`,
@@ -1367,13 +1405,235 @@ export async function initDB() {
   // Run incremental migrations after bootstrap
   await runIncrementalMigrations()
 
-  await pool.query(
-    `INSERT INTO app_bootstrap_state (key) VALUES ($1) ON CONFLICT (key) DO NOTHING`,
-    [BOOTSTRAP_MARKER_KEY]
-  )
+  // Writes the bootstrap marker AND the schema level in one statement, so a
+  // freshly created database takes the fast path from its very next cold start.
+  await recordSchemaVersion()
 }
 
+// ── Syllabus system: master curriculum library + per-school overlay ──────────
+// Declared here and run from runIncrementalMigrations() so BOTH a fresh bootstrap
+// and an already-provisioned database (which early-returns before the bootstrap)
+// end up with these tables. All statements are idempotent.
+const SYLLABUS_SCHEMA: string[] = [
+
+    // ── Global Master Curriculum tables ────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS master_subjects (
+      id SERIAL PRIMARY KEY,
+      board VARCHAR(50) NOT NULL,
+      grade VARCHAR(20) NOT NULL,
+      subject_name VARCHAR(100) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(board, grade, subject_name)
+    )`,
+    // Extra Subjects (Dance, Music, Art, ...) use the identical chapter/topic
+    // structure as academic subjects — 'category' just files them separately
+    // in the catalog. Extra subjects are stored under board='EXTRA' so the
+    // existing UNIQUE(board, grade, subject_name) and all board-scoped
+    // queries keep working unchanged.
+    `ALTER TABLE master_subjects ADD COLUMN IF NOT EXISTS category VARCHAR(20) NOT NULL DEFAULT 'academic'`,
+
+    `CREATE TABLE IF NOT EXISTS master_chapters (
+      id SERIAL PRIMARY KEY,
+      subject_id INTEGER NOT NULL REFERENCES master_subjects(id) ON DELETE CASCADE,
+      chapter_name VARCHAR(200) NOT NULL,
+      chapter_order INTEGER NOT NULL DEFAULT 0,
+      description TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_master_chapters_subject ON master_chapters(subject_id)`,
+
+    `CREATE TABLE IF NOT EXISTS master_topics (
+      id SERIAL PRIMARY KEY,
+      chapter_id INTEGER NOT NULL REFERENCES master_chapters(id) ON DELETE CASCADE,
+      topic_name VARCHAR(200) NOT NULL,
+      topic_order INTEGER NOT NULL DEFAULT 0,
+      content_text TEXT,
+      content_pdf_url VARCHAR(512),
+      questions JSONB DEFAULT '[]'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_master_topics_chapter ON master_topics(chapter_id)`,
+
+    `CREATE TABLE IF NOT EXISTS master_resources (
+      id SERIAL PRIMARY KEY,
+      topic_id INTEGER NOT NULL REFERENCES master_topics(id) ON DELETE CASCADE,
+      resource_type VARCHAR(50) NOT NULL,
+      title VARCHAR(200) NOT NULL,
+      url VARCHAR(512) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_master_resources_topic ON master_resources(topic_id)`,
+
+    `CREATE TABLE IF NOT EXISTS master_tasks (
+      id SERIAL PRIMARY KEY,
+      chapter_id INTEGER NOT NULL REFERENCES master_chapters(id) ON DELETE CASCADE,
+      topic_id INTEGER REFERENCES master_topics(id) ON DELETE SET NULL,
+      title VARCHAR(200) NOT NULL,
+      instructions TEXT,
+      task_type VARCHAR(50) DEFAULT 'homework',
+      max_marks INTEGER DEFAULT 10,
+      is_mandatory BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_master_tasks_chapter ON master_tasks(chapter_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_master_tasks_topic ON master_tasks(topic_id)`,
+
+    // ── School Local Customized tables ──────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS school_subjects (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      master_subject_id INTEGER REFERENCES master_subjects(id) ON DELETE SET NULL,
+      subject_name VARCHAR(100) NOT NULL,
+      board VARCHAR(50),
+      grade VARCHAR(20) NOT NULL,
+      academic_year VARCHAR(20) DEFAULT '2025-26',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, grade, subject_name, academic_year)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_subjects_school ON school_subjects(school_id)`,
+    // Copied from master_subjects.category at subscribe time — kept as its
+    // own column (not a live join) since master_subjects rows can change or
+    // be deleted after a school has already subscribed.
+    `ALTER TABLE school_subjects ADD COLUMN IF NOT EXISTS category VARCHAR(20) NOT NULL DEFAULT 'academic'`,
+
+    `CREATE TABLE IF NOT EXISTS school_chapters (
+      id SERIAL PRIMARY KEY,
+      school_subject_id INTEGER NOT NULL REFERENCES school_subjects(id) ON DELETE CASCADE,
+      master_chapter_id INTEGER REFERENCES master_chapters(id) ON DELETE SET NULL,
+      chapter_name VARCHAR(200) NOT NULL,
+      chapter_order INTEGER NOT NULL DEFAULT 0,
+      is_custom BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_chapters_subject ON school_chapters(school_subject_id)`,
+
+    `CREATE TABLE IF NOT EXISTS school_topics (
+      id SERIAL PRIMARY KEY,
+      school_chapter_id INTEGER NOT NULL REFERENCES school_chapters(id) ON DELETE CASCADE,
+      master_topic_id INTEGER REFERENCES master_topics(id) ON DELETE SET NULL,
+      topic_name VARCHAR(200) NOT NULL,
+      topic_order INTEGER NOT NULL DEFAULT 0,
+      content_text TEXT,
+      content_pdf_url VARCHAR(512),
+      questions JSONB DEFAULT '[]'::jsonb,
+      is_custom BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_topics_chapter ON school_topics(school_chapter_id)`,
+
+    `CREATE TABLE IF NOT EXISTS school_resources (
+      id SERIAL PRIMARY KEY,
+      school_topic_id INTEGER NOT NULL REFERENCES school_topics(id) ON DELETE CASCADE,
+      master_resource_id INTEGER REFERENCES master_resources(id) ON DELETE SET NULL,
+      resource_type VARCHAR(50) NOT NULL,
+      title VARCHAR(200) NOT NULL,
+      url VARCHAR(512) NOT NULL,
+      is_custom BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_resources_topic ON school_resources(school_topic_id)`,
+
+    `CREATE TABLE IF NOT EXISTS school_tasks (
+      id SERIAL PRIMARY KEY,
+      school_chapter_id INTEGER NOT NULL REFERENCES school_chapters(id) ON DELETE CASCADE,
+      school_topic_id INTEGER REFERENCES school_topics(id) ON DELETE SET NULL,
+      master_task_id INTEGER REFERENCES master_tasks(id) ON DELETE SET NULL,
+      title VARCHAR(200) NOT NULL,
+      instructions TEXT,
+      task_type VARCHAR(50) DEFAULT 'homework',
+      max_marks INTEGER DEFAULT 10,
+      is_mandatory BOOLEAN DEFAULT FALSE,
+      is_active BOOLEAN DEFAULT TRUE,
+      is_custom BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      CONSTRAINT chk_mandatory_active CHECK (is_mandatory = FALSE OR is_active = TRUE)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_tasks_chapter ON school_tasks(school_chapter_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_school_tasks_topic ON school_tasks(school_topic_id)`,
+
+    `CREATE TABLE IF NOT EXISTS school_topic_progress (
+      id SERIAL PRIMARY KEY,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      school_topic_id INTEGER NOT NULL REFERENCES school_topics(id) ON DELETE CASCADE,
+      status VARCHAR(20) DEFAULT 'pending',
+      covered_date DATE,
+      covered_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(class_id, school_topic_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_school_topic_progress_class ON school_topic_progress(class_id)`,
+
+    // Progress-tracking fields the syllabus GET/PATCH routes select — must
+    // exist alongside the table itself (the CREATE above predates them).
+    `ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS target_date DATE`,
+    `ALTER TABLE school_topic_progress ADD COLUMN IF NOT EXISTS delay_reason TEXT`,
+    // HOD management was removed — these columns were only ever read/written
+    // by the orphaned HODSyllabus.tsx component.
+    `ALTER TABLE school_topic_progress DROP COLUMN IF EXISTS hod_remark`,
+    `ALTER TABLE school_topic_progress DROP COLUMN IF EXISTS hod_remark_by`,
+    `ALTER TABLE school_topic_progress DROP COLUMN IF EXISTS hod_remark_at`,
+    `ALTER TABLE school_subjects ADD COLUMN IF NOT EXISTS academic_year VARCHAR(20) DEFAULT '2025-26'`,
+    `ALTER TABLE school_subjects DROP CONSTRAINT IF EXISTS school_subjects_school_id_grade_subject_name_key`,
+
+    // Subject-level textbook/handbook files, uploaded once per master subject
+    // (not per-chapter) and inherited by every school subscribed to it via
+    // school_subjects.master_subject_id. Students only ever see 'textbook'
+    // rows — 'handbook' is staff-only (school admins + the subject's teachers).
+    `CREATE TABLE IF NOT EXISTS master_subject_materials (
+      id SERIAL PRIMARY KEY,
+      subject_id INTEGER NOT NULL REFERENCES master_subjects(id) ON DELETE CASCADE,
+      material_type VARCHAR(20) NOT NULL CHECK (material_type IN ('textbook', 'handbook')),
+      title VARCHAR(200) NOT NULL,
+      file_url VARCHAR(512) NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_master_subject_materials_subject ON master_subject_materials(subject_id)`,
+
+    // Optional Sem 1 / Sem 2 grouping for chapters — nullable because only some
+    // subjects use semesters. Bulk-import auto-detects whichever shape is
+    // pasted (flat chapter array vs. semester-grouped) and tags chapters
+    // accordingly; everything downstream just groups by this when present and
+    // falls back to a flat list when it's null, so nothing breaks for subjects
+    // that don't use semesters.
+    `ALTER TABLE master_chapters ADD COLUMN IF NOT EXISTS semester VARCHAR(50)`,
+    `ALTER TABLE school_chapters ADD COLUMN IF NOT EXISTS semester VARCHAR(50)`,
+
+    // Subtopics are a plain text list nested under a topic (no separate
+    // identity/table — matches how curators paste them: topic -> subtopics).
+    `ALTER TABLE master_topics ADD COLUMN IF NOT EXISTS subtopics JSONB DEFAULT '[]'::jsonb`,
+    `ALTER TABLE school_topics ADD COLUMN IF NOT EXISTS subtopics JSONB DEFAULT '[]'::jsonb`,
+
+    // Which book a chapter came from (Text Book / Hand Book / Work Book),
+    // independent of semester — a subject can have several books, each with
+    // its own chapter list. Defaults to 'textbook' so pre-existing chapters
+    // (imported before this column existed) keep rendering exactly as before.
+    `ALTER TABLE master_chapters ADD COLUMN IF NOT EXISTS book_type VARCHAR(20) NOT NULL DEFAULT 'textbook' CHECK (book_type IN ('textbook','handbook','workbook'))`,
+    `ALTER TABLE school_chapters ADD COLUMN IF NOT EXISTS book_type VARCHAR(20) NOT NULL DEFAULT 'textbook' CHECK (book_type IN ('textbook','handbook','workbook'))`,
+
+    // Who a book is meant for — independent of book_type (a Hand Book is
+    // usually a teacher's edition, but that's a convenience default, not a
+    // fixed rule; any book can be marked teacher/student/both). Purely a
+    // label everywhere it's shown — it doesn't gate visibility, every portal
+    // still sees every book. Defaults to 'student' so pre-existing chapters
+    // keep behaving exactly as before.
+    `ALTER TABLE master_chapters ADD COLUMN IF NOT EXISTS audience VARCHAR(20) NOT NULL DEFAULT 'student' CHECK (audience IN ('teacher','student','both'))`,
+    `ALTER TABLE school_chapters ADD COLUMN IF NOT EXISTS audience VARCHAR(20) NOT NULL DEFAULT 'student' CHECK (audience IN ('teacher','student','both'))`,
+
+    // A subject can have more than one book of the same book_type (e.g. two
+    // different Text Books) — book_type alone can't tell them apart, so this
+    // captures the book's own name/title when known. Nullable, no default:
+    // unlike book_type/audience there's no sensible value to invent, and a
+    // NULL book_name renders identically to today (generic "Text Book" tab)
+    // until a second same-type book actually shows up for that subject.
+    `ALTER TABLE master_chapters ADD COLUMN IF NOT EXISTS book_name VARCHAR(200)`,
+    `ALTER TABLE school_chapters ADD COLUMN IF NOT EXISTS book_name VARCHAR(200)`,
+]
+
 async function runIncrementalMigrations() {
+  // Syllabus system (master_* + school_*) — idempotent, safe on fresh and existing DBs
+  for (const stmt of SYLLABUS_SCHEMA) await pool.query(stmt)
+
   await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS board VARCHAR(20)`)
 
   await pool.query(`ALTER TABLE parents ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)`)
@@ -1512,6 +1772,15 @@ async function runIncrementalMigrations() {
   // directly to each student's ledger by year-rollover/year-end — they must never be
   // gated behind the per-grade fee_structures setup that real fixed fee heads require.
   await pool.query(`ALTER TABLE fee_categories ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE`)
+  // Backfill: "Previous Year Dues"/"Passout Dues" categories created BEFORE the
+  // is_system column existed defaulted to FALSE, so they kept showing up as a
+  // manageable fee-head card in the Fee Plan setup grid (which already filters
+  // out is_system categories everywhere) until that school's next Year Rollover
+  // or Year-End close happened to self-heal the flag. Year-rollover/year-end
+  // already correct this going forward (UPDATE ... SET is_system = TRUE on
+  // every run) — this just applies that same correction immediately instead
+  // of waiting for the next rollover event.
+  await pool.query(`UPDATE fee_categories SET is_system = TRUE WHERE name IN ('Previous Year Dues', 'Passout Dues') AND is_system = FALSE`)
   // Previously only ever created inline in year-end/route.ts (ENSURE_CLOSE) — other
   // routes that check whether a year is closed (payments/cancel, ledger/[id]) wrapped
   // the query in .catch(() => ({rows:[]})), so a missing table silently failed the
@@ -1534,6 +1803,34 @@ async function runIncrementalMigrations() {
       reopened_at    TIMESTAMPTZ,
       reopen_reason  TEXT,
       UNIQUE(school_id, academic_year)
+    )
+  `)
+  // Only ever created inline in category-assignments/route.ts, but categories/route.ts's
+  // DELETE unconditionally deletes from it — so deleting a fee category on any database
+  // where category-assignments had never been hit 500s with "relation does not exist".
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS student_fee_category_assignments (
+      id               SERIAL PRIMARY KEY,
+      school_id        INTEGER NOT NULL,
+      fee_category_id  INTEGER NOT NULL REFERENCES fee_categories(id) ON DELETE CASCADE,
+      student_id       INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      academic_year    TEXT    NOT NULL DEFAULT '2025-26',
+      amount           NUMERIC(10,2) NOT NULL DEFAULT 0,
+      created_at       TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS student_fee_assignment_history (
+      id               SERIAL PRIMARY KEY,
+      school_id        INTEGER NOT NULL,
+      student_id       INTEGER NOT NULL,
+      fee_category_id  INTEGER NOT NULL,
+      academic_year    TEXT    NOT NULL,
+      old_amount       NUMERIC(10,2),
+      new_amount       NUMERIC(10,2),
+      change_type      TEXT    NOT NULL DEFAULT 'update',
+      changed_by       TEXT    NOT NULL DEFAULT 'Admin',
+      changed_at       TIMESTAMPTZ DEFAULT NOW()
     )
   `)
   // Previously self-healed independently in upi-id/route.ts (x2) and upi-qr/route.ts.
@@ -1567,11 +1864,24 @@ async function runIncrementalMigrations() {
 
   // ── School roll number (class roll number assigned by school) ─────────────────
   await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS school_roll_number INTEGER`)
+  // This is what actually makes the roll-number duplicate check in
+  // POST /api/students race-proof: two concurrent inserts of the same roll number
+  // both pass the app-level SELECT, and only this index stops both from committing.
+  // It CAN fail on a database that already holds duplicates — and an uncaught
+  // failure here aborts initDB, which (with the SCHEMA_VERSION fast path) would
+  // leave every cold start retrying the full migration run forever, i.e. the whole
+  // app down over one dirty table. Log and continue instead: the app-level check
+  // still holds the line, and the failure is visible in the function logs.
+  // Deliberately NOT auto-de-duplicated the way parents are above — that fix
+  // DELETEs rows, which is acceptable for a duplicated parent contact record and
+  // absolutely not for a student.
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_students_school_roll_unique
       ON students(school_id, grade, section, school_roll_number)
       WHERE school_roll_number IS NOT NULL
-  `)
+  `).catch((e: unknown) => {
+    console.error('[db] idx_students_school_roll_unique not created — duplicate roll numbers exist', e)
+  })
   // Drop UNIQUE constraint on fee_payments.receipt_number to allow multi-entry receipts
   await pool.query(`
     DO $$ BEGIN
@@ -1668,6 +1978,40 @@ async function runIncrementalMigrations() {
       WHERE email IS NOT NULL
   `).catch(() => {})
 
+  // ── Hot-path indexes on the core tables ──────────────────────────────────────
+  // Every index below is justified by a real query; nothing speculative, because
+  // each one is paid for on every INSERT/UPDATE to these very write-heavy tables.
+  //
+  // students had NO index on school_id at all — GET /api/students builds
+  // `WHERE school_id = $1 [AND grade = $2 [AND section = $3]]` (the params are
+  // appended in exactly that order), so every roster fetch sequentially scanned
+  // every student on the platform. One index in that column order serves all
+  // three shapes, plus the grades_only variant which filters school_id alone.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_students_school_grade_section
+      ON students(school_id, grade, section)
+  `).catch(() => {})
+  // teachers only had (employee_id, school_id) — wrong leading column for the
+  // `WHERE school_id = $1` lookups that dominate this table (GET /api/teachers
+  // staff directory, admin overview counts, doubts auto-routing, schools list
+  // teacher_count subqueries). None of those know an employee_id.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_teachers_school ON teachers(school_id)
+  `).catch(() => {})
+  // attendance's only index leads with student_id, so the two predicates the
+  // attendance screens actually use both fell back to a sequential scan of a table
+  // that grows by (students × days × sessions):
+  //   class_id + date  — GET /api/attendance single-day, summary, previous
+  //                      (previous/monthly use the class_id prefix alone)
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_attendance_class_date ON attendance(class_id, date)
+  `).catch(() => {})
+  //   school_id + date — the all-classes dashboard (`a.school_id = $1 AND a.date = $2`)
+  //                      and the analytics trends, which scan school_id + a date range
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_attendance_school_date ON attendance(school_id, date)
+  `).catch(() => {})
+
   // ── Per-school feature overrides (self-heal) ───────────────────────────────────
   // This table's CREATE TABLE only lived in the one-time fresh-DB bootstrap block
   // above, which never re-runs once a database is already bootstrapped — so on any
@@ -1698,6 +2042,29 @@ async function runIncrementalMigrations() {
     VALUES
       ('student-portal', 'basic', true), ('student-portal', 'standard', true), ('student-portal', 'premium', true),
       ('parent-portal',  'basic', true), ('parent-portal',  'standard', true), ('parent-portal',  'premium', true)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+
+  // WLYL Digital Library nav item for school-admin — same self-heal/seed
+  // pattern as student-portal/parent-portal above, enabled by default so
+  // existing schools see it without a platform-admin needing to flip it on.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES
+      ('library', 'basic', true), ('library', 'standard', true), ('library', 'premium', true)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+
+  // Expense Tracking nav item for school-admin — same self-heal/seed pattern
+  // as library above. Without this, 'expenses' exists in ALL_FEATURES but
+  // is absent from plan_features, and /api/platform/features treats any
+  // unconfigured feature as disabled — so the Expenses tab would silently
+  // never appear in the sidebar for any school until a platform admin
+  // manually flipped it on.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES
+      ('expenses', 'basic', true), ('expenses', 'standard', true), ('expenses', 'premium', true)
     ON CONFLICT (feature_key, tier) DO NOTHING
   `).catch(() => {})
 
@@ -1818,4 +2185,162 @@ async function runIncrementalMigrations() {
   // ── Fee receipt branding (logo reuses existing logo_url; header is a list of styled blocks) ──
   await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS receipt_header_blocks JSONB DEFAULT '[]'`).catch(() => {})
   await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS logo_align VARCHAR(10) DEFAULT 'center'`).catch(() => {})
+
+  // ── School Expenses — tracks money the school spends (salaries, utilities,
+  // maintenance, supplies, ...), the mirror of Fee Management which tracks
+  // money collected from students. Fully separate tables/routes/UI; nothing
+  // here is read or written by any Fee Management code path.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_categories (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      name VARCHAR(100) NOT NULL,
+      is_system BOOLEAN NOT NULL DEFAULT FALSE,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(school_id, name)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_expense_categories_school ON expense_categories(school_id)`).catch(() => {})
+
+  await pool.query(`CREATE SEQUENCE IF NOT EXISTS voucher_number_seq START 1000`).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expenses (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      category_id INTEGER NOT NULL REFERENCES expense_categories(id) ON DELETE RESTRICT,
+      title VARCHAR(200) NOT NULL,
+      payee_name VARCHAR(150),
+      amount NUMERIC(10,2) NOT NULL,
+      expense_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      payment_mode VARCHAR(20) NOT NULL DEFAULT 'cash',
+      transaction_ref VARCHAR(200),
+      notes TEXT,
+      voucher_number VARCHAR(50) UNIQUE,
+      recorded_by_name VARCHAR(100),
+      recorded_by_id INTEGER,
+      is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_expenses_school_date ON expenses(school_id, expense_date DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category_id)`).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_attachments (
+      id SERIAL PRIMARY KEY,
+      expense_id INTEGER NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
+      file_url TEXT NOT NULL,
+      file_name VARCHAR(255),
+      uploaded_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_expense_attachments_expense ON expense_attachments(expense_id)`).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_audit_log (
+      id SERIAL PRIMARY KEY,
+      expense_id INTEGER NOT NULL,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      action VARCHAR(20) NOT NULL,
+      changed_by_name VARCHAR(100),
+      changes JSONB,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_expense_audit_expense ON expense_audit_log(expense_id, created_at DESC)`).catch(() => {})
+
+  // ── Platform usage analytics — login/session tracking across all 5 roles ──
+  // Deliberately separate from Watchline (request_logs/error_events), which
+  // is opt-in per school, API-call-only, and short-retention by design for
+  // debugging. Usage analytics needs the opposite: always-on for every
+  // school, tracks actual login events + active time (not API traffic), and
+  // needs months of history for trend charts, so it gets its own table with
+  // its own (longer) retention rather than overloading Watchline's purpose.
+  //
+  // actor_id/role are a polymorphic pair, not a hard FK — school_admin and
+  // platform_admin live in `users`, but teacher/student/parent each have
+  // their own separate identity table, so no single FK target exists (same
+  // reason platform_audit_log.actor_id has no cross-role FK either).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS usage_sessions (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
+      actor_id INTEGER NOT NULL,
+      actor_role VARCHAR(20) NOT NULL,   -- school_admin|principal|vice_principal|teacher|student|parent|platform_admin
+      actor_name VARCHAR(200),
+      started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      ended_at TIMESTAMPTZ,
+      duration_seconds INTEGER
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_sessions_school ON usage_sessions(school_id, started_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_sessions_actor ON usage_sessions(actor_role, actor_id, started_at DESC)`).catch(() => {})
+  // Heartbeats update last_seen_at frequently — an open index on that alone
+  // would churn constantly, so it's intentionally NOT indexed separately;
+  // the rollup job scans by started_at/ended_at instead.
+
+  // Pre-aggregated daily rollup so the dashboard never scans raw session rows
+  // (each portal's heartbeat can produce a lot of rows over time, and the
+  // Supabase pool here is connection-constrained — see CLAUDE.md — so the
+  // dashboard's normal-path queries hit this small summary table, not the
+  // raw event log).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS usage_daily_rollup (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
+      day DATE NOT NULL,
+      actor_role VARCHAR(20) NOT NULL,
+      login_count INTEGER NOT NULL DEFAULT 0,
+      unique_actors INTEGER NOT NULL DEFAULT 0,
+      total_duration_seconds INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(school_id, day, actor_role)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_rollup_school_day ON usage_daily_rollup(school_id, day DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_usage_rollup_day ON usage_daily_rollup(day DESC)`).catch(() => {})
+
+  // ── Feature-level usage — which module/tab each portal actually opens ──
+  // usage_sessions only proves someone logged in, not what they used. Every
+  // portal already funnels tab switches through one navigateTo(key) function
+  // (school-admin, teacher, student, parent), so a single tracking call there
+  // captures every feature open with no per-button wiring. nav_key reuses
+  // each portal's existing key strings as-is (school-admin's already match
+  // lib/features.ts's ALL_FEATURES keys 1:1; teacher/student/parent keys are
+  // portal-local and scoped by portal + actor_role, not force-fit into that
+  // catalog). Raw events kept short-retention-ish via the same
+  // pre-aggregated-rollup pattern as usage_sessions, for the same reason:
+  // the dashboard should never scan raw per-click rows.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feature_usage_events (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
+      actor_id INTEGER NOT NULL,
+      actor_role VARCHAR(20) NOT NULL,
+      portal VARCHAR(20) NOT NULL,   -- school-admin|teacher|student|parent|platform-admin
+      nav_key VARCHAR(60) NOT NULL,  -- e.g. 'fee-management', 'syllabus', 'my-classes'
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_events_school ON feature_usage_events(school_id, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_events_key ON feature_usage_events(nav_key, created_at DESC)`).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feature_usage_daily_rollup (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER REFERENCES schools(id) ON DELETE CASCADE,
+      day DATE NOT NULL,
+      portal VARCHAR(20) NOT NULL,
+      nav_key VARCHAR(60) NOT NULL,
+      actor_role VARCHAR(20) NOT NULL,
+      open_count INTEGER NOT NULL DEFAULT 0,
+      unique_actors INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(school_id, day, portal, nav_key, actor_role)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_rollup_school_day ON feature_usage_daily_rollup(school_id, day DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_rollup_key_day ON feature_usage_daily_rollup(nav_key, day DESC)`).catch(() => {})
 }
