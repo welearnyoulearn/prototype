@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { resolveAcademicYear } from '@/lib/academicYear'
-import { requireSyllabusAccess } from '@/lib/auth'
+import { requireSyllabusAccess, schoolHasFeature } from '@/lib/auth'
 import { gradeOrderSql } from '@/lib/grades'
 
 // GET /api/school/library?school_id=&academic_year=
@@ -21,6 +21,14 @@ export async function GET(req: NextRequest) {
 
   const access = await requireSyllabusAccess(school_id)
   if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  // requireSyllabusAccess only checks tenant/role — the library toggle itself
+  // (plan tier or per-school override) is a separate gate, same as every
+  // other feature-gated route. platform_admin previewing a school bypasses
+  // this the same way requireSyllabusAccess already lets it bypass tenancy.
+  if (access.role !== 'platform_admin' && !(await schoolHasFeature(Number(school_id), 'library'))) {
+    return NextResponse.json({ error: 'Digital Library is not enabled for this school' }, { status: 403 })
+  }
 
   try {
     await ensureDB()

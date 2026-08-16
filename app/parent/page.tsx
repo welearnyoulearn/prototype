@@ -10,6 +10,7 @@ import DigitalLibrary from '../components/library/DigitalLibrary'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
+import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Child = { id: number; name: string; grade: string; section: string; roll_number: string; school_id: number }
@@ -100,6 +101,12 @@ const NAV = [
   { key: 'library',    label: 'Digital Library',    icon: 'M12 6.253C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253m0-13v13' },
 ]
 
+// Only nav keys that map to a plan-gated ALL_FEATURES entry get checked
+// against enabledFeatures — everything else has always been unconditionally
+// available and stays that way. 'syllabus' resolves through
+// PORTAL_NAV_KEY_ALIASES to school-admin's 'curriculum' key.
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library'])
+
 function fmt(n: number | string) { return `₹${Number(n).toLocaleString('en-IN')}` }
 function timeStr(t: string) { return t ? t.slice(0, 5) : '' }
 function relTime(iso: string) {
@@ -122,6 +129,16 @@ export default function ParentDashboard() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [activeNav, setActiveNav] = useState('overview')
   const [visited, setVisited] = useState<Set<string>>(new Set(['overview']))
+  const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
+
+  // Filters out nav items gated by a plan feature the school doesn't have
+  // enabled for this portal — null (still loading) means "show everything"
+  // so the sidebar doesn't flash empty before the fetch resolves.
+  function isNavItemVisible(key: string) {
+    if (!RESTRICTABLE_NAV_KEYS.has(key)) return true
+    if (enabledFeatures === null) return true
+    return enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
+  }
 
   // Per-section data
   const [timetable, setTimetable] = useState<TimetablePeriod[]>([])
@@ -281,6 +298,10 @@ export default function ParentDashboard() {
         if (r.status === 401) { router.push('/parent/login'); return }
         const data = await r.json()
         setParentInfo(data)
+        fetch(`/api/school/enabled-features?school_id=${data.school_id}&portal=parent`)
+          .then(r => r.ok ? r.json() : null)
+          .then(d => { if (d?.enabled) setEnabledFeatures(new Set<string>(d.enabled)) })
+          .catch(() => {})
         if (data.children.length === 1) {
           await selectChild(data.children[0])
         } else if (data.children.length > 1) {
@@ -527,7 +548,7 @@ export default function ParentDashboard() {
         {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
         {/* Sidebar */}
         <nav className={`fixed inset-y-0 left-0 z-40 lg:relative lg:inset-y-auto lg:left-auto w-48 bg-white border-r border-gray-100 flex flex-col py-3 shrink-0 overflow-y-auto transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-          {NAV.map(item => (
+          {NAV.filter(item => isNavItemVisible(item.key)).map(item => (
             <button key={item.key} onClick={() => navigateTo(item.key)}
               className={`flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium transition-colors mx-2 rounded-lg ${
                 activeNav === item.key ? 'bg-pink-50 text-pink-700' : 'text-gray-600 hover:bg-gray-50'
@@ -753,7 +774,7 @@ export default function ParentDashboard() {
           )}
 
           {/* ── SYLLABUS ──────────────────────────────────────────────────── */}
-          {visited.has('syllabus') && (
+          {visited.has('syllabus') && isNavItemVisible('syllabus') && (
           <div hidden={activeNav !== 'syllabus'}>
             <ParentSyllabus
               schoolId={student.school_id}
@@ -766,7 +787,7 @@ export default function ParentDashboard() {
           )}
 
           {/* ── DIGITAL LIBRARY ───────────────────────────────────────────── */}
-          {visited.has('library') && (
+          {visited.has('library') && isNavItemVisible('library') && (
           <div hidden={activeNav !== 'library'}>
             <DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}`} />
           </div>
