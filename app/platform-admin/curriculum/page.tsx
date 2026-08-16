@@ -964,6 +964,28 @@ export default function PlatformCurriculum() {
     if (expandedMergeId === mergeId) setExpandedMergeId(null)
   }
 
+  // A big folder-import batch fires many sequential bulk-import calls, each
+  // needing its own DB connection — on Vercel's single-connection pool
+  // (PgBouncer session mode, see lib/db.ts) a request can still queue past
+  // the 10s connect timeout under any concurrent load, even though nothing
+  // here runs in parallel. That failure is purely "the pool was momentarily
+  // busy," not a bad request, so retrying it (with a short backoff to let
+  // the previous connection actually finish releasing) resolves it without
+  // the admin needing to manually re-run failed files.
+  async function postBulkImportWithRetry(body: unknown, attempts = 3): Promise<{ res: Response; data: { error?: string; chapters?: number; topics?: number } }> {
+    for (let attempt = 1; ; attempt++) {
+      const res = await fetch('/api/platform/syllabus/bulk-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      const isTimeout = !res.ok && typeof data.error === 'string' && data.error.includes('Database connection timed out')
+      if (!isTimeout || attempt >= attempts) return { res, data }
+      await new Promise(r => setTimeout(r, 1500 * attempt))
+    }
+  }
+
   // Runs the actual import: resolve/create each subject, bulk-import its
   // JSON if present, then upload+register every PDF as a material tagged by
   // its book-type folder. Continues past per-subject/per-file failures so one
@@ -1015,12 +1037,7 @@ export default function PlatformCurriculum() {
       for (const merge of group.merges) {
         try {
           const jsonBookType = bookTypeChoices[merge.bookType]
-          const res = await fetch('/api/platform/syllabus/bulk-import', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ subject_id: subjectId, mode: 'append', json: merge.combinedJson, book_type: jsonBookType, book_name: merge.bookName }),
-          })
-          const data = await res.json()
+          const { res, data } = await postBulkImportWithRetry({ subject_id: subjectId, mode: 'append', json: merge.combinedJson, book_type: jsonBookType, book_name: merge.bookName })
           if (!res.ok) throw new Error(data.error)
           log(`  ✓ merged (${merge.fileNames.join(' + ')}): ${data.chapters} chapters, ${data.topics} topics`)
           chaptersOk += 1
@@ -1057,12 +1074,7 @@ export default function PlatformCurriculum() {
             }])
           }
           const jsonBookType = bookTypeChoices[jf.bookType]
-          const res = await fetch('/api/platform/syllabus/bulk-import', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ subject_id: subjectId, mode: 'append', json: jsonToSend, book_type: jsonBookType, book_name: jsonBookName }),
-          })
-          const data = await res.json()
+          const { res, data } = await postBulkImportWithRetry({ subject_id: subjectId, mode: 'append', json: jsonToSend, book_type: jsonBookType, book_name: jsonBookName })
           if (!res.ok) throw new Error(data.error)
           log(`  ✓ ${jf.file.name}: ${data.chapters} chapters, ${data.topics} topics`)
           chaptersOk += 1
