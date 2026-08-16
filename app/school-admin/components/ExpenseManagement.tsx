@@ -128,13 +128,13 @@ export default function ExpenseManagement({ schoolId }: Props) {
             <span className="text-base leading-none">+</span> Add Expense
           </button>
         </div>
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg overflow-x-auto max-w-full">
           {(['dashboard', 'expenses', 'categories', 'audit'] as const).map(t => (
             <button
               key={t}
               data-testid={`expenses-tab-${t}`}
               onClick={() => setTab(t)}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-150 capitalize ${
+              className={`px-3 sm:px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-150 capitalize whitespace-nowrap flex-shrink-0 ${
                 tab === t ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
               }`}
             >
@@ -281,16 +281,16 @@ function DashboardView({ schoolId, refreshKey }: { schoolId: number; refreshKey:
                   const pct = metrics.total_spent > 0 ? Math.round((c.total / metrics.total_spent) * 100) : 0
                   const color = categoryColor(c.category_id)
                   return (
-                    <div key={c.category_id} className="flex items-center gap-4 px-5 py-3">
-                      <span className="flex items-center gap-2 w-40 min-w-0">
+                    <div key={c.category_id} className="flex items-center gap-3 sm:gap-4 px-4 sm:px-5 py-3">
+                      <span className="flex items-center gap-2 w-24 sm:w-40 min-w-0 flex-shrink-0">
                         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${color.dot}`} />
                         <span className="text-sm text-gray-700 font-medium truncate">{c.category_name}</span>
                       </span>
-                      <div className="flex-1 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                      <div className="flex-1 bg-gray-100 rounded-full h-1.5 overflow-hidden min-w-[32px]">
                         <div className={`${color.bar} h-full rounded-full transition-all duration-500`} style={{ width: `${pct}%` }} />
                       </div>
-                      <span className="w-24 text-right text-xs text-gray-500">{fmt(c.total)}</span>
-                      <span className="w-10 text-right text-xs text-gray-400">{pct}%</span>
+                      <span className="w-16 sm:w-24 text-right text-xs text-gray-500 flex-shrink-0">{fmt(c.total)}</span>
+                      <span className="hidden sm:block w-10 text-right text-xs text-gray-400 flex-shrink-0">{pct}%</span>
                     </div>
                   )
                 })}
@@ -400,15 +400,15 @@ function ExpensesListView({ schoolId, categories, adminName, adminId, onCategori
           {filterMode === 'month' && (
             <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs" data-testid="expenses-filter-month" />
           )}
-          <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs" data-testid="expenses-filter-category">
+          <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs w-full sm:w-auto" data-testid="expenses-filter-category">
             <option value="">All Categories</option>
             {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-          <input value={filterPayee} onChange={e => setFilterPayee(e.target.value)} placeholder="Search payee…" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs w-32" data-testid="expenses-filter-payee" />
+          <input value={filterPayee} onChange={e => setFilterPayee(e.target.value)} placeholder="Search payee…" className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs w-full sm:w-32" data-testid="expenses-filter-payee" />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
           <a href={`/api/expenses/export?school_id=${schoolId}${filterMode === 'range' ? `&from=${filterFrom}&to=${filterTo}` : ''}${filterCategory ? `&category_id=${filterCategory}` : ''}`}
-            className="text-xs border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50" data-testid="expenses-export-btn">
+            className="text-xs border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50 text-center w-full sm:w-auto" data-testid="expenses-export-btn">
             ⬇ Export CSV
           </a>
         </div>
@@ -421,45 +421,79 @@ function ExpensesListView({ schoolId, categories, adminName, adminId, onCategori
           <div className="text-center py-12 text-gray-400 text-sm">No expenses match these filters.</div>
         ) : (
           <>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
-                  <th className="text-left px-4 py-2 font-semibold">Voucher</th>
-                  <th className="text-left px-4 py-2 font-semibold">Date</th>
-                  <th className="text-left px-4 py-2 font-semibold">Title</th>
-                  <th className="text-left px-4 py-2 font-semibold">Category</th>
-                  <th className="text-left px-4 py-2 font-semibold">Payee</th>
-                  <th className="text-left px-4 py-2 font-semibold">Mode</th>
-                  <th className="text-right px-4 py-2 font-semibold">Amount</th>
-                  <th className="text-center px-4 py-2 font-semibold">Bills</th>
-                  <th className="text-right px-4 py-2 font-semibold">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.expenses.map(e => (
-                  <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => setDetailId(e.id)} data-testid={`expenses-row-${e.id}`}>
-                    <td className="px-4 py-2.5 font-mono text-xs text-indigo-600">{e.voucher_number}</td>
-                    <td className="px-4 py-2.5 text-gray-600">{fmtDate(e.expense_date)}</td>
-                    <td className="px-4 py-2.5 text-gray-800 font-medium">{e.title}</td>
-                    <td className="px-4 py-2.5 text-gray-500">{e.category_name}</td>
-                    <td className="px-4 py-2.5 text-gray-500">{e.payee_name || '—'}</td>
-                    <td className="px-4 py-2.5">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium border capitalize ${PAYMENT_MODE_COLORS[e.payment_mode] || 'bg-gray-50 text-gray-600 border-gray-200'}`}>
-                        {e.payment_mode.replace('_', ' ')}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5 text-right font-bold text-gray-800">{fmt(e.amount)}</td>
-                    <td className="px-4 py-2.5 text-center text-gray-400">{e.attachment_count > 0 ? `📎 ${e.attachment_count}` : '—'}</td>
-                    <td className="px-4 py-2.5 text-right" onClick={ev => ev.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button onClick={() => { setEditing(e); setShowForm(true) }} className="text-xs border border-gray-200 text-gray-500 px-2 py-1 rounded-lg hover:bg-gray-50">Edit</button>
-                        <button onClick={() => handleDelete(e.id)} className="text-xs border border-red-200 text-red-500 px-2 py-1 rounded-lg hover:bg-red-50">Remove</button>
-                      </div>
-                    </td>
+            {/* Mobile: stacked cards with full-width Edit/Remove — a 9-column
+                table has no room for action buttons on a phone even with
+                horizontal scroll, so below md this swaps to cards instead. */}
+            <div className="md:hidden divide-y divide-gray-50">
+              {data.expenses.map(e => (
+                <div key={e.id} className="p-4" data-testid={`expenses-row-${e.id}`}>
+                  <div className="flex items-start justify-between gap-3 cursor-pointer" onClick={() => setDetailId(e.id)}>
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-800 truncate">{e.title}</p>
+                      <p className="text-xs text-gray-400 mt-0.5 font-mono text-indigo-600">{e.voucher_number}</p>
+                    </div>
+                    <span className="font-bold text-gray-800 flex-shrink-0">{fmt(e.amount)}</span>
+                  </div>
+                  <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mt-2 text-xs text-gray-500 cursor-pointer" onClick={() => setDetailId(e.id)}>
+                    <span>{fmtDate(e.expense_date)}</span>
+                    <span>{e.category_name}</span>
+                    {e.payee_name && <span>{e.payee_name}</span>}
+                    <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium border capitalize ${PAYMENT_MODE_COLORS[e.payment_mode] || 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                      {e.payment_mode.replace('_', ' ')}
+                    </span>
+                    {e.attachment_count > 0 && <span>📎 {e.attachment_count}</span>}
+                  </div>
+                  <div className="flex items-center gap-2 mt-3">
+                    <button onClick={() => { setEditing(e); setShowForm(true) }} className="flex-1 text-xs border border-gray-200 text-gray-600 py-2 rounded-lg hover:bg-gray-50 font-medium">Edit</button>
+                    <button onClick={() => handleDelete(e.id)} className="flex-1 text-xs border border-red-200 text-red-500 py-2 rounded-lg hover:bg-red-50 font-medium">Remove</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Tablet/desktop: full table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
+                    <th className="text-left px-4 py-2 font-semibold">Voucher</th>
+                    <th className="text-left px-4 py-2 font-semibold">Date</th>
+                    <th className="text-left px-4 py-2 font-semibold">Title</th>
+                    <th className="text-left px-4 py-2 font-semibold">Category</th>
+                    <th className="text-left px-4 py-2 font-semibold">Payee</th>
+                    <th className="text-left px-4 py-2 font-semibold">Mode</th>
+                    <th className="text-right px-4 py-2 font-semibold">Amount</th>
+                    <th className="text-center px-4 py-2 font-semibold">Bills</th>
+                    <th className="text-right px-4 py-2 font-semibold">Action</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {data.expenses.map(e => (
+                    <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => setDetailId(e.id)}>
+                      <td className="px-4 py-2.5 font-mono text-xs text-indigo-600">{e.voucher_number}</td>
+                      <td className="px-4 py-2.5 text-gray-600">{fmtDate(e.expense_date)}</td>
+                      <td className="px-4 py-2.5 text-gray-800 font-medium">{e.title}</td>
+                      <td className="px-4 py-2.5 text-gray-500">{e.category_name}</td>
+                      <td className="px-4 py-2.5 text-gray-500">{e.payee_name || '—'}</td>
+                      <td className="px-4 py-2.5">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium border capitalize ${PAYMENT_MODE_COLORS[e.payment_mode] || 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                          {e.payment_mode.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-bold text-gray-800">{fmt(e.amount)}</td>
+                      <td className="px-4 py-2.5 text-center text-gray-400">{e.attachment_count > 0 ? `📎 ${e.attachment_count}` : '—'}</td>
+                      <td className="px-4 py-2.5 text-right" onClick={ev => ev.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button onClick={() => { setEditing(e); setShowForm(true) }} className="text-xs border border-gray-200 text-gray-500 px-2 py-1 rounded-lg hover:bg-gray-50">Edit</button>
+                          <button onClick={() => handleDelete(e.id)} className="text-xs border border-red-200 text-red-500 px-2 py-1 rounded-lg hover:bg-red-50">Remove</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
             <div className="flex items-center justify-between px-4 py-3 border-t border-gray-50">
               <p className="text-xs text-gray-400">{data.total} total · Page {page} of {Math.max(1, data.total_pages)}</p>
               <div className="flex gap-1.5">
@@ -661,7 +695,7 @@ function ExpenseFormModal({ schoolId, categories, adminName, adminId, editing, o
               className={`${inputBase} border-gray-200 focus:border-indigo-400 focus:ring-indigo-100`} data-testid="expense-form-title" />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-gray-600">🏷️ Category *</label>
               <select value={categoryId} onChange={e => setCategoryId(e.target.value)}
@@ -678,7 +712,7 @@ function ExpenseFormModal({ schoolId, categories, adminName, adminId, editing, o
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-gray-600">🧑 Payee</label>
               <input value={payee} onChange={e => setPayee(e.target.value)} placeholder="Who was paid"
@@ -691,7 +725,7 @@ function ExpenseFormModal({ schoolId, categories, adminName, adminId, editing, o
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs font-medium text-gray-600">💳 Payment Mode</label>
               <select value={mode} onChange={e => setMode(e.target.value)}
