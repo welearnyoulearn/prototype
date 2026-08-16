@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 
 type ClassInfo = {
   id: number
@@ -317,8 +317,16 @@ export default function Attendance({ teacherId, schoolId }: Props) {
   const presentCount = records.filter(r => r.status === 'present').length
   const absentCount  = records.filter(r => r.status === 'absent').length
   const lateCount    = records.filter(r => r.status === 'late').length
-  const absentStudents = students.filter(s => records.find(r => r.student_id === s.id)?.status === 'absent')
-  const lateStudents   = students.filter(s => records.find(r => r.student_id === s.id)?.status === 'late')
+  // O(1) lookup instead of a `records.find()` per student — this ran once
+  // per student for absentStudents, again for lateStudents, and again per
+  // rendered row further down, each scanning the whole records array.
+  const recordByStudent = useMemo(() => {
+    const map = new Map<number, AttendanceRecord>()
+    for (const r of records) map.set(r.student_id, r)
+    return map
+  }, [records])
+  const absentStudents = students.filter(s => recordByStudent.get(s.id)?.status === 'absent')
+  const lateStudents   = students.filter(s => recordByStudent.get(s.id)?.status === 'late')
   const sessionLabel = session === 'morning' ? 'Morning' : 'Afternoon'
   const dateFormatted = new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 
@@ -770,7 +778,7 @@ export default function Attendance({ teacherId, schoolId }: Props) {
         ) : (
           <div className="divide-y divide-gray-50">
             {students.map((student, idx) => {
-              const status = records.find(r => r.student_id === student.id)?.status || 'present'
+              const status = recordByStudent.get(student.id)?.status || 'present'
               return (
                 <div key={student.id} className="flex items-center px-5 py-3">
                   <span className="text-sm text-gray-400 w-7 flex-shrink-0">{idx + 1}</span>

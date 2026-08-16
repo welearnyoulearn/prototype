@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 
-type Feature    = { key: string; label: string; category: string }
+type Feature    = { key: string; label: string; category: string; portals: string[] }
+
+const PORTAL_LABEL: Record<string, string> = { 'school-admin': 'School', student: 'Student', parent: 'Parent' }
 type Matrix     = Record<string, Record<string, boolean>>  // feature_key → { basic, standard, premium }
 type StaffLimits = Record<string, string>  // tier → '' (unlimited) | '2' | '5' etc.
 
@@ -94,13 +95,9 @@ export default function FeaturePlansPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Top bar */}
+      {/* Page header */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-20">
-        <div className="flex items-center gap-3">
-          <Link href="/platform-admin" className="text-gray-400 hover:text-gray-600 text-sm">← Platform Admin</Link>
-          <span className="text-gray-300">/</span>
-          <span className="text-gray-800 font-medium text-sm">Feature Plans</span>
-        </div>
+        <h1 className="text-lg font-bold text-gray-900">Feature Plans</h1>
         <div className="flex items-center gap-3">
           {saved && <span className="text-green-600 text-sm font-medium">✓ Saved — school admins will see changes immediately</span>}
           {error && <span className="text-red-600 text-sm">{error}</span>}
@@ -173,7 +170,7 @@ export default function FeaturePlansPage() {
                     className={`grid grid-cols-[1fr_100px_100px_100px] items-center hover:bg-gray-50 transition-colors
                       ${gi < grouped.length - 1 || fi < group.items.length - 1 ? 'border-b border-gray-100' : ''}`}
                   >
-                    <div className="px-5 py-3.5 flex items-center gap-2">
+                    <div className="px-5 py-3.5 flex items-center gap-2 flex-wrap">
                       <span className="text-sm text-gray-800 font-medium">{feature.label}</span>
                       {/* Badge: show tier restriction at a glance */}
                       {(() => {
@@ -185,6 +182,15 @@ export default function FeaturePlansPage() {
                         if (!b && !s && !p) return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-400">Disabled</span>
                         return null
                       })()}
+                      {/* Badge: this toggle also gates other portals, not just School Admin */}
+                      {feature.portals?.length > 1 && (
+                        <span
+                          className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700"
+                          title={`Also gates: ${feature.portals.filter(p => p !== 'school-admin').map(p => PORTAL_LABEL[p] || p).join(', ')} portal`}
+                        >
+                          {feature.portals.map(p => PORTAL_LABEL[p] || p).join(' · ')}
+                        </span>
+                      )}
                     </div>
 
                     {TIERS.map(t => {

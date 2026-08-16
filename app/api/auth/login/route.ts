@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { verifyPassword, JWTPayload, setAuthCookie, setPlatformAuthCookie } from '@/lib/auth'
+import { recordSessionStart } from '@/lib/usageTracking'
 
 export async function POST(req: NextRequest) {
 
@@ -65,12 +66,20 @@ export async function POST(req: NextRequest) {
       await setAuthCookie(payload)
     }
 
+    const usageSessionId = await recordSessionStart({
+      schoolId: user.school_id ?? null,
+      actorId: user.id,
+      actorRole: user.role,
+      actorName: user.full_name || user.email,
+    })
+
     return NextResponse.json({
       success: true,
       role: user.role,
       firstLogin: user.first_login,
       profileCompleted: user.profile_completed,
       schoolId: user.school_id,
+      usageSessionId,
     })
   } catch (error) {
     console.error('[auth/login]', error)

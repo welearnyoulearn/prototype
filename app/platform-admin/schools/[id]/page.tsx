@@ -578,7 +578,7 @@ export default function SchoolDetailPage() {
         </div>
 
         {/* ── Watchline ────────────────────────────────────────────────────── */}
-        <WatchlineCard schoolId={schoolId} schoolName={school?.name ?? ''} />
+        <WatchlineCard schoolId={schoolId} schoolName={school?.name ?? ''} portalOverrides={portalOverrides} />
 
         {/* ── Danger Zone ──────────────────────────────────────────────────── */}
         <div className="bg-white rounded-xl border border-red-200 overflow-hidden">
@@ -769,7 +769,7 @@ export default function SchoolDetailPage() {
 }
 
 // ── Watchline card ────────────────────────────────────────────────────────────
-function WatchlineCard({ schoolId, schoolName }: { schoolId: string; schoolName: string }) {
+function WatchlineCard({ schoolId, schoolName, portalOverrides }: { schoolId: string; schoolName: string; portalOverrides: Record<string, boolean> }) {
   const [enabled, setEnabled]   = useState(false)
   const [saving, setSaving]     = useState(false)
   const [saved, setSaved]       = useState(false)
@@ -778,14 +778,16 @@ function WatchlineCard({ schoolId, schoolName }: { schoolId: string; schoolName:
   }>>([])
   const [errLoading, setErrLoading] = useState(true)
 
+  // Override state comes from the parent page's own feature-overrides fetch
+  // (Promise.all'd alongside school + features) — no need for a second,
+  // identical request here.
   useEffect(() => {
-    // Load current override state
-    fetch(`/api/platform/schools/${schoolId}/feature-overrides`)
-      .then(r => r.ok ? r.json() : { overrides: {} })
-      .then(d => setEnabled(d.overrides['api-monitoring'] === true))
-      .catch(() => {})
+    setEnabled(portalOverrides['api-monitoring'] === true)
+  }, [portalOverrides])
 
-    // Load recent errors for this school (always shown regardless of toggle)
+  useEffect(() => {
+    // Recent errors are specific to this card and aren't fetched anywhere
+    // else on the page, so this one stays.
     fetch(`/api/platform/watchline?type=error&school_id=${schoolId}&page=0`)
       .then(r => r.ok ? r.json() : { rows: [] })
       .then(d => setRecentErrors((d.rows || []).slice(0, 5)))
