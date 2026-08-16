@@ -10,6 +10,7 @@ import AppLoader from '../components/AppLoader'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
+import { ALL_FEATURES, PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 
 // Always-loaded (small, needed immediately)
 import Overview from './components/Overview'
@@ -385,9 +386,21 @@ function SchoolAdmin() {
   // rides on 'curriculum's enablement instead of a 'syllabus-tracking' key
   // (which was never in ALL_FEATURES / plan_features, so checking it directly
   // here would have made this tab permanently invisible to every school).
+  // A feature can be entitled without belonging in School Admin's own sidebar
+  // at all — e.g. a student/parent-only feature whose ALL_FEATURES entry
+  // doesn't list 'school-admin' in `portals`. Items with no ALL_FEATURES
+  // entry (legacy keys not yet migrated into the catalog) default to visible
+  // so nothing existing silently disappears.
+  const isSchoolAdminScoped = (key: string) => {
+    const featureKey = PORTAL_NAV_KEY_ALIASES[key] ?? key
+    const feature = ALL_FEATURES.find(f => f.key === featureKey)
+    return !feature || feature.portals.includes('school-admin')
+  }
+
   const enabledNavItems = NAV_ITEMS.filter(item =>
     tier !== 'none' &&
     enabledFeatures.has(item.key === 'syllabus-tracking' ? 'curriculum' : item.key) &&
+    isSchoolAdminScoped(item.key) &&
     !(isStaffAccount && item.key === 'settings')
   )
 
@@ -482,9 +495,18 @@ function SchoolAdmin() {
             {/* School branding */}
             <div className="px-4 py-4 border-b border-slate-700/60">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-base flex-shrink-0 shadow-lg">
-                  {selectedSchool.name.charAt(0).toUpperCase()}
-                </div>
+                {selectedSchool.logo_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={selectedSchool.logo_url}
+                    alt={selectedSchool.name}
+                    className="w-9 h-9 rounded-xl object-cover flex-shrink-0 shadow-lg bg-white"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-base flex-shrink-0 shadow-lg">
+                    {selectedSchool.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
                 <div className="min-w-0">
                   <p className="text-sm font-bold text-white leading-tight truncate">{selectedSchool.name}</p>
                   <p className="text-[11px] text-slate-400 mt-0.5 truncate">{[selectedSchool.city, selectedSchool.country].filter(Boolean).join(', ') || selectedSchool.type || 'School'}</p>
@@ -569,10 +591,10 @@ function SchoolAdmin() {
                   })()}
 
                   {/* Locked features */}
-                  {NAV_ITEMS.filter(item => !enabledFeatures.has(item.key)).length > 0 && (
+                  {NAV_ITEMS.filter(item => isSchoolAdminScoped(item.key) && !enabledFeatures.has(item.key)).length > 0 && (
                     <div className="mt-3 pt-3 border-t border-slate-800">
                       <p className="px-4 pb-1.5 text-[9px] font-bold text-slate-600 uppercase tracking-[0.15em]">Upgrade to Unlock</p>
-                      {NAV_ITEMS.filter(item => !enabledFeatures.has(item.key)).map(item => (
+                      {NAV_ITEMS.filter(item => isSchoolAdminScoped(item.key) && !enabledFeatures.has(item.key)).map(item => (
                         <div key={item.key} className="flex items-center gap-3 px-4 py-1.5 text-sm text-slate-600 cursor-not-allowed select-none">
                           <svg className="w-4 h-4 flex-shrink-0 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
