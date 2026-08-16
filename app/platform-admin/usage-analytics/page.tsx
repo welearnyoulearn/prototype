@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import Link from 'next/link'
 
 type Trend = { day: string; login_count: number; unique_actors: number; total_duration_seconds: number }
 type RoleBreakdown = { actor_role: string; login_count: number; unique_actors: number; total_duration_seconds: number }
@@ -192,23 +191,15 @@ export default function UsageAnalyticsPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Top bar */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link href="/platform-admin" className="text-gray-400 hover:text-gray-600 text-sm">← Platform Admin</Link>
-          <span className="text-gray-300">/</span>
-          <span className="text-gray-800 font-medium text-sm">Usage Analytics</span>
+      {/* Page header */}
+      {overview && (
+        <div className="bg-white border-b border-gray-200 px-6 py-2 flex items-center justify-end">
+          <span className="inline-flex items-center gap-1.5 bg-green-50 text-green-700 text-xs font-medium px-3 py-1 rounded-full border border-green-200">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            {fmt(overview.active_now)} active now
+          </span>
         </div>
-        <div className="flex items-center gap-2">
-          {overview && (
-            <span className="inline-flex items-center gap-1.5 bg-green-50 text-green-700 text-xs font-medium px-3 py-1 rounded-full border border-green-200">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-              {fmt(overview.active_now)} active now
-            </span>
-          )}
-          <span className="bg-purple-100 text-purple-700 text-xs font-medium px-3 py-1 rounded-full">Platform Admin</span>
-        </div>
-      </div>
+      )}
 
       <div className="max-w-6xl mx-auto px-6 py-8 space-y-6">
 

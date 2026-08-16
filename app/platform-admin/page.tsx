@@ -2,9 +2,7 @@
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
-import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 
 type School = {
   id: number
@@ -69,7 +67,6 @@ function isNewThisWeek(dateStr: string) {
 }
 
 export default function PlatformAdmin() {
-  const router = useRouter()
   const [tab, setTab]                     = useState<Tab>('active')
   const [schools, setSchools]             = useState<School[]>([])
   const [stats, setStats]                 = useState<PlatformStats | null>(null)
@@ -264,17 +261,6 @@ export default function PlatformAdmin() {
 
   useUsageHeartbeat()
 
-  async function handleLogout() {
-    const usageSessionId = getUsageSessionId()
-    await fetch('/api/auth/logout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usageSessionId }),
-    })
-    clearUsageSessionId()
-    router.push('/login')
-  }
-
   // Filter + sort — memoized so typing in the search box (or any unrelated
   // re-render) doesn't re-filter/re-sort the whole schools array every time;
   // only recomputes when the inputs that actually affect the result change.
@@ -340,59 +326,19 @@ export default function PlatformAdmin() {
   return (
     <div className="min-h-screen bg-gray-50">
 
-      {/* ── Top bar ── */}
+      {/* ── Page header ── */}
       <div className="bg-white border-b border-gray-200 px-6 py-3.5 flex items-center justify-between sticky top-0 z-20 shadow-sm">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-purple-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">W</span>
-            </div>
-            <span className="font-bold text-gray-900">WLYL</span>
-          </div>
-          <span className="text-gray-300">|</span>
-          <h1 className="text-sm font-semibold text-gray-700">Platform Admin</h1>
-        </div>
+        <h1 className="text-lg font-bold text-gray-900">Schools</h1>
         <div className="flex items-center gap-2">
           <button onClick={openAdminModal}
             className="text-xs text-purple-600 hover:text-purple-800 border border-purple-200 bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg transition-colors font-medium">
             👥 Admin Team
           </button>
-          <Link href="/platform-admin/curriculum"
-            className="text-xs text-purple-600 hover:text-purple-800 hover:bg-purple-100 border border-purple-200 px-3 py-1.5 rounded-lg transition-colors font-semibold bg-purple-50">
-            📚 Master Syllabus
-          </Link>
-          <Link href="/platform-admin/library"
-            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors font-medium">
-            📖 Digital Library
-          </Link>
-          <Link href="/platform-admin/features"
-            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors font-medium">
-            Feature Plans
-          </Link>
-          <Link href="/platform-admin/audit"
-            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors">
-            Audit Log
-          </Link>
-          <Link href="/platform-admin/logs"
-            className="text-xs text-teal-700 hover:text-teal-900 border border-teal-200 bg-teal-50 hover:bg-teal-100 px-3 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-teal-500 inline-block" />
-            Watchline
-          </Link>
-          <Link href="/platform-admin/usage-analytics"
-            className="text-xs text-indigo-700 hover:text-indigo-900 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 inline-block animate-pulse" />
-            Usage Analytics
-          </Link>
           <button
             onClick={() => { fetchSchools(tab); fetchStats() }}
             className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors"
             title="Refresh data"
           >↻ Refresh</button>
-          <span className="bg-purple-100 text-purple-700 text-xs font-medium px-3 py-1 rounded-full">Platform Admin</span>
-          <button onClick={handleLogout}
-            className="text-sm text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition-colors">
-            Logout
-          </button>
         </div>
       </div>
 
