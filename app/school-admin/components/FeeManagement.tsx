@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState, useCallback, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { useFeature } from '../features-context'
+import { useEffect, useState, useCallback, useMemo, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useFeature } from '@/lib/features-context'
+import { GRADE_SEQUENCE, FINAL_GRADE } from '@/lib/grades'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -10,6 +11,10 @@ type FeeCategory = {
   frequency: 'monthly' | 'quarterly' | 'annual' | 'one_time'
   is_active: boolean; structure_count: number; ledger_count: number
   category_type: 'fixed' | 'variable'
+  // System-generated categories ("Previous Year Dues", "Passout Dues") are billed
+  // directly to each student's ledger by year-rollover/year-end — they never get a
+  // fee_structures row and must be excluded from the fixed-fee-setup gate below.
+  is_system?: boolean
 }
 
 type ApplStudent = { id: number; name: string; roll_number: string; section: string }
@@ -42,6 +47,7 @@ type LedgerEntry = {
   due_date: string; status: 'pending' | 'paid' | 'partial' | 'overdue' | 'waived' | 'settled'
   days_overdue: number; has_edits: boolean
   source_academic_year: string | null
+  notes: string | null
 }
 
 type FeeStats = {
@@ -94,6 +100,14 @@ type PaymentRecord = {
   bill_year?: string; ledger_id?: number
 }
 
+type ReceiptHeaderBlock = {
+  text: string
+  size: 'sm' | 'md' | 'lg' | 'xl'
+  bold: boolean
+  italic: boolean
+  align: 'left' | 'center' | 'right'
+}
+
 type PaySuccess = {
   receipt_number: string; student_name: string; amount: number
   school_name: string; roll_number: string; grade: string; section: string; parent_name: string | null
@@ -105,11 +119,15 @@ type PaySuccess = {
   // `row` state, which can still reflect the pre-payment balance if the admin clicks
   // Print before the refetch has resolved and re-rendered.
   outstanding_before?: number
+  // Per-fee-head breakdown from the API — a single payment can span multiple fee
+  // categories (e.g. Tuition + Transport + Hostel), so this is the source of truth
+  // for the receipt table rather than the single category_name/period_label above.
+  line_items?: { category_name: string; period_label: string; amount: number }[]
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const GRADES = ['Nursery','LKG','UKG','1','2','3','4','5','6','7','8','9','10','11','12']
+const GRADES = GRADE_SEQUENCE
 function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
 
 const GRADE_GROUPS = [
@@ -117,7 +135,6 @@ const GRADE_GROUPS = [
   { key: 'primary',   label: 'Primary',   sub: 'Grade 1–5',   grades: ['1','2','3','4','5'] },
   { key: 'middle',    label: 'Middle',    sub: 'Grade 6–8',   grades: ['6','7','8'] },
   { key: 'secondary', label: 'Secondary', sub: 'Grade 9–10',  grades: ['9','10'] },
-  { key: 'senior',    label: 'Senior',    sub: 'Grade 11–12',  grades: ['11','12'] },
 ]
 
 const FREQ_LABEL: Record<string, string> = {
@@ -269,20 +286,184 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
     </body></html>`
 }
 
+// ─── Shared fee-receipt rendering (branding, signature block, dual-copy layout) ─────
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
+
+const RECEIPT_HEADER_SIZE_PX: Record<ReceiptHeaderBlock['size'], number> = { sm: 11, md: 14, lg: 18, xl: 24 }
+
+function renderHeaderBlocks(blocks: ReceiptHeaderBlock[] = []): string {
+  return blocks.map(b =>
+    `<div style="font-size:${RECEIPT_HEADER_SIZE_PX[b.size]}px;font-weight:${b.bold ? 700 : 400};font-style:${b.italic ? 'italic' : 'normal'};text-align:${b.align}">${escapeHtml(b.text)}</div>`
+  ).join('')
+}
+
+type ReceiptCardData = {
+  school_name: string
+  logo_url: string | null
+  logo_align: 'left' | 'center' | 'right'
+  header_blocks: ReceiptHeaderBlock[]
+  student_name: string
+  roll_number: string
+  grade: string
+  section: string
+  parent_name: string | null
+  receipt_number: string
+  lines: { label: string; period: string; amount: number }[]
+  total_paid: number
+  payment_mode: string
+  paid_date: string
+  transaction_ref?: string | null
+  collected_by_name?: string | null
+  notes?: string | null
+  balance_after?: number
+}
+
+const RECEIPT_MODE_LABEL: Record<string, string> = {
+  cash: 'Cash', cheque: 'Cheque', dd: 'Demand Draft', upi: 'UPI', online: 'Online Transfer',
+}
+
+function receiptCard(data: ReceiptCardData, copyLabel: string): string {
+  const lineRows = data.lines.map(l =>
+    `<tr><td>${escapeHtml(l.label)}</td><td>${escapeHtml(l.period)}</td><td style="text-align:right">${RUPEE(l.amount)}</td></tr>`
+  ).join('')
+  return `
+${copyLabel ? `<div class="copy-label">${escapeHtml(copyLabel)}</div>` : ''}
+<div class="hdr">
+  ${data.logo_url && data.logo_align === 'center' ? `<div style="text-align:center;margin-bottom:4px"><img src="${escapeHtml(data.logo_url)}" style="height:56px;object-fit:contain" /></div>` : ''}
+  <div class="hdr-row">
+    ${data.logo_url && data.logo_align === 'left' ? `<img class="hdr-logo left" src="${escapeHtml(data.logo_url)}" style="height:64px;object-fit:contain" />` : ''}
+    <div class="hdr-text">
+      <div class="school">${escapeHtml(data.school_name)}</div>
+      ${renderHeaderBlocks(data.header_blocks)}
+      <div class="rtitle">FEE RECEIPT</div>
+      <div class="rno">Receipt No: <strong>${escapeHtml(data.receipt_number)}</strong></div>
+    </div>
+    ${data.logo_url && data.logo_align === 'right' ? `<img class="hdr-logo right" src="${escapeHtml(data.logo_url)}" style="height:64px;object-fit:contain" />` : ''}
+  </div>
+</div>
+<div class="grid2">
+  <div><div class="lbl">Student Name</div><div class="val">${escapeHtml(data.student_name)}</div></div>
+  <div><div class="lbl">Roll Number</div><div class="val">${escapeHtml(data.roll_number)}</div></div>
+  <div><div class="lbl">Class</div><div class="val">Grade ${escapeHtml(data.grade)}${escapeHtml(data.section)}</div></div>
+  <div><div class="lbl">Parent / Guardian</div><div class="val">${escapeHtml(data.parent_name || '—')}</div></div>
+</div>
+<table><thead><tr><th>Fee Head</th><th>Period</th><th style="text-align:right">Amount</th></tr></thead>
+<tbody>${lineRows}</tbody>
+<tfoot><tr class="tot"><td colspan="2" style="text-align:right">Total Paid:</td><td style="text-align:right">${RUPEE(data.total_paid)}</td></tr></tfoot></table>
+<div class="grid2">
+  <div><div class="lbl">Payment Mode</div><div class="val">${RECEIPT_MODE_LABEL[data.payment_mode] || escapeHtml(data.payment_mode)}</div></div>
+  <div><div class="lbl">Payment Date</div><div class="val">${data.paid_date ? new Date(data.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) : '—'}</div></div>
+  ${data.transaction_ref ? `<div><div class="lbl">Reference</div><div class="val">${escapeHtml(data.transaction_ref)}</div></div>` : ''}
+</div>
+${data.notes ? `<div style="margin-bottom:10px"><div class="lbl">Remarks</div><div class="val">${escapeHtml(data.notes)}</div></div>` : ''}
+<div class="sig-row">
+  <div class="sig-box">${escapeHtml(data.collected_by_name || 'Collected By')}</div>
+  <div class="sig-box">Authorized Signatory</div>
+</div>
+${data.balance_after != null ? `<div class="ftr">Balance after this payment: ${RUPEE(data.balance_after)} &nbsp;·&nbsp; Generated on ${new Date().toLocaleString('en-IN')}</div>` : `<div class="ftr">Generated on ${new Date().toLocaleString('en-IN')} &nbsp;·&nbsp; Computer-generated receipt.</div>`}
+`
+}
+
+const RECEIPT_STYLE = `
+  *{box-sizing:border-box}
+  @page { size: A4; margin: 10mm }
+  body{font-family:Arial,sans-serif;color:#222;max-width:720px;margin:0 auto}
+  .sheet{page-break-inside:avoid;overflow:hidden;position:relative;padding:8px 4px}
+  .cut-line{height:6mm;line-height:6mm;overflow:hidden;border-top:1px dashed #999;text-align:center;color:#999;font-size:10px}
+  .copy-label{position:absolute;top:2px;right:4px;font-size:9px;color:#999;text-transform:uppercase;letter-spacing:.5px}
+  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:10px}
+  .hdr-row{position:relative}
+  .hdr-row .hdr-logo{position:absolute;top:50%;transform:translateY(-50%)}
+  .hdr-row .hdr-logo.left{left:0}.hdr-row .hdr-logo.right{right:0}
+  .hdr-text{text-align:center}
+  .school{font-size:18px;font-weight:bold}.rtitle{font-size:13px;font-weight:bold;margin-top:4px;letter-spacing:1px}
+  .rno{font-size:11px;color:#555;margin-top:3px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .lbl{font-size:10px;color:#888;margin-bottom:1px}.val{font-size:12px;font-weight:500}
+  table{width:100%;border-collapse:collapse;margin:8px 0}
+  th{background:#f3f4f6;padding:5px 8px;text-align:left;font-size:10px;border:1px solid #ddd}
+  td{padding:5px 8px;font-size:11px;border:1px solid #ddd}
+  .tot td{font-weight:bold;background:#f9fafb}
+  .sig-row{display:flex;justify-content:space-between;margin-top:16px}
+  .sig-box{text-align:center;border-top:1px solid #333;width:150px;padding-top:3px;font-size:10px;color:#555}
+  .ftr{margin-top:8px;text-align:center;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:6px}
+  @media print{body{padding:0}}
+`
+
+// Writes HTML into a popup window and prints only after any <img> tags (e.g. school
+// logo from Cloudinary) have finished loading — printing immediately after
+// document.write() races the image request and can print a blank logo.
+function writeAndPrint(win: Window, html: string) {
+  win.document.write(html); win.document.close()
+
+  const images = Array.from(win.document.images)
+  if (images.length === 0) { win.print(); return }
+  let remaining = images.length
+  const proceed = () => { if (--remaining <= 0) win.print() }
+  images.forEach(img => {
+    if (img.complete) proceed()
+    else { img.addEventListener('load', proceed); img.addEventListener('error', proceed) }
+  })
+}
+
+function openReceiptWindow(receiptNumber: string, bodyHtml: string) {
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${escapeHtml(receiptNumber)}</title>
+<style>${RECEIPT_STYLE}</style></head><body>${bodyHtml}</body></html>`
+  const win = window.open('', '_blank', 'width=800,height=900')
+  if (win) writeAndPrint(win, html)
+}
+
+// Two copies (Office + Payer) on one A4 sheet — used for every printed receipt
+// (payment collection and passbook reprints alike). Sheet heights + cut-line are
+// budgeted to total well under the ~277mm usable A4 height (297mm page - 10mm
+// top/bottom margins) so both copies always land on a single page.
+function printDualCopyReceipt(data: ReceiptCardData) {
+  openReceiptWindow(data.receipt_number, `
+<div class="sheet" style="height:133mm">${receiptCard(data, 'Office Copy')}</div>
+<div class="cut-line">✂ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>
+<div class="sheet" style="height:133mm">${receiptCard(data, 'Payer Copy')}</div>`)
+}
+
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 import dynamic from 'next/dynamic'
 
 export default function FeeManagement({
-  schoolId, adminName
+  schoolId, adminName, schoolName, schoolLogoUrl, schoolLogoAlign, schoolHeaderBlocks,
 }: {
   schoolId: number
   adminName?: string
+  // Passed down from the school-admin page's already-loaded `selectedSchool` (fetched
+  // before this component ever mounts) rather than fetched again here — avoids a race
+  // where a print button could be clicked before a fresh in-component fetch resolved,
+  // which showed a blank/placeholder school name on printed receipts.
+  schoolName?: string
+  schoolLogoUrl?: string | null
+  schoolLogoAlign?: 'left' | 'center' | 'right' | null
+  schoolHeaderBlocks?: ReceiptHeaderBlock[]
 }) {
-  type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'students' | 'reports' | 'yearend'
+  type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'students' | 'reports' | 'yearend' | 'leavers'
   const [activeTab, setActiveTab] = useState<Tab>('overview')
 
   const hasOnlinePayments = useFeature('online-payments')
+
+  // Receipt branding — set once in School Profile, read here for every print function.
+  // Seeded from props (the school-admin page's `selectedSchool`, already loaded before
+  // this component ever mounts) so there's never an empty-window race where a print
+  // button could be clicked before branding data exists. The fetch below just refreshes
+  // it in case School Profile was edited earlier in the same session without a reload.
+  const [branding, setBranding] = useState<{ school_name: string; logo_url: string | null; logo_align: 'left' | 'center' | 'right'; receipt_header_blocks: ReceiptHeaderBlock[] }>({
+    school_name: schoolName ?? '', logo_url: schoolLogoUrl ?? null, logo_align: schoolLogoAlign ?? 'center', receipt_header_blocks: schoolHeaderBlocks ?? [],
+  })
+  useEffect(() => {
+    fetch(`/api/schools/${schoolId}`).then(r => r.ok ? r.json() : null).then(d => {
+      if (d) setBranding({ school_name: d.name ?? '', logo_url: d.logo_url ?? null, logo_align: d.logo_align ?? 'center', receipt_header_blocks: d.receipt_header_blocks ?? [] })
+    }).catch(() => {})
+  }, [schoolId])
 
   // Shared
   const [academicYear, setAcademicYear]   = useState('')
@@ -384,8 +565,6 @@ export default function FeeManagement({
   const [showPaymentsId, setShowPaymentsId]     = useState<number | null>(null)
 
   // Collect (inline from ledger or search)
-  const [collectSearch, setCollectSearch]   = useState('')
-  const [collectEntries, setCollectEntries] = useState<LedgerEntry[]>([])
   const [collectLoading, setCollectLoading] = useState(false)
   const [selectedEntry, setSelectedEntry]   = useState<LedgerEntry | null>(null)
   const [payAmount, setPayAmount]           = useState('')
@@ -476,13 +655,34 @@ export default function FeeManagement({
   const [pbErr, setPbErr]                        = useState('')
   const [pbData, setPbData]                     = useState<PassbookData | null>(null)
   const [pbLoading, setPbLoading]               = useState(false)
-  const [pbSection, setPbSection]               = useState<'timeline' | 'bills' | 'payments' | 'waivers'>('bills')
+  const [pbSection, setPbSection]               = useState<'timeline' | 'bills' | 'payments' | 'waivers' | 'receipts'>('bills')
   // Derived passbook data filtered to the selected academic year
   const pbYearGroup = pbData?.ledger_by_year.find(y => y.academic_year === academicYear) ?? null
   const pbSummary   = pbYearGroup
     ? { total_billed: pbYearGroup.total_billed, total_paid: pbYearGroup.total_paid, total_waived: pbYearGroup.total_waived, discretionary_waived: pbYearGroup.discretionary_waived ?? pbYearGroup.total_waived, outstanding: pbYearGroup.outstanding }
     : { total_billed: 0, total_paid: 0, total_waived: 0, discretionary_waived: 0, outstanding: 0 }
   const pbPayments  = pbData?.payments.filter(p => p.bill_year === academicYear) ?? []
+  // One receipt_number can span several fee-category rows in pbPayments (one
+  // payment covering multiple categories at once) — group them here so the
+  // Print Receipts tab lists one entry per actual receipt, not one per line.
+  const pbReceipts = (() => {
+    const byReceipt = new Map<string, { receipt_number: string; paid_date: string; total: number; cancelled: boolean; lineCount: number }>()
+    for (const p of pbPayments) {
+      const existing = byReceipt.get(p.receipt_number)
+      const isCancelled = p.payment_status === 'cancelled'
+      if (existing) {
+        existing.total += isCancelled ? 0 : Number(p.amount)
+        existing.lineCount += 1
+        existing.cancelled = existing.cancelled && isCancelled
+      } else {
+        byReceipt.set(p.receipt_number, {
+          receipt_number: p.receipt_number, paid_date: p.paid_date,
+          total: isCancelled ? 0 : Number(p.amount), cancelled: isCancelled, lineCount: 1,
+        })
+      }
+    }
+    return Array.from(byReceipt.values()).sort((a, b) => new Date(b.paid_date).getTime() - new Date(a.paid_date).getTime())
+  })()
   const pbWaivers   = pbData?.waivers.filter(w => w.bill_year === academicYear) ?? []
   const pbTimeline  = pbData?.timeline.filter(t => t.academic_year === academicYear) ?? []
   const pbYearOnly  = pbYearGroup ? [pbYearGroup] : []
@@ -595,6 +795,74 @@ export default function FeeManagement({
   } | null>(null)
   const [passoutLoading, setPassoutLoading] = useState(false)
 
+  // ── Leavers & Dues: students removed from the school (status != 'active', not
+  // in the passout ledger) who still carry an unresolved balance from a prior year ──
+  type RemovedStudent = {
+    student_id: number
+    student_name: string
+    roll_number: string
+    grade: string | null
+    section: string | null
+    student_status: string
+    passout_year: string | null
+    total_billed: number
+    total_collected: number
+    outstanding: number
+    academic_years: string[]
+  }
+  const [removedData, setRemovedData] = useState<{
+    summary: { student_count: number; total_outstanding: number }
+    students: RemovedStudent[]
+  } | null>(null)
+  const [removedLoading, setRemovedLoading] = useState(false)
+  const loadRemovedStudents = useCallback(async () => {
+    setRemovedLoading(true)
+    try {
+      const res = await fetch(`/api/fees/removed-students?school_id=${schoolId}`)
+      if (res.ok) { clearLoadError('removed'); setRemovedData(await res.json()) }
+      else setLoadError('removed', 'Could not load removed-student dues — try refreshing')
+    } catch { setLoadError('removed', 'Network error — could not load removed-student dues') }
+    finally { setRemovedLoading(false) }
+  }, [schoolId])
+  useEffect(() => { if (activeTab === 'leavers') loadRemovedStudents() }, [activeTab, loadRemovedStudents])
+
+  const [removedCollectLoading, setRemovedCollectLoading] = useState<number | null>(null)
+  async function collectRemovedStudent(s: RemovedStudent) {
+    setRemovedCollectLoading(s.student_id)
+    try {
+      const allEntries: LedgerEntry[] = []
+      for (const yr of s.academic_years) {
+        const res = await fetch(`/api/fees/ledger?school_id=${schoolId}&student_id=${s.student_id}&academic_year=${encodeURIComponent(yr)}`)
+        if (res.ok) allEntries.push(...(await res.json() as LedgerEntry[]))
+      }
+      const open = allEntries.filter(e => ['pending', 'partial', 'overdue'].includes(e.status))
+      if (open.length === 0) { setPayError('No outstanding dues found for this student'); setRemovedCollectLoading(null); return }
+      const row: StudentRow = {
+        student_id: s.student_id, student_name: s.student_name, roll_number: s.roll_number,
+        school_roll_number: null, grade: s.grade ?? '—', section: s.section ?? '',
+        email: null, phone: null, parent_name: null, parent_phone: null, parent_email: null,
+        student_status: s.student_status,
+        total_billed: open.reduce((a, e) => a + Number(e.amount_due), 0),
+        total_paid: 0,
+        outstanding: s.outstanding,
+        open_entries: open, all_entries: allEntries,
+        has_overdue: open.some(e => e.status === 'overdue'), never_paid: false,
+      }
+      setActiveTab('collect' as Tab)
+      setCollectionView('counter')
+      setOpenStudentId(s.student_id)
+      setCollectChecked(new Set(open.map(e => e.id)))
+      const fullTotal = open.reduce((a, e) => a + Number(e.balance), 0)
+      setPayAmount(fullTotal > 0 ? String(fullTotal) : '')
+      setPayMode('cash'); setPayRef(''); setPayNotes(''); setPayDate(new Date().toISOString().slice(0, 10))
+      setPayError(''); setPaySuccess(null); setShowCollectForm(true)
+      // Reuse the same "synthesised row not in the normal ledger list" slot as passout
+      // students — openStudent falls back to this when the id isn't in studentRows.
+      setPassoutOpenStudent(row)
+    } catch { setPayError('Network error — could not load this student\'s dues') }
+    setRemovedCollectLoading(null)
+  }
+
   // 15-day banner: days until year end (null = not loaded yet, -1 = not applicable)
   const [daysUntilYearEnd, setDaysUntilYearEnd] = useState<number | null>(null)
   const [yearEndDate, setYearEndDate]           = useState<string | null>(null)
@@ -642,12 +910,29 @@ export default function FeeManagement({
   const [catChangelogLoading, setCatChangelogLoading] = useState(false)
 
   // ── Load academic years ──────────────────────────────────────────────────────
+  // A failed fetch (network error, 500, DB connection-pool exhaustion, etc.)
+  // must never be mistaken for "this school genuinely has zero academic
+  // years" — that misread is exactly what showed the "Create your Academic
+  // Year" first-login wizard to a school that already has real years, purely
+  // because one transient request failed. r.ok distinguishes "the request
+  // succeeded and truly returned nothing" from "the request itself failed."
   const loadAcademicYears = useCallback(() => {
     Promise.all([
       fetch(`/api/academic-year/current?school_id=${schoolId}`).then(r => r.ok ? r.json() : null),
-      fetch(`/api/academic-years?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
+      fetch(`/api/academic-years?school_id=${schoolId}`).then(r => r.ok ? { ok: true, data: r.json() } : { ok: false, data: null }),
       fetch(`/api/fees/year-rollover?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
-    ]).then(([current, all, closed]) => {
+    ]).then(async ([current, yearsResult, closed]) => {
+      if (!yearsResult.ok) {
+        // The years list itself failed to load — show a retry banner, never
+        // the "no years exist yet" wizard, and leave whatever state was
+        // already on screen alone rather than clearing it out from under the
+        // admin.
+        setLoadError('academicYears', 'Could not load academic years — try refreshing')
+        return
+      }
+      clearLoadError('academicYears')
+
+      const all = await yearsResult.data
       const allYears: { label: string; end_date: string }[] = Array.isArray(all) ? all : []
       const labels: string[] = allYears.map((y) => y.label)
       const cur: string = current?.label ?? labels[0] ?? ''
@@ -656,7 +941,8 @@ export default function FeeManagement({
       const closedSet = new Set<string>(Array.isArray(closed) ? closed.map((c: { academic_year: string }) => c.academic_year) : [])
       setClosedYears(closedSet)
 
-      // Show first-login wizard if no academic years exist yet
+      // Show first-login wizard only now that we know the request genuinely
+      // succeeded and the school genuinely has zero academic years.
       if (labels.length === 0) {
         setShowYearWizard(true)
         return
@@ -671,9 +957,11 @@ export default function FeeManagement({
         setDaysUntilYearEnd(diff)
         setYearEndDate(curYear.end_date)
       } else {
-        setDaysUntilYearEnd(-1)
+        setDaysUntilYearEnd(null)
       }
-    }).catch(() => { setAcademicYears([]); setAcademicYear('') })
+    }).catch(() => {
+      setLoadError('academicYears', 'Network error — could not load academic years')
+    })
   }, [schoolId])
 
   useEffect(() => { loadAcademicYears() }, [loadAcademicYears])
@@ -986,92 +1274,6 @@ export default function FeeManagement({
     if (r.ok) setCategories(prev => prev.map(c => c.id === catId ? { ...c, is_active: true } : c))
   }
 
-  function printReceipt(data: PaySuccess) {
-    const modeLabel: Record<string, string> = {
-      cash: 'Cash', cheque: 'Cheque', dd: 'Demand Draft', upi: 'UPI', online: 'Online Transfer',
-    }
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${data.receipt_number}</title>
-<style>
-  body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:720px;margin:0 auto}
-  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:20px}
-  .school{font-size:22px;font-weight:bold}
-  .rtitle{font-size:15px;font-weight:bold;margin-top:6px;letter-spacing:1px}
-  .rno{font-size:12px;color:#555;margin-top:4px}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
-  .lbl{font-size:11px;color:#888;margin-bottom:2px}
-  .val{font-size:14px;font-weight:500}
-  table{width:100%;border-collapse:collapse;margin:14px 0}
-  th{background:#f3f4f6;padding:9px 12px;text-align:left;font-size:12px;border:1px solid #ddd}
-  td{padding:9px 12px;font-size:13px;border:1px solid #ddd}
-  .tot td{font-weight:bold;background:#f9fafb}
-  .ftr{margin-top:28px;text-align:center;font-size:11px;color:#aaa;border-top:1px solid #eee;padding-top:12px}
-  @media print{body{padding:0}}
-</style></head><body>
-<div class="hdr">
-  <div class="school">${data.school_name}</div>
-  <div class="rtitle">FEE RECEIPT</div>
-  <div class="rno">Receipt No: <strong>${data.receipt_number}</strong></div>
-</div>
-<div class="grid2">
-  <div><div class="lbl">Student Name</div><div class="val">${data.student_name}</div></div>
-  <div><div class="lbl">Roll Number</div><div class="val">${data.roll_number}</div></div>
-  <div><div class="lbl">Class</div><div class="val">Grade ${data.grade}${data.section}</div></div>
-  <div><div class="lbl">Parent / Guardian</div><div class="val">${data.parent_name || '—'}</div></div>
-</div>
-<table>
-  <thead><tr><th>Fee Category</th><th>Period</th><th>Amount Due</th><th>Amount Paid</th></tr></thead>
-  <tbody>
-    <tr><td>${data.category_name}</td><td>${data.period_label}</td>
-    <td>₹${Number(data.amount_due).toLocaleString('en-IN')}</td>
-    <td>₹${Number(data.amount).toLocaleString('en-IN')}</td></tr>
-  </tbody>
-  <tfoot><tr class="tot"><td colspan="3" style="text-align:right">Total Paid:</td>
-    <td>₹${Number(data.amount).toLocaleString('en-IN')}</td></tr></tfoot>
-</table>
-<div class="grid2">
-  <div><div class="lbl">Payment Mode</div><div class="val">${modeLabel[data.payment_mode] || data.payment_mode}</div></div>
-  <div><div class="lbl">Payment Date</div><div class="val">${data.paid_date ? new Date(data.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) : '—'}</div></div>
-  ${data.transaction_ref ? `<div><div class="lbl">Transaction Ref</div><div class="val">${data.transaction_ref}</div></div>` : ''}
-  ${data.collected_by_name ? `<div><div class="lbl">Collected By</div><div class="val">${data.collected_by_name}</div></div>` : ''}
-</div>
-${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}</div></div>` : ''}
-<div class="ftr">
-  Generated on ${new Date().toLocaleString('en-IN', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-  &nbsp;·&nbsp; This is a computer-generated receipt and does not require a signature.
-</div>
-</body></html>`
-    const win = window.open('', '_blank', 'width=800,height=650')
-    if (win) { win.document.write(html); win.document.close(); win.print() }
-  }
-
-  const filteredLedger = ledger.filter(e => {
-    const q = ledgerSearch.trim().toLowerCase()
-    return !q || [
-      e.student_name, e.roll_number,
-      e.school_roll_number != null ? String(e.school_roll_number) : '',
-      e.grade, e.section, e.email, e.phone,
-      e.parent_name, e.parent_phone, e.parent_email,
-    ].some(v => (v || '').toLowerCase().includes(q))
-  })
-
-  // ── Collect: search students ─────────────────────────────────────────────────
-  // Filter from already-loaded ledger state — no extra fetch on each keystroke
-  function searchStudent(q: string) {
-    if (!q.trim() || !academicYear) { setCollectEntries([]); return }
-    const ql = q.trim().toLowerCase()
-    setCollectEntries(
-      ledger.filter(e =>
-        [
-          e.student_name, e.roll_number,
-          e.school_roll_number != null ? String(e.school_roll_number) : '',
-          e.grade, e.section, e.email, e.phone,
-          e.parent_name, e.parent_phone, e.parent_email,
-        ].some(v => (v || '').toLowerCase().includes(ql))
-        && e.status !== 'paid' && e.status !== 'waived'
-      )
-    )
-  }
-
   function openCollect(entry: LedgerEntry) {
     setSelectedEntry(entry)
     setPayAmount(String(entry.balance > 0 ? entry.balance : entry.amount_due))
@@ -1109,7 +1311,6 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       })
       if (r.ok) {
         setShowWaiver(false); setSelectedEntry(null)
-        setCollectSearch(''); setCollectEntries([])
         setOpenStudentId(null); setShowCollectForm(false); setCollectChecked(new Set())
         loadStats(); loadLedger()
         if (reportData !== null) loadReports()
@@ -1284,9 +1485,11 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     return Number(cat.ledger_count) > 0
   }
 
-  // Active FIXED fee heads only (variable fees are optional / per-student, so excluded from the gate)
+  // Active FIXED fee heads only (variable fees are optional / per-student, and
+  // system-generated carry-forward categories are billed directly to the ledger —
+  // both are excluded from the per-grade setup gate)
   function fixedFeeHeads(): FeeCategory[] {
-    return categories.filter(c => c.is_active && c.category_type !== 'variable')
+    return categories.filter(c => c.is_active && c.category_type !== 'variable' && !c.is_system)
   }
   // Generate Bills is allowed only when EVERY active fixed fee head has at least one amount set
   function fixedAmountsComplete(): boolean {
@@ -1298,9 +1501,11 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   function fixedFeesMissingAmounts(): string[] {
     return fixedFeeHeads().filter(c => !feeHasAmounts(c.id, c.category_type)).map(c => c.name)
   }
-  // Any bills generated at all (gate for Lock)
+  // Any bills generated at all (gate for Lock) — system categories (Previous Year
+  // Dues) always have ledger rows right after carry-forward, which would otherwise
+  // let the plan be "locked" with zero real fee heads set up for the new year.
   function anyBillsGenerated(): boolean {
-    return categories.some(c => feeBillsGenerated(c))
+    return categories.some(c => !c.is_system && feeBillsGenerated(c))
   }
   // All active fixed fee heads that have amounts set must also have bills generated
   function allReadyHeadsBilled(): boolean {
@@ -1546,8 +1751,10 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     const d = await r.json()
     if (r.ok) {
       const passoutPart = d.passout?.count > 0 ? `, ${d.passout.count} to passout ledger (${fmt(d.passout.total)})` : ''
-      setYeMsg(`✓ Applied — ${d.carried.count} carried (${fmt(d.carried.total)}), ${d.writeoff.count} written off (${fmt(d.writeoff.total)})${passoutPart}`)
+      const closedPart = d.closed ? ` — ${academicYear} is now fully resolved and closed.` : ''
+      setYeMsg(`✓ Applied — ${d.carried.count} carried (${fmt(d.carried.total)}), ${d.writeoff.count} written off (${fmt(d.writeoff.total)})${passoutPart}${closedPart}`)
       loadYearEnd(); loadStats(); loadLedger()
+      if (d.closed) loadAcademicYears()
       if (d.passout?.count > 0) loadPassout()
     } else {
       setYeMsg(d.error || 'Failed to apply')
@@ -1694,11 +1901,12 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       <td>${st.is_leaver ? st.leaver_reason : 'Continuing'}</td>
       <td>${(yeDecisions[st.student_id] || 'open').replace('writeoff','Write Off').replace('carry','Carry Forward').replace('open','Leave Open')}</td>
     </tr>`).join('')
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Year-End Statement ${academicYear}</title>
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Year-End Statement ${escapeHtml(academicYear)}</title>
 <style>
   body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:820px;margin:0 auto}
   .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:18px}
-  .title{font-size:20px;font-weight:bold}.sub{font-size:13px;color:#555;margin-top:4px}
+  .school{font-size:18px;font-weight:bold}
+  .title{font-size:20px;font-weight:bold;margin-top:4px}.sub{font-size:13px;color:#555;margin-top:4px}
   .sumbox{display:flex;gap:12px;margin:18px 0}
   .sumbox div{flex:1;border:1px solid #ddd;border-radius:8px;padding:10px;text-align:center}
   .sumbox .l{font-size:11px;color:#888}.sumbox .v{font-size:15px;font-weight:bold;margin-top:2px}
@@ -1708,7 +1916,13 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
   .ftr{margin-top:24px;text-align:center;font-size:11px;color:#aaa}
   @media print{body{padding:0}}
 </style></head><body>
-<div class="hdr"><div class="title">Year-End Financial Statement</div><div class="sub">Academic Year ${academicYear}</div></div>
+<div class="hdr">
+  ${branding.logo_url ? `<div style="text-align:${branding.logo_align}"><img src="${escapeHtml(branding.logo_url)}" style="height:44px;margin-bottom:6px;object-fit:contain" /></div>` : ''}
+  <div class="school">${escapeHtml(branding.school_name || 'School')}</div>
+  ${renderHeaderBlocks(branding.receipt_header_blocks)}
+  <div class="title">Year-End Financial Statement</div>
+  <div class="sub">Academic Year ${escapeHtml(academicYear)}</div>
+</div>
 <div class="sumbox">
   <div><div class="l">Total Billed</div><div class="v">₹${Number(s.total_billed).toLocaleString('en-IN')}</div></div>
   <div><div class="l">Collected</div><div class="v">₹${Number(s.total_collected).toLocaleString('en-IN')}</div></div>
@@ -1721,7 +1935,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 <div class="ftr">Generated ${new Date().toLocaleString('en-IN')} · ${adminName || 'Admin'} · Computer-generated statement.</div>
 </body></html>`
     const win = window.open('', '_blank', 'width=900,height=680')
-    if (win) { win.document.write(html); win.document.close(); win.print() }
+    if (win) writeAndPrint(win, html)
   }
 
   async function fetchAmendImpact(catId: number, grade: string) {
@@ -1791,7 +2005,11 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     all_entries: LedgerEntry[]
     has_overdue: boolean; never_paid: boolean
   }
-  const studentRows: StudentRow[] = (() => {
+  // Memoized: this re-groups the whole school's ledger into per-student rows,
+  // so without useMemo it re-ran on every render — including every keystroke
+  // in the Collect-tab search box — for a dataset that scales with the
+  // school's entire fee history.
+  const studentRows: StudentRow[] = useMemo(() => {
     const map = new Map<number, StudentRow>()
     for (const e of ledger) {
       let row = map.get(e.student_id)
@@ -1817,13 +2035,32 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
       // never_paid = zero cash AND zero waiver across all entries
       if (Number(e.amount_paid) > 0 || Number(e.waiver_amount ?? 0) > 0) row.never_paid = false
     }
-    return Array.from(map.values())
-  })()
+    // Students who've left/graduated stay in the ledger data (their history must be
+    // preserved), but the active-roster Ledger/Collect view should only show currently
+    // enrolled students — otherwise a graduated student's now-waived/closed-out old bill
+    // still clutters their former grade's list. They're surfaced separately via the
+    // Leavers & Dues tab and the Passout Students panel instead.
+    return Array.from(map.values()).filter(r => r.student_status === 'active')
+  }, [ledger])
 
   // Grade-only filtered rows — used for chip counts so they reflect grade selection but not search/status
-  const gradeFilteredRows = ledgerGrade ? studentRows.filter(r => r.grade === ledgerGrade) : studentRows
+  const gradeFilteredRows = useMemo(
+    () => ledgerGrade ? studentRows.filter(r => r.grade === ledgerGrade) : studentRows,
+    [studentRows, ledgerGrade]
+  )
 
-  const collectionFiltered = studentRows.filter(r => {
+  // The 5 status-chip counts below all used to run their own inline
+  // `.filter().length` pass over gradeFilteredRows on every render — computed
+  // once here instead.
+  const statusCounts = useMemo(() => ({
+    all: gradeFilteredRows.length,
+    overdue: gradeFilteredRows.filter(r => r.has_overdue && r.outstanding > 0).length,
+    partial: gradeFilteredRows.filter(r => r.total_paid > 0 && r.outstanding > 0).length,
+    never: gradeFilteredRows.filter(r => r.never_paid && r.outstanding > 0).length,
+    clear: gradeFilteredRows.filter(r => r.outstanding <= 0).length,
+  }), [gradeFilteredRows])
+
+  const collectionFiltered = useMemo(() => studentRows.filter(r => {
     if (ledgerGrade && r.grade !== ledgerGrade) return false
     if (ledgerSearch) {
       const q = ledgerSearch.trim().toLowerCase()
@@ -1840,7 +2077,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
     if (ledgerStatus === 'never') return r.never_paid && r.outstanding > 0
     if (ledgerStatus === 'clear') return r.outstanding <= 0
     return true
-  })
+  }), [studentRows, ledgerGrade, ledgerSearch, ledgerStatus])
 
   const openStudent = collectionFiltered.find(r => r.student_id === openStudentId)
     || studentRows.find(r => r.student_id === openStudentId)
@@ -1926,6 +2163,7 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
         collected_by_name: payCollectedBy || null,
         transaction_ref: payRef || null, notes: payNotes || null,
         outstanding_before: openStudent.outstanding,
+        line_items: d.line_items || undefined,
       })
       setShowCollectForm(false)
       setPassoutOpenStudent(null)
@@ -1940,45 +2178,15 @@ ${data.notes ? `<div><div class="lbl">Notes</div><div class="val">${data.notes}<
 
   // Print a multi-line receipt for counter collection
   function printCounterReceipt(row: StudentRow, paid: PaySuccess, lines: { cat: string; period: string; amount: number }[]) {
-    const modeLabel: Record<string, string> = { cash: 'Cash', cheque: 'Cheque', dd: 'Demand Draft', upi: 'UPI', online: 'Online Transfer' }
-    const lineRows = lines.map(l => `<tr><td>${l.cat}</td><td>${l.period}</td><td style="text-align:right">₹${Number(l.amount).toLocaleString('en-IN')}</td></tr>`).join('')
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${paid.receipt_number}</title>
-<style>
-  body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:720px;margin:0 auto}
-  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:20px}
-  .school{font-size:22px;font-weight:bold}.rtitle{font-size:15px;font-weight:bold;margin-top:6px;letter-spacing:1px}
-  .rno{font-size:12px;color:#555;margin-top:4px}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
-  .lbl{font-size:11px;color:#888;margin-bottom:2px}.val{font-size:14px;font-weight:500}
-  table{width:100%;border-collapse:collapse;margin:14px 0}
-  th{background:#f3f4f6;padding:9px 12px;text-align:left;font-size:12px;border:1px solid #ddd}
-  td{padding:9px 12px;font-size:13px;border:1px solid #ddd}
-  .tot td{font-weight:bold;background:#f9fafb}
-  .ftr{margin-top:28px;text-align:center;font-size:11px;color:#aaa;border-top:1px solid #eee;padding-top:12px}
-  @media print{body{padding:0}}
-</style></head><body>
-<div class="hdr"><div class="school">${paid.school_name || 'School'}</div>
-<div class="rtitle">FEE RECEIPT</div><div class="rno">Receipt No: <strong>${paid.receipt_number}</strong></div></div>
-<div class="grid2">
-  <div><div class="lbl">Student Name</div><div class="val">${row.student_name}</div></div>
-  <div><div class="lbl">Roll Number</div><div class="val">${row.roll_number}</div></div>
-  <div><div class="lbl">Class</div><div class="val">Grade ${row.grade}${row.section}</div></div>
-  <div><div class="lbl">Parent / Guardian</div><div class="val">${paid.parent_name || '—'}</div></div>
-</div>
-<table><thead><tr><th>Fee Head</th><th>Period</th><th style="text-align:right">Amount</th></tr></thead>
-<tbody>${lineRows}</tbody>
-<tfoot><tr class="tot"><td colspan="2" style="text-align:right">Total Paid:</td><td style="text-align:right">₹${Number(paid.amount).toLocaleString('en-IN')}</td></tr></tfoot></table>
-<div class="grid2">
-  <div><div class="lbl">Payment Mode</div><div class="val">${modeLabel[paid.payment_mode] || paid.payment_mode}</div></div>
-  <div><div class="lbl">Payment Date</div><div class="val">${paid.paid_date ? new Date(paid.paid_date).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' }) : '—'}</div></div>
-  ${paid.transaction_ref ? `<div><div class="lbl">Reference</div><div class="val">${paid.transaction_ref}</div></div>` : ''}
-  ${paid.collected_by_name ? `<div><div class="lbl">Collected By</div><div class="val">${paid.collected_by_name}</div></div>` : ''}
-</div>
-${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><div class="val">${paid.notes}</div></div>` : ''}
-<div class="ftr">Balance after this payment: ₹${Number(Math.max(0, (paid.outstanding_before ?? row.outstanding) - paid.amount)).toLocaleString('en-IN')} &nbsp;·&nbsp; Generated on ${new Date().toLocaleString('en-IN')} &nbsp;·&nbsp; Computer-generated receipt.</div>
-</body></html>`
-    const win = window.open('', '_blank', 'width=800,height=650')
-    if (win) { win.document.write(html); win.document.close(); win.print() }
+    printDualCopyReceipt({
+      school_name: paid.school_name || 'School', logo_url: branding.logo_url, logo_align: branding.logo_align, header_blocks: branding.receipt_header_blocks,
+      student_name: row.student_name, roll_number: row.roll_number, grade: row.grade, section: row.section,
+      parent_name: paid.parent_name, receipt_number: paid.receipt_number,
+      lines: lines.map(l => ({ label: l.cat, period: l.period, amount: l.amount })),
+      total_paid: paid.amount, payment_mode: paid.payment_mode, paid_date: paid.paid_date,
+      transaction_ref: paid.transaction_ref, collected_by_name: paid.collected_by_name, notes: paid.notes,
+      balance_after: Math.max(0, (paid.outstanding_before ?? row.outstanding) - paid.amount),
+    })
   }
 
   // ── Day Close ──
@@ -2120,50 +2328,32 @@ ${paid.notes ? `<div style="margin-bottom:14px"><div class="lbl">Remarks</div><d
     setCancelWaiverBusy(false)
   }
 
-  // Print a receipt for any single completed payment from the passbook
-  function printPassbookReceipt(p: PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }) {
+  // Reprint the COMPLETE original receipt for a past transaction. One
+  // payment can cover several fee categories at once — each category lands
+  // as its own row in fee_payments (and so in pbPayments), all sharing the
+  // same receipt_number. Reprinting from a single row used to print only
+  // that one line under the shared receipt number, producing a document
+  // that didn't match what was handed out at collection time. Group every
+  // row with the same receipt_number first, so the reprint always matches
+  // the original.
+  function printReceiptByNumber(receiptNumber: string) {
     if (!pbData) return
+    const rows = pbPayments.filter(p => p.receipt_number === receiptNumber && p.payment_status !== 'cancelled')
+    if (rows.length === 0) return
     const s = pbData.student
-    const modeLabel: Record<string, string> = { cash: 'Cash', cheque: 'Cheque', dd: 'Demand Draft', upi: 'UPI', online: 'Online Transfer' }
-    const head = p.fee_head_name || p.category_name || 'Fee'
-    const period = p.period_label || ''
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${p.receipt_number}</title>
-<style>
-  body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:720px;margin:0 auto}
-  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:20px}
-  .school{font-size:22px;font-weight:bold}.rtitle{font-size:15px;font-weight:bold;margin-top:6px;letter-spacing:1px}
-  .rno{font-size:12px;color:#555;margin-top:4px}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
-  .lbl{font-size:11px;color:#888;margin-bottom:2px}.val{font-size:14px;font-weight:500}
-  table{width:100%;border-collapse:collapse;margin:14px 0}
-  th{background:#f3f4f6;padding:9px 12px;text-align:left;font-size:12px;border:1px solid #ddd}
-  td{padding:9px 12px;font-size:13px;border:1px solid #ddd}
-  .tot td{font-weight:bold;background:#f9fafb}
-  .ftr{margin-top:28px;text-align:center;font-size:11px;color:#aaa;border-top:1px solid #eee;padding-top:12px}
-  @media print{body{padding:0}}
-</style></head><body>
-<div class="hdr"><div class="school">Fee Receipt</div>
-<div class="rtitle">PAYMENT RECEIPT</div><div class="rno">Receipt No: <strong>${p.receipt_number}</strong></div></div>
-<div class="grid2">
-  <div><div class="lbl">Student Name</div><div class="val">${s.name}</div></div>
-  <div><div class="lbl">Roll Number</div><div class="val">${s.roll_number}</div></div>
-  <div><div class="lbl">Class</div><div class="val">Grade ${s.grade}${s.section || ''}</div></div>
-  <div><div class="lbl">Parent / Guardian</div><div class="val">${s.parent_name || '—'}</div></div>
-</div>
-<table><thead><tr><th>Fee Head</th><th>Period</th><th style="text-align:right">Amount</th></tr></thead>
-<tbody><tr><td>${head}</td><td>${period}</td><td style="text-align:right">₹${Number(p.amount).toLocaleString('en-IN')}</td></tr></tbody>
-<tfoot><tr class="tot"><td colspan="2" style="text-align:right">Total Paid:</td><td style="text-align:right">₹${Number(p.amount).toLocaleString('en-IN')}</td></tr></tfoot></table>
-<div class="grid2">
-  <div><div class="lbl">Payment Mode</div><div class="val">${modeLabel[p.payment_mode] || p.payment_mode}</div></div>
-  <div><div class="lbl">Payment Date</div><div class="val">${p.paid_date ? new Date(p.paid_date).toLocaleDateString('en-IN', { day:'2-digit', month:'long', year:'numeric' }) : '—'}</div></div>
-  ${p.transaction_ref ? `<div><div class="lbl">Reference</div><div class="val">${p.transaction_ref}</div></div>` : ''}
-  ${p.collected_by_name ? `<div><div class="lbl">Collected By</div><div class="val">${p.collected_by_name}</div></div>` : ''}
-</div>
-${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div></div>` : ''}
-<div class="ftr">Generated on ${new Date().toLocaleString('en-IN')} · Computer-generated receipt.</div>
-</body></html>`
-    const win = window.open('', '_blank', 'width=800,height=650')
-    if (win) { win.document.write(html); win.document.close(); win.print() }
+    const first = rows[0] as PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }
+    printDualCopyReceipt({
+      school_name: branding.school_name || 'Fee Receipt', logo_url: branding.logo_url, logo_align: branding.logo_align, header_blocks: branding.receipt_header_blocks,
+      student_name: s.name, roll_number: s.roll_number, grade: s.grade, section: s.section || '',
+      parent_name: s.parent_name, receipt_number: receiptNumber,
+      lines: rows.map(r => {
+        const row = r as PaymentRecord & { fee_head_name?: string; period_label?: string; category_name?: string }
+        return { label: row.fee_head_name || row.category_name || 'Fee', period: row.period_label || '', amount: row.amount }
+      }),
+      total_paid: rows.reduce((sum, r) => sum + Number(r.amount), 0),
+      payment_mode: first.payment_mode, paid_date: first.paid_date,
+      transaction_ref: first.transaction_ref, collected_by_name: first.collected_by_name, notes: first.notes,
+    })
   }
 
   function printPassbookStatement() {
@@ -2176,11 +2366,15 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
       <td style="text-align:right">${t.credit > 0 ? '₹' + Number(t.credit).toLocaleString('en-IN') : ''}</td>
       <td style="text-align:right">₹${Number(t.balance).toLocaleString('en-IN')}</td>
     </tr>`).join('')
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Statement ${s.name}</title>
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Statement ${escapeHtml(s.name)}</title>
 <style>
   body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:820px;margin:0 auto}
   .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:14px;margin-bottom:18px}
-  .title{font-size:20px;font-weight:bold}.sub{font-size:13px;color:#555;margin-top:4px}
+  .hdr-row{position:relative}
+  .hdr-row .hdr-logo{position:absolute;top:50%;transform:translateY(-50%)}
+  .hdr-row .hdr-logo.left{left:0}.hdr-row .hdr-logo.right{right:0}
+  .school{font-size:18px;font-weight:bold}
+  .title{font-size:20px;font-weight:bold;margin-top:4px}.sub{font-size:13px;color:#555;margin-top:4px}
   .info{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;font-size:13px}
   .sumbox{display:flex;gap:16px;margin-bottom:18px}
   .sumbox div{flex:1;border:1px solid #ddd;border-radius:8px;padding:10px;text-align:center}
@@ -2191,8 +2385,17 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
   .ftr{margin-top:24px;text-align:center;font-size:11px;color:#aaa}
   @media print{body{padding:0}}
 </style></head><body>
-<div class="hdr"><div class="title">Fee Statement (Passbook)</div>
-<div class="sub">${s.name} · Grade ${s.grade}${s.section} · Roll #${s.roll_number} · ${academicYear}</div></div>
+<div class="hdr">
+  ${branding.logo_url && branding.logo_align === 'center' ? `<div style="text-align:center;margin-bottom:6px"><img src="${escapeHtml(branding.logo_url)}" style="height:56px;object-fit:contain" /></div>` : ''}
+  <div class="hdr-row">
+    ${branding.logo_url && branding.logo_align === 'left' ? `<img class="hdr-logo left" src="${escapeHtml(branding.logo_url)}" style="height:64px;object-fit:contain" />` : ''}
+    <div class="school">${escapeHtml(branding.school_name || 'School')}</div>
+    ${renderHeaderBlocks(branding.receipt_header_blocks)}
+    <div class="title">Fee Statement (Passbook)</div>
+    <div class="sub">${escapeHtml(s.name)} · Grade ${escapeHtml(s.grade)}${escapeHtml(s.section || '')} · Roll #${escapeHtml(s.roll_number)} · ${escapeHtml(academicYear)}</div>
+    ${branding.logo_url && branding.logo_align === 'right' ? `<img class="hdr-logo right" src="${escapeHtml(branding.logo_url)}" style="height:64px;object-fit:contain" />` : ''}
+  </div>
+</div>
 <div class="info">
   <div>Parent: ${s.parent_name || '—'}</div>
   <div>Phone: ${s.parent_phone || '—'}</div>
@@ -2208,7 +2411,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
 <div class="ftr">Generated ${new Date().toLocaleString('en-IN')} · Computer-generated statement.</div>
 </body></html>`
     const win = window.open('', '_blank', 'width=900,height=680')
-    if (win) { win.document.write(html); win.document.close(); win.print() }
+    if (win) writeAndPrint(win, html)
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -2352,7 +2555,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             setAcademicYear(e.target.value)
             // Reset view state that is year-scoped
             setPbData(null); setPbErr('')
-            setOpenStudentId(null); setCollectEntries([]); setCollectSearch('')
+            setOpenStudentId(null)
           }}
           className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
@@ -2362,32 +2565,52 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
         </select>
       </div>
 
-      {/* ── 15-day approaching year-end banner ── */}
-      {daysUntilYearEnd !== null && daysUntilYearEnd >= 0 && daysUntilYearEnd <= 15 && !closedYears.has(academicYear) && (
-        <div data-testid="year-end-banner" className="flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-xl px-4 py-3">
-          <span className="text-amber-500 text-lg mt-0.5">⚠</span>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-amber-800">
-              {daysUntilYearEnd === 0
-                ? `Academic year ${academicYear} ends today (${yearEndDate})`
-                : `Academic year ${academicYear} ends in ${daysUntilYearEnd} day${daysUntilYearEnd === 1 ? '' : 's'} — ${yearEndDate}`}
-            </p>
-            <p className="text-xs text-amber-700 mt-0.5">Collect outstanding fees before year-end. You can extend the due date or close the year.</p>
+      <LoadErrorBanner sectionKey="academicYears" onRetry={loadAcademicYears} />
+
+      {/* ── Approaching / overdue year-end banner ── */}
+      {daysUntilYearEnd !== null && daysUntilYearEnd <= 15 && !closedYears.has(academicYear) && (
+        daysUntilYearEnd < 0 ? (
+          <div data-testid="year-end-banner" className="flex items-start gap-3 bg-red-50 border border-red-300 rounded-xl px-4 py-3">
+            <span className="text-red-500 text-lg mt-0.5">⚠</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-red-800">
+                {`Academic year ${academicYear} ended ${Math.abs(daysUntilYearEnd)} day${Math.abs(daysUntilYearEnd) === 1 ? '' : 's'} ago (${yearEndDate}) — please close it out`}
+              </p>
+              <p className="text-xs text-red-700 mt-0.5">This year is past its end date and still open. Close it out to lock the ledger and roll over balances.</p>
+            </div>
+            <div className="flex gap-2 flex-shrink-0">
+              <button data-testid="banner-extend" onClick={() => setActiveTab('yearend' as Tab)}
+                className="text-xs bg-white border border-red-300 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-50 font-medium">
+                Extend / Close
+              </button>
+            </div>
           </div>
-          <div className="flex gap-2 flex-shrink-0">
-            <button data-testid="banner-extend" onClick={() => setActiveTab('yearend' as Tab)}
-              className="text-xs bg-white border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg hover:bg-amber-50 font-medium">
-              Extend / Close
-            </button>
+        ) : (
+          <div data-testid="year-end-banner" className="flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-xl px-4 py-3">
+            <span className="text-amber-500 text-lg mt-0.5">⚠</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-amber-800">
+                {daysUntilYearEnd === 0
+                  ? `Academic year ${academicYear} ends today (${yearEndDate})`
+                  : `Academic year ${academicYear} ends in ${daysUntilYearEnd} day${daysUntilYearEnd === 1 ? '' : 's'} — ${yearEndDate}`}
+              </p>
+              <p className="text-xs text-amber-700 mt-0.5">Collect outstanding fees before year-end. You can extend the due date or close the year.</p>
+            </div>
+            <div className="flex gap-2 flex-shrink-0">
+              <button data-testid="banner-extend" onClick={() => setActiveTab('yearend' as Tab)}
+                className="text-xs bg-white border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg hover:bg-amber-50 font-medium">
+                Extend / Close
+              </button>
+            </div>
           </div>
-        </div>
+        )
       )}
 
       {/* ── 5-step setup wizard (shown when there are no bills yet) ── */}
       {!setupWizardDismissed && academicYear && !closedYears.has(academicYear) && (
         (() => {
           const step1Done = true // year exists
-          const step2Done = categories.filter(c => c.is_active !== false).length > 0
+          const step2Done = categories.filter(c => c.is_active !== false && !c.is_system).length > 0
           const step3Done = fixedAmountsComplete()
           const step4Done = (stats?.summary?.total_due ?? 0) > 0
           const step5Done = !!structureLock
@@ -2440,6 +2663,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           { key: 'students',         label: 'Student Passbook' },
           { key: 'reports',          label: 'Reports' },
           { key: 'yearend',          label: 'Year-End' },
+          { key: 'leavers',          label: 'Leavers & Dues' },
         ] as const).map(t => (
           <button
             key={t.key}
@@ -2938,7 +3162,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           {/* ── Setup progress strip ── */}
           {(() => {
             const hasYear    = academicYears.length > 0
-            const hasHeads   = categories.length > 0
+            const hasHeads   = categories.some(c => !c.is_system)
             const allAmountsSet = fixedAmountsComplete()
             const steps = [
               { n: 1, label: 'Create Academic Year', done: hasYear },
@@ -2976,7 +3200,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
             <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-800">
               <strong>First — create an academic year.</strong> Go to <strong>School Settings → Academic Years</strong> to set up the current year before configuring fees.
             </div>
-          ) : !structureLock && categories.length > 0 && (() => {
+          ) : !structureLock && categories.some(c => !c.is_system) && (() => {
             const missing = fixedFeesMissingAmounts()
             const generated = anyBillsGenerated()
             if (missing.length > 0) {
@@ -3099,8 +3323,8 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           {/* ── Top action bar ── */}
           <div className="flex items-center justify-between">
             <p className="text-sm text-gray-500">
-              {categories.length} fee {categories.length === 1 ? 'head' : 'heads'} ·{' '}
-              <span className="text-green-600 font-medium">{categories.filter(c => feeBillsGenerated(c)).length} with bills generated</span>
+              {categories.filter(c => !c.is_system).length} fee {categories.filter(c => !c.is_system).length === 1 ? 'head' : 'heads'} ·{' '}
+              <span className="text-green-600 font-medium">{categories.filter(c => !c.is_system && feeBillsGenerated(c)).length} with bills generated</span>
             </p>
             <div className="flex items-center gap-2">
               {structureMsg && (
@@ -3113,7 +3337,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                     + Add Fee Head
                   </button>
                   <button data-testid="btn-generate-bills" onClick={generateLedger}
-                    disabled={generatingLedger || categories.length === 0 || !fixedAmountsComplete()}
+                    disabled={generatingLedger || fixedFeeHeads().length === 0 || !fixedAmountsComplete()}
                     title={!fixedAmountsComplete() ? `Set amounts for all fixed fees first${fixedFeesMissingAmounts().length ? ': ' + fixedFeesMissingAmounts().join(', ') : ''}` : 'Generate bills for all students'}
                     className="text-sm bg-green-600 text-white hover:bg-green-700 px-4 py-2 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed">
                     {generatingLedger ? 'Generating…' : 'Generate All Bills'}
@@ -3124,7 +3348,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           </div>
 
           {/* ── Sub-view toggle ── */}
-          {categories.length > 0 && (
+          {categories.some(c => !c.is_system) && (
             <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
               {([
                 { key: 'heads',    label: 'Fee Heads & Amounts' },
@@ -3259,7 +3483,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           })()}
 
           {/* ── Empty state ── */}
-          {planView === 'heads' && (categories.length === 0 ? (
+          {planView === 'heads' && (categories.filter(cat => !cat.is_system).length === 0 ? (
             <div className="bg-white rounded-xl border border-dashed border-gray-200 p-16 text-center">
               <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">💰</div>
               <p className="text-gray-600 font-medium mb-1">No fee heads yet</p>
@@ -3272,7 +3496,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           ) : (
             /* ── Fee head cards ── */
             <div className="bg-gray-50 rounded-xl p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {categories.map(cat => {
+              {categories.filter(cat => !cat.is_system).map(cat => {
                 const amountsSet = feeHasAmounts(cat.id, cat.category_type)
                 const generated = feeBillsGenerated(cat)
                 const catStat = stats?.by_category.find(c => c.category_name === cat.name)
@@ -3291,16 +3515,20 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                           </p>
                         </div>
                       </div>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${cat.category_type === 'variable' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'}`}>
-                        {cat.category_type === 'variable' ? 'Variable' : 'Fixed'}
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${cat.is_system ? 'bg-indigo-100 text-indigo-600' : cat.category_type === 'variable' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'}`}>
+                        {cat.is_system ? 'System' : cat.category_type === 'variable' ? 'Variable' : 'Fixed'}
                       </span>
                     </div>
 
                     {/* Status row */}
                     <div className="flex items-center gap-4 mt-4 text-xs flex-wrap">
-                      <span className={amountsSet ? 'text-green-600' : 'text-amber-600'}>
-                        {amountsSet ? '✅ Amounts set' : '⚠ Amounts not set'}
-                      </span>
+                      {cat.is_system ? (
+                        <span className="text-gray-400">Billed directly to each student — no setup needed</span>
+                      ) : (
+                        <span className={amountsSet ? 'text-green-600' : 'text-amber-600'}>
+                          {amountsSet ? '✅ Amounts set' : '⚠ Amounts not set'}
+                        </span>
+                      )}
                       <span className={generated ? 'text-green-600' : 'text-gray-400'}>
                         {generated ? '✅ Bills generated' : '◌ Bills not generated'}
                       </span>
@@ -3325,17 +3553,19 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
 
                     {/* Actions */}
                     <div className="flex items-center gap-2 mt-4 pt-3 border-t border-gray-50">
-                      <button
-                        onClick={() => { setPlanManageCatId(planManageCatId === cat.id ? null : cat.id); setGroupAmounts({}); setStructureMsg(''); if (cat.category_type === 'variable') { setApplGrade(''); setApplStudents([]); setApplCategories([]); setApplAmounts({}) } }}
-                        className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-blue-700"
-                      >
-                        {planManageCatId === cat.id ? 'Close' : 'Manage →'}
-                      </button>
+                      {!cat.is_system && (
+                        <button
+                          onClick={() => { setPlanManageCatId(planManageCatId === cat.id ? null : cat.id); setGroupAmounts({}); setStructureMsg(''); if (cat.category_type === 'variable') { setApplGrade(''); setApplStudents([]); setApplCategories([]); setApplAmounts({}) } }}
+                          className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-blue-700"
+                        >
+                          {planManageCatId === cat.id ? 'Close' : 'Manage →'}
+                        </button>
+                      )}
                       <button onClick={() => loadStructHistory(cat.id)}
                         className="text-xs border border-gray-200 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-50">
                         History
                       </button>
-                      {!structureLock && cat.is_active && (
+                      {!structureLock && cat.is_active && !cat.is_system && (
                         <button onClick={() => toggleCategoryType(cat)}
                           className="text-xs border border-gray-200 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-50 ml-auto">
                           Switch to {cat.category_type === 'fixed' ? 'Variable' : 'Fixed'}
@@ -3500,7 +3730,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
           ))}
 
           {/* ── Lock plan CTA (when not locked) ── */}
-          {!structureLock && categories.length > 0 && (
+          {!structureLock && categories.some(c => !c.is_system) && (
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold text-blue-800">Finished setting up?</p>
@@ -3540,7 +3770,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
-                        {categories.filter(c => c.is_active).map(cat => (
+                        {categories.filter(c => c.is_active && !c.is_system).map(cat => (
                           <tr key={cat.id} className="hover:bg-gray-50/60">
                             <td className="px-4 py-2.5 font-medium text-gray-800">{cat.name}</td>
                             <td className="px-4 py-2.5 text-gray-500">{FREQ_LABEL[cat.frequency]}</td>
@@ -3725,11 +3955,11 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
               {/* Quick filter chips */}
               <div className="flex gap-2 flex-wrap">
                 {([
-                  { key: '',        label: `All Students (${gradeFilteredRows.length})` },
-                  { key: 'overdue', label: `Overdue (${gradeFilteredRows.filter(r => r.has_overdue && r.outstanding > 0).length})` },
-                  { key: 'partial', label: `Partially Paid (${gradeFilteredRows.filter(r => r.total_paid > 0 && r.outstanding > 0).length})` },
-                  { key: 'never',   label: `Never Paid (${gradeFilteredRows.filter(r => r.never_paid && r.outstanding > 0).length})` },
-                  { key: 'clear',   label: `Fully Cleared (${gradeFilteredRows.filter(r => r.outstanding <= 0).length})` },
+                  { key: '',        label: `All Students (${statusCounts.all})` },
+                  { key: 'overdue', label: `Overdue (${statusCounts.overdue})` },
+                  { key: 'partial', label: `Partially Paid (${statusCounts.partial})` },
+                  { key: 'never',   label: `Never Paid (${statusCounts.never})` },
+                  { key: 'clear',   label: `Fully Cleared (${statusCounts.clear})` },
                 ] as const).map(f => (
                   <button key={f.key} onClick={() => setLedgerStatus(f.key)}
                     className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
@@ -3804,15 +4034,21 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                 </div>
                                 <div className="flex gap-2">
                                   <button onClick={() => {
-                                    const selected = row.open_entries.filter(e => collectChecked.has(e.id))
-                                    const selectedTotal = selected.reduce((s, e) => s + Number(e.balance), 0)
+                                    // line_items from the payment API is the source of truth — it reflects
+                                    // every fee head actually paid, even when several are settled in one
+                                    // transaction (e.g. Tuition + Transport + Hostel). Ledger checkbox state
+                                    // can be empty/stale by the time Print is clicked, so it's only a fallback.
                                     let lines: { cat: string; period: string; amount: number }[]
-                                    if (paySuccess.amount >= selectedTotal - 0.01 && selected.length > 0) {
-                                      // full payment of selected bills — itemise each
-                                      lines = selected.map(e => ({ cat: e.category_name, period: e.period_label, amount: Number(e.balance) }))
+                                    if (paySuccess.line_items?.length) {
+                                      lines = paySuccess.line_items.map(li => ({ cat: li.category_name, period: li.period_label, amount: li.amount }))
                                     } else {
-                                      // partial payment — single line for the actual amount taken
-                                      lines = [{ cat: 'Part payment towards dues', period: selected.map(e => e.period_label).join(', ') || paySuccess.period_label, amount: paySuccess.amount }]
+                                      const selected = row.open_entries.filter(e => collectChecked.has(e.id))
+                                      const selectedTotal = selected.reduce((s, e) => s + Number(e.balance), 0)
+                                      if (paySuccess.amount >= selectedTotal - 0.01 && selected.length > 0) {
+                                        lines = selected.map(e => ({ cat: e.category_name, period: e.period_label, amount: Number(e.balance) }))
+                                      } else {
+                                        lines = [{ cat: paySuccess.category_name || 'Part payment towards dues', period: selected.map(e => e.period_label).join(', ') || paySuccess.period_label, amount: paySuccess.amount }]
+                                      }
                                     }
                                     printCounterReceipt(row, paySuccess, lines)
                                   }}
@@ -3838,7 +4074,13 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                           setPayAmount(String(newTotal))
                                         }}
                                         className="w-4 h-4 rounded border-gray-300 text-blue-600" />
-                                      <span className="flex-1 text-sm text-gray-700">{e.category_name} · <span className="text-gray-400">{e.period_label}</span></span>
+                                      <span className="flex-1 text-sm text-gray-700">
+                                        {e.source_academic_year ? (
+                                          <>Previous Year Dues · <span className="text-gray-400">{e.notes?.replace(/^Carried from [^:]+:\s*/, '') || e.period_label}</span></>
+                                        ) : (
+                                          <>{e.category_name} · <span className="text-gray-400">{e.period_label}</span></>
+                                        )}
+                                      </span>
                                       <span className={`text-xs px-1.5 py-0.5 rounded-full capitalize ${STATUS_COLORS[e.status]}`}>{e.status}</span>
                                       <span className="text-sm font-bold text-gray-800 w-20 text-right">{fmt(e.balance)}</span>
                                     </label>
@@ -4465,6 +4707,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   { key: 'payments', label: `Payments (${pbPayments.length})` },
                   { key: 'waivers',  label: `Waivers (${pbWaivers.length})` },
                   { key: 'timeline', label: 'Full Timeline' },
+                  { key: 'receipts', label: `Print Receipts (${pbReceipts.length})` },
                 ] as const).map(v => (
                   <button key={v.key} onClick={() => setPbSection(v.key)}
                     className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
@@ -4616,8 +4859,6 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                         openCancel(p.id, Number(p.amount), le ? Number(le.balance) : 0)
                                       }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
                                     )}
-                                    <button onClick={() => printPassbookReceipt(p)} title="Print receipt"
-                                      className="text-xs border border-indigo-200 text-indigo-600 px-2.5 py-1 rounded-lg hover:bg-indigo-50">🖨 Print</button>
                                   </div>
                                 </td>
                               </tr>
@@ -4679,6 +4920,47 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                       </table>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* Print Receipts — one row per actual receipt_number, reprinting the
+                  complete original receipt (all fee lines that were part of that
+                  transaction), not just whichever single line was clicked. */}
+              {pbSection === 'receipts' && (
+                <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                  {pbReceipts.length === 0 ? (
+                    <p className="text-sm text-gray-400 p-8 text-center">No receipts for {academicYear}.</p>
+                  ) : (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
+                          <th className="text-left px-4 py-2 font-semibold">Receipt</th>
+                          <th className="text-left px-4 py-2 font-semibold">Date</th>
+                          <th className="text-left px-4 py-2 font-semibold">Fee Lines</th>
+                          <th className="text-right px-4 py-2 font-semibold">Total</th>
+                          <th className="text-right px-4 py-2 font-semibold">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pbReceipts.map(r => (
+                          <tr key={r.receipt_number} className={`border-b border-gray-50 ${r.cancelled ? 'bg-gray-50/60' : 'hover:bg-gray-50'}`}>
+                            <td className={`px-4 py-2.5 font-mono text-xs ${r.cancelled ? 'text-gray-400 line-through' : 'text-indigo-600'}`}>{r.receipt_number}</td>
+                            <td className="px-4 py-2.5 text-gray-600">{fmtDate(r.paid_date)}</td>
+                            <td className="px-4 py-2.5 text-gray-500">{r.lineCount} {r.lineCount === 1 ? 'item' : 'items'}</td>
+                            <td className={`px-4 py-2.5 text-right font-bold ${r.cancelled ? 'text-gray-400 line-through' : 'text-green-700'}`}>{fmt(r.total)}</td>
+                            <td className="px-4 py-2.5 text-right">
+                              {r.cancelled ? (
+                                <span className="text-[10px] bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full font-medium">Cancelled</span>
+                              ) : (
+                                <button onClick={() => printReceiptByNumber(r.receipt_number)} title="Print full receipt"
+                                  className="text-xs border border-indigo-200 text-indigo-600 px-2.5 py-1 rounded-lg hover:bg-indigo-50">🖨 Print</button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               )}
 
@@ -5438,7 +5720,82 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
         </div>
       )}
 
+      {/* ══ LEAVERS & DUES ════════════════════════════════════════════════════════ */}
+      {activeTab === 'leavers' && (
+        <div className="space-y-5">
+          <LoadErrorBanner sectionKey="removed" onRetry={loadRemovedStudents} />
 
+          <div>
+            <h2 className="text-base font-semibold text-gray-800">Leavers & Dues</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Every student no longer on the active roster — graduated/passout or otherwise removed —
+              who still has unresolved dues. Nothing here is deleted, so amounts owed stay visible and collectible.
+            </p>
+          </div>
+
+          {removedLoading && !removedData ? (
+            <div className="bg-white rounded-xl border border-gray-100 p-10 text-center text-gray-400 text-sm">Loading…</div>
+          ) : removedData && removedData.students.length === 0 ? (
+            <div className="bg-white rounded-xl border border-dashed border-gray-200 p-10 text-center">
+              <p className="text-gray-500 text-sm">No removed students with outstanding dues.</p>
+            </div>
+          ) : removedData && (
+            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-gray-50">
+                <p className="text-sm font-semibold text-gray-700">
+                  {removedData.summary.student_count} student{removedData.summary.student_count === 1 ? '' : 's'} · {fmt(removedData.summary.total_outstanding)} outstanding
+                </p>
+                <button onClick={loadRemovedStudents} disabled={removedLoading}
+                  className="text-xs text-gray-500 hover:text-gray-700">
+                  {removedLoading ? '…' : '↻ Refresh'}
+                </button>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr className="text-xs text-gray-500 border-b border-gray-100">
+                    <th className="text-left px-4 py-2 font-semibold">Student</th>
+                    <th className="text-left px-4 py-2 font-semibold">Status</th>
+                    <th className="text-left px-4 py-2 font-semibold">Years</th>
+                    <th className="text-right px-4 py-2 font-semibold">Billed</th>
+                    <th className="text-right px-4 py-2 font-semibold">Collected</th>
+                    <th className="text-right px-4 py-2 font-semibold">Outstanding</th>
+                    <th className="text-right px-4 py-2 font-semibold">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {removedData.students.map(s => (
+                    <tr key={s.student_id} className="hover:bg-gray-50/60">
+                      <td className="px-4 py-2.5">
+                        <p className="font-medium text-gray-800">{s.student_name}</p>
+                        <p className="text-xs text-gray-400">
+                          {s.roll_number}{s.grade ? ` · Gr.${s.grade}${s.section || ''}` : ''}
+                        </p>
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-gray-500 capitalize">
+                        {s.student_status}
+                        {s.passout_year && <span className="block text-[10px] text-gray-400 normal-case">passed out {s.passout_year}</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-gray-500">{s.academic_years.filter(y => y !== 'passout').join(', ') || '—'}</td>
+                      <td className="px-4 py-2.5 text-right text-gray-700">{fmt(s.total_billed)}</td>
+                      <td className="px-4 py-2.5 text-right text-green-600">{fmt(s.total_collected)}</td>
+                      <td className="px-4 py-2.5 text-right font-bold text-red-600">{fmt(s.outstanding)}</td>
+                      <td className="px-4 py-2.5 text-right">
+                        <button
+                          data-testid={`btn-leaver-collect-${s.student_id}`}
+                          onClick={() => collectRemovedStudent(s)}
+                          disabled={removedCollectLoading === s.student_id}
+                          className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50">
+                          {removedCollectLoading === s.student_id ? '…' : 'Collect'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ══ Year Rollover Modal ═════════════════════════════════════════════════ */}
       {showRolloverModal && (
@@ -5462,7 +5819,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   <ul className="list-disc list-inside space-y-1 text-xs">
                     <li>Creates the next academic year and sets it as current</li>
                     <li>Carries all remaining unpaid dues forward as &quot;Previous Year Dues&quot;</li>
-                    <li>Grade 12 students and leavers are excluded from auto-carry</li>
+                    <li>Grade {FINAL_GRADE} students and leavers are excluded from auto-carry</li>
                   </ul>
                 </div>
                 <p className="text-xs text-gray-500">This is irreversible. Make sure all year-end decisions (carry / write-off / passout) are applied first.</p>
@@ -5718,6 +6075,7 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                   { key: 'payments', label: `Payments (${pbPayments.length})` },
                   { key: 'waivers',  label: `Waivers (${pbWaivers.length})` },
                   { key: 'timeline', label: 'Timeline' },
+                  { key: 'receipts', label: `Print Receipts (${pbReceipts.length})` },
                 ] as const).map(v => (
                   <button key={v.key} onClick={() => setPbSection(v.key)}
                     className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
@@ -5823,8 +6181,6 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                                   </div>
                                   {!isCancelled && p.payment_status === 'completed' && (
                                     <div className="flex gap-2 flex-shrink-0">
-                                      <button onClick={() => printPassbookReceipt(p)}
-                                        className="text-xs border border-gray-200 text-gray-500 px-2.5 py-1 rounded-lg hover:bg-gray-50">🖨</button>
                                       {cancelPmtId === p.id
                                         ? <button onClick={() => setCancelPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600 px-2">Close</button>
                                         : <button onClick={() => {
@@ -5871,6 +6227,32 @@ ${p.notes ? `<div><div class="lbl">Remarks</div><div class="val">${p.notes}</div
                             </Fragment>
                           )
                         })
+                      }
+                    </div>
+                  )}
+
+                  {/* Print Receipts — one row per actual receipt_number, reprinting the
+                      complete original receipt rather than a single fee line. */}
+                  {pbSection === 'receipts' && (
+                    <div className="space-y-2">
+                      {pbReceipts.length === 0
+                        ? <p className="text-sm text-gray-400 text-center py-8">No receipts for {academicYear}.</p>
+                        : pbReceipts.map(r => (
+                          <div key={r.receipt_number} className={`rounded-xl border px-4 py-3 flex items-center justify-between gap-3 ${r.cancelled ? 'bg-gray-50 border-gray-100 opacity-60' : 'bg-white border-gray-100'}`}>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-mono text-xs font-semibold text-indigo-600">{r.receipt_number}</span>
+                                {r.cancelled && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Cancelled</span>}
+                              </div>
+                              <p className={`text-lg font-bold mt-0.5 ${r.cancelled ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{fmt(r.total)}</p>
+                              <p className="text-xs text-gray-400 mt-0.5">{fmtDate(r.paid_date)} · {r.lineCount} {r.lineCount === 1 ? 'item' : 'items'}</p>
+                            </div>
+                            {!r.cancelled && (
+                              <button onClick={() => printReceiptByNumber(r.receipt_number)}
+                                className="text-xs border border-gray-200 text-gray-500 px-2.5 py-1 rounded-lg hover:bg-gray-50 flex-shrink-0">🖨 Print</button>
+                            )}
+                          </div>
+                        ))
                       }
                     </div>
                   )}

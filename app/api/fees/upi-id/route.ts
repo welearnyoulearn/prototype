@@ -8,7 +8,6 @@ export async function GET(req: NextRequest) {
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS upi_id TEXT`)
     const { rows: [sc] } = await pool.query(`SELECT upi_id FROM schools WHERE id = $1`, [school_id])
     return NextResponse.json({ upi_id: sc?.upi_id || '' })
   } catch (err: unknown) {
@@ -29,7 +28,6 @@ export async function PUT(req: NextRequest) {
     if (value && !/^[\w.\-]{2,}@[\w.\-]{2,}$/.test(value)) {
       return NextResponse.json({ error: 'Enter a valid UPI ID, e.g. school@okhdfcbank' }, { status: 400 })
     }
-    await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS upi_id TEXT`)
     await pool.query(`UPDATE schools SET upi_id = $1 WHERE id = $2`, [value || null, school_id])
     return NextResponse.json({ ok: true, upi_id: value })
   } catch (err: unknown) {

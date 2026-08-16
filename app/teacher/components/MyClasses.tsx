@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useFeature } from '@/lib/features-context'
 
 type Teacher = {
   id: number
@@ -20,14 +21,12 @@ type ClassOption = {
   student_count: number
 }
 
-type TimetableSlot = {
-  grade: string | null
-  section: string | null
-  subject_name: string | null
-  day_of_week: string
-  period_number: number
-  time_from: string
-  time_to: string
+type ClassSubjectAssignment = {
+  id: number
+  subject_name: string
+  class_id: number
+  grade: string
+  section: string
 }
 
 type ClassTimetableSlot = {
@@ -52,6 +51,7 @@ type Props = {
   teacher: Teacher
   schoolId: number
   onViewClass: (cls: { id: number; grade: string; section: string; class_teacher_name: string | null }) => void
+  onGoToSyllabus: (cls: { id: number; grade: string; section: string; class_teacher_name: string | null }) => void
 }
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -61,7 +61,8 @@ function todayName() {
   return ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d]
 }
 
-export default function MyClasses({ teacher, schoolId, onViewClass }: Props) {
+export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllabus }: Props) {
+  const hasTimetableFeature = useFeature('timetable')
   const [entries, setEntries] = useState<ClassEntry[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -73,9 +74,9 @@ export default function MyClasses({ teacher, schoolId, onViewClass }: Props) {
 
   useEffect(() => {
     Promise.all([
-      fetch(`/api/timetable?teacher_id=${teacher.id}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
+      fetch(`/api/teachers/${teacher.id}/class-subjects`).then(r => r.json()).catch(() => []),
       fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()).catch(() => []),
-    ]).then(([timetable, allClasses]: [TimetableSlot[], ClassOption[]]) => {
+    ]).then(([classSubjects, allClasses]: [ClassSubjectAssignment[], ClassOption[]]) => {
       const classMap = new Map<string, ClassEntry>()
 
       // Own class first
@@ -84,17 +85,19 @@ export default function MyClasses({ teacher, schoolId, onViewClass }: Props) {
         if (cls) classMap.set(`${cls.grade}-${cls.section}`, { cls, subjects: [], isOwn: true })
       }
 
-      // Subject teacher classes from timetable
-      timetable.forEach((slot: TimetableSlot) => {
-        if (!slot.grade || !slot.section) return
-        const key = `${slot.grade}-${slot.section}`
+      // Subject teacher classes — from Class Management's class_subjects
+      // assignment, not the timetable (a class is "theirs" the moment
+      // school-admin assigns it, whether or not a timetable exists yet).
+      classSubjects.forEach((a: ClassSubjectAssignment) => {
+        if (!a.grade || !a.section) return
+        const key = `${a.grade}-${a.section}`
         if (!classMap.has(key)) {
-          const cls = allClasses.find(c => c.grade === slot.grade && c.section === slot.section)
+          const cls = allClasses.find(c => c.id === a.class_id)
           if (cls) classMap.set(key, { cls, subjects: [], isOwn: false })
         }
         const entry = classMap.get(key)!
-        if (slot.subject_name && !entry.subjects.includes(slot.subject_name)) {
-          entry.subjects.push(slot.subject_name)
+        if (!entry.subjects.includes(a.subject_name)) {
+          entry.subjects.push(a.subject_name)
         }
       })
 
@@ -134,7 +137,7 @@ export default function MyClasses({ teacher, schoolId, onViewClass }: Props) {
             </svg>
           </div>
           <h3 className="text-lg font-semibold text-gray-700 mb-2">No Classes Assigned</h3>
-          <p className="text-gray-400 text-sm">Ask admin to set up your timetable.</p>
+          <p className="text-gray-400 text-sm">Ask your school admin to assign you a subject in Class Management.</p>
         </div>
       </div>
     )
@@ -175,16 +178,27 @@ export default function MyClasses({ teacher, schoolId, onViewClass }: Props) {
                   </div>
                 )}
 
-                <button
-                  onClick={() => onViewClass({ id: cls.id, grade: cls.grade, section: cls.section, class_teacher_name: cls.class_teacher_name })}
-                  className="w-full mt-auto bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
-                  Open Full Class View
-                </button>
+                <div className="flex gap-2 mt-auto">
+                  <button
+                    onClick={() => onViewClass({ id: cls.id, grade: cls.grade, section: cls.section, class_teacher_name: cls.class_teacher_name })}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    Open Full Class View
+                  </button>
+                  <button
+                    onClick={() => onGoToSyllabus({ id: cls.id, grade: cls.grade, section: cls.section, class_teacher_name: cls.class_teacher_name })}
+                    title="Open Syllabus"
+                    className="px-3 py-2.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors flex items-center justify-center"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             ) : (
               /* ── Other class card (Subject Teacher) ── */
@@ -210,7 +224,7 @@ export default function MyClasses({ teacher, schoolId, onViewClass }: Props) {
                     {subjects.length > 0 ? subjects.map(s => (
                       <span key={s} className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-medium">{s}</span>
                     )) : (
-                      <span className="text-xs text-gray-400">No subjects mapped in timetable</span>
+                      <span className="text-xs text-gray-400">No subject assigned</span>
                     )}
                   </div>
 
@@ -227,14 +241,26 @@ export default function MyClasses({ teacher, schoolId, onViewClass }: Props) {
                       Open Class View
                     </button>
                     <button
-                      onClick={() => expandClass(cls)}
-                      className="px-3 py-2 border border-gray-200 text-gray-500 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1"
+                      onClick={() => onGoToSyllabus({ id: cls.id, grade: cls.grade, section: cls.section, class_teacher_name: cls.class_teacher_name })}
+                      title="Open Syllabus"
+                      className="px-3 py-2 border border-indigo-200 text-indigo-600 text-xs font-medium rounded-lg hover:bg-indigo-50 transition-colors flex items-center gap-1"
                     >
-                      <svg className={`w-3.5 h-3.5 transition-transform ${expandedClassId === cls.id ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                       </svg>
-                      Timetable
+                      Syllabus
                     </button>
+                    {hasTimetableFeature && (
+                      <button
+                        onClick={() => expandClass(cls)}
+                        className="px-3 py-2 border border-gray-200 text-gray-500 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1"
+                      >
+                        <svg className={`w-3.5 h-3.5 transition-transform ${expandedClassId === cls.id ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        Timetable
+                      </button>
+                    )}
                   </div>
                 </div>
 

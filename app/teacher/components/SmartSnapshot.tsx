@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useFeature } from '@/lib/features-context'
 
 type Teacher = {
   id: number
@@ -50,6 +51,14 @@ type ClassTimetableSlot = {
   substitute_teacher_id: number | null
   substitute_teacher_subject?: string | null
   substitute_teacher_department?: string | null
+}
+
+type ClassSubjectAssignment = {
+  id: number
+  subject_name: string
+  class_id: number
+  grade: string
+  section: string
 }
 
 type SubstituteDuty = {
@@ -117,7 +126,12 @@ type LeaveRecord = { id: number; leave_type: string; start_date: string; end_dat
 type AnnouncementItem = { id: number; title: string; content: string; announcement_type: string; target_audience: string; priority: string; created_by_name: string; expires_at: string | null; created_at: string }
 
 export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewClass }: Props) {
+  const hasTimetableFeature = useFeature('timetable')
   const [timetable, setTimetable] = useState<Period[]>([])
+  // Class Management's class_subjects assignments — the actual source of
+  // truth for which (class, subject) pairs a teacher is assigned, independent
+  // of whether a timetable has been generated yet for that class.
+  const [classSubjects, setClassSubjects] = useState<ClassSubjectAssignment[]>([])
   const [classes, setClasses] = useState<ClassInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [nowMins, setNowMins] = useState(getNowMins())
@@ -160,14 +174,16 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
     Promise.all([
       fetch(`/api/timetable?teacher_id=${teacher.id}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
       fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()).catch(() => []),
+      fetch(`/api/teachers/${teacher.id}/class-subjects`).then(r => r.json()).catch(() => []),
       // Fetch all duties — we'll split into today vs upcoming client-side
       fetch(`/api/substitutes?school_id=${schoolId}&substitute_teacher_id=${teacher.id}`).then(r => r.json()).catch(() => []),
       // active_date lets SQL do the date comparison server-side (avoids timezone issues)
       fetch(`/api/leave-requests?teacher_id=${teacher.id}&school_id=${schoolId}&status=approved&active_date=${todayStr}`).then(r => r.json()).catch(() => []),
       fetch(`/api/announcements?school_id=${schoolId}&audience=teachers`).then(r => r.json()).catch(() => []),
-    ]).then(([tt, cls, subs, leaves, ann]) => {
+    ]).then(([tt, cls, classSubs, subs, leaves, ann]) => {
       setTimetable(Array.isArray(tt) ? tt : [])
       setClasses(Array.isArray(cls) ? cls : [])
+      setClassSubjects(Array.isArray(classSubs) ? classSubs : [])
       const allSubs: SubstituteDuty[] = Array.isArray(subs) ? subs : []
       setSubstituteDuties(allSubs.filter(s => s.date?.slice(0, 10) === todayStr))
       // Upcoming: duties after today, within next 14 days, sorted by date then period
@@ -230,6 +246,19 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
     }
     const cls = classSet.get(key)!
     if (p.subject && !cls.subjects.includes(p.subject)) cls.subjects.push(p.subject)
+  })
+  // Class Management assignments — the class still needs to show up here even
+  // when no timetable has been generated for it yet, since the teacher is
+  // already genuinely assigned to teach this subject there.
+  classSubjects.forEach(a => {
+    if (!a.grade || !a.section) return
+    const key = `${a.grade}-${a.section}`
+    if (!classSet.has(key)) {
+      const info = classes.find(c => c.grade === a.grade && c.section === a.section) || null
+      classSet.set(key, { grade: a.grade, section: a.section, subjects: [], classInfo: info })
+    }
+    const cls = classSet.get(key)!
+    if (!cls.subjects.includes(a.subject_name)) cls.subjects.push(a.subject_name)
   })
   const myClasses = Array.from(classSet.values()).sort((a, b) => {
     const ga = parseInt(a.grade) || 0, gb = parseInt(b.grade) || 0
@@ -408,7 +437,9 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
       })()}
 
       {/* Stats row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className={`grid grid-cols-2 gap-4 ${hasTimetableFeature ? 'sm:grid-cols-4' : 'sm:grid-cols-2'}`}>
+        {hasTimetableFeature && (
+        <>
         {/* Next Class card */}
         <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
           <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Next Class</p>
@@ -442,6 +473,8 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
           <p className="text-3xl font-bold text-gray-900">{todayPeriods.length}</p>
           <p className="text-xs text-gray-400 mt-0.5">periods scheduled</p>
         </div>
+        </>
+        )}
 
         <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
           <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Role</p>
@@ -466,6 +499,7 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
       </div>
 
       {/* Today's Timetable */}
+      {hasTimetableFeature && (
       <div className="bg-white rounded-xl border border-gray-200">
         <div className="px-5 py-4 flex items-center justify-between border-b border-gray-100">
           <div className="flex items-center gap-3">
@@ -533,6 +567,7 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
           </div>
         )}
       </div>
+      )}
 
       {/* Substitute Duties Today */}
       {substituteDuties.length > 0 && (
@@ -671,7 +706,7 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
         </div>
         {myClasses.length === 0 ? (
           <div className="bg-white rounded-xl border border-gray-200 py-8 text-center text-sm text-gray-400">
-            No class assignments yet — timetable needed
+            No class assignments yet — ask school admin to assign you a subject in Class Management
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4">

@@ -279,7 +279,41 @@ export async function getAnySession(): Promise<{ schoolId: number; role: string 
   if (teacher) return { schoolId: teacher.schoolId, role: 'teacher' }
   const student = await getStudentSession()
   if (student) return { schoolId: student.schoolId, role: 'student' }
+  const parent = await getParentSession()
+  if (parent) return { schoolId: parent.schoolId, role: 'parent' }
   const admin = await getSession()
   if (admin && admin.schoolId) return { schoolId: admin.schoolId, role: admin.role }
   return null
+}
+
+// ─── Syllabus tenant guard ──────────────────────────────────────────────────
+// Mirrors requireFeeAccess's tenant-matching, but also admits teacher/student/
+// parent sessions (getAnySession) since syllabus is read by every school role
+// and written by teachers, not just school-admin staff.
+export async function requireSyllabusAccess(requestedSchoolId: string | number | null | undefined):
+  Promise<{ schoolId: number; role: string } | null> {
+  const platformSession = await getPlatformSession()
+  if (platformSession?.role === 'platform_admin') {
+    const sid = requestedSchoolId != null ? Number(requestedSchoolId) : (platformSession.schoolId ?? 0)
+    if (!sid) return null
+    return { schoolId: sid, role: 'platform_admin' }
+  }
+
+  const session = await getAnySession()
+  if (!session) return null
+  if (requestedSchoolId != null && Number(requestedSchoolId) !== Number(session.schoolId)) {
+    return null   // cross-tenant attempt
+  }
+  return session
+}
+
+// Write-capable roles only (teacher, school admin/principal/VP) — students and
+// parents get requireSyllabusAccess for reads but must never mark/add/delete.
+export async function requireSyllabusWriteAccess(requestedSchoolId: string | number | null | undefined):
+  Promise<{ schoolId: number; role: string } | null> {
+  const session = await requireSyllabusAccess(requestedSchoolId)
+  if (!session) return null
+  const WRITE_ROLES = ['teacher', 'school_admin', 'principal', 'vice_principal', 'platform_admin']
+  if (!WRITE_ROLES.includes(session.role)) return null
+  return session
 }

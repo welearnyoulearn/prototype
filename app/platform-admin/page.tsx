@@ -1,8 +1,10 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
+import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 
 type School = {
   id: number
@@ -260,13 +262,23 @@ export default function PlatformAdmin() {
     } catch { setError('Failed to restore school') }
   }
 
+  useUsageHeartbeat()
+
   async function handleLogout() {
-    await fetch('/api/auth/logout', { method: 'POST' })
+    const usageSessionId = getUsageSessionId()
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usageSessionId }),
+    })
+    clearUsageSessionId()
     router.push('/login')
   }
 
-  // Filter + sort
-  const filtered = schools.filter(s => {
+  // Filter + sort — memoized so typing in the search box (or any unrelated
+  // re-render) doesn't re-filter/re-sort the whole schools array every time;
+  // only recomputes when the inputs that actually affect the result change.
+  const filtered = useMemo(() => schools.filter(s => {
     const q = search.toLowerCase()
     const matchSearch = !search || (
       s.name.toLowerCase().includes(q) ||
@@ -275,9 +287,9 @@ export default function PlatformAdmin() {
     )
     const matchTier = filterTier === 'all' || (s.tier || 'none') === filterTier
     return matchSearch && matchTier
-  })
+  }), [schools, search, filterTier])
 
-  const sorted = [...filtered].sort((a, b) => {
+  const sorted = useMemo(() => [...filtered].sort((a, b) => {
     const dir = sort.dir === 'asc' ? 1 : -1
     switch (sort.col) {
       case 'name':   return dir * a.name.localeCompare(b.name)
@@ -294,7 +306,7 @@ export default function PlatformAdmin() {
       }
       default: return 0
     }
-  })
+  }), [filtered, sort])
 
   // Derived stats
   const noPlanCount    = stats?.subscriptions.none ?? 0
@@ -345,6 +357,14 @@ export default function PlatformAdmin() {
             className="text-xs text-purple-600 hover:text-purple-800 border border-purple-200 bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg transition-colors font-medium">
             👥 Admin Team
           </button>
+          <Link href="/platform-admin/curriculum"
+            className="text-xs text-purple-600 hover:text-purple-800 hover:bg-purple-100 border border-purple-200 px-3 py-1.5 rounded-lg transition-colors font-semibold bg-purple-50">
+            📚 Master Syllabus
+          </Link>
+          <Link href="/platform-admin/library"
+            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors font-medium">
+            📖 Digital Library
+          </Link>
           <Link href="/platform-admin/features"
             className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors font-medium">
             Feature Plans
@@ -357,6 +377,11 @@ export default function PlatformAdmin() {
             className="text-xs text-teal-700 hover:text-teal-900 border border-teal-200 bg-teal-50 hover:bg-teal-100 px-3 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-teal-500 inline-block" />
             Watchline
+          </Link>
+          <Link href="/platform-admin/usage-analytics"
+            className="text-xs text-indigo-700 hover:text-indigo-900 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 inline-block animate-pulse" />
+            Usage Analytics
           </Link>
           <button
             onClick={() => { fetchSchools(tab); fetchStats() }}

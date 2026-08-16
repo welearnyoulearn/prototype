@@ -3,14 +3,6 @@ import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
 
-async function waiverSchoolIdById(id: string | null): Promise<number | null> {
-  if (!id) return null
-  try {
-    const { rows } = await pool.query(`SELECT school_id FROM fee_waivers WHERE id = $1`, [id])
-    return rows[0]?.school_id ?? null
-  } catch { return null }
-}
-
 // GET /api/fees/waivers?school_id=X&student_id=Y
 async function handleGET(req: NextRequest) {
   try {
@@ -223,7 +215,7 @@ async function handlePATCH(req: NextRequest) {
              status = CASE
                WHEN (GREATEST(0, COALESCE(waiver_amount, 0) + $1) + amount_paid) >= amount_due THEN 'waived'
                WHEN (GREATEST(0, COALESCE(waiver_amount, 0) + $1) + amount_paid) > 0           THEN 'partial'
-               WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
+               WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                ELSE 'pending'
              END
          WHERE id = $2`,
@@ -242,10 +234,12 @@ async function handlePATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
-export const PATCH = withWatchline(handlePATCH, {
-  route: '/api/fees/waivers',
-  getSchoolId: async req => { try { return await waiverSchoolIdById((await req.clone().json())?.id ?? null) } catch { return null } },
-})
+// No getSchoolId extractor here — PATCH/DELETE only learn the school_id by looking
+// up the target waiver row, which the handler itself already does. Adding a second,
+// separate lookup query purely for logging purposes adds avoidable DB connection
+// pressure on top of the handler's own pool.connect() (this pool runs max:1 on
+// Vercel), so these two log without a school_id rather than risk that contention.
+export const PATCH = withWatchline(handlePATCH, { route: '/api/fees/waivers' })
 
 async function handleDELETE(req: NextRequest) {
   try {
@@ -311,9 +305,9 @@ async function handleDELETE(req: NextRequest) {
          SET waiver_amount = $1,
              amount_paid   = $2,
              status = CASE
-               WHEN $1 + $2 >= amount_due THEN (CASE WHEN $1 > 0 THEN 'waived' ELSE 'paid' END)
-               WHEN $2 > 0 THEN 'partial'
-               WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = school_id AND ay.label = academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
+               WHEN $1::numeric + $2::numeric >= amount_due THEN (CASE WHEN $1::numeric > 0 THEN 'waived' ELSE 'paid' END)
+               WHEN $2::numeric > 0 THEN 'partial'
+               WHEN EXISTS (SELECT 1 FROM academic_years ay WHERE ay.school_id = student_fee_ledger.school_id AND ay.label = student_fee_ledger.academic_year AND ay.end_date < CURRENT_DATE) THEN 'overdue'
                ELSE 'pending'
              END
          WHERE id = $3`,
@@ -332,7 +326,5 @@ async function handleDELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
-export const DELETE = withWatchline(handleDELETE, {
-  route: '/api/fees/waivers',
-  getSchoolId: req => waiverSchoolIdById(req.nextUrl.searchParams.get('id')),
-})
+// See the PATCH note above — no extra lookup query for the same reason.
+export const DELETE = withWatchline(handleDELETE, { route: '/api/fees/waivers' })

@@ -8,19 +8,20 @@ export const ALL_FEATURES = [
   { key: 'class-management',   label: 'Class Management',                category: 'Core' },
   { key: 'student-portal',     label: 'Student Portal Access',           category: 'Core' },
   { key: 'parent-portal',      label: 'Parent Portal Access',            category: 'Core' },
+  { key: 'library',            label: 'WLYL Digital Library',            category: 'Core' },
 
   // â”€â”€ Scheduling â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   { key: 'attendance',         label: 'Attendance Tracking',             category: 'Scheduling' },
   { key: 'leave-requests',     label: 'Leave Requests',                  category: 'Scheduling' },
   { key: 'emergency-cover',    label: 'Emergency Cover',                 category: 'Scheduling' },
   { key: 'timetable',          label: 'Timetable Management',            category: 'Scheduling' },
+  { key: 'curriculum',         label: 'Syllabus Customizer',             category: 'Scheduling' },
   { key: 'exam-schedule',      label: 'Exam Schedule',                   category: 'Scheduling' },
 
   // â”€â”€ Analytics & Intelligence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   { key: 'briefing',           label: 'Daily Briefing',                  category: 'Analytics' },
   { key: 'analysis',           label: 'Studentâ€“Teacher Analysis',        category: 'Analytics' },
   { key: 'class-analytics',    label: 'Class Analytics',                 category: 'Analytics' },
-  { key: 'academic-analytics', label: 'Academic Analytics',              category: 'Analytics' },
 
   // â”€â”€ Communication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   { key: 'announcements',      label: 'Announcement Board',              category: 'Communication' },
@@ -29,6 +30,7 @@ export const ALL_FEATURES = [
 
   // â”€â”€ Finance â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   { key: 'fee-management',     label: 'Fee Management',                  category: 'Finance' },
+  { key: 'expenses',           label: 'Expense Tracking',                category: 'Finance' },
 
   // â”€â”€ Administration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   { key: 'calendar',           label: 'Academic Calendar',               category: 'Administration' },

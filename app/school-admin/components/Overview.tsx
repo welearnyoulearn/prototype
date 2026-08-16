@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { useFeature } from '../features-context'
+import { useFeature } from '@/lib/features-context'
 
 type Props = { schoolId: number; onNavigate?: (key: string) => void }
 

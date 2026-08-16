@@ -1,6 +1,5 @@
 import { test, expect, Page, request as playwrightRequest, APIRequestContext } from '@playwright/test'
-
-const BASE = process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:3000'
+import { BASE, platformAdminCookie, createSchool, setSubscription } from './fixtures/platform-admin'
 
 // ─── UI helpers ─────────────────────────────────────────────────────────────
 async function uiLogin(page: Page, identifier: string, password: string): Promise<string> {
@@ -74,21 +73,19 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     test.setTimeout(120000)
     ctx = await playwrightRequest.newContext({ baseURL: BASE })
 
-    const schoolRes = await ctx.post('/api/schools', {
-      data: {
-        name: `Onboarding Test School ${ts}`,
-        type: 'Private', city: 'Chennai', country: 'India',
-        phone: `98765${String(ts).slice(-5)}`,
-        email: `school${ts}@onboardtest.com`,
-        address: '1 Test Lane',
-      },
+    // Provisioning a school requires a platform admin session.
+    const platformCookie = await platformAdminCookie()
+    const school = await createSchool(platformCookie, {
+      name: `Onboarding Test School ${ts}`,
+      phone: `98765${String(ts).slice(-5)}`,
+      email: `school${ts}@onboardtest.com`,
+      address: '1 Test Lane',
     })
-    const school = await schoolRes.json()
     schoolId   = school.id
     schoolCode = school.school_code
     schoolPass = school.temp_password
 
-    await ctx.put(`/api/schools/${schoolId}/subscription`, { data: { tier: 'premium' } })
+    await setSubscription(platformCookie, schoolId, 'premium')
 
     const loginRes = await ctx.post('/api/auth/login', {
       data: { identifier: schoolCode, password: schoolPass },
@@ -243,16 +240,13 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
       rollNo: '1', lastName: 'Copy', firstName: 'Student',
       grade: '10', section: 'A', parentName: 'Copy Parent', parentPhone: phone(6),
     })
-    await page.getByTestId('enroll-students-btn').click()
 
-    // The API returns 0 inserted with an error row. The UI opens the result modal,
-    // but no "Copy Student" credential row is rendered since nothing was enrolled.
-    await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 20000 })
-    await expect(page.getByText('Copy Student')).toHaveCount(0)
+    // The duplicate is caught client-side against the preloaded roll numbers: the row
+    // is flagged inline and Enroll stays disabled, so the request is never sent.
+    await expect(page.getByTestId('roll-dup-warning-0')).toContainText(/already exists in Grade 10/i)
+    await expect(page.getByTestId('enroll-students-btn')).toBeDisabled()
 
-    await page.getByRole('button', { name: 'Done' }).click()
-
-    // Verify via API that no duplicate student was created
+    // The invariant that matters either way — no duplicate reached the database.
     const found = await studentIdsByNames(['Copy Student'])
     found.forEach((s: { id: number }) => createdStudentIds.push(s.id)) // cleanup if any slipped in
     expect(found).toHaveLength(0)
@@ -318,9 +312,11 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
 
     await page.getByTestId('enroll-students-btn').click()
 
-    // Client-side validation flags the negative roll number before submit
+    // Client-side validation flags the negative roll number before submit.
+    // .first() — the same `error` state renders in two banners (above the form and in
+    // the table footer), so the match is ambiguous under strict mode.
     await expect(
-      page.getByText(/Roll No must be a positive/i).or(page.getByText(/positive number/i))
+      page.getByText(/Roll No must be a positive/i).or(page.getByText(/positive number/i)).first()
     ).toBeVisible({ timeout: 10000 })
   })
 
@@ -348,7 +344,9 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
 
     // The validation banner shows the row-specific message (distinct from the
     // static "Parent Phone (blue) is required…" helper text).
-    await expect(page.getByText(/Row \d+: Parent Phone is required/i)).toBeVisible({ timeout: 5000 })
+    // .first() — StudentOnboarding renders the same `error` state in two banners (one
+    // above the form, one in the table footer), so an unqualified match trips strict mode.
+    await expect(page.getByText(/Row \d+: Parent Phone is required/i).first()).toBeVisible({ timeout: 5000 })
   })
 
   // ─── 10. Credentials — student + parent temp passwords displayed ─────────────
@@ -360,7 +358,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     await fillRow(page, {
       rollNo: '1', lastName: 'Cred', firstName: 'Test',
       email: `credtest${ts}@student.com`,
-      grade: '12', section: 'A',
+      grade: '10', section: 'A',
       parentName: 'Cred Parent', parentPhone: phone(12),
       parentEmail: `credparent${ts}@parent.com`,
     })
@@ -387,7 +385,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     await fillRow(page, {
       rollNo: '20', lastName: 'Reset', firstName: 'Test',
       email: `resettest${ts}@student.com`,
-      grade: '12', section: 'B',
+      grade: '10', section: 'B',
       parentName: 'Reset Parent', parentPhone: phone(20),
     })
     await page.getByTestId('enroll-students-btn').click()
@@ -442,8 +440,11 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     await expect(page.getByRole('button', { name: /Template/i })).toBeVisible()
     await expect(page.getByRole('button', { name: /Import CSV/i })).toBeVisible()
     await expect(page.getByRole('button', { name: /Paste CSV/i })).toBeVisible()
-    await expect(page.getByText('Roll No')).toBeVisible()
-    await expect(page.getByText('Parent Phone')).toBeVisible()
+    // Scoped to the header row: bare getByText('Roll No') also matches the
+    // "Roll No unique within Grade + Section" helper line under the table.
+    const headers = page.getByTestId('onboarding-table').locator('thead')
+    await expect(headers.getByText('Roll No', { exact: false })).toBeVisible()
+    await expect(headers.getByText('Parent Phone', { exact: false })).toBeVisible()
   })
 
   // ─── 14. UI: Manual entry + credentials modal + Copy All ─────────────────────
@@ -499,9 +500,10 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     const found = after.find((s: { id: number }) => s.id === target.id)
     expect(found?.status).toBe('inactive')
 
-    // Page still shows the Student Management area (active students only)
+    // Page still shows the Student Management area (active students only).
+    // Match the heading, not bare text — the nav button carries the same label.
     await page.getByRole('button', { name: /Student Management/i }).click()
-    await expect(page.getByText('Student Management')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByRole('heading', { name: 'Student Management' })).toBeVisible({ timeout: 10000 })
   })
 
   // ─── 16. Unauthorized bulk enroll → 401 ──────────────────────────────────────

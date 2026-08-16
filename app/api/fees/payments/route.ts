@@ -3,7 +3,17 @@ import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
 
-// GET /api/fees/payments?school_id=X&student_id=Y&ledger_id=Z
+// Hard ceiling on rows per request so a payment history can never come back unbounded.
+const MAX_LIMIT = 500
+
+// Non-negative integer query param. Absent => fallback; malformed => NaN so the
+// caller can reject it (Math.min/clamping keeps NaN, which Number.isInteger catches).
+function parseCount(raw: string | null, fallback: number): number {
+  if (raw === null) return fallback
+  return /^\d+$/.test(raw) ? Number(raw) : NaN
+}
+
+// GET /api/fees/payments?school_id=X&student_id=Y&ledger_id=Z&limit=&offset=
 async function handleGET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
@@ -19,19 +29,53 @@ async function handleGET(req: NextRequest) {
     if (student_id) { values.push(student_id); conditions.push(`fp.student_id = $${values.length}`) }
     if (ledger_id)  { values.push(ledger_id);  conditions.push(`fp.ledger_id = $${values.length}`) }
 
+    const where = `WHERE ${conditions.join(' AND ')}`
+    // Every JOIN is on a primary key (students.id, student_fee_ledger.id,
+    // fee_categories.id), so they filter but never multiply rows — the count
+    // reuses this exact FROM/JOIN/WHERE and so agrees with the rows returned.
+    const from = `FROM fee_payments fp
+         JOIN students s ON s.id = fp.student_id
+         JOIN student_fee_ledger l ON l.id = fp.ledger_id
+         JOIN fee_categories fc ON fc.id = l.fee_category_id`
+
+    // Pagination is opt-in — see the note in app/api/fees/ledger/route.ts. The
+    // collection screens total these rows up, so a default cap would show wrong
+    // "collected" figures rather than an obviously truncated list.
+    const paginated = p.has('limit') || p.has('offset')
+    let pageClause = ''
+    let limit = 0
+    let offset = 0
+    if (paginated) {
+      limit = Math.min(parseCount(p.get('limit'), MAX_LIMIT), MAX_LIMIT)
+      offset = parseCount(p.get('offset'), 0)
+      if (!Number.isInteger(limit) || !Number.isInteger(offset)) {
+        return NextResponse.json({ error: 'limit and offset must be non-negative integers' }, { status: 400 })
+      }
+      values.push(limit, offset)
+      pageClause = `LIMIT $${values.length - 1} OFFSET $${values.length}`
+    }
+
     try {
+      // created_at alone is not a total order — one multi-entry FIFO payment
+      // inserts several rows inside a single transaction and they share a
+      // timestamp, so paging over it would drop/duplicate rows. fp.id breaks ties.
       const { rows } = await pool.query(
         `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section,
                 fc.name AS category_name, l.period_label
-         FROM fee_payments fp
-         JOIN students s ON s.id = fp.student_id
-         JOIN student_fee_ledger l ON l.id = fp.ledger_id
-         JOIN fee_categories fc ON fc.id = l.fee_category_id
-         WHERE ${conditions.join(' AND ')}
-         ORDER BY fp.created_at DESC`,
+         ${from}
+         ${where}
+         ORDER BY fp.created_at DESC, fp.id DESC
+         ${pageClause}`,
         values
       )
-      return NextResponse.json(rows)
+      if (!paginated) return NextResponse.json(rows)
+
+      // Only paginated callers pay for the count.
+      const { rows: [{ total }] } = await pool.query<{ total: number }>(
+        `SELECT COUNT(*)::int AS total ${from} ${where}`,
+        values.slice(0, values.length - 2)
+      )
+      return NextResponse.json({ data: rows, limit, offset, total })
     } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
 } catch (err: unknown) {
     console.error('[API]', err)
@@ -104,7 +148,9 @@ async function handlePOST(req: NextRequest) {
     // ── Acquire connection only after validation passes ─────────────────────────
     const client = await pool.connect()
     try {
-      // Guard: block payments against a closed academic year
+      // Guard: block payments against a closed academic year — fee_year_close is
+      // guaranteed to exist (see lib/db.ts), so a query error here is a real failure,
+      // not a missing table; let it propagate rather than silently failing this open.
       const guardIds = isMulti ? ledger_ids : (ledger_id ? [ledger_id] : [])
       if (guardIds.length > 0) {
         const { rows: [locked] } = await client.query(
@@ -113,7 +159,7 @@ async function handlePOST(req: NextRequest) {
            JOIN fee_year_close yc ON yc.school_id = l.school_id AND yc.academic_year = l.academic_year AND yc.is_reopened = FALSE
            WHERE l.id = ANY($1) LIMIT 1`,
           [guardIds]
-        ).catch(() => ({ rows: [] }))
+        )
         if (locked) {
           return NextResponse.json({ error: 'This academic year is closed. Reopen it to record payments.' }, { status: 409 })
         }
@@ -265,10 +311,23 @@ async function handlePOST(req: NextRequest) {
         [createdPayments[0].id]
       )
 
+      // Per-fee-head breakdown for the receipt — createdPayments can span multiple
+      // fee categories (e.g. Tuition + Transport + Hostel paid in one transaction),
+      // so the receipt must itemise each rather than assuming a single category.
+      const { rows: lineItems } = await client.query(
+        `SELECT fp.id, fc.name AS category_name, l.period_label, fp.amount
+         FROM fee_payments fp
+         JOIN student_fee_ledger l ON l.id = fp.ledger_id
+         JOIN fee_categories fc ON fc.id = l.fee_category_id
+         WHERE fp.id = ANY($1::int[])`,
+        [createdPayments.map(p => p.id)]
+      )
+
       return NextResponse.json({
         ...full,
         receipt_number,
         total_paid: createdPayments.reduce((s, p) => s + parseFloat(p.amount), 0),
+        line_items: lineItems.map(li => ({ category_name: li.category_name, period_label: li.period_label, amount: parseFloat(li.amount) })),
         allocations: createdPayments.map(p => ({ ledger_id: p.ledger_id, amount: parseFloat(p.amount) })),
       }, { status: 201 })
     } catch (e) {

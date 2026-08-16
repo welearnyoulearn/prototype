@@ -74,7 +74,16 @@ export async function GET(req: NextRequest) {
     )
 
     // ── Row query ──
-    const where: string[] = ['created_at BETWEEN $1 AND $2']
+    // The bare "created_at" condition below is unambiguous on its own (only
+    // request_logs/error_events have it in scope), but every row query here also
+    // LEFT JOINs schools for the school name — and schools has its own created_at
+    // column too, so the bare reference becomes ambiguous once joined. qualifyDate()
+    // swaps in the correct table alias only for the queries that actually join schools.
+    const DATE_COND = 'created_at BETWEEN $1 AND $2'
+    const qualifyDate = (conds: string[], alias: string) =>
+      conds.map(c => c === DATE_COND ? `${alias}.created_at BETWEEN $1 AND $2` : c)
+
+    const where: string[] = [DATE_COND]
     const vals: unknown[] = [fromDate, toDate]
     if (schoolId) where.push(`school_id = $${vals.push(schoolId)}`)
 
@@ -85,7 +94,7 @@ export async function GET(req: NextRequest) {
           `SELECT rl.*, s.name AS school_name
            FROM request_logs rl
            LEFT JOIN schools s ON s.id = rl.school_id
-           WHERE ${where.join(' AND ')}
+           WHERE ${qualifyDate(where, 'rl').join(' AND ')}
            ORDER BY rl.created_at DESC`,
           vals,
         )
@@ -98,7 +107,7 @@ export async function GET(req: NextRequest) {
           `SELECT ee.*, s.name AS school_name
            FROM error_events ee
            LEFT JOIN schools s ON s.id = ee.school_id
-           WHERE ${errWhere.join(' AND ')}
+           WHERE ${qualifyDate(errWhere, 'ee').join(' AND ')}
            ORDER BY ee.created_at DESC`,
           vals,
         )
@@ -120,7 +129,7 @@ export async function GET(req: NextRequest) {
         `SELECT rl.*, s.name AS school_name
          FROM request_logs rl
          LEFT JOIN schools s ON s.id = rl.school_id
-         WHERE ${where.join(' AND ')}
+         WHERE ${qualifyDate(where, 'rl').join(' AND ')}
          ORDER BY rl.created_at DESC
          LIMIT $${vals.push(PAGE_SIZE)} OFFSET $${vals.push(page * PAGE_SIZE)}`,
         vals,
@@ -138,7 +147,7 @@ export async function GET(req: NextRequest) {
         `SELECT ee.*, s.name AS school_name
          FROM error_events ee
          LEFT JOIN schools s ON s.id = ee.school_id
-         WHERE ${errWhere.join(' AND ')}
+         WHERE ${qualifyDate(errWhere, 'ee').join(' AND ')}
          ORDER BY ee.created_at DESC
          LIMIT $${errVals.push(PAGE_SIZE)} OFFSET $${errVals.push(page * PAGE_SIZE)}`,
         errVals,

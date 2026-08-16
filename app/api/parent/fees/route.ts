@@ -1,18 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getAnySession } from '@/lib/auth'
+import { getAnySession, getParentSession } from '@/lib/auth'
+import { resolveAcademicYear } from '@/lib/academicYear'
 
 // GET /api/parent/fees?school_id=X&student_id=Y&academic_year=2025-26
 export async function GET(req: NextRequest) {
   try {
-    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const session = await getAnySession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const p = req.nextUrl.searchParams
     const school_id   = p.get('school_id')
     const student_id  = p.get('student_id')
     if (!school_id || !student_id) return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
-    const academic_year = p.get('academic_year') || await pool.query(
-      `SELECT label FROM academic_years WHERE school_id=$1 AND is_current=TRUE LIMIT 1`, [school_id]
-    ).then(r => r.rows[0]?.label ?? '2025-26').catch(() => '2025-26')
+    // getAnySession() only confirms SOME valid login exists — without these
+    // checks, any logged-in parent/teacher/student could pass another
+    // family's student_id/school_id and read their fee ledger, payment
+    // history, and transaction references.
+    if (session.schoolId !== parseInt(school_id)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (session.role === 'parent') {
+      const parent = await getParentSession()
+      const linkRes = await pool.query(
+        'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
+        [student_id, parent?.parentId]
+      )
+      if (linkRes.rowCount === 0) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+    }
+    const academic_year = p.get('academic_year') || await resolveAcademicYear(school_id)
 
     try {
       // Auto-mark overdue for this student only (targeted, not full table scan).

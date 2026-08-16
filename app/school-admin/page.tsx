@@ -3,10 +3,13 @@
 import { useEffect, useState, useCallback, Suspense } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
-import { FeaturesProvider } from './features-context'
+import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
 import { useRouter, useSearchParams } from 'next/navigation'
 import AppLoader from '../components/AppLoader'
+import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
+import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 
 // Always-loaded (small, needed immediately)
 import Overview from './components/Overview'
@@ -32,6 +35,9 @@ const StaffOnboarding       = dynamic(() => import('./components/StaffOnboarding
 const StudentOnboarding     = dynamic(() => import('./components/StudentOnboarding'),      { loading: () => <ModuleSkeleton /> })
 const ClassManagement       = dynamic(() => import('./components/ClassManagement'),        { loading: () => <ModuleSkeleton /> })
 const TimetableManagement   = dynamic(() => import('./components/TimetableManagement'),    { loading: () => <ModuleSkeleton /> })
+const CurriculumCustomizer   = dynamic(() => import('./components/CurriculumCustomizer'),   { loading: () => <ModuleSkeleton /> })
+const DigitalLibrary         = dynamic(() => import('@/app/components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
+const AcademicAnalytics      = dynamic(() => import('./components/AcademicAnalytics'),      { loading: () => <ModuleSkeleton /> })
 const ExamSchedule          = dynamic(() => import('./components/ExamSchedule'),           { loading: () => <ModuleSkeleton /> })
 const TeachersManagement    = dynamic(() => import('./components/TeachersManagement'),     { loading: () => <ModuleSkeleton /> })
 const StudentsManagement    = dynamic(() => import('./components/StudentsManagement'),     { loading: () => <ModuleSkeleton /> })
@@ -39,6 +45,7 @@ const AnnouncementBoard     = dynamic(() => import('./components/AnnouncementBoa
 const ExportCenter          = dynamic(() => import('./components/ExportCenter'),           { loading: () => <ModuleSkeleton /> })
 const SchoolSettings        = dynamic(() => import('./components/SchoolSettings'),         { loading: () => <ModuleSkeleton /> })
 const FeeManagement         = dynamic(() => import('./components/FeeManagement'),          { loading: () => <ModuleSkeleton /> })
+const ExpenseManagement     = dynamic(() => import('./components/ExpenseManagement'),      { loading: () => <ModuleSkeleton /> })
 const YearRollover          = dynamic(() => import('./components/YearRollover'),           { loading: () => <ModuleSkeleton /> })
 
 type School = {
@@ -48,6 +55,9 @@ type School = {
   city: string
   country: string
   status: string
+  logo_url?: string | null
+  logo_align?: 'left' | 'center' | 'right' | null
+  receipt_header_blocks?: { text: string; size: 'sm' | 'md' | 'lg' | 'xl'; bold: boolean; italic: boolean; align: 'left' | 'center' | 'right' }[]
 }
 
 type Tier = 'none' | 'basic' | 'standard' | 'premium'
@@ -64,7 +74,7 @@ const NAV_SECTIONS = [
   { label: 'OVERVIEW',      keys: ['overview'] },
   { label: 'PEOPLE',        keys: ['staff', 'students', 'class-management'] },
   { label: 'MANAGEMENT',    keys: ['fee-management'] },
-  { label: 'SCHEDULING',    keys: ['timetable', 'attendance', 'leave-requests', 'emergency-cover', 'exam-schedule'] },
+  { label: 'SCHEDULING',    keys: ['timetable', 'curriculum', 'library', 'attendance', 'leave-requests', 'emergency-cover', 'exam-schedule'] },
   { label: 'COMMUNICATION', keys: ['announcements'] },
   { label: 'TOOLS',         keys: ['export', 'settings', 'year-rollover'] },
 ]
@@ -142,6 +152,36 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    key: 'curriculum',
+    label: 'Syllabus Customizer',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'library',
+    label: 'Digital Library',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+      </svg>
+    ),
+  },
+  {
+    key: 'syllabus-tracking',
+    label: 'Syllabus Tracking',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+      </svg>
+    ),
+  },
+  {
     key: 'exam-schedule',
     label: 'Exam Schedule',
     tier: ['basic', 'standard', 'premium'],
@@ -202,6 +242,16 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    key: 'expenses',
+    label: 'Expenses',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v14a2 2 0 01-2 2z" />
+      </svg>
+    ),
+  },
+  {
     key: 'year-rollover',
     label: 'Year Rollover',
     tier: ['basic', 'standard', 'premium'],
@@ -218,6 +268,7 @@ function SchoolAdmin() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [selectedSchool, setSelectedSchool] = useState<School | null>(null)
+  const [academicYear, setAcademicYear] = useState('')
   const [tier, setTier] = useState<Tier>('none')
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
   const initialTab = searchParams.get('tab') || 'overview'
@@ -233,6 +284,8 @@ function SchoolAdmin() {
   const [staffRefreshKey, setStaffRefreshKey] = useState(0)
   const [studentRefreshKey, setStudentRefreshKey] = useState(0)
 
+  const trackOpen = useFeatureTracking('school-admin')
+
   const navigateTo = useCallback((key: string) => {
     setActiveNav(key)
     setVisited(prev => new Set([...prev, key]))
@@ -242,10 +295,19 @@ function SchoolAdmin() {
     const params = new URLSearchParams(window.location.search)
     params.set('tab', key)
     router.replace(`/school-admin?${params.toString()}`, { scroll: false })
-  }, [router])
+    trackOpen(key)
+  }, [router, trackOpen])
+
+  useUsageHeartbeat()
 
   async function handleLogout() {
-    await fetch('/api/auth/logout', { method: 'POST' })
+    const usageSessionId = getUsageSessionId()
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usageSessionId }),
+    })
+    clearUsageSessionId()
     router.push('/login')
   }
 
@@ -259,16 +321,37 @@ function SchoolAdmin() {
         if (!schoolRoles.includes(me.role) || !me.school_id) { router.push('/login?role=school'); return }
         setMyRole(me.role)
 
-        const schoolRes = await fetch(`/api/schools/${me.school_id}`)
+        // School and subscription both depend only on me.school_id, not on each
+        // other — fire them together so the dashboard waits one round-trip
+        // instead of two. allSettled (not all) so one failing fetch doesn't
+        // reject the other's handling: the school fetch still falls back below
+        // and the subscription still degrades to tier 'none'.
+        const [schoolSettled, subSettled] = await Promise.allSettled([
+          fetch(`/api/schools/${me.school_id}`),
+          fetch(`/api/schools/${me.school_id}/subscription`),
+        ])
+
+        if (schoolSettled.status === 'rejected') throw schoolSettled.reason
+        const schoolRes = schoolSettled.value
         const school = schoolRes.ok
           ? await schoolRes.json()
           : { id: me.school_id, name: me.school_name, type: '', city: '', country: '', status: 'active' }
         setSelectedSchool(school)
 
+        // Ambient "which year am I looking at" badge — every feature already
+        // scopes its own data to the active academic year server-side, but
+        // used to give no visible signal when that year is wrong (silently
+        // empty screens). One fetch here, shown once in the header, covers
+        // every tab instead of adding it to each one individually.
+        fetch(`/api/academic-year/current?school_id=${school.id}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(d => { if (d?.label) setAcademicYear(d.label) })
+          .catch(() => {})
+
         // Load subscription + features before showing UI — prevents "No Plan Assigned" flash
         try {
-          const subRes = await fetch(`/api/schools/${school.id}/subscription`)
-          const subData = await subRes.json()
+          if (subSettled.status === 'rejected') throw subSettled.reason
+          const subData = await subSettled.value.json()
           const t: Tier = subData.tier || 'none'
           setTier(t)
           if (t !== 'none') {
@@ -295,9 +378,16 @@ function SchoolAdmin() {
   const isStaffAccount = myRole === 'principal' || myRole === 'vice_principal'
 
   // Only show nav items that are enabled in platform feature config for this tier
-  // Staff accounts (principal/vice_principal) don't see Settings — they get a Profile page instead
+  // Staff accounts (principal/vice_principal) don't see Settings — they get a Profile page instead.
+  // Syllabus Tracking isn't its own togglable feature — it's not a separate
+  // thing a plan can include/exclude on its own, it's just the reporting view
+  // over whatever a school already subscribed to via Syllabus Customizer. It
+  // rides on 'curriculum's enablement instead of a 'syllabus-tracking' key
+  // (which was never in ALL_FEATURES / plan_features, so checking it directly
+  // here would have made this tab permanently invisible to every school).
   const enabledNavItems = NAV_ITEMS.filter(item =>
-    tier !== 'none' && enabledFeatures.has(item.key) &&
+    tier !== 'none' &&
+    enabledFeatures.has(item.key === 'syllabus-tracking' ? 'curriculum' : item.key) &&
     !(isStaffAccount && item.key === 'settings')
   )
 
@@ -320,6 +410,17 @@ function SchoolAdmin() {
               <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
               {selectedSchool.name}
             </div>
+          )}
+
+          {/* Active academic year — ambient, visible on every tab */}
+          {academicYear && (
+            <span
+              data-testid="academic-year-badge"
+              title="Active academic year — all data on this screen is scoped to this year"
+              className="hidden sm:inline-flex items-center gap-1 bg-slate-100 border border-slate-200 text-slate-600 text-xs font-medium px-2.5 py-1 rounded-full"
+            >
+              📅 {academicYear}
+            </span>
           )}
         </div>
 
@@ -574,12 +675,16 @@ function SchoolAdmin() {
 
                 {visited.has('class-management') && <div hidden={activeNav !== 'class-management'}><ClassManagement schoolId={selectedSchool.id} onNavigate={navigateTo} /></div>}
                 {visited.has('timetable')        && <div hidden={activeNav !== 'timetable'}><TimetableManagement schoolId={selectedSchool.id} /></div>}
+                {visited.has('curriculum')       && <div hidden={activeNav !== 'curriculum'}><CurriculumCustomizer schoolId={selectedSchool.id} /></div>}
+                {visited.has('library')          && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${selectedSchool.id}`} /></div>}
+                {visited.has('syllabus-tracking') && <div hidden={activeNav !== 'syllabus-tracking'}><AcademicAnalytics schoolId={selectedSchool.id} /></div>}
                 {visited.has('exam-schedule')    && <div hidden={activeNav !== 'exam-schedule'}><ExamSchedule schoolId={selectedSchool.id} /></div>}
                 {visited.has('announcements')    && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} /></div>}
                 {visited.has('export')           && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}
                 {visited.has('settings')         && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} /></div>}
                 {visited.has('profile')          && <div hidden={activeNav !== 'profile'}><StaffProfile /></div>}
-                {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} /></div>}
+                {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} schoolName={selectedSchool.name} schoolLogoUrl={selectedSchool.logo_url ?? null} schoolLogoAlign={selectedSchool.logo_align ?? 'center'} schoolHeaderBlocks={selectedSchool.receipt_header_blocks ?? []} /></div>}
+                {visited.has('expenses')         && <div hidden={activeNav !== 'expenses'}><ExpenseManagement schoolId={selectedSchool.id} /></div>}
                 {visited.has('year-rollover')    && <div hidden={activeNav !== 'year-rollover'}><YearRollover schoolId={selectedSchool.id} /></div>}
               </FeaturesProvider>
             )}

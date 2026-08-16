@@ -6,6 +6,22 @@ import { sendStudentWelcomeEmail, sendParentWelcomeEmail } from '@/lib/email'
 import { findOrCreateParent, linkStudentParent } from '@/lib/studentOnboarding'
 import { gradeOrderSql } from '@/lib/grades'
 
+// Never `SELECT *`: students carries password_hash, which would otherwise be
+// serialised straight to the browser. Enumerate every safe column instead.
+const STUDENT_COLUMNS = `id, school_id, name, email, phone, grade, section,
+         roll_number, school_roll_number, parent_name, parent_phone, parent_email,
+         status, password_changed, created_at`
+
+// Hard ceiling on rows per request so a roster can never come back unbounded.
+const MAX_LIMIT = 500
+
+// Non-negative integer query param. Absent => fallback; malformed => NaN so the
+// caller can reject it (Math.min/clamping keeps NaN, which Number.isInteger catches).
+function parseCount(raw: string | null, fallback: number): number {
+  if (raw === null) return fallback
+  return /^\d+$/.test(raw) ? Number(raw) : NaN
+}
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getAnySession()
@@ -21,31 +37,74 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
 
+      // The tenant scope comes from the SESSION, never from the presence of a param.
+      // getAnySession() admits student/parent logins, so when school_id was simply
+      // omitted the guard above never fired and the WHERE clause came out empty —
+      // any logged-in student could dump every school's roster. Only platform_admin
+      // may retarget the scope, and even then it falls back to their own school
+      // (getAnySession never returns a session without a schoolId).
+      const scopedSchoolId = session.role === 'platform_admin' && school_id
+        ? Number(school_id)
+        : session.schoolId
+      if (!Number.isInteger(scopedSchoolId)) {
+        return NextResponse.json({ error: 'Invalid school_id' }, { status: 400 })
+      }
+
       // Lightweight mode: just the distinct grades with active students, for screens
       // that need to know which grades are actually in use (e.g. fee setup validation)
-      // without paying for a full SELECT * roster fetch.
-      if (searchParams.get('grades_only') === '1' && school_id) {
+      // without paying for a full roster fetch.
+      if (searchParams.get('grades_only') === '1') {
         const { rows } = await pool.query(
           `SELECT DISTINCT grade FROM students WHERE school_id = $1 AND (status IS NULL OR status = 'active')`,
-          [school_id]
+          [scopedSchoolId]
         )
         return NextResponse.json(rows.map(r => r.grade))
       }
 
-      const conditions: string[] = []
-      const values: (string | number)[] = []
+      // school_id is seeded as $1 rather than pushed conditionally, so there is no
+      // code path that can emit a school-less query.
+      const values: (string | number)[] = [scopedSchoolId]
+      const conditions: string[] = ['school_id = $1']
 
-      if (school_id) { values.push(school_id); conditions.push(`school_id = $${values.length}`) }
       if (grade) { values.push(grade); conditions.push(`grade = $${values.length}`) }
       if (section) { values.push(section); conditions.push(`section = $${values.length}`) }
 
-      const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+      const where = `WHERE ${conditions.join(' AND ')}`
+
+      // Pagination is strictly opt-in. A default cap was tried and rejected: several
+      // screens (FeeManagement, StudentsManagement, StudentTeacherAnalysis) fetch the
+      // whole roster and aggregate over it, so a silent LIMIT would quietly produce
+      // WRONG fee totals for any school past the cap. A slow correct answer beats a
+      // fast wrong one — callers that want paging ask for it and get `total` back so
+      // they can tell how much is left.
+      const paginated = searchParams.has('limit') || searchParams.has('offset')
+      let pageClause = ''
+      let limit = 0
+      let offset = 0
+      if (paginated) {
+        limit = Math.min(parseCount(searchParams.get('limit'), MAX_LIMIT), MAX_LIMIT)
+        offset = parseCount(searchParams.get('offset'), 0)
+        if (!Number.isInteger(limit) || !Number.isInteger(offset)) {
+          return NextResponse.json({ error: 'limit and offset must be non-negative integers' }, { status: 400 })
+        }
+        values.push(limit, offset)
+        pageClause = `LIMIT $${values.length - 1} OFFSET $${values.length}`
+      }
 
       const result = await pool.query(
-        `SELECT * FROM students ${where} ORDER BY ${gradeOrderSql('grade')}, section, name`,
+        `SELECT ${STUDENT_COLUMNS} FROM students ${where}
+         ORDER BY ${gradeOrderSql('grade')}, section, school_roll_number NULLS LAST, name
+         ${pageClause}`,
         values
       )
-      return NextResponse.json(result.rows)
+      if (!paginated) return NextResponse.json(result.rows)
+
+      // Only paginated callers pay for the count.
+      const { rows: [{ total }] } = await pool.query<{ total: string }>(
+        `SELECT COUNT(*)::int AS total FROM students ${where}`,
+        values.slice(0, values.length - 2)
+      )
+      return NextResponse.json({ data: result.rows, limit, offset, total })
     } catch (error) {
       console.error(error)
       return NextResponse.json({ error: 'Failed to fetch students' }, { status: 500 })
@@ -90,9 +149,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Deliberately NOT filtered to status='active': idx_students_school_roll_unique
+    // ignores status too, so an inactive student still owns the roll number and the
+    // insert would fail — this check just turns that 500 into a friendly 409.
     if (school_roll_number != null && grade && section) {
       const dupRoll = await pool.query(
-        `SELECT id FROM students WHERE school_id = $1 AND grade = $2 AND section = $3 AND school_roll_number = $4 AND status = 'active'`,
+        `SELECT id FROM students WHERE school_id = $1 AND grade = $2 AND section = $3 AND school_roll_number = $4`,
         [school_id, grade, section, school_roll_number]
       )
       if (dupRoll.rows.length > 0) {

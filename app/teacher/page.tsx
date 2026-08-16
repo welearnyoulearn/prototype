@@ -2,16 +2,39 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import AppLoader from '../components/AppLoader'
-import SmartSnapshot from './components/SmartSnapshot'
-import ClassView from './components/ClassView'
-import FullTimetable from './components/FullTimetable'
-import TeacherLeave from './components/TeacherLeave'
-import TeacherProfile from './components/TeacherProfile'
-import Attendance from './components/Attendance'
-import MyStudents from './components/MyStudents'
-import MyClasses from './components/MyClasses'
+import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
+import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
+import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
+
+// Always-loaded (landing tab, and small enough not to be worth its own chunk)
+import SmartSnapshot from './components/SmartSnapshot'
+import TeacherSyllabus from './components/TeacherSyllabus'
+
+// Lazy-loaded — only downloaded when first opened
+function ModuleSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      <div className="h-8 bg-gray-100 rounded-xl w-48" />
+      <div className="grid grid-cols-3 gap-4">
+        {[1,2,3].map(i => <div key={i} className="h-28 bg-gray-100 rounded-2xl" />)}
+      </div>
+      <div className="h-64 bg-gray-100 rounded-2xl" />
+    </div>
+  )
+}
+// Turbopack requires inline object literals for next/dynamic options
+const ClassView      = dynamic(() => import('./components/ClassView'),      { loading: () => <ModuleSkeleton /> })
+const FullTimetable  = dynamic(() => import('./components/FullTimetable'),  { loading: () => <ModuleSkeleton /> })
+const TeacherLeave   = dynamic(() => import('./components/TeacherLeave'),   { loading: () => <ModuleSkeleton /> })
+const TeacherProfile = dynamic(() => import('./components/TeacherProfile'), { loading: () => <ModuleSkeleton /> })
+const Attendance     = dynamic(() => import('./components/Attendance'),     { loading: () => <ModuleSkeleton /> })
+const MyStudents     = dynamic(() => import('./components/MyStudents'),     { loading: () => <ModuleSkeleton /> })
+const MyClasses      = dynamic(() => import('./components/MyClasses'),      { loading: () => <ModuleSkeleton /> })
+const DigitalLibrary = dynamic(() => import('../components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
 
 type Teacher = {
   id: number
@@ -39,6 +62,13 @@ type NavSection = {
   items: { key: string; label: string; icon: React.ReactNode; comingSoon?: boolean }[]
 }
 
+// Maps a sidebar nav key to the school-plan feature key that gates it —
+// same feature keys school-admin's sidebar and Class Management already use.
+const NAV_KEY_TO_FEATURE: Record<string, string> = {
+  timetable: 'timetable',
+  attendance: 'attendance',
+}
+
 const NAV_SECTIONS: NavSection[] = [
   {
     label: 'MAIN',
@@ -51,6 +81,8 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: 'my-classes', label: 'My Classes', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg> },
       { key: 'my-students', label: 'My Students', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg> },
+      { key: 'syllabus', label: 'Syllabus', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" /></svg> },
+      { key: 'library', label: 'Digital Library', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253m0-13v13" /></svg> },
       { key: 'timetable', label: 'Timetable', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> },
       { key: 'attendance', label: 'Attendance', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg> },
     ],
@@ -75,10 +107,13 @@ export default function TeacherPortal() {
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
   const [classViewOpenExamId, setClassViewOpenExamId] = useState<number | undefined>(undefined)
 
+  const trackOpen = useFeatureTracking('teacher')
+
   function navigateTo(key: string) {
     setActiveNav(key)
     setVisitedNav(prev => new Set([...prev, key]))
     setSidebarOpen(false)
+    trackOpen(key)
   }
 
   function handleNavigate(key: string, payload?: { examId?: number; classId?: number; tab?: string }) {
@@ -100,10 +135,21 @@ export default function TeacherPortal() {
     }
   }
 
+  useUsageHeartbeat()
+
   const handleLogout = useCallback(async () => {
-    await fetch('/api/teacher/auth/logout', { method: 'POST' })
+    const usageSessionId = getUsageSessionId()
+    await fetch('/api/teacher/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usageSessionId }),
+    })
+    clearUsageSessionId()
     router.push('/teacher/login')
   }, [router])
+
+  const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
+  const [academicYear, setAcademicYear] = useState('')
 
   // Fetch teacher identity from session cookie
   useEffect(() => {
@@ -120,6 +166,38 @@ export default function TeacherPortal() {
       .finally(() => setLoading(false))
   }, [router])
 
+  // A teacher belongs to a school, and the school's plan decides which
+  // features exist — same gate school-admin already applies (e.g. Timetable
+  // tab hidden on the Basic plan). Without this, the teacher portal shows
+  // Timetable/Attendance nav items and tabs regardless of the school's plan.
+  useEffect(() => {
+    if (!teacher?.school_id) return
+    fetch(`/api/schools/${teacher.school_id}/subscription`)
+      .then(r => r.json())
+      .then(async subData => {
+        const tier = subData.tier || 'none'
+        if (tier === 'none') return
+        const featRes = await fetch(`/api/platform/features?tier=${tier}`)
+        if (featRes.ok) {
+          const fd = await featRes.json()
+          setEnabledFeatures(new Set(fd.enabled || []))
+        }
+      })
+      .catch(() => {})
+  }, [teacher?.school_id])
+
+  // Ambient "which year am I looking at" badge — every syllabus/class screen
+  // already scopes its own data to the school's active academic year, but
+  // gave no visible signal when that year is wrong. One fetch here, shown
+  // once in the header, covers every tab.
+  useEffect(() => {
+    if (!teacher?.school_id) return
+    fetch(`/api/academic-year/current?school_id=${teacher.school_id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.label) setAcademicYear(d.label) })
+      .catch(() => {})
+  }, [teacher?.school_id])
+
   if (loading) return <AppLoader message="Loading your portal" sub="Getting your classes and schedule ready…" />
 
   if (!teacher) return null
@@ -128,6 +206,7 @@ export default function TeacherPortal() {
   const greeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening'
 
   return (
+    <FeaturesProvider value={enabledFeatures}>
     <div className="min-h-screen flex flex-col bg-gray-100">
       {/* Top bar */}
       <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between flex-shrink-0 z-30">
@@ -152,6 +231,15 @@ export default function TeacherPortal() {
           </nav>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
+          {academicYear && (
+            <span
+              data-testid="academic-year-badge"
+              title="Active academic year — all data on this screen is scoped to this year"
+              className="hidden sm:inline-flex items-center gap-1 bg-gray-100 border border-gray-200 text-gray-500 text-xs font-medium px-2.5 py-1 rounded-full"
+            >
+              📅 {academicYear}
+            </span>
+          )}
           <p className="hidden sm:block text-sm font-medium text-gray-800">{greeting}, {teacher.name}</p>
           <NotificationBell teacherId={teacher.id} onNavigate={handleNavigate} />
           <button
@@ -180,11 +268,18 @@ export default function TeacherPortal() {
 
           <nav className="flex-1 py-3 overflow-y-auto">
             {NAV_SECTIONS.map(section => {
-              if (section.items.length === 0) return null
+              // Only these nav keys correspond to a school-plan feature gate —
+              // the rest (My Classes, My Students, Syllabus, Profile, Leave)
+              // aren't plan-gated features and always show.
+              const visibleItems = section.items.filter(item => {
+                const featureKey = NAV_KEY_TO_FEATURE[item.key]
+                return !featureKey || enabledFeatures.size === 0 || enabledFeatures.has(featureKey)
+              })
+              if (visibleItems.length === 0) return null
               return (
                 <div key={section.label} className="mb-2">
                   <p className="px-4 py-1.5 text-[10px] font-semibold text-slate-500 uppercase tracking-widest">{section.label}</p>
-                  {section.items.map(item => (
+                  {visibleItems.map(item => (
                     <button key={item.key}
                       onClick={() => { if (!item.comingSoon) navigateTo(item.key) }}
                       className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-colors text-left ${
@@ -224,10 +319,13 @@ export default function TeacherPortal() {
           {visitedNav.has('attendance')     && <div hidden={activeNav !== 'attendance'}><Attendance teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('leave')          && <div hidden={activeNav !== 'leave'}><TeacherLeave teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('profile')        && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher as (t: unknown) => void} /></div>}
-          {visitedNav.has('my-classes')     && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} /></div>}
+          {visitedNav.has('my-classes')     && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} onGoToSyllabus={cls => handleNavigate('class-view', { classId: cls.id, tab: 'Syllabus' })} /></div>}
           {visitedNav.has('my-students')    && <div hidden={activeNav !== 'my-students'}><MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
+          {visitedNav.has('syllabus')       && <div hidden={activeNav !== 'syllabus'}><TeacherSyllabus teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onGoToHomework={classId => handleNavigate('class-view', { classId, tab: 'Homework' })} /></div>}
+          {visitedNav.has('library')        && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${teacher.school_id}`} /></div>}
         </main>
       </div>
     </div>
+    </FeaturesProvider>
   )
 }

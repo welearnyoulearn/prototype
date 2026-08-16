@@ -10,18 +10,19 @@ export async function GET(req: NextRequest) {
   const offset = parseInt(req.nextUrl.searchParams.get('offset') || '0')
 
   try {
-    const result = await pool.query(`
-      SELECT
-        l.id, l.action, l.entity_type, l.entity_id, l.entity_name,
-        l.details, l.created_at,
-        u.email AS actor_email
-      FROM platform_audit_log l
-      LEFT JOIN users u ON u.id = l.actor_id
-      ORDER BY l.created_at DESC
-      LIMIT $1 OFFSET $2
-    `, [limit, offset])
-
-    const countRes = await pool.query('SELECT COUNT(*) FROM platform_audit_log')
+    const [result, countRes] = await Promise.all([
+      pool.query(`
+        SELECT
+          l.id, l.action, l.entity_type, l.entity_id, l.entity_name,
+          l.details, l.created_at,
+          u.email AS actor_email
+        FROM platform_audit_log l
+        LEFT JOIN users u ON u.id = l.actor_id
+        ORDER BY l.created_at DESC
+        LIMIT $1 OFFSET $2
+      `, [limit, offset]),
+      pool.query('SELECT COUNT(*) FROM platform_audit_log'),
+    ])
 
     return NextResponse.json({
       logs: result.rows,
