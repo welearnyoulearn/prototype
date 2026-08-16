@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 
 type AuditLog = {
   id: number
@@ -68,16 +67,6 @@ export default function AuditLogPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Top bar */}
-      <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link href="/platform-admin" className="text-gray-400 hover:text-gray-600 text-sm">← Platform Admin</Link>
-          <span className="text-gray-300">/</span>
-          <span className="text-gray-800 font-medium text-sm">Audit Log</span>
-        </div>
-        <span className="bg-purple-100 text-purple-700 text-xs font-medium px-3 py-1 rounded-full">Platform Admin</span>
-      </div>
-
       <div className="max-w-5xl mx-auto px-6 py-8">
         <div className="flex items-center justify-between mb-6">
           <div>

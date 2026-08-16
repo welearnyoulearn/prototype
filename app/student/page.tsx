@@ -8,6 +8,7 @@ import NotificationBell from '../components/NotificationBell'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
+import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
 import StudentDashboard from './components/StudentDashboard'
@@ -75,6 +76,14 @@ const NAV_SECTIONS: NavSection[] = [
 
 const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
 
+// Only nav keys that map to a plan-gated ALL_FEATURES entry get checked
+// against enabledFeatures — everything else (dashboard, tasks, doubts,
+// my-marks, profile) has always been unconditionally available and stays
+// that way. 'syllabus' resolves through PORTAL_NAV_KEY_ALIASES to
+// school-admin's 'curriculum' key, since that's the same underlying
+// capability under two different portal-local names.
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library'])
+
 const BOTTOM_NAV = [
   { key: 'dashboard', label: 'Home',    emoji: '🏠' },
   { key: 'tasks',     label: 'Tasks',   emoji: '📝' },
@@ -92,7 +101,17 @@ export default function StudentPortal() {
   const [visitedNav,  setVisitedNav]  = useState<Set<string>>(new Set(['dashboard']))
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [loading,     setLoading]     = useState(true)
+  const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
   const logoutInFlight = useRef(false)
+
+  // Filters out nav items gated by a plan feature the school doesn't have
+  // enabled for this portal — null (still loading) means "show everything"
+  // so the sidebar doesn't flash empty before the fetch resolves.
+  function isNavItemVisible(key: string) {
+    if (!RESTRICTABLE_NAV_KEYS.has(key)) return true
+    if (enabledFeatures === null) return true
+    return enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
+  }
 
   const trackOpen = useFeatureTracking('student')
 
@@ -109,6 +128,10 @@ export default function StudentPortal() {
         if (r.status === 401) { router.push('/student/login'); return }
         const data = await r.json()
         setStudent(data)
+        fetch(`/api/school/enabled-features?school_id=${data.school_id}&portal=student`)
+          .then(r => r.ok ? r.json() : null)
+          .then(d => { if (d?.enabled) setEnabledFeatures(new Set<string>(d.enabled)) })
+          .catch(() => {})
         const classRes = await fetch(`/api/classes?school_id=${data.school_id}`)
         if (classRes.ok) {
           const classes = await classRes.json()
@@ -244,7 +267,7 @@ export default function StudentPortal() {
                 <p className="px-3 pt-4 pb-1 text-[9px] font-bold text-slate-600 uppercase tracking-[0.15em]">
                   {section.label}
                 </p>
-                {section.items.map(item => (
+                {section.items.filter(item => isNavItemVisible(item.key)).map(item => (
                   <button
                     key={item.key}
                     onClick={() => { if (!item.comingSoon) navigateTo(item.key) }}
@@ -290,8 +313,8 @@ export default function StudentPortal() {
             {visitedNav.has('doubts')      && <div hidden={activeNav !== 'doubts'}><StudentDoubts student={student} classId={classId} schoolId={student.school_id} /></div>}
             {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={student.school_id} classId={classId} /></div>}
             {visitedNav.has('timetable')   && <div hidden={activeNav !== 'timetable'}><StudentTimetable classId={classId} schoolId={student.school_id} grade={student.grade} section={student.section} /></div>}
-            {visitedNav.has('syllabus')    && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={student.school_id} classId={classId} grade={student.grade} /></div>}
-            {visitedNav.has('library')     && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}`} /></div>}
+            {visitedNav.has('syllabus') && isNavItemVisible('syllabus') && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={student.school_id} classId={classId} grade={student.grade} /></div>}
+            {visitedNav.has('library') && isNavItemVisible('library') && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}`} /></div>}
             {visitedNav.has('profile')     && <div hidden={activeNav !== 'profile'}><StudentProfile student={student} /></div>}
           </div>
         </main>
