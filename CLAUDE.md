@@ -114,11 +114,18 @@ Platform Admin is served on `admin.welearnyoulearn.com` subdomain only — block
 - Used for Cashfree secret key and WhatsApp access token at rest
 
 ### Branch Strategy
-- `wlylV1` — dev/testing branch (Vercel preview)
+- `dev` — active development, feature branches merge here first
+- `qa` — QA testing branch, kept in sync with `dev`; protected (PRs only, no direct pushes, no merge commits — squash or rebase via PR)
 - `wlylV1_main` — production branch (welearnyoulearn.com), requires PR to merge
-- `dev` — separate feature branch
 - **Never commit online payments / WhatsApp code to `wlylV1_main` without explicit approval**
 - Never auto-push — commit locally, push only when told
+
+### Keeping `qa` in sync with `dev`, and `prod` in sync with `qa`
+- **Sync `qa` from `dev` after every PR merged into `dev`, or at minimum weekly — don't let them drift.** A 56-commit gap (real incident: Aug 2026) produced 39 conflicted files in one merge, most of them "which version wins" on files both branches had independently touched multiple times over. Small, frequent syncs keep each merge to a handful of files with obvious resolutions.
+- **Same discipline one level up: promote `qa → prod` promptly after a `dev → qa` sync lands (once QA has actually verified it), or at minimum weekly.** Don't let `prod` sit multiple `qa` syncs behind — same drift-causes-conflicts problem, just one hop further down the pipeline.
+- Workflow (either direction): branch off the target as `merge-dev-to-qa-vN` or `merge-qa-to-prod-vN` (increment N from the last one — check `git branch -a | grep merge-dev-to-qa` / `merge-qa-to-prod`), merge the source branch into it, resolve conflicts, verify (`tsc --noEmit`, `npm run build`, smoke test), push, open a PR into the target (direct push is blocked by branch protection — PR-only, no merge commits).
+- When resolving conflicts in a sync: if one side is simply older/stale and the other has the same feature done more completely (or a bug/security fix the other lacks), take the newer side — don't hand-merge line by line unless there are genuinely two different, both-wanted changes to reconcile.
+- `qa → prod` carries real production risk (live schools, live payments) that `dev → qa` doesn't — don't promote to `prod` without the user's explicit go-ahead for that specific promotion, even though `dev → qa` syncing can be done proactively.
 
 ### Email
 - `lib/email.ts` — Resend API, `EMAIL_FROM` env var
