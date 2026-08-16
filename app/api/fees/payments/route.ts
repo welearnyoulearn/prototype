@@ -3,7 +3,17 @@ import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
 
-// GET /api/fees/payments?school_id=X&student_id=Y&ledger_id=Z
+// Hard ceiling on rows per request so a payment history can never come back unbounded.
+const MAX_LIMIT = 500
+
+// Non-negative integer query param. Absent => fallback; malformed => NaN so the
+// caller can reject it (Math.min/clamping keeps NaN, which Number.isInteger catches).
+function parseCount(raw: string | null, fallback: number): number {
+  if (raw === null) return fallback
+  return /^\d+$/.test(raw) ? Number(raw) : NaN
+}
+
+// GET /api/fees/payments?school_id=X&student_id=Y&ledger_id=Z&limit=&offset=
 async function handleGET(req: NextRequest) {
   try {
     const p = req.nextUrl.searchParams
@@ -19,19 +29,53 @@ async function handleGET(req: NextRequest) {
     if (student_id) { values.push(student_id); conditions.push(`fp.student_id = $${values.length}`) }
     if (ledger_id)  { values.push(ledger_id);  conditions.push(`fp.ledger_id = $${values.length}`) }
 
+    const where = `WHERE ${conditions.join(' AND ')}`
+    // Every JOIN is on a primary key (students.id, student_fee_ledger.id,
+    // fee_categories.id), so they filter but never multiply rows — the count
+    // reuses this exact FROM/JOIN/WHERE and so agrees with the rows returned.
+    const from = `FROM fee_payments fp
+         JOIN students s ON s.id = fp.student_id
+         JOIN student_fee_ledger l ON l.id = fp.ledger_id
+         JOIN fee_categories fc ON fc.id = l.fee_category_id`
+
+    // Pagination is opt-in — see the note in app/api/fees/ledger/route.ts. The
+    // collection screens total these rows up, so a default cap would show wrong
+    // "collected" figures rather than an obviously truncated list.
+    const paginated = p.has('limit') || p.has('offset')
+    let pageClause = ''
+    let limit = 0
+    let offset = 0
+    if (paginated) {
+      limit = Math.min(parseCount(p.get('limit'), MAX_LIMIT), MAX_LIMIT)
+      offset = parseCount(p.get('offset'), 0)
+      if (!Number.isInteger(limit) || !Number.isInteger(offset)) {
+        return NextResponse.json({ error: 'limit and offset must be non-negative integers' }, { status: 400 })
+      }
+      values.push(limit, offset)
+      pageClause = `LIMIT $${values.length - 1} OFFSET $${values.length}`
+    }
+
     try {
+      // created_at alone is not a total order — one multi-entry FIFO payment
+      // inserts several rows inside a single transaction and they share a
+      // timestamp, so paging over it would drop/duplicate rows. fp.id breaks ties.
       const { rows } = await pool.query(
         `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section,
                 fc.name AS category_name, l.period_label
-         FROM fee_payments fp
-         JOIN students s ON s.id = fp.student_id
-         JOIN student_fee_ledger l ON l.id = fp.ledger_id
-         JOIN fee_categories fc ON fc.id = l.fee_category_id
-         WHERE ${conditions.join(' AND ')}
-         ORDER BY fp.created_at DESC`,
+         ${from}
+         ${where}
+         ORDER BY fp.created_at DESC, fp.id DESC
+         ${pageClause}`,
         values
       )
-      return NextResponse.json(rows)
+      if (!paginated) return NextResponse.json(rows)
+
+      // Only paginated callers pay for the count.
+      const { rows: [{ total }] } = await pool.query<{ total: number }>(
+        `SELECT COUNT(*)::int AS total ${from} ${where}`,
+        values.slice(0, values.length - 2)
+      )
+      return NextResponse.json({ data: rows, limit, offset, total })
     } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
 } catch (err: unknown) {
     console.error('[API]', err)

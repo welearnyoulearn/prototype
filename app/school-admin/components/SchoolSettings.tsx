@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { getBoardLabels } from '@/lib/board-syllabus/data'
 import { ALL_FEATURES, CATEGORY_ORDER } from '@/lib/features'
-import { useFeature } from '@/app/school-admin/features-context'
+import { useFeature } from '@/lib/features-context'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

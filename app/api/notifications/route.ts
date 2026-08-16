@@ -1,36 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getAnySession } from '@/lib/auth'
+import { getSession, getTeacherSession, getStudentSession } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
   try {
-    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    const { searchParams } = new URL(req.url)
-    const teacher_id = searchParams.get('teacher_id')
-    const recipient_school_id = searchParams.get('recipient_school_id')
-    const student_id = searchParams.get('student_id')
-    const unread_only = searchParams.get('unread_only')
+    // The recipient is derived from the session, never from the query string.
+    // Previously the session was only checked for existence and the caller-supplied
+    // teacher_id/student_id/recipient_school_id was trusted, so any logged-in user
+    // could read anybody else's notifications just by changing the id in the URL.
+    // Precedence matches getAnySession(): teacher, then student, then school staff.
+    const teacher = await getTeacherSession()
+    const student = teacher ? null : await getStudentSession()
+    const admin   = teacher || student ? null : await getSession()
 
-    if (!teacher_id && !recipient_school_id && !student_id) {
-      return NextResponse.json({ error: 'teacher_id, recipient_school_id, or student_id required' }, { status: 400 })
+    let recipientColumn: string
+    let recipientId: number
+
+    if (teacher) {
+      recipientColumn = 'n.recipient_teacher_id'
+      recipientId = teacher.teacherId
+    } else if (student) {
+      recipientColumn = 'n.recipient_student_id'
+      recipientId = student.studentId
+    } else if (admin?.schoolId) {
+      recipientColumn = 'n.recipient_school_id'
+      recipientId = admin.schoolId
+    } else {
+      // Includes parent sessions — no notification stream exists for them today.
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+
+    const unread_only = new URL(req.url).searchParams.get('unread_only')
+
     try {
       let q = `SELECT n.*, t.name AS sender_name
                FROM notifications n
                LEFT JOIN teachers t ON n.sender_teacher_id = t.id
                WHERE `
-      const vals: (string | number)[] = []
-
-      if (teacher_id) {
-        vals.push(teacher_id)
-        q += `n.recipient_teacher_id = $${vals.length}`
-      } else if (student_id) {
-        vals.push(student_id)
-        q += `n.recipient_student_id = $${vals.length}`
-      } else {
-        vals.push(recipient_school_id!)
-        q += `n.recipient_school_id = $${vals.length}`
-      }
+      const vals: (string | number)[] = [recipientId]
+      q += `${recipientColumn} = $1`
 
       if (unread_only === 'true') q += ` AND n.is_read = FALSE`
       q += ' ORDER BY n.created_at DESC LIMIT 50'

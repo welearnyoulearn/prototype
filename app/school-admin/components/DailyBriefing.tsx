@@ -281,7 +281,7 @@ export default function DailyBriefing({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {[
               { label: 'Active Announcements', value: data.active_announcements, action: 'announcements', icon: '📢' },
-              { label: 'Low Syllabus Coverage', value: data.low_syllabus_classes, action: 'academic-analytics', icon: '📚', warn: data.low_syllabus_classes > 0 },
+              { label: 'Low Syllabus Coverage', value: data.low_syllabus_classes, action: 'syllabus-tracking', icon: '📚', warn: data.low_syllabus_classes > 0 },
               { label: 'Classes Today', value: data.attendance.total_classes, action: 'class-management', icon: '🏫' },
             ].map(k => (
               <div key={k.label}

@@ -220,13 +220,15 @@ export async function POST(req: NextRequest) {
 
       await client.query('COMMIT')
 
+      // Login is always roll_number — /api/student/auth/login never checks
+      // email, it's only where the credential email gets delivered.
       const studentCredentials = studentPortalEnabled ? toInsert.map((s, i) => ({
         student_id: insertedStudents[i].id,
         name: s.name.trim(),
         grade: s.grade?.trim() || '',
         section: s.section?.trim() || '',
         school_roll_number: s._school_roll_number,
-        login: s.email?.trim() || '(no email — share manually)',
+        login: insertedStudents[i].roll_number,
         temp_password: studentTempPasswords[i],
       })) : []
 

@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 
 type School = {
   id: number
@@ -67,7 +67,6 @@ function isNewThisWeek(dateStr: string) {
 }
 
 export default function PlatformAdmin() {
-  const router = useRouter()
   const [tab, setTab]                     = useState<Tab>('active')
   const [schools, setSchools]             = useState<School[]>([])
   const [stats, setStats]                 = useState<PlatformStats | null>(null)
@@ -260,13 +259,12 @@ export default function PlatformAdmin() {
     } catch { setError('Failed to restore school') }
   }
 
-  async function handleLogout() {
-    await fetch('/api/auth/logout', { method: 'POST' })
-    router.push('/login')
-  }
+  useUsageHeartbeat()
 
-  // Filter + sort
-  const filtered = schools.filter(s => {
+  // Filter + sort — memoized so typing in the search box (or any unrelated
+  // re-render) doesn't re-filter/re-sort the whole schools array every time;
+  // only recomputes when the inputs that actually affect the result change.
+  const filtered = useMemo(() => schools.filter(s => {
     const q = search.toLowerCase()
     const matchSearch = !search || (
       s.name.toLowerCase().includes(q) ||
@@ -275,9 +273,9 @@ export default function PlatformAdmin() {
     )
     const matchTier = filterTier === 'all' || (s.tier || 'none') === filterTier
     return matchSearch && matchTier
-  })
+  }), [schools, search, filterTier])
 
-  const sorted = [...filtered].sort((a, b) => {
+  const sorted = useMemo(() => [...filtered].sort((a, b) => {
     const dir = sort.dir === 'asc' ? 1 : -1
     switch (sort.col) {
       case 'name':   return dir * a.name.localeCompare(b.name)
@@ -294,7 +292,7 @@ export default function PlatformAdmin() {
       }
       default: return 0
     }
-  })
+  }), [filtered, sort])
 
   // Derived stats
   const noPlanCount    = stats?.subscriptions.none ?? 0
@@ -328,46 +326,19 @@ export default function PlatformAdmin() {
   return (
     <div className="min-h-screen bg-gray-50">
 
-      {/* ── Top bar ── */}
+      {/* ── Page header ── */}
       <div className="bg-white border-b border-gray-200 px-6 py-3.5 flex items-center justify-between sticky top-0 z-20 shadow-sm">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-purple-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-sm">W</span>
-            </div>
-            <span className="font-bold text-gray-900">WLYL</span>
-          </div>
-          <span className="text-gray-300">|</span>
-          <h1 className="text-sm font-semibold text-gray-700">Platform Admin</h1>
-        </div>
+        <h1 className="text-lg font-bold text-gray-900">Schools</h1>
         <div className="flex items-center gap-2">
           <button onClick={openAdminModal}
             className="text-xs text-purple-600 hover:text-purple-800 border border-purple-200 bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg transition-colors font-medium">
             👥 Admin Team
           </button>
-          <Link href="/platform-admin/features"
-            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors font-medium">
-            Feature Plans
-          </Link>
-          <Link href="/platform-admin/audit"
-            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors">
-            Audit Log
-          </Link>
-          <Link href="/platform-admin/logs"
-            className="text-xs text-teal-700 hover:text-teal-900 border border-teal-200 bg-teal-50 hover:bg-teal-100 px-3 py-1.5 rounded-lg transition-colors font-medium flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-teal-500 inline-block" />
-            Watchline
-          </Link>
           <button
             onClick={() => { fetchSchools(tab); fetchStats() }}
             className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors"
             title="Refresh data"
           >↻ Refresh</button>
-          <span className="bg-purple-100 text-purple-700 text-xs font-medium px-3 py-1 rounded-full">Platform Admin</span>
-          <button onClick={handleLogout}
-            className="text-sm text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition-colors">
-            Logout
-          </button>
         </div>
       </div>
 

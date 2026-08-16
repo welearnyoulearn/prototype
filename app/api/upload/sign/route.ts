@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { v2 as cloudinary } from 'cloudinary'
 import { ensureDB } from '@/lib/db'
-import { getAnySession } from '@/lib/auth'
+import { getAnySession, getPlatformSession } from '@/lib/auth'
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -11,7 +11,10 @@ cloudinary.config({
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await getAnySession()
+    // getAnySession() only recognizes teacher/student/parent/school-admin
+    // cookies — Platform Admin signs in via a separate cookie (COOKIE_PLATFORM,
+    // see lib/auth.ts), so it needs its own check here too.
+    const session = (await getAnySession()) || (await getPlatformSession())
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     if (!process.env.CLOUDINARY_API_SECRET) {

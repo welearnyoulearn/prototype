@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import AuthShell, { THEMES, AuthError, PasswordField } from '@/app/components/AuthShell'
+import { setUsageSessionId } from '@/lib/usageSession'
 
 export default function ParentLoginPage() {
   const router = useRouter()
@@ -25,6 +26,8 @@ export default function ParentLoginPage() {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Login failed'); return }
+
+      setUsageSessionId(data.usageSessionId)
 
       if (!data.passwordChanged) {
         router.push('/parent/change-password')

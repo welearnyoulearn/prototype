@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { verifyPassword, signTeacherToken, setTeacherAuthCookie, TeacherJWTPayload } from '@/lib/auth'
+import { recordSessionStart } from '@/lib/usageTracking'
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,11 +11,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email and password are required' }, { status: 400 })
     }
 
+    // Legacy/seed data can have more than one active teacher sharing an email
+    // across schools (onboarding now blocks new collisions, but old rows can
+    // still exist) — order deterministically by most-recently-created so a
+    // stale duplicate never silently wins over the account someone actually
+    // meant to log into.
     const result = await pool.query(
       `SELECT t.id, t.name, t.email, t.school_id, t.password_hash, t.password_changed, t.status, s.name AS school_name
        FROM teachers t
        JOIN schools s ON s.id = t.school_id
        WHERE LOWER(t.email) = LOWER($1) AND t.removed_at IS NULL
+       ORDER BY t.id DESC
        LIMIT 1`,
       [email.trim()]
     )
@@ -49,11 +56,19 @@ export async function POST(req: NextRequest) {
 
     await setTeacherAuthCookie(payload)
 
+    const usageSessionId = await recordSessionStart({
+      schoolId: teacher.school_id,
+      actorId: teacher.id,
+      actorRole: 'teacher',
+      actorName: teacher.name,
+    })
+
     return NextResponse.json({
       success: true,
       passwordChanged: teacher.password_changed,
       name: teacher.name,
       schoolName: teacher.school_name,
+      usageSessionId,
     })
   } catch (error) {
     console.error('[teacher/auth/login]', error)

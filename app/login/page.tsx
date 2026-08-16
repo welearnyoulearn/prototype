@@ -4,6 +4,7 @@ import { useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import AuthShell, { THEMES, AuthError, AuthInput, AuthButton, PasswordField } from '@/app/components/AuthShell'
+import { setUsageSessionId } from '@/lib/usageSession'
 
 function LoginForm() {
   const router = useRouter()
@@ -29,6 +30,8 @@ function LoginForm() {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Invalid credentials'); return }
+
+      setUsageSessionId(data.usageSessionId)
 
       if (data.role === 'platform_admin') {
         window.location.href = '/platform-admin'
