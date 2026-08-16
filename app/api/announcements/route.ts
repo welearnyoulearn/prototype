@@ -2,16 +2,35 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { getAnySession } from '@/lib/auth'
 
-// GET /api/announcements?school_id=&audience=teachers|students|parents|all
+// Hard ceiling on rows per request so a noticeboard can never come back unbounded.
+const MAX_LIMIT = 500
+
+// Non-negative integer query param. Absent => fallback; malformed => NaN so the
+// caller can reject it (Math.min/clamping keeps NaN, which Number.isInteger catches).
+function parseCount(raw: string | null, fallback: number): number {
+  if (raw === null) return fallback
+  return /^\d+$/.test(raw) ? Number(raw) : NaN
+}
+
+// GET /api/announcements?school_id=&audience=teachers|students|parents|all&limit=&offset=
 // Returns active announcements filtered by audience.
 // audience param: if provided, returns announcements targeted to 'all' OR that specific audience.
 export async function GET(req: NextRequest) {
   try {
-    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const session = await getAnySession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const school_id = req.nextUrl.searchParams.get('school_id')
     const audience  = req.nextUrl.searchParams.get('audience') // 'teachers' | 'students' | 'parents' | 'all' | null
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+
+    // The session used to be checked for existence and then thrown away, so any
+    // logged-in user — including a student or parent — could pass another school's
+    // id and read its entire noticeboard. Scope comes from the session; the param
+    // is only allowed to agree with it.
+    if (Number(school_id) !== Number(session.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const today = new Date().toISOString().slice(0, 10)
 
@@ -19,7 +38,7 @@ export async function GET(req: NextRequest) {
     // - No audience param → return everything (admin view)
     // - audience=X → return rows where target_audience='all' OR contains X in comma-separated list
     let audienceFilter = ''
-    const params: (string | number)[] = [school_id, today]
+    const params: (string | number)[] = [session.schoolId, today]
 
     if (audience && audience !== 'all') {
       audienceFilter = `AND (
@@ -32,19 +51,49 @@ export async function GET(req: NextRequest) {
       params.push(audience)
     }
 
+    // Single table, no JOINs, so COUNT(*) over this same WHERE is exact.
+    const where = `WHERE school_id = $1
+        AND (expires_at IS NULL OR expires_at >= $2)
+        ${audienceFilter}`
+
+    // Pagination is opt-in — see the note in app/api/fees/ledger/route.ts. Without
+    // limit/offset the response stays the plain unbounded array callers expect today.
+    const paginated = req.nextUrl.searchParams.has('limit') || req.nextUrl.searchParams.has('offset')
+    let pageClause = ''
+    let limit = 0
+    let offset = 0
+    if (paginated) {
+      limit = Math.min(parseCount(req.nextUrl.searchParams.get('limit'), MAX_LIMIT), MAX_LIMIT)
+      offset = parseCount(req.nextUrl.searchParams.get('offset'), 0)
+      if (!Number.isInteger(limit) || !Number.isInteger(offset)) {
+        return NextResponse.json({ error: 'limit and offset must be non-negative integers' }, { status: 400 })
+      }
+      params.push(limit, offset)
+      pageClause = `LIMIT $${params.length - 1} OFFSET $${params.length}`
+    }
+
+    // priority bucket + created_at is not a total order (bulk-created notices share
+    // a timestamp), so id breaks the tie and keeps paging stable.
     const { rows } = await pool.query(`
       SELECT id, title, content, announcement_type, target_audience, priority,
              created_by_name, expires_at::text, created_at
       FROM announcements
-      WHERE school_id = $1
-        AND (expires_at IS NULL OR expires_at >= $2)
-        ${audienceFilter}
+      ${where}
       ORDER BY
         CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 ELSE 2 END,
-        created_at DESC
+        created_at DESC,
+        id DESC
+      ${pageClause}
     `, params)
 
-    return NextResponse.json(rows)
+    if (!paginated) return NextResponse.json(rows)
+
+    // Only paginated callers pay for the count.
+    const { rows: [{ total }] } = await pool.query<{ total: number }>(
+      `SELECT COUNT(*)::int AS total FROM announcements ${where}`,
+      params.slice(0, params.length - 2)
+    )
+    return NextResponse.json({ data: rows, limit, offset, total })
 } catch (err: unknown) {
     console.error('[API]', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

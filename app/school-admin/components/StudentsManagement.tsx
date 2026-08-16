@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 
 type Props = { schoolId: number; refreshKey?: number }
 
@@ -257,6 +257,118 @@ function DuplicatesPanel({
   )
 }
 
+// Passwords are hashed and never recoverable after creation — the temp
+// password shown at onboarding (or a previous reset) is gone the moment that
+// screen closes. This is the only ongoing way to get a usable, visible
+// password for a student: click Reset, a fresh one is generated, emailed to
+// them if they have an email on file, and shown here once. Students log in
+// with roll_number (not email — email is only where the credential gets
+// mailed), so that's what's shown as the username.
+function CredentialsPanel({ students }: { students: Student[] }) {
+  const [search, setSearch] = useState('')
+  const [resettingId, setResettingId] = useState<number | null>(null)
+  const [results, setResults] = useState<Record<number, { password: string; emailed: boolean; error?: string }>>({})
+
+  async function handleReset(student: Student) {
+    if (!confirm(`Reset ${student.name}'s password? Their current password will stop working immediately.`)) return
+    setResettingId(student.id)
+    setResults(prev => {
+      const next = { ...prev }
+      delete next[student.id]
+      return next
+    })
+    try {
+      const res = await fetch(`/api/students/${student.id}/reset-credentials`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Reset failed')
+      setResults(prev => ({ ...prev, [student.id]: { password: data.temp_password, emailed: !!student.email } }))
+    } catch (err: unknown) {
+      setResults(prev => ({ ...prev, [student.id]: { password: '', emailed: false, error: err instanceof Error ? err.message : 'Reset failed' } }))
+    } finally {
+      setResettingId(null)
+    }
+  }
+
+  const filtered = students.filter(s =>
+    !search.trim() ||
+    s.name.toLowerCase().includes(search.toLowerCase()) ||
+    (s.roll_number || '').toLowerCase().includes(search.toLowerCase()) ||
+    (s.email || '').toLowerCase().includes(search.toLowerCase())
+  )
+
+  return (
+    <div>
+      <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-xs text-gray-500 max-w-xl">
+          Students log in with their Roll No, not email. Passwords are never stored in plain text and can&apos;t
+          be shown again after creation — click <strong>Reset</strong> to generate a new one.
+        </p>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, roll no, or email..."
+          className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300 min-w-[240px]" />
+      </div>
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 border-b border-gray-200">
+            <tr>
+              <th className="text-left px-4 py-2.5 font-medium text-gray-500">Student</th>
+              <th className="text-left px-4 py-2.5 font-medium text-gray-500">Grade / Roll</th>
+              <th className="text-left px-4 py-2.5 font-medium text-gray-500">Username (Roll No)</th>
+              <th className="text-left px-4 py-2.5 font-medium text-gray-500">Password</th>
+              <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-28">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.length === 0 ? (
+              <tr><td colSpan={5} className="text-center py-8 text-gray-400 text-sm">No students found</td></tr>
+            ) : filtered.map(s => {
+              const result = results[s.id]
+              return (
+                <tr key={s.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-green-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                        {s.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="font-medium text-gray-900">{s.name}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5 text-gray-600 text-xs">
+                    {s.grade}{s.section ? `-${s.section}` : ''} {s.school_roll_number != null ? `· Roll ${s.school_roll_number}` : ''}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <span className="font-mono text-gray-700 text-xs">{s.roll_number}</span>
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {result?.error ? (
+                      <span className="text-red-500 text-xs">{result.error}</span>
+                    ) : result?.password ? (
+                      <div>
+                        <span className="font-mono bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200 text-xs">{result.password}</span>
+                        {!result.emailed && <p className="text-amber-600 text-[10px] mt-0.5">No email on file — share manually</p>}
+                      </div>
+                    ) : (
+                      <span className="text-gray-400 text-xs">•••••••• (hidden)</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <button
+                      data-testid={`reset-student-credentials-${s.id}`}
+                      onClick={() => handleReset(s)}
+                      disabled={resettingId === s.id}
+                      className="text-xs text-green-600 hover:text-green-800 hover:underline disabled:opacity-40 disabled:no-underline font-medium">
+                      {resettingId === s.id ? 'Resetting…' : 'Reset'}
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const [students, setStudents] = useState<Student[]>([])
   const [classes, setClasses] = useState<{ id: number; grade: string; section: string }[]>([])
@@ -264,7 +376,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const [error, setError] = useState('')
   const [gradeFilter, setGradeFilter] = useState('all')
   const [sectionFilter, setSectionFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all' | 'duplicates'>('active')
+  const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all' | 'duplicates' | 'credentials'>('active')
   const [dupGroups, setDupGroups] = useState<DupGroup[]>([])
   const [dupLoading, setDupLoading] = useState(false)
   const [dupTotalCount, setDupTotalCount] = useState(0)
@@ -281,6 +393,9 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const [studentPerf, setStudentPerf] = useState<StudentPerf | null>(null)
   const [studentRewards, setStudentRewards] = useState<StudentRewards | null>(null)
   const [perfLoading, setPerfLoading] = useState(false)
+  const [resettingPassword, setResettingPassword] = useState(false)
+  const [resetPassword, setResetPassword] = useState<{ password: string; emailed: boolean } | null>(null)
+  const [resetError, setResetError] = useState('')
 
   // Auto-scroll to top when this module opens
   useEffect(() => {
@@ -434,25 +549,49 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
     }
   }
 
-  const activeStudents = students.filter(s => s.status === 'active' || !s.status)
-  const inactiveStudents = students.filter(s => s.status === 'inactive')
+  // Generates a fresh temp password and shows it once — the only place in the
+  // ongoing (non-onboarding) UI that can recover credential access for a
+  // student who already has an account, since passwords are hashed and never
+  // stored/shown again after creation.
+  async function handleResetPassword(student: Student) {
+    if (!confirm(`Reset ${student.name}'s password? Their current password will stop working immediately.`)) return
+    setResettingPassword(true)
+    setResetPassword(null)
+    setResetError('')
+    try {
+      const res = await fetch(`/api/students/${student.id}/reset-credentials`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Reset failed')
+      setResetPassword({ password: data.temp_password, emailed: !!student.email })
+    } catch (err: unknown) {
+      setResetError(err instanceof Error ? err.message : 'Failed to reset password')
+    } finally {
+      setResettingPassword(false)
+    }
+  }
+
+  // Memoized — the whole roster gets re-filtered/re-grouped on every search
+  // keystroke and every grade/section/status filter click, so without this
+  // it re-scans the full student list on every render for no reason.
+  const activeStudents = useMemo(() => students.filter(s => s.status === 'active' || !s.status), [students])
+  const inactiveStudents = useMemo(() => students.filter(s => s.status === 'inactive'), [students])
 
   const displayStudents = statusFilter === 'active' ? activeStudents
     : statusFilter === 'inactive' ? inactiveStudents
     : statusFilter === 'duplicates' ? activeStudents
     : students
 
-  const grades = ['all', ...Array.from(new Set(displayStudents.map(s => s.grade).filter(Boolean)))
-    .sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))]
+  const grades = useMemo(() => ['all', ...Array.from(new Set(displayStudents.map(s => s.grade).filter(Boolean)))
+    .sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))], [displayStudents])
   // Sections are already normalised to uppercase; show only sections for the selected grade
-  const sections = ['all', ...Array.from(new Set(
+  const sections = useMemo(() => ['all', ...Array.from(new Set(
     displayStudents
       .filter(s => gradeFilter === 'all' || s.grade === gradeFilter)
       .map(s => (s.section ?? '').toUpperCase())
       .filter(Boolean)
-  )).sort()]
+  )).sort()], [displayStudents, gradeFilter])
 
-  const filtered = displayStudents.filter(s => {
+  const filtered = useMemo(() => displayStudents.filter(s => {
     const sec = (s.section ?? '').toUpperCase()
     const matchesGrade   = gradeFilter === 'all' || s.grade === gradeFilter
     const matchesSection = sectionFilter === 'all' || sec === sectionFilter.toUpperCase()
@@ -460,16 +599,19 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
       (s.roll_number || '').toLowerCase().includes(search.toLowerCase()) ||
       (s.school_roll_number != null && String(s.school_roll_number).includes(search))
     return matchesGrade && matchesSection && matchesSearch
-  })
+  }), [displayStudents, gradeFilter, sectionFilter, search])
 
   // Group by grade-section, sort numerically by grade then alphabetically by section
-  const grouped: Record<string, Student[]> = {}
-  filtered.forEach(s => {
-    const sec = (s.section ?? '').toUpperCase()
-    const key = s.grade && sec ? `Grade ${s.grade} – Section ${sec}` : s.grade ? `Grade ${s.grade}` : 'Unassigned'
-    if (!grouped[key]) grouped[key] = []
-    grouped[key].push(s)
-  })
+  const grouped: Record<string, Student[]> = useMemo(() => {
+    const g: Record<string, Student[]> = {}
+    filtered.forEach(s => {
+      const sec = (s.section ?? '').toUpperCase()
+      const key = s.grade && sec ? `Grade ${s.grade} – Section ${sec}` : s.grade ? `Grade ${s.grade}` : 'Unassigned'
+      if (!g[key]) g[key] = []
+      g[key].push(s)
+    })
+    return g
+  }, [filtered])
 
   function sortGroupKey(a: string, b: string) {
     const ga = parseInt(a.match(/Grade (\d+)/)?.[1] ?? '0')
@@ -524,6 +666,12 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
               <span className="ml-1.5 bg-orange-100 text-orange-600 text-xs px-1.5 py-0.5 rounded-full">{dupTotalCount}</span>
             )}
           </button>
+          <button
+            data-testid="student-credentials-tab-btn"
+            onClick={() => setStatusFilter('credentials')}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === 'credentials' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            Credentials
+          </button>
         </div>
 
         {error && (
@@ -533,7 +681,9 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
           </div>
         )}
 
-        {statusFilter === 'duplicates' ? (
+        {statusFilter === 'credentials' ? (
+          <CredentialsPanel students={activeStudents} />
+        ) : statusFilter === 'duplicates' ? (
           <DuplicatesPanel
             dupGroups={dupGroups}
             dupLoading={dupLoading}
@@ -605,7 +755,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                       if (b.school_roll_number != null) return 1
                       return a.name.localeCompare(b.name)
                     }).map(s => (
-                      <tr key={s.id} onClick={() => { setSelected(s); setEditing(false); setDetailTab('info'); setStudentPerf(null); setStudentRewards(null) }}
+                      <tr key={s.id} onClick={() => { setSelected(s); setEditing(false); setDetailTab('info'); setStudentPerf(null); setStudentRewards(null); setResetPassword(null); setResetError('') }}
                         className={`cursor-pointer transition-colors ${selected?.id === s.id ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-3 text-center font-semibold text-sm text-amber-700 bg-amber-50/40">
                           {s.school_roll_number ?? <span className="text-gray-300 font-normal text-xs">—</span>}
@@ -835,6 +985,24 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                   className="w-full border border-green-200 text-green-600 py-2 rounded-lg text-sm font-medium hover:bg-green-50 transition-colors">
                   Edit Details
                 </button>
+              )}
+              <button onClick={() => handleResetPassword(selected)} disabled={resettingPassword}
+                className="w-full border border-blue-200 text-blue-600 py-2 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors disabled:opacity-50">
+                {resettingPassword ? 'Resetting…' : 'Reset Password'}
+              </button>
+              {resetPassword && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2.5 text-xs space-y-1">
+                  <p className="text-blue-700 font-semibold">New password (shown once — save now):</p>
+                  <p className="font-mono bg-white border border-blue-200 rounded px-2 py-1 text-blue-900 select-all">{resetPassword.password}</p>
+                  <p className="text-blue-500">{resetPassword.emailed ? 'Also emailed to the student.' : 'No email on file — share this manually.'}</p>
+                  <button onClick={() => setResetPassword(null)} className="text-blue-400 hover:text-blue-600 text-[11px]">Dismiss</button>
+                </div>
+              )}
+              {resetError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-600 flex justify-between items-center">
+                  <span>{resetError}</span>
+                  <button onClick={() => setResetError('')} className="text-red-400 hover:text-red-600">✕</button>
+                </div>
               )}
               {selected.status === 'inactive' ? (
                 <button onClick={() => handleRestore(selected)}

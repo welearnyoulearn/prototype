@@ -13,7 +13,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (isNaN(studentId)) return NextResponse.json({ error: 'Invalid student ID' }, { status: 400 })
 
   const studentRes = await pool.query(
-    `SELECT s.id, s.name, s.email, s.school_id, s.roll_number, sc.name as school_name
+    `SELECT s.id, s.name, s.email, s.school_id, s.roll_number, s.status, sc.name as school_name
      FROM students s JOIN schools sc ON sc.id = s.school_id
      WHERE s.id = $1`,
     [studentId]
@@ -22,6 +22,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const student = studentRes.rows[0]
   if (student.school_id !== admin.schoolId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+
+  // A deactivated student can't log in either way — resetting their password
+  // would just email fresh credentials to an account nobody can use.
+  if (student.status && student.status !== 'active') {
+    return NextResponse.json({ error: 'This student is not active — restore them before resetting their password' }, { status: 400 })
+  }
 
   const tempPassword = generateTempPassword(8)
   const passwordHash = await hashPassword(tempPassword)

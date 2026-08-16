@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test'
-
-const BASE = 'http://localhost:3000'
+import { BASE, platformAdminCookie, createSchool, setSubscription } from './fixtures/platform-admin'
 
 test.describe.serial('School Admin Workflow', () => {
   let schoolCode: string
@@ -9,31 +8,14 @@ test.describe.serial('School Admin Workflow', () => {
   let cookie: string
 
   test.beforeAll(async () => {
-    const ts = Date.now()
-    const res = await fetch(`${BASE}/api/schools`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: `Test School ${ts}`,
-        type: 'Private',
-        city: 'Chennai',
-        country: 'India',
-        phone: '9876500100',
-        email: `admin${ts}@test.com`,
-        address: '50 Anna Salai, Chennai',
-      }),
-    })
-    const data = await res.json()
-    schoolCode = data.school_code
-    schoolPass = data.temp_password
-    schoolId = data.id
+    // Provisioning a school requires a platform admin session.
+    const platformCookie = await platformAdminCookie()
+    const school = await createSchool(platformCookie)
+    schoolCode = school.school_code
+    schoolPass = school.temp_password
+    schoolId = school.id
 
-    // Set premium plan
-    await fetch(`${BASE}/api/schools/${schoolId}/subscription`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tier: 'premium' }),
-    })
+    await setSubscription(platformCookie, schoolId, 'premium')
   })
 
   test('1. School Admin — login with school code', async ({ page }) => {

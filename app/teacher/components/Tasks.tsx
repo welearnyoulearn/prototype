@@ -55,6 +55,15 @@ type Props = {
   section: string
   schoolId: number
   teacher: Teacher
+  // Set when navigated here from a specific syllabus topic's "Add Homework"
+  // button — opens the create form pre-filled instead of the plain list, so
+  // the teacher doesn't have to re-type which chapter/topic it's for.
+  // onPrefillConsumed lets the parent clear its copy right after, so leaving
+  // and manually returning to this tab later doesn't re-trigger the same
+  // pre-filled form a second time.
+  prefillTitle?: string
+  prefillSubject?: string
+  onPrefillConsumed?: () => void
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -108,7 +117,7 @@ const DEFAULT_FORM: TaskForm = {
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export default function Tasks({ classId, grade, section, schoolId, teacher }: Props) {
+export default function Tasks({ classId, grade, section, schoolId, teacher, prefillTitle, prefillSubject, onPrefillConsumed }: Props) {
   const isClassTeacher = teacher.class_teacher_grade === grade && teacher.class_teacher_section === section
 
   // View: 'list' | 'create' | 'review'
@@ -140,11 +149,25 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
 
   useEffect(() => { fetchTasks() }, [fetchTasks])
 
-  function openCreate() {
+  // Arrived here via a topic's "Add Homework" button — open the create form
+  // pre-filled instead of the plain list. Only fires once per navigation
+  // (prefillTitle is cleared by the parent after being read, same "one-shot"
+  // pattern classViewInitialTab already uses for cross-tab navigation).
+  useEffect(() => {
+    if (!prefillTitle) return
+    const t = setTimeout(() => {
+      openCreate({ title: prefillTitle, subject: prefillSubject })
+      onPrefillConsumed?.()
+    }, 0)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillTitle, prefillSubject])
+
+  function openCreate(prefill?: { title?: string; subject?: string }) {
     setEditingTask(null)
     const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
     const due = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth()+1).padStart(2,'0')}-${String(tomorrow.getDate()).padStart(2,'0')}`
-    setForm({ ...DEFAULT_FORM, subject: teacher.subject, due_date: due })
+    setForm({ ...DEFAULT_FORM, subject: prefill?.subject || teacher.subject, title: prefill?.title || '', due_date: due })
     setFormError('')
     setView('create')
   }
@@ -376,7 +399,7 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
           <option value="overdue">Overdue</option>
           <option value="draft">Draft</option>
         </select>
-        <button onClick={openCreate}
+        <button onClick={() => openCreate()}
           className="ml-auto flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors">
           <span className="text-lg leading-none">+</span> Add Homework
         </button>
@@ -410,7 +433,7 @@ export default function Tasks({ classId, grade, section, schoolId, teacher }: Pr
             </div>
             <p className="text-gray-500 font-medium">No homework yet</p>
             <p className="text-gray-400 text-sm mt-1">Add the first homework for this class</p>
-            <button onClick={openCreate}
+            <button onClick={() => openCreate()}
               className="mt-3 bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-700 transition-colors">
               + Add Homework
             </button>

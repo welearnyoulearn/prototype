@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import Link from 'next/link'
 
 type RequestRow = {
   id: number; school_id: number | null; school_name: string | null
@@ -209,20 +208,13 @@ export default function WatchlinePage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Top bar */}
+      {/* Page header */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link href="/platform-admin" className="text-gray-400 hover:text-gray-600 text-sm">← Platform Admin</Link>
-          <span className="text-gray-300">/</span>
-          <span className="text-gray-800 font-medium text-sm">Watchline</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 bg-teal-50 text-teal-700 text-xs font-medium px-3 py-1 rounded-full border border-teal-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
-            Observability
-          </span>
-          <span className="bg-purple-100 text-purple-700 text-xs font-medium px-3 py-1 rounded-full">Platform Admin</span>
-        </div>
+        <h1 className="text-lg font-bold text-gray-900">Watchline</h1>
+        <span className="inline-flex items-center gap-1.5 bg-teal-50 text-teal-700 text-xs font-medium px-3 py-1 rounded-full border border-teal-200">
+          <span className="w-1.5 h-1.5 rounded-full bg-teal-500 animate-pulse" />
+          Observability
+        </span>
       </div>
 
       {/* Storage health banner */}

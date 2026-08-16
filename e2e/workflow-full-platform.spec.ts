@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { PLATFORM_ADMIN_EMAIL, PLATFORM_ADMIN_PASSWORD } from './fixtures/platform-admin'
 
 test.describe.serial('Full Platform Workflow', () => {
   let schoolCode: string
@@ -10,8 +11,8 @@ test.describe.serial('Full Platform Workflow', () => {
     await page.goto('/admin')
     await expect(page.getByRole('heading', { name: 'Platform Admin' })).toBeVisible()
 
-    await page.getByTestId('auth-email-address-input').fill('ckrishna@startensystems.com')
-    await page.getByTestId('auth-password-input').fill('Admin@1234')
+    await page.getByTestId('auth-email-address-input').fill(PLATFORM_ADMIN_EMAIL)
+    await page.getByTestId('auth-password-input').fill(PLATFORM_ADMIN_PASSWORD)
     await page.getByTestId('auth-submit-btn').click()
 
     await page.waitForURL(/\/platform-admin/, { timeout: 20000 })
@@ -21,8 +22,8 @@ test.describe.serial('Full Platform Workflow', () => {
   test('2. Platform Admin — create a new school', async ({ page }) => {
     // Login first
     await page.goto('/admin')
-    await page.getByTestId('auth-email-address-input').fill('ckrishna@startensystems.com')
-    await page.getByTestId('auth-password-input').fill('Admin@1234')
+    await page.getByTestId('auth-email-address-input').fill(PLATFORM_ADMIN_EMAIL)
+    await page.getByTestId('auth-password-input').fill(PLATFORM_ADMIN_PASSWORD)
     await page.getByTestId('auth-submit-btn').click()
     await page.waitForURL(/\/platform-admin/, { timeout: 15000 })
     await expect(page.getByText('Active Schools', { exact: true })).toBeVisible({ timeout: 10000 })
@@ -66,8 +67,8 @@ test.describe.serial('Full Platform Workflow', () => {
   test('3. Platform Admin — set school subscription plan', async ({ page }) => {
     // Login
     await page.goto('/admin')
-    await page.getByTestId('auth-email-address-input').fill('ckrishna@startensystems.com')
-    await page.getByTestId('auth-password-input').fill('Admin@1234')
+    await page.getByTestId('auth-email-address-input').fill(PLATFORM_ADMIN_EMAIL)
+    await page.getByTestId('auth-password-input').fill(PLATFORM_ADMIN_PASSWORD)
     await page.getByTestId('auth-submit-btn').click()
     await page.waitForURL(/\/platform-admin/, { timeout: 15000 })
     await expect(page.getByText('Active Schools', { exact: true })).toBeVisible({ timeout: 10000 })

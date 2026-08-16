@@ -1,8 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { getAnySession } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
   try {
+    // This handler previously had NO session check at all, and school_id was pushed
+    // only `if (school_id)` — so omitting the param produced an empty WHERE and
+    // returned every teacher's leave records, across every school, to an entirely
+    // unauthenticated caller (middleware treats /api/ as public). Authenticate
+    // first, then scope to the session's school so neither hole can reopen.
+    const session = await getAnySession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const school_id = req.nextUrl.searchParams.get('school_id')
     const teacher_id = req.nextUrl.searchParams.get('teacher_id')
@@ -10,11 +18,16 @@ export async function GET(req: NextRequest) {
     // active_date=YYYY-MM-DD → only return leaves where that date falls within [start_date, end_date]
     const active_date = req.nextUrl.searchParams.get('active_date')
 
-    try {
-      const conditions: string[] = []
-      const values: (string | number)[] = []
+    if (school_id && Number(school_id) !== Number(session.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
-      if (school_id) { values.push(school_id); conditions.push(`lr.school_id = $${values.length}`) }
+    try {
+      // Seeded as $1 rather than pushed conditionally, so the WHERE clause can
+      // never come out school-less.
+      const conditions: string[] = ['lr.school_id = $1']
+      const values: (string | number)[] = [session.schoolId]
+
       if (teacher_id) { values.push(teacher_id); conditions.push(`lr.teacher_id = $${values.length}`) }
       if (status) { values.push(status); conditions.push(`lr.status = $${values.length}`) }
       if (active_date) {
@@ -22,7 +35,7 @@ export async function GET(req: NextRequest) {
         conditions.push(`$${values.length}::date BETWEEN lr.start_date AND lr.end_date`)
       }
 
-      const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+      const where = `WHERE ${conditions.join(' AND ')}`
 
       const result = await pool.query(
         `SELECT lr.*, t.name AS teacher_name, t.employee_id, t.department

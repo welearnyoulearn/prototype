@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { platformAdminCookie } from './fixtures/platform-admin'
 
 test.describe('Portal Access Verification', () => {
 
@@ -124,8 +125,15 @@ test.describe('Portal Access Verification', () => {
       expect(body.db).toBe('connected')
     })
 
-    test('schools API returns data', async ({ request }) => {
+    test('schools API rejects unauthenticated callers', async ({ request }) => {
       const res = await request.get('/api/schools?scope=active')
+      expect(res.status()).toBe(401)
+    })
+
+    test('schools API returns data for a platform admin', async ({ request }) => {
+      const res = await request.get('/api/schools?scope=active', {
+        headers: { Cookie: await platformAdminCookie() },
+      })
       expect(res.ok()).toBeTruthy()
       const schools = await res.json()
       expect(Array.isArray(schools)).toBe(true)

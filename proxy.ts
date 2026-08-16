@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
-import { JWT_SECRET as JWT_SECRET_RAW, COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from '@/lib/auth-constants'
+import { JWT_SECRET as JWT_SECRET_RAW, INGEST_SECRET, COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from '@/lib/auth-constants'
 
 // Combined middleware: auth routing (formerly proxy.ts) + Watchline observability logging.
 // Edge runtime only — cannot use pg, jsonwebtoken, or lib/auth / lib/db.
@@ -50,7 +50,10 @@ function isPublic(pathname: string): boolean {
 }
 
 // ── Watchline constants ───────────────────────────────────────────────────────
-const INGEST_SECRET = process.env.INGEST_SECRET || 'watchline-internal'
+// INGEST_SECRET now comes from lib/auth-constants too — it had a third hardcoded copy
+// of the same default here and in both internal routes. In production without the env
+// var it is '' and the routes reject it, so logging goes quiet instead of running on a
+// secret that is published in this repo.
 const SKIP_ROUTES   = new Set([
   '/api/internal/log-ingest',
   '/api/internal/log-cleanup',

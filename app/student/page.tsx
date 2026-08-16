@@ -2,14 +2,37 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import AppLoader from '../components/AppLoader'
-import StudentDashboard from './components/StudentDashboard'
-import StudentTasks from './components/StudentTasks'
-import StudentDoubts from './components/StudentDoubts'
-import StudentProfile from './components/StudentProfile'
-import StudentMarks from './components/StudentMarks'
-import StudentTimetable from './components/StudentTimetable'
 import NotificationBell from '../components/NotificationBell'
+import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
+import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
+import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
+
+// Always-loaded (landing tab, and small enough not to be worth its own chunk)
+import StudentDashboard from './components/StudentDashboard'
+import StudentProfile from './components/StudentProfile'
+
+// Lazy-loaded — only downloaded when first opened
+function ModuleSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      <div className="h-8 bg-gray-100 rounded-xl w-48" />
+      <div className="grid grid-cols-3 gap-4">
+        {[1,2,3].map(i => <div key={i} className="h-28 bg-gray-100 rounded-2xl" />)}
+      </div>
+      <div className="h-64 bg-gray-100 rounded-2xl" />
+    </div>
+  )
+}
+// Turbopack requires inline object literals for next/dynamic options
+const StudentTasks     = dynamic(() => import('./components/StudentTasks'),     { loading: () => <ModuleSkeleton /> })
+const StudentDoubts    = dynamic(() => import('./components/StudentDoubts'),    { loading: () => <ModuleSkeleton /> })
+const StudentMarks     = dynamic(() => import('./components/StudentMarks'),     { loading: () => <ModuleSkeleton /> })
+const StudentTimetable = dynamic(() => import('./components/StudentTimetable'), { loading: () => <ModuleSkeleton /> })
+const StudentSyllabus  = dynamic(() => import('./components/StudentSyllabus'),  { loading: () => <ModuleSkeleton /> })
+const DigitalLibrary    = dynamic(() => import('../components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
 
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
@@ -26,6 +49,8 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: 'dashboard', label: 'Dashboard',    icon: '🏠' },
       { key: 'timetable', label: 'My Timetable', icon: '🗓️' },
+      { key: 'syllabus',  label: 'Syllabus',     icon: '📚' },
+      { key: 'library',   label: 'Digital Library', icon: '📖' },
     ],
   },
   {
@@ -51,6 +76,14 @@ const NAV_SECTIONS: NavSection[] = [
 
 const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
 
+// Only nav keys that map to a plan-gated ALL_FEATURES entry get checked
+// against enabledFeatures — everything else (dashboard, tasks, doubts,
+// my-marks, profile) has always been unconditionally available and stays
+// that way. 'syllabus' resolves through PORTAL_NAV_KEY_ALIASES to
+// school-admin's 'curriculum' key, since that's the same underlying
+// capability under two different portal-local names.
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library'])
+
 const BOTTOM_NAV = [
   { key: 'dashboard', label: 'Home',    emoji: '🏠' },
   { key: 'tasks',     label: 'Tasks',   emoji: '📝' },
@@ -63,16 +96,30 @@ export default function StudentPortal() {
   const router = useRouter()
   const [student,     setStudent]     = useState<Student | null>(null)
   const [classId,     setClassId]     = useState(0)
+  const [academicYear, setAcademicYear] = useState('')
   const [activeNav,   setActiveNav]   = useState('dashboard')
   const [visitedNav,  setVisitedNav]  = useState<Set<string>>(new Set(['dashboard']))
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [loading,     setLoading]     = useState(true)
+  const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
   const logoutInFlight = useRef(false)
+
+  // Filters out nav items gated by a plan feature the school doesn't have
+  // enabled for this portal — null (still loading) means "show everything"
+  // so the sidebar doesn't flash empty before the fetch resolves.
+  function isNavItemVisible(key: string) {
+    if (!RESTRICTABLE_NAV_KEYS.has(key)) return true
+    if (enabledFeatures === null) return true
+    return enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
+  }
+
+  const trackOpen = useFeatureTracking('student')
 
   function navigateTo(key: string) {
     setActiveNav(key)
     setVisitedNav(prev => new Set([...prev, key]))
     setSidebarOpen(false)
+    trackOpen(key)
   }
 
   useEffect(() => {
@@ -81,6 +128,10 @@ export default function StudentPortal() {
         if (r.status === 401) { router.push('/student/login'); return }
         const data = await r.json()
         setStudent(data)
+        fetch(`/api/school/enabled-features?school_id=${data.school_id}&portal=student`)
+          .then(r => r.ok ? r.json() : null)
+          .then(d => { if (d?.enabled) setEnabledFeatures(new Set<string>(d.enabled)) })
+          .catch(() => {})
         const classRes = await fetch(`/api/classes?school_id=${data.school_id}`)
         if (classRes.ok) {
           const classes = await classRes.json()
@@ -88,15 +139,29 @@ export default function StudentPortal() {
             .find(c => c.grade === data.grade && c.section === data.section)
           if (cls) setClassId(cls.id)
         }
+        // Ambient "which year am I looking at" badge — one fetch, shown once
+        // in the header, covers every tab (syllabus, marks, timetable, ...).
+        fetch(`/api/academic-year/current?school_id=${data.school_id}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(d => { if (d?.label) setAcademicYear(d.label) })
+          .catch(() => {})
       })
       .catch(() => router.push('/student/login'))
       .finally(() => setLoading(false))
   }, [router])
 
+  useUsageHeartbeat()
+
   async function handleLogout() {
     if (logoutInFlight.current) return
     logoutInFlight.current = true
-    await fetch('/api/student/auth/logout', { method: 'POST' }).catch(() => {})
+    const usageSessionId = getUsageSessionId()
+    await fetch('/api/student/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usageSessionId }),
+    }).catch(() => {})
+    clearUsageSessionId()
     router.push('/student/login')
   }
 
@@ -138,6 +203,15 @@ export default function StudentPortal() {
         </div>
 
         <div className="flex items-center gap-2">
+          {academicYear && (
+            <span
+              data-testid="academic-year-badge"
+              title="Active academic year — all data on this screen is scoped to this year"
+              className="hidden sm:inline-flex items-center gap-1 bg-gray-100 border border-gray-200 text-gray-500 text-[10px] font-medium px-2.5 py-1 rounded-full"
+            >
+              📅 {academicYear}
+            </span>
+          )}
           {/* Student name — desktop */}
           <div className="hidden sm:flex items-center gap-2 border border-gray-200 rounded-full pl-1.5 pr-3 py-1">
             <div className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center flex-shrink-0">
@@ -193,7 +267,7 @@ export default function StudentPortal() {
                 <p className="px-3 pt-4 pb-1 text-[9px] font-bold text-slate-600 uppercase tracking-[0.15em]">
                   {section.label}
                 </p>
-                {section.items.map(item => (
+                {section.items.filter(item => isNavItemVisible(item.key)).map(item => (
                   <button
                     key={item.key}
                     onClick={() => { if (!item.comingSoon) navigateTo(item.key) }}
@@ -239,6 +313,8 @@ export default function StudentPortal() {
             {visitedNav.has('doubts')      && <div hidden={activeNav !== 'doubts'}><StudentDoubts student={student} classId={classId} schoolId={student.school_id} /></div>}
             {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={student.school_id} classId={classId} /></div>}
             {visitedNav.has('timetable')   && <div hidden={activeNav !== 'timetable'}><StudentTimetable classId={classId} schoolId={student.school_id} grade={student.grade} section={student.section} /></div>}
+            {visitedNav.has('syllabus') && isNavItemVisible('syllabus') && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={student.school_id} classId={classId} grade={student.grade} /></div>}
+            {visitedNav.has('library') && isNavItemVisible('library') && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}`} /></div>}
             {visitedNav.has('profile')     && <div hidden={activeNav !== 'profile'}><StudentProfile student={student} /></div>}
           </div>
         </main>

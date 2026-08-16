@@ -593,7 +593,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                       <tr>
                         <th className="text-left px-3 py-2 font-medium text-gray-600">Student</th>
                         <th className="text-left px-3 py-2 font-medium text-gray-600">Grade / Roll</th>
-                        <th className="text-left px-3 py-2 font-medium text-gray-600">Login (Email)</th>
+                        <th className="text-left px-3 py-2 font-medium text-gray-600">Login (Roll No)</th>
                         <th className="text-left px-3 py-2 font-medium text-gray-600">Temp Password</th>
                         <th className="text-left px-3 py-2 font-medium text-gray-600">Reset</th>
                       </tr>
@@ -608,11 +608,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                               {s.grade}{s.section ? `-${s.section}` : ''} {s.school_roll_number != null ? `· Roll ${s.school_roll_number}` : ''}
                             </td>
                             <td className="px-3 py-2.5">
-                              {s.login.startsWith('(') ? (
-                                <span className="text-gray-400 italic">{s.login}</span>
-                              ) : (
-                                <span className="font-mono text-gray-700">{s.login}</span>
-                              )}
+                              <span className="font-mono text-gray-700">{s.login}</span>
                             </td>
                             <td className="px-3 py-2.5">
                               {resetResult ? (

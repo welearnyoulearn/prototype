@@ -5,6 +5,12 @@ import { useRouter } from 'next/navigation'
 import AppLoader from '../components/AppLoader'
 import Link from 'next/link'
 import { TRANSLATIONS, type Lang } from './translations'
+import ParentSyllabus from './components/ParentSyllabus'
+import DigitalLibrary from '../components/library/DigitalLibrary'
+import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
+import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
+import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Child = { id: number; name: string; grade: string; section: string; roll_number: string; school_id: number }
@@ -91,7 +97,15 @@ const NAV = [
   { key: 'fees',       label: 'Fees',               icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z' },
   { key: 'exams',      label: 'Exam Calendar',      icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
   { key: 'results',    label: 'Results',            icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+  { key: 'syllabus',   label: 'Syllabus',           icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
+  { key: 'library',    label: 'Digital Library',    icon: 'M12 6.253C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253m0-13v13' },
 ]
+
+// Only nav keys that map to a plan-gated ALL_FEATURES entry get checked
+// against enabledFeatures — everything else has always been unconditionally
+// available and stays that way. 'syllabus' resolves through
+// PORTAL_NAV_KEY_ALIASES to school-admin's 'curriculum' key.
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library'])
 
 function fmt(n: number | string) { return `₹${Number(n).toLocaleString('en-IN')}` }
 function timeStr(t: string) { return t ? t.slice(0, 5) : '' }
@@ -115,6 +129,16 @@ export default function ParentDashboard() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [activeNav, setActiveNav] = useState('overview')
   const [visited, setVisited] = useState<Set<string>>(new Set(['overview']))
+  const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
+
+  // Filters out nav items gated by a plan feature the school doesn't have
+  // enabled for this portal — null (still loading) means "show everything"
+  // so the sidebar doesn't flash empty before the fetch resolves.
+  function isNavItemVisible(key: string) {
+    if (!RESTRICTABLE_NAV_KEYS.has(key)) return true
+    if (enabledFeatures === null) return true
+    return enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
+  }
 
   // Per-section data
   const [timetable, setTimetable] = useState<TimetablePeriod[]>([])
@@ -165,10 +189,13 @@ export default function ParentDashboard() {
   function changeLang(l: Lang) { setLang(l); localStorage.setItem('parent_lang', l) }
   const T = TRANSLATIONS[lang]
 
+  const trackOpen = useFeatureTracking('parent')
+
   function navigateTo(key: string) {
     setActiveNav(key)
     setVisited(prev => new Set([...prev, key]))
     setSidebarOpen(false)
+    trackOpen(key)
   }
 
   // ── Data loaders ─────────────────────────────────────────────────────────────
@@ -271,6 +298,10 @@ export default function ParentDashboard() {
         if (r.status === 401) { router.push('/parent/login'); return }
         const data = await r.json()
         setParentInfo(data)
+        fetch(`/api/school/enabled-features?school_id=${data.school_id}&portal=parent`)
+          .then(r => r.ok ? r.json() : null)
+          .then(d => { if (d?.enabled) setEnabledFeatures(new Set<string>(d.enabled)) })
+          .catch(() => {})
         if (data.children.length === 1) {
           await selectChild(data.children[0])
         } else if (data.children.length > 1) {
@@ -281,8 +312,16 @@ export default function ParentDashboard() {
       .finally(() => setLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useUsageHeartbeat()
+
   async function handleLogout() {
-    await fetch('/api/parent/auth/logout', { method: 'POST' }).catch(() => {})
+    const usageSessionId = getUsageSessionId()
+    await fetch('/api/parent/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usageSessionId }),
+    }).catch(() => {})
+    clearUsageSessionId()
     router.push('/parent/login')
   }
 
@@ -463,6 +502,15 @@ export default function ParentDashboard() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {feeAcYear && (
+            <span
+              data-testid="academic-year-badge"
+              title="Active academic year — all data on this screen is scoped to this year"
+              className="hidden sm:inline-flex items-center gap-1 bg-gray-100 border border-gray-200 text-gray-500 text-[10px] font-medium px-2.5 py-1 rounded-full"
+            >
+              📅 {feeAcYear}
+            </span>
+          )}
           {summary?.unacknowledged_count ? (
             <button onClick={() => navigateTo('results')}
               className="bg-red-100 text-red-700 text-xs font-bold px-2.5 py-1 rounded-full hover:bg-red-200">
@@ -500,7 +548,7 @@ export default function ParentDashboard() {
         {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
         {/* Sidebar */}
         <nav className={`fixed inset-y-0 left-0 z-40 lg:relative lg:inset-y-auto lg:left-auto w-48 bg-white border-r border-gray-100 flex flex-col py-3 shrink-0 overflow-y-auto transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-          {NAV.map(item => (
+          {NAV.filter(item => isNavItemVisible(item.key)).map(item => (
             <button key={item.key} onClick={() => navigateTo(item.key)}
               className={`flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium transition-colors mx-2 rounded-lg ${
                 activeNav === item.key ? 'bg-pink-50 text-pink-700' : 'text-gray-600 hover:bg-gray-50'
@@ -725,6 +773,25 @@ export default function ParentDashboard() {
           </div>
           )}
 
+          {/* ── SYLLABUS ──────────────────────────────────────────────────── */}
+          {visited.has('syllabus') && isNavItemVisible('syllabus') && (
+          <div hidden={activeNav !== 'syllabus'}>
+            <ParentSyllabus
+              schoolId={student.school_id}
+              classId={student.class_id}
+              studentName={student.name}
+              grade={student.grade}
+              section={student.section}
+            />
+          </div>
+          )}
+
+          {/* ── DIGITAL LIBRARY ───────────────────────────────────────────── */}
+          {visited.has('library') && isNavItemVisible('library') && (
+          <div hidden={activeNav !== 'library'}>
+            <DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}`} />
+          </div>
+          )}
 
           {/* ── TODAY'S SCHEDULE ───────────────────────────────────────────── */}
           {visited.has('today') && (

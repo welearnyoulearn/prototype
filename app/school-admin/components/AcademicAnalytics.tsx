@@ -21,6 +21,7 @@ type TeacherCoverage = {
 type SubjectSchool = { subject: string; total: number; covered: number; pct: number | null }
 
 type SyllabusData = {
+  academic_year: string
   by_class:   ClassCoverage[]
   by_teacher: TeacherCoverage[]
   by_subject: SubjectSchool[]
@@ -155,7 +156,10 @@ export default function AcademicAnalytics({ schoolId }: { schoolId: number }) {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold text-gray-800">Academic Analytics</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Syllabus coverage & task tracking across all classes</p>
+          <p className="text-sm text-gray-400 mt-0.5">
+            Syllabus coverage & task tracking across all classes
+            {tab === 'syllabus' && syllabusData?.academic_year && ` · ${syllabusData.academic_year}`}
+          </p>
         </div>
         <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
           {(['syllabus', 'tasks'] as const).map(t => (
