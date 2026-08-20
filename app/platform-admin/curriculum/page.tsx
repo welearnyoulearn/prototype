@@ -235,7 +235,7 @@ const BOARDS = [
   { key: 'TS_SSC', label: 'TS SSC (Telangana)' },
 ]
 
-const GRADES = ['6', '7', '8', '9', '10']
+const GRADES = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']
 
 // Extra Subjects (Dance, Music, Art, ...) use the identical
 // subject→chapter→topic structure as academic ones, filed under a fixed
@@ -249,6 +249,7 @@ export default function PlatformCurriculum() {
   const [category, setCategory] = useState<'academic' | 'extra'>('academic')
   const [selectedBoard, setSelectedBoard] = useState('CBSE')
   const [selectedGrade, setSelectedGrade] = useState('10')
+  const [showCustomGrade, setShowCustomGrade] = useState(false)
   const [activeSubject, setActiveSubject] = useState<Subject | null>(null)
   const [selectedSubjectIds, setSelectedSubjectIds] = useState<Set<number>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
@@ -1751,11 +1752,11 @@ export default function PlatformCurriculum() {
                   <label className="block text-xs font-semibold text-gray-400 mb-1.5 uppercase">Grade level</label>
                   <div className="grid grid-cols-5 gap-1 p-1 rounded-xl" style={{ background: SURFACE }}>
                     {GRADES.map(g => {
-                      const active = selectedGrade === g
+                      const active = !showCustomGrade && selectedGrade === g
                       return (
                         <button
                           key={g}
-                          onClick={() => setSelectedGrade(g)}
+                          onClick={() => { setSelectedGrade(g); setShowCustomGrade(false) }}
                           className="py-1.5 rounded-lg text-xs font-bold transition-all"
                           style={{ background: active ? PURPLE : 'transparent', color: active ? 'white' : '#6b7280' }}
                         >
@@ -1764,6 +1765,26 @@ export default function PlatformCurriculum() {
                       )
                     })}
                   </div>
+                  {showCustomGrade ? (
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="e.g. 11, LKG, Nursery"
+                      value={selectedGrade}
+                      onChange={e => setSelectedGrade(e.target.value)}
+                      className="w-full mt-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg border focus:outline-none focus:ring-2"
+                      style={{ borderColor: PURPLE, color: INK }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => { setShowCustomGrade(true); setSelectedGrade('') }}
+                      className="w-full mt-1.5 text-xs font-medium py-1.5 rounded-lg border hover:bg-gray-50"
+                      style={{ borderColor: BORDER, color: '#6b7280' }}
+                    >
+                      + Custom grade
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
