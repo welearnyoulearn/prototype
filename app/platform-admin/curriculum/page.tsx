@@ -1975,8 +1975,8 @@ export default function PlatformCurriculum() {
                     onClose={() => { setShowBulk(false); setBulkError('') }}
                     onCopyPrompt={copyPrompt}
                     actions={[
-                      { label: importing ? 'Importing…' : 'Append', color: TEAL, onClick: (t) => handleBulkImport(t, 'append') },
-                      { label: importing ? 'Importing…' : 'Replace all', color: PURPLE, onClick: (t) => handleBulkImport(t, 'replace') },
+                      { id: 'append', label: importing ? 'Importing…' : 'Append', color: TEAL, onClick: (t) => handleBulkImport(t, 'append') },
+                      { id: 'replace', label: importing ? 'Importing…' : 'Replace all', color: PURPLE, onClick: (t) => handleBulkImport(t, 'replace') },
                     ]}
                   />
                 )}

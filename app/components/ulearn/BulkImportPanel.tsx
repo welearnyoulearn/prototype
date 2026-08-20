@@ -9,6 +9,7 @@ import { Upload, X, Sparkles, Copy, ExternalLink, AlertTriangle, FileUp } from '
 import { INK, PURPLE, CREAM, BORDER } from './theme'
 
 export type BulkAction = {
+  id: string
   label: string
   color: string
   onClick: (text: string) => void
@@ -122,7 +123,7 @@ export function BulkImportPanel({
         <div className="flex-1" />
         {actions.map((a) => (
           <button
-            key={a.label}
+            key={a.id}
             onClick={() => a.onClick(text)}
             className="text-sm px-3 py-1.5 rounded-lg text-white font-medium shadow-sm"
             style={{ background: a.color }}
