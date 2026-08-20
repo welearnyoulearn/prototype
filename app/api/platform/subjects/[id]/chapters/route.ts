@@ -68,3 +68,36 @@ export async function POST(
     return NextResponse.json({ error: 'Failed to save master chapter' }, { status: 500 })
   }
 }
+
+// DELETE /api/platform/subjects/[id]/chapters?book_type=textbook&book_name=Telugu%20Parimalam
+//
+// Deletes every chapter (and, via ON DELETE CASCADE, their topics) for one
+// whole book on this subject — the "book" tab switcher's delete action.
+// Scoped by (book_type, book_name) the same way bulk-import's replace mode
+// scopes its clear, so deleting "Telugu Parimalam" never touches a different
+// same-type book ("Second Language Telugu") on the same subject. book_name
+// is compared case/whitespace-insensitively via IS NOT DISTINCT FROM so the
+// unnamed-book bucket (NULL) matches correctly too.
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id: subjectId } = await params
+  if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  try {
+    const bookType = normalizeBookType(req.nextUrl.searchParams.get('book_type') ?? undefined)
+    if (!bookType) {
+      return NextResponse.json({ error: 'book_type must be "textbook", "handbook", or "workbook"' }, { status: 400 })
+    }
+    const bookName = normalizeBookName(req.nextUrl.searchParams.get('book_name'))
+
+    const { rowCount } = await pool.query(
+      `DELETE FROM master_chapters WHERE subject_id = $1 AND book_type = $2 AND LOWER(TRIM(book_name)) IS NOT DISTINCT FROM LOWER(TRIM($3))`,
+      [subjectId, bookType, bookName]
+    )
+    return NextResponse.json({ ok: true, chapters_deleted: rowCount })
+  } catch (err) {
+    console.error('Platform chapters DELETE error:', err)
+    return NextResponse.json({ error: 'Failed to delete book' }, { status: 500 })
+  }
+}
