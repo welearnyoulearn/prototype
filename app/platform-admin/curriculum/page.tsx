@@ -486,12 +486,7 @@ export default function PlatformCurriculum() {
     setBulkError('')
     setImporting(true)
     try {
-      const res = await fetch('/api/platform/syllabus/bulk-import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject_id: activeSubject.id, mode, json, book_type: bulkBookType, audience: bulkAudience, book_name: bulkBookName.trim() || null }),
-      })
-      const data = await res.json()
+      const { res, data } = await postBulkImportWithRetry({ subject_id: activeSubject.id, mode, json, book_type: bulkBookType, audience: bulkAudience, book_name: bulkBookName.trim() || null })
       if (!res.ok) throw new Error(data.error || 'Import failed')
       setShowBulk(false)
       const parts = [
@@ -972,16 +967,24 @@ export default function PlatformCurriculum() {
   // busy," not a bad request, so retrying it (with a short backoff to let
   // the previous connection actually finish releasing) resolves it without
   // the admin needing to manually re-run failed files.
-  async function postBulkImportWithRetry(body: unknown, attempts = 3): Promise<{ res: Response; data: { error?: string; chapters?: number; topics?: number } }> {
+  async function postBulkImportWithRetry(body: unknown, attempts = 3): Promise<{ res: Response; data: { error?: string; chapters?: number; chapters_created?: number; chapters_updated?: number; sections_merged?: number; topics?: number } }> {
     for (let attempt = 1; ; attempt++) {
-      const res = await fetch('/api/platform/syllabus/bulk-import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      const data = await res.json()
-      const isTimeout = !res.ok && typeof data.error === 'string' && data.error.includes('Database connection timed out')
-      if (!isTimeout || attempt >= attempts) return { res, data }
+      try {
+        const res = await fetch('/api/platform/syllabus/bulk-import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        const data = await res.json()
+        const isTimeout = !res.ok && typeof data.error === 'string' && data.error.includes('Database connection timed out')
+        if (!isTimeout || attempt >= attempts) return { res, data }
+      } catch (err) {
+        // A dropped connection or a non-JSON response (e.g. a Vercel Gateway
+        // Timeout page instead of our own error JSON) is just as transient as
+        // our own pool-timeout message — retry it the same way rather than
+        // surfacing a confusing "Unexpected token <" parse error.
+        if (attempt >= attempts) throw err instanceof Error ? err : new Error('Import failed — connection error, try again.')
+      }
       await new Promise(r => setTimeout(r, 1500 * attempt))
     }
   }
