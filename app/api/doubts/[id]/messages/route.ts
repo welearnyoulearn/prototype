@@ -11,6 +11,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const { id: doubt_id } = await params
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (Number(school_id) !== Number(session.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const { rows: [doubt] } = await pool.query(
       'SELECT * FROM doubts WHERE id = $1 AND school_id = $2', [doubt_id, school_id]
@@ -43,6 +46,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
     if (!['student', 'teacher'].includes(sender_type)) {
       return NextResponse.json({ error: 'sender_type must be student or teacher' }, { status: 400 })
+    }
+    if (Number(school_id) !== Number(session.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const { rows: [doubt] } = await pool.query(
@@ -137,12 +143,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const session = await getAnySession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { id: doubt_id } = await params
     const body = await req.json()
     const { school_id, action, student_id, student_name, teacher_id, teacher_name } = body
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (Number(school_id) !== Number(session.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const { rows: [doubt] } = await pool.query(
       'SELECT * FROM doubts WHERE id = $1 AND school_id = $2', [doubt_id, school_id]

@@ -23,9 +23,14 @@ import { requirePlatformAdmin } from '@/lib/auth'
 // transaction so a bad row rolls the whole import back.
 export async function POST(req: NextRequest) {
   if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  // ensureDB() must run before pool.connect() below — it issues its own
+  // pool.query() calls, and on Vercel the pool is capped at max:1. Calling it
+  // after checkout would have it wait forever for a connection that's already
+  // held by `client`, self-deadlocking until connectionTimeoutMillis fires
+  // ("Database connection timed out").
+  await ensureDB()
   const client = await pool.connect()
   try {
-    await ensureDB()
     const { subject_id, mode = 'append', json, book_type, audience, book_name } = await req.json()
 
     if (!subject_id || Number.isNaN(Number(subject_id))) {

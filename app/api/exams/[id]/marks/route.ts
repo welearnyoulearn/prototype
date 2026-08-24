@@ -9,12 +9,16 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authSession = await getAnySession()
+    if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { id: exam_id } = await params
     const school_id = req.nextUrl.searchParams.get('school_id')
     const student_id = req.nextUrl.searchParams.get('student_id') // optional: only this student
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (Number(school_id) !== Number(authSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     try {
       const { rows: [exam] } = await pool.query(
@@ -152,6 +156,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const authSession = await getAnySession()
+    if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { id: exam_id } = await params
     const body = await req.json()
@@ -159,6 +165,9 @@ export async function POST(
 
     if (!school_id || !teacher_id || !Array.isArray(entries)) {
       return NextResponse.json({ error: 'school_id, teacher_id, entries[] required' }, { status: 400 })
+    }
+    if (Number(school_id) !== Number(authSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     try {

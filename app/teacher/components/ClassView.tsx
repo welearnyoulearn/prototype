@@ -5,12 +5,13 @@ import Tasks from './Tasks'
 import ClassDoubts from './ClassDoubts'
 import ExamMarks from './ExamMarks'
 import { SCHEDULE } from '@/lib/schedule'
-import { BookOpen, ChevronDown, Check, Loader2, Sparkles, X, Eye, CalendarClock } from 'lucide-react'
-import TopicContentViewer from '@/app/components/TopicContentViewer'
-import { INK, GOLD, GREEN, BORDER, SURFACE } from '@/app/components/ulearn/theme'
-import { StatusPill, QuizPill, ProgressBar, Toast } from '@/app/components/ulearn/primitives'
+import { BookOpen, ChevronDown, Check, Loader2, X, CalendarClock, Upload, Hash } from 'lucide-react'
+import { INK, GOLD, PURPLE, GREEN, BORDER, SURFACE } from '@/app/components/ulearn/theme'
+import { ProgressBar, Toast } from '@/app/components/ulearn/primitives'
+import { BulkImportPanel } from '@/app/components/ulearn/BulkImportPanel'
 import { useToast } from '@/app/components/ulearn/useToast'
 import { useFeature } from '@/lib/features-context'
+import { syllabusPrompt, SYLLABUS_EXAMPLE } from '@/lib/syllabus/chatgpt-prompt'
 import StudentDetail from './StudentDetail'
 
 type Subject = {
@@ -416,19 +417,6 @@ type SylTopic = {
   resources?: SylResource[] | null
 }
 
-// `questions` may arrive as a JSON array or a raw string depending on the DB
-// driver's json handling; TopicContentViewer parses the same way — mirrored
-// here purely for the QuizPill count (no new data, just a real existing field).
-function sylQuestionCount(q: SylTopic['questions']): number {
-  if (!q) return 0
-  if (Array.isArray(q)) return q.length
-  try {
-    const parsed = JSON.parse(q)
-    return Array.isArray(parsed) ? parsed.length : 0
-  } catch {
-    return 0
-  }
-}
 type SylChapter = {
   chapter_name: string
   chapter_order: number
@@ -503,22 +491,14 @@ function computeBookGroups(chapters: SylChapter[]): BookGroup[] {
 }
 type SylSubject = {
   subject: string
+  board: string | null
   total: number
   covered: number
   completion_pct: number
   chapters: SylChapter[]
 }
-type HomeworkSuggestion = {
-  title: string
-  instructions: string
-  task_type: string
-  max_marks: number
-  estimated_time_minutes: number
-  topicId: number
-}
-
 export function SyllabusTracking({
-  classId, schoolId, grade, teacher, isClassTeacher, allowedSubjects, onGoToHomework,
+  classId, schoolId, grade, teacher, isClassTeacher, allowedSubjects,
 }: {
   classId: number
   schoolId: number
@@ -530,7 +510,6 @@ export function SyllabusTracking({
   // subject for their own class regardless (kept — a common real-school
   // expectation); everyone else is gated strictly to their assignments.
   allowedSubjects?: string[]
-  onGoToHomework: (prefill?: { title: string; subject: string }) => void
 }) {
   const [subjects, setSubjects] = useState<SylSubject[]>([])
   const [selectedSubject, setSelectedSubject] = useState<string>('')
@@ -538,14 +517,7 @@ export function SyllabusTracking({
   const [expandedChapter, setExpandedChapter] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [markingId, setMarkingId] = useState<number | null>(null)
-  const [suggestion, setSuggestion] = useState<HomeworkSuggestion | null>(null)
-  const [suggestLoading, setSuggestLoading] = useState(false)
-  const [suggestError, setSuggestError] = useState(false)
-  const [assigning, setAssigning] = useState(false)
-  const [assignedMsg, setAssignedMsg] = useState('')
-  const [activeTopic, setActiveTopic] = useState<SylTopic | null>(null)
-  const suggestionRef = useRef<HTMLDivElement>(null)
-  const { toast, flash } = useToast()
+  const { toast, flash, copyPrompt } = useToast()
 
   // Add-custom-topic form — one open at a time, keyed by chapter name so a
   // teacher can add topics to a chapter before or after marking others taught,
@@ -556,6 +528,26 @@ export function SyllabusTracking({
   const [newTopicName, setNewTopicName] = useState('')
   const [addingTopic, setAddingTopic] = useState(false)
 
+  // Add-chapter form — subject-level, mirrors the add-custom-topic pattern
+  // above. Uses POST /api/syllabus/chapters (auto-numbers chapter_order via
+  // MAX+1), separate from POST /api/syllabus which only ever creates a
+  // chapter as a side effect of adding its first topic.
+  const [addingChapter, setAddingChapter] = useState(false)
+  const [newChapterName, setNewChapterName] = useState('')
+  const [creatingChapter, setCreatingChapter] = useState(false)
+
+  // Empty-subject bootstrap (Part D) — shown only when the selected subject
+  // has zero chapters. Two entry points into the same subject: paste
+  // ChatGPT-generated JSON (POST /api/school/syllabus/bulk-import), or enter
+  // a chapter count for dummy "Chapter N" placeholders to rename later
+  // (POST /api/school/syllabus/bootstrap-chapters). Both just populate
+  // school_chapters/school_topics — after that this subject renders through
+  // the normal chapter accordion above, same as any other subject.
+  const [bootstrapMode, setBootstrapMode] = useState<'none' | 'import' | 'count'>('none')
+  const [bootstrapError, setBootstrapError] = useState('')
+  const [bootstrapping, setBootstrapping] = useState(false)
+  const [chapterCount, setChapterCount] = useState('')
+
   // Inline target-date/delay-reason editor — one topic at a time, matching
   // the add-custom-topic pattern above (keyed by topic id instead of chapter).
   const [scheduleTopicId, setScheduleTopicId] = useState<number | null>(null)
@@ -563,18 +555,15 @@ export function SyllabusTracking({
   const [scheduleReason, setScheduleReason] = useState('')
   const [savingSchedule, setSavingSchedule] = useState(false)
 
-  // Scroll suggestion banner into view whenever it appears
-  useEffect(() => {
-    if ((suggestion || suggestLoading) && suggestionRef.current) {
-      suggestionRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-    }
-  }, [suggestion, suggestLoading])
-
   const loadSyllabus = useCallback(async () => {
     setLoading(true)
     try {
-      const subjectParam = selectedSubject ? `&subject=${encodeURIComponent(selectedSubject)}` : ''
-      const res = await fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}${subjectParam}`)
+      // Always fetch every subject for this class, never scoped to
+      // selectedSubject — this function is also called to refresh after any
+      // mutation (add chapter/topic, bootstrap, mark complete), and a
+      // subject-scoped response here would silently truncate `subjects` down
+      // to just the one being edited, dropping every other subject's tab.
+      const res = await fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}`)
       const data = await res.json()
       const fetched: SylSubject[] = Array.isArray(data.subjects) ? data.subjects : []
       // Class teachers see every subject for their own class; everyone else
@@ -663,6 +652,85 @@ export function SyllabusTracking({
     }
   }
 
+  async function addCustomChapter() {
+    const name = newChapterName.trim()
+    if (!name || !selectedSubject) return
+    setCreatingChapter(true)
+    try {
+      const res = await fetch('/api/syllabus/chapters', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId,
+          class_id: classId,
+          subject: selectedSubject,
+          chapter_name: name,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to add chapter')
+      flash(`"${name}" added to ${selectedSubject}`)
+      setNewChapterName('')
+      setAddingChapter(false)
+      setExpandedChapter(name)
+      await loadSyllabus()
+    } catch (err: unknown) {
+      flash(err instanceof Error ? err.message : 'Failed to add chapter')
+    } finally {
+      setCreatingChapter(false)
+    }
+  }
+
+  async function handleBootstrapImport(json: string) {
+    if (!selectedSubject) return
+    setBootstrapError('')
+    setBootstrapping(true)
+    try {
+      const res = await fetch('/api/school/syllabus/bulk-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, class_id: classId, subject: selectedSubject, json }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Import failed')
+      flash(`Imported ${data.chapters} chapter${data.chapters === 1 ? '' : 's'} into ${selectedSubject}`)
+      setBootstrapMode('none')
+      await loadSyllabus()
+    } catch (err: unknown) {
+      setBootstrapError(err instanceof Error ? err.message : 'Import failed')
+    } finally {
+      setBootstrapping(false)
+    }
+  }
+
+  async function handleBootstrapCount() {
+    if (!selectedSubject) return
+    const n = Number(chapterCount)
+    if (!Number.isInteger(n) || n < 1 || n > 50) {
+      setBootstrapError('Enter a whole number between 1 and 50.')
+      return
+    }
+    setBootstrapError('')
+    setBootstrapping(true)
+    try {
+      const res = await fetch('/api/school/syllabus/bootstrap-chapters', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, class_id: classId, subject: selectedSubject, count: n }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to create chapters')
+      flash(`Created ${data.chapters.length} chapter${data.chapters.length === 1 ? '' : 's'} — rename them to match your textbook`)
+      setBootstrapMode('none')
+      setChapterCount('')
+      await loadSyllabus()
+    } catch (err: unknown) {
+      setBootstrapError(err instanceof Error ? err.message : 'Failed to create chapters')
+    } finally {
+      setBootstrapping(false)
+    }
+  }
+
   async function saveSchedule(topic: SylTopic) {
     setSavingSchedule(true)
     try {
@@ -698,7 +766,6 @@ export function SyllabusTracking({
     if (!teacher) return
     const newStatus = topic.status === 'covered' ? 'pending' : 'covered'
     setMarkingId(topic.id)
-    setSuggestion(null)
     try {
       await fetch(`/api/syllabus/${topic.id}`, {
         method: 'PATCH',
@@ -706,68 +773,12 @@ export function SyllabusTracking({
         body: JSON.stringify({ school_id: schoolId, class_id: classId, status: newStatus, covered_by: teacher.id }),
       })
       flash(newStatus === 'covered' ? `"${topic.topic_name}" marked taught` : `"${topic.topic_name}" marked pending`)
-      // Reload to sync counts
-      const subjectParam = `&subject=${encodeURIComponent(selectedSubject)}`
-      const res = await fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}${subjectParam}`)
-      const data = await res.json()
-      setSubjects(prev => {
-        const list: SylSubject[] = Array.isArray(data.subjects) ? data.subjects : prev
-        return list
-      })
-      // AI homework suggestion on cover
-      if (newStatus === 'covered') {
-        setSuggestError(false)
-        setSuggestLoading(true)
-        try {
-          const sg = await fetch('/api/ai/suggest-homework', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ subject: selectedSubject, chapter_name: topic.chapter_name, topic_name: topic.topic_name, grade }),
-          })
-          if (sg.ok) {
-            const s = await sg.json()
-            setSuggestion({ ...s, topicId: topic.id })
-          } else {
-            setSuggestError(true)
-          }
-        } catch {
-          setSuggestError(true)
-        } finally {
-          setSuggestLoading(false)
-        }
-      }
+      // Reload to sync counts — loadSyllabus always fetches every subject
+      // for this class, so this can't truncate `subjects` down to just the
+      // one being edited.
+      await loadSyllabus()
     } finally {
       setMarkingId(null)
-    }
-  }
-
-  async function assignHomework() {
-    if (!suggestion || !teacher) return
-    setAssigning(true)
-    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
-    const due = tomorrow.toISOString().slice(0, 10)
-    try {
-      await fetch('/api/tasks', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          school_id: schoolId,
-          class_id: classId,
-          teacher_id: teacher.id,
-          subject: selectedSubject,
-          title: suggestion.title,
-          instructions: suggestion.instructions,
-          task_type: 'homework',
-          max_marks: suggestion.max_marks,
-          due_date: due,
-          status: 'published',
-          assigned_to: 'all',
-        }),
-      })
-      setAssignedMsg('Homework assigned to all students!')
-      setSuggestion(null)
-    } finally {
-      setAssigning(false)
     }
   }
 
@@ -797,7 +808,7 @@ export function SyllabusTracking({
             const active = selectedSubject === s.subject
             return (
               <button key={s.subject}
-                onClick={() => { setSelectedSubject(s.subject); setActiveBookKey(''); setSuggestion(null); setSuggestError(false); setExpandedChapter(null) }}
+                onClick={() => { setSelectedSubject(s.subject); setActiveBookKey(''); setExpandedChapter(null) }}
                 data-testid={`syllabus-subject-${s.subject}`}
                 className="px-4 py-2 rounded-xl text-sm font-medium border transition-colors"
                 style={{ background: active ? GOLD : 'white', color: active ? 'white' : INK, borderColor: active ? GOLD : BORDER }}>
@@ -835,15 +846,7 @@ export function SyllabusTracking({
         <div className="bg-white rounded-2xl border px-5 py-4 mb-5" style={{ borderColor: BORDER }}>
           <div className="flex items-center justify-between mb-2">
             <span className="font-semibold" style={{ color: INK }}>{selectedSubject}</span>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">{currentSubject.covered}/{currentSubject.total} topics taught</span>
-              <button onClick={() => onGoToHomework()}
-                data-testid="syllabus-add-homework-btn"
-                className="flex items-center gap-1.5 px-3 py-1.5 text-white rounded-lg text-xs font-semibold transition-colors" style={{ background: INK }}>
-                <Sparkles size={13} />
-                Add Homework
-              </button>
-            </div>
+            <span className="text-sm text-gray-500">{currentSubject.covered}/{currentSubject.total} topics taught</span>
           </div>
           <ProgressBar pct={currentSubject.completion_pct} color={GOLD} className="w-full" />
           <p className="text-xs text-gray-400 mt-1.5">{currentSubject.completion_pct}% complete · {currentSubject.chapters.length} chapters</p>
@@ -866,67 +869,106 @@ export function SyllabusTracking({
         </div>
       )}
 
-      {/* AI homework suggestion */}
-      <div ref={suggestionRef}>
-      {suggestLoading && (
-        <div className="mb-4 rounded-2xl px-5 py-4 flex items-center gap-3 border" style={{ background: '#FCEBDB', borderColor: GOLD }}>
-          <Loader2 size={16} className="animate-spin flex-shrink-0" style={{ color: GOLD }} />
-          <p className="text-sm" style={{ color: '#8A4B12' }}>Generating AI homework suggestion...</p>
-        </div>
-      )}
-      {suggestError && !suggestLoading && (
-        <div className="mb-4 rounded-2xl px-5 py-3 flex items-center justify-between" style={{ background: '#FCEBEB' }}>
-          <p className="text-sm" style={{ color: '#791F1F' }}>AI suggestion failed. Use the Homework tab to add manually.</p>
-          <div className="flex gap-2 items-center">
-            <button onClick={() => onGoToHomework()} data-testid="syllabus-suggest-error-homework-btn" className="text-xs px-3 py-1.5 text-white rounded-lg font-medium" style={{ background: INK }}>Add Homework</button>
-            <button onClick={() => setSuggestError(false)} data-testid="syllabus-suggest-error-dismiss" className="opacity-60 hover:opacity-100" style={{ color: '#791F1F' }}><X size={16} /></button>
-          </div>
-        </div>
-      )}
-      {suggestion && !suggestLoading && (
-        <div className="mb-5 rounded-2xl px-5 py-4 border" style={{ background: '#FCEBDB', borderColor: GOLD }}>
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-bold uppercase tracking-wide mb-1 flex items-center gap-1.5" style={{ color: '#8A4B12' }}>
-                <Sparkles size={12} /> AI Homework Suggestion
-              </p>
-              <p className="font-semibold text-sm" style={{ color: INK }}>{suggestion.title}</p>
-              <p className="text-xs mt-1 leading-relaxed" style={{ color: '#4b5563' }}>{suggestion.instructions}</p>
-              <div className="flex gap-3 mt-2">
-                <span className="text-xs px-2 py-0.5 rounded-full" style={{ color: '#8A4B12', background: 'white' }}>{suggestion.estimated_time_minutes} min</span>
-                <span className="text-xs px-2 py-0.5 rounded-full" style={{ color: '#8A4B12', background: 'white' }}>{suggestion.max_marks} marks</span>
+      {/* Empty-subject bootstrap — this subject was assigned via Class
+          Management but has no chapters yet. Two ways in: paste a
+          ChatGPT-generated JSON syllabus, or just say how many chapters the
+          textbook has and rename dummy chapters afterward. Both funnel into
+          the same chapter accordion below once content exists. */}
+      {currentSubject && currentSubject.chapters.length === 0 && (
+        <div className="mb-5">
+          {bootstrapMode === 'none' && (
+            <div className="bg-white rounded-2xl border border-dashed py-10 px-6 text-center" style={{ borderColor: BORDER }}>
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-3" style={{ background: '#FCEBDB' }}>
+                <BookOpen size={22} style={{ color: GOLD }} />
               </div>
+              <p className="font-medium mb-1" style={{ color: INK }}>No chapters yet for {selectedSubject}</p>
+              <p className="text-gray-400 text-sm mb-4">Get started by importing a syllabus or laying down chapter placeholders.</p>
+              <div className="flex items-center justify-center gap-2 flex-wrap">
+                <button
+                  onClick={() => { setBootstrapError(''); setBootstrapMode('import') }}
+                  data-testid="syllabus-bootstrap-import-btn"
+                  className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl text-white"
+                  style={{ background: PURPLE }}>
+                  <Upload size={14} /> Import from ChatGPT / JSON
+                </button>
+                <button
+                  onClick={() => { setBootstrapError(''); setBootstrapMode('count') }}
+                  data-testid="syllabus-bootstrap-count-btn"
+                  className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl border"
+                  style={{ borderColor: BORDER, color: INK }}>
+                  <Hash size={14} /> Enter chapter count
+                </button>
+              </div>
+              <button
+                onClick={() => setAddingChapter(true)}
+                data-testid="syllabus-bootstrap-manual-btn"
+                className="text-xs text-gray-400 hover:text-gray-600 mt-3 underline">
+                Or add chapters one at a time
+              </button>
             </div>
-            <div className="flex flex-col gap-2 flex-shrink-0">
-              <button onClick={assignHomework} disabled={assigning}
-                data-testid="syllabus-assign-homework-btn"
-                className="px-4 py-2 text-white rounded-xl text-sm font-semibold disabled:opacity-50" style={{ background: GOLD }}>
-                {assigning ? 'Assigning...' : 'Assign to All'}
-              </button>
-              <button onClick={() => { setSuggestion(null); onGoToHomework() }}
-                data-testid="syllabus-edit-manually-btn"
-                className="px-4 py-2 border rounded-xl text-sm font-medium" style={{ borderColor: BORDER, color: INK, background: SURFACE }}>
-                Edit Manually
-              </button>
-              <button onClick={() => setSuggestion(null)}
-                data-testid="syllabus-suggest-dismiss"
-                className="px-4 py-2 border rounded-xl text-sm hover:bg-gray-50" style={{ borderColor: BORDER, color: '#6b7280' }}>
-                Dismiss
-              </button>
+          )}
+
+          {bootstrapMode === 'import' && (
+            <BulkImportPanel
+              title={`Import syllabus — ${selectedSubject}`}
+              hint="Paste the JSON produced by ChatGPT (or written by hand) to create chapters and topics for this subject."
+              example={SYLLABUS_EXAMPLE}
+              prompt={syllabusPrompt(currentSubject.board || 'CBSE', grade, selectedSubject)}
+              error={bootstrapError}
+              onClose={() => setBootstrapMode('none')}
+              onCopyPrompt={copyPrompt}
+              actions={[
+                { id: 'import', label: bootstrapping ? 'Importing…' : 'Import', color: PURPLE, onClick: handleBootstrapImport },
+              ]}
+            />
+          )}
+
+          {bootstrapMode === 'count' && (
+            <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-3" style={{ borderColor: PURPLE }}>
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-medium flex items-center gap-2" style={{ color: INK }}>
+                  <Hash size={14} style={{ color: PURPLE }} /> How many chapters does {selectedSubject} have?
+                </div>
+                <button onClick={() => setBootstrapMode('none')} className="p-1 rounded hover:bg-gray-100 text-gray-400" aria-label="Close">
+                  <X size={15} />
+                </button>
+              </div>
+              <p className="text-xs text-gray-400">Creates that many placeholder chapters (&ldquo;Chapter 1&rdquo;, &ldquo;Chapter 2&rdquo;, ...) for you to rename and fill in with subtopics.</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <input
+                  autoFocus
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={chapterCount}
+                  onChange={e => setChapterCount(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleBootstrapCount()}
+                  placeholder="e.g. 12"
+                  data-testid="syllabus-bootstrap-count-input"
+                  className="w-28 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2"
+                  style={{ borderColor: BORDER, color: INK }}
+                />
+                <button
+                  onClick={handleBootstrapCount}
+                  disabled={bootstrapping || !chapterCount.trim()}
+                  data-testid="syllabus-bootstrap-count-submit"
+                  className="text-sm px-3 py-1.5 rounded-lg text-white font-medium shadow-sm disabled:opacity-50"
+                  style={{ background: PURPLE }}>
+                  {bootstrapping ? 'Creating…' : 'Create chapters'}
+                </button>
+              </div>
+              {bootstrapError && (
+                <div className="text-xs rounded-lg px-2.5 py-2" style={{ background: '#FCEBEB', color: '#791F1F' }}>
+                  {bootstrapError}
+                </div>
+              )}
             </div>
-          </div>
+          )}
         </div>
       )}
-      {assignedMsg && (
-        <div className="mb-4 rounded-2xl px-5 py-3 flex items-center justify-between" style={{ background: '#E1F5EE' }}>
-          <p className="text-sm font-medium" style={{ color: '#085041' }}>{assignedMsg}</p>
-          <button onClick={() => setAssignedMsg('')} data-testid="syllabus-assignedmsg-dismiss" className="opacity-60 hover:opacity-100" style={{ color: '#085041' }}><X size={16} /></button>
-        </div>
-      )}
-      </div>
 
       {/* Chapter accordion — textbook index style */}
-      {currentSubject && (
+      {currentSubject && currentSubject.chapters.length > 0 && (
         <div className="space-y-4">
           {semesterGroups.map(group => (
             <div key={group.semester ?? '__none__'} className="space-y-2">
@@ -980,7 +1022,6 @@ export function SyllabusTracking({
                     {ch.topics.map((topic, tIdx) => {
                       const isCovered = topic.status === 'covered'
                       const isMarking = markingId === topic.id
-                      const qCount = sylQuestionCount(topic.questions)
 
                       return (
                         <div key={topic.id} className="w-full px-5 py-3 flex items-center gap-3" style={{ borderColor: SURFACE }}>
@@ -990,9 +1031,9 @@ export function SyllabusTracking({
                               <span className="text-sm" style={{ color: isCovered ? '#9ca3af' : INK, fontWeight: isCovered ? 400 : 500, textDecoration: isCovered ? 'line-through' : undefined }}>
                                 {topic.topic_name}
                               </span>
-                              <StatusPill status={isCovered ? 'taught' : 'unlocked'} />
-                              <QuizPill count={qCount} />
-                              {/* Mark Complete — labeled button, not a bare circle toggle */}
+                              {/* Mark Complete — the one action this row needs; quiz count,
+                                  AI homework suggestion, and View Material were dropped here
+                                  to keep syllabus tracking about completion status only. */}
                               <button
                                 onClick={() => markCovered(topic)}
                                 disabled={isMarking}
@@ -1006,22 +1047,6 @@ export function SyllabusTracking({
                                   opacity: isMarking ? 0.5 : 1,
                                 }}>
                                 {isCovered ? <><Check size={11} /> Completed</> : 'Mark Complete'}
-                              </button>
-                              {isCovered && (
-                                <button
-                                  onClick={() => onGoToHomework({ title: `${topic.topic_name} (${topic.chapter_name})`, subject: selectedSubject })}
-                                  data-testid={`syllabus-topic-add-homework-${topic.id}`}
-                                  className="text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1"
-                                  style={{ color: INK, background: SURFACE, border: `1px solid ${BORDER}` }}>
-                                  <Sparkles size={11} /> Add Homework
-                                </button>
-                              )}
-                              <button
-                                onClick={() => setActiveTopic(topic)}
-                                data-testid={`syllabus-view-material-${topic.id}`}
-                                className="text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1"
-                                style={{ color: GOLD, background: '#FCEBDB', border: `1px solid ${GOLD}` }}>
-                                <Eye size={11} /> View Material
                               </button>
                               {!isCovered && (
                                 <button
@@ -1129,7 +1154,7 @@ export function SyllabusTracking({
                         data-testid={`syllabus-add-topic-btn-${chIdx}`}
                         className="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors"
                         style={{ borderColor: BORDER, color: INK }}>
-                        + Custom Topic
+                        + Add Subtopic
                       </button>
                     )}
                   </div>
@@ -1139,15 +1164,48 @@ export function SyllabusTracking({
               })}
             </div>
           ))}
-        </div>
-      )}
 
-      {activeTopic && (
-        <TopicContentViewer
-          topic={activeTopic}
-          onClose={() => setActiveTopic(null)}
-          role="teacher"
-        />
+          {/* Add chapter — subject-level, sibling to the accordion above.
+              Uses POST /api/syllabus/chapters so a teacher can lay down a
+              chapter shell before adding any subtopics. */}
+          <div className="pt-1">
+            {addingChapter ? (
+              <div className="bg-white rounded-2xl border px-5 py-3 flex gap-2 items-center flex-wrap" style={{ borderColor: BORDER }}>
+                <input
+                  autoFocus
+                  value={newChapterName}
+                  onChange={e => setNewChapterName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addCustomChapter()}
+                  placeholder="Chapter name"
+                  data-testid="syllabus-new-chapter-input"
+                  className="flex-1 min-w-40 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2"
+                  style={{ borderColor: BORDER, color: INK }}
+                />
+                <button
+                  onClick={addCustomChapter}
+                  disabled={creatingChapter || !newChapterName.trim()}
+                  data-testid="syllabus-new-chapter-submit"
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
+                  style={{ background: GOLD }}>
+                  {creatingChapter ? 'Adding…' : 'Add'}
+                </button>
+                <button
+                  onClick={() => { setAddingChapter(false); setNewChapterName('') }}
+                  className="text-xs text-gray-400 hover:text-gray-600 px-2">
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setAddingChapter(true); setNewChapterName('') }}
+                data-testid="syllabus-add-chapter-btn"
+                className="w-full text-sm font-semibold px-4 py-3 rounded-2xl border border-dashed transition-colors hover:bg-gray-50"
+                style={{ borderColor: BORDER, color: INK }}>
+                + Add Chapter
+              </button>
+            )}
+          </div>
+        </div>
       )}
 
       <Toast message={toast} />
@@ -2220,7 +2278,6 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           grade={grade}
           teacher={teacher}
           isClassTeacher={isClassTeacher}
-          onGoToHomework={prefill => { setHomeworkPrefill(prefill ?? null); setActiveTab('Homework') }}
         />
       )}
 

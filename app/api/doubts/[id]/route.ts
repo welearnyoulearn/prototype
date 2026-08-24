@@ -10,6 +10,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const { id } = await params
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (Number(school_id) !== Number(session.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const { rows: [doubt] } = await pool.query(`
       SELECT d.*, s.name AS student_name, s.roll_number,
@@ -40,6 +43,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const { school_id, teacher_id, teacher_answer, status } = body
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (Number(school_id) !== Number(session.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const { rows: [doubt] } = await pool.query(
       'SELECT * FROM doubts WHERE id = $1 AND school_id = $2', [id, school_id]
@@ -82,6 +88,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 // PATCH /api/doubts/[id] — toggle FAQ status (teacher only)
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const session = await getAnySession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { id } = await params
     const body = await req.json()
@@ -89,6 +97,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     if (!school_id || !teacher_id) {
       return NextResponse.json({ error: 'school_id and teacher_id required' }, { status: 400 })
+    }
+    if (Number(school_id) !== Number(session.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const { rows: [doubt] } = await pool.query(
@@ -115,11 +126,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    const session = await getAnySession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { id } = await params
     const school_id = req.nextUrl.searchParams.get('school_id')
     const student_id = req.nextUrl.searchParams.get('student_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (Number(school_id) !== Number(session.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const { rows: [doubt] } = await pool.query(
       'SELECT * FROM doubts WHERE id = $1 AND school_id = $2', [id, school_id]

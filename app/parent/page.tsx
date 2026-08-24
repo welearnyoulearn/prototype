@@ -789,7 +789,7 @@ export default function ParentDashboard() {
           {/* ── DIGITAL LIBRARY ───────────────────────────────────────────── */}
           {visited.has('library') && isNavItemVisible('library') && (
           <div hidden={activeNav !== 'library'}>
-            <DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}`} />
+            <DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}&student_id=${student.id}`} />
           </div>
           )}
 

@@ -3,6 +3,25 @@ import pool, { ensureDB } from '@/lib/db'
 import { resolveAcademicYear } from '@/lib/academicYear'
 import { requireSyllabusAccess, requireSyllabusWriteAccess } from '@/lib/auth'
 
+type SyllabusTopicRow = {
+  id: number
+  topic_name: string
+  topic_order: number
+  content_text: string | null
+  content_pdf_url: string | null
+  questions: unknown
+  subtopics: unknown
+  resources: unknown
+  is_custom: boolean
+  status: string
+  covered_date: string | null
+  covered_by: number | null
+  covered_by_name: string | null
+  target_date: string | null
+  delay_reason: string | null
+  published: true
+}
+
 // GET /api/syllabus?school_id=&class_id=&subject=
 // Returns syllabus topics grouped by subject > chapter > topics with coverage stats.
 // Query maps to hierarchical school tables (school_subjects -> school_chapters -> school_topics -> school_topic_progress)
@@ -37,6 +56,7 @@ export async function GET(req: NextRequest) {
     let query = `
       SELECT
         ss.subject_name AS subject,
+        ss.board AS board,
         sc.chapter_name AS chapter_name,
         sc.chapter_order AS chapter_order,
         sc.semester AS semester,
@@ -63,7 +83,7 @@ export async function GET(req: NextRequest) {
         stp.target_date AS target_date,
         stp.delay_reason AS delay_reason
       FROM school_subjects ss
-      JOIN school_chapters sc ON sc.school_subject_id = ss.id
+      LEFT JOIN school_chapters sc ON sc.school_subject_id = ss.id
       LEFT JOIN school_topics st ON st.school_chapter_id = sc.id
       LEFT JOIN school_topic_progress stp ON stp.school_topic_id = st.id AND stp.class_id = $1
       LEFT JOIN teachers t ON t.id = stp.covered_by
@@ -83,6 +103,7 @@ export async function GET(req: NextRequest) {
     // Group by subject -> chapter -> topics
     const grouped: Record<string, {
       subject: string
+      board: string | null
       total: number
       covered: number
       chapters: Record<string, {
@@ -94,18 +115,24 @@ export async function GET(req: NextRequest) {
         book_name: string | null
         total: number
         covered: number
-        topics: any[]
+        topics: SyllabusTopicRow[]
       }>
     }> = {}
 
     for (const row of rows) {
       const subjName = row.subject
       if (!grouped[subjName]) {
-        grouped[subjName] = { subject: subjName, total: 0, covered: 0, chapters: {} }
+        grouped[subjName] = { subject: subjName, board: row.board ?? null, total: 0, covered: 0, chapters: {} }
       }
       const subj = grouped[subjName]
 
+      // A subject with zero chapters still needs to appear (LEFT JOIN on
+      // school_chapters now produces one all-null chapter row for it,
+      // matching the existing zero-topics handling below) — the subject
+      // exists in `grouped` with an empty chapters list, nothing more to do.
       const chName = row.chapter_name
+      if (chName == null) continue
+
       if (!subj.chapters[chName]) {
         subj.chapters[chName] = {
           chapter_name: chName,
@@ -136,6 +163,25 @@ export async function GET(req: NextRequest) {
         ...row,
         published: true
       })
+    }
+
+    // A subject can be assigned to this class via Class Management's
+    // class_subjects (the teacher-visibility source of truth) without ever
+    // having a school_subjects row — no subscription happened, and no
+    // custom subject or bootstrap flow has run yet either. The query above
+    // only iterates school_subjects, so such a subject would otherwise
+    // never appear at all (not even as a zero-chapter entry), leaving the
+    // teacher on a dead-end "No syllabus loaded" screen with no route to
+    // the bootstrap UI. Surface it the same way as a zero-chapter subject.
+    const assignedRes = await pool.query(
+      'SELECT DISTINCT subject_name FROM class_subjects WHERE class_id = $1',
+      [class_id]
+    )
+    for (const { subject_name } of assignedRes.rows) {
+      if (subject && subject_name !== subject) continue
+      if (!grouped[subject_name]) {
+        grouped[subject_name] = { subject: subject_name, board: null, total: 0, covered: 0, chapters: {} }
+      }
     }
 
     return NextResponse.json({
@@ -229,7 +275,7 @@ export async function POST(req: NextRequest) {
     const inserted = []
 
     for (const t of topics) {
-      const { school_id, class_id, subject, chapter_name, chapter_order = 0, topic_name, topic_order = 0 } = t
+      const { school_id, class_id, subject, chapter_name, chapter_order, topic_name, topic_order } = t
       if (!school_id || !class_id || !subject || !chapter_name || !topic_name) {
         return NextResponse.json({ error: 'school_id, class_id, subject, chapter_name, topic_name required' }, { status: 400 })
       }
@@ -270,29 +316,51 @@ export async function POST(req: NextRequest) {
         [school_subject_id, chapter_name]
       )
       if (chapterRes.rows.length === 0) {
+        // chapter_order is caller-optional (teacher-created chapters never
+        // supply one) — when omitted, append after the last chapter in this
+        // subject instead of defaulting to 0, which would collide every
+        // new chapter at the same position. Same MAX+1 pattern the platform
+        // bulk-import route uses for master_chapters.
+        let resolvedChapterOrder = chapter_order
+        if (resolvedChapterOrder == null) {
+          const orderRes = await pool.query(
+            'SELECT COALESCE(MAX(chapter_order), -1) + 1 AS next FROM school_chapters WHERE school_subject_id = $1',
+            [school_subject_id]
+          )
+          resolvedChapterOrder = orderRes.rows[0].next
+        }
         const insertCh = await pool.query(
           'INSERT INTO school_chapters (school_subject_id, chapter_name, chapter_order, is_custom) VALUES ($1, $2, $3, TRUE) RETURNING id',
-          [school_subject_id, chapter_name, chapter_order]
+          [school_subject_id, chapter_name, resolvedChapterOrder]
         )
         school_chapter_id = insertCh.rows[0].id
       } else {
         school_chapter_id = chapterRes.rows[0].id
       }
 
-      // 4. Create custom school topic
+      // 4. Create custom school topic — same MAX+1 fallback as chapters above,
+      // scoped per-chapter so subtopics land as 1.1, 1.2, 1.3 in order added.
+      let resolvedTopicOrder = topic_order
+      if (resolvedTopicOrder == null) {
+        const topicOrderRes = await pool.query(
+          'SELECT COALESCE(MAX(topic_order), -1) + 1 AS next FROM school_topics WHERE school_chapter_id = $1',
+          [school_chapter_id]
+        )
+        resolvedTopicOrder = topicOrderRes.rows[0].next
+      }
       const topicRes = await pool.query(
         `INSERT INTO school_topics (school_chapter_id, topic_name, topic_order, is_custom)
          VALUES ($1, $2, $3, TRUE)
          RETURNING *`,
-        [school_chapter_id, topic_name, topic_order]
+        [school_chapter_id, topic_name, resolvedTopicOrder]
       )
       inserted.push(topicRes.rows[0])
     }
 
     return NextResponse.json({ inserted })
-  } catch (err: any) {
+  } catch (err) {
     console.error('Syllabus POST error:', err)
-    if (err && err.code === '23505') {
+    if (err && typeof err === 'object' && 'code' in err && err.code === '23505') {
       return NextResponse.json({ error: 'A topic with this name already exists in this chapter' }, { status: 409 })
     }
     return NextResponse.json({ error: 'Failed to add topics' }, { status: 500 })

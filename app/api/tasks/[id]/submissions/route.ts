@@ -12,6 +12,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const school_id  = req.nextUrl.searchParams.get('school_id')
     const student_id = req.nextUrl.searchParams.get('student_id') // optional: student viewing own submission
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (Number(school_id) !== Number(session.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const { rows: [task] } = await pool.query(
       'SELECT * FROM tasks WHERE id=$1 AND school_id=$2', [task_id, school_id]
@@ -67,6 +70,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }
     if (!['pending', 'reviewed'].includes(status)) {
       return NextResponse.json({ error: 'Invalid status' }, { status: 400 })
+    }
+    if (Number(school_id) !== Number(session.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const { rows: [task] } = await pool.query(

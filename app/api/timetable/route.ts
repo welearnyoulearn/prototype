@@ -6,13 +6,17 @@ import { getAnySession } from '@/lib/auth'
 // Derives teacher's timetable directly from class_timetable (no separate timetable table).
 export async function GET(req: NextRequest) {
   try {
-    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authSession = await getAnySession()
+    if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const { searchParams } = new URL(req.url)
     const teacher_id = searchParams.get('teacher_id')
     const school_id  = searchParams.get('school_id')
     const day        = searchParams.get('day')
 
     if (!teacher_id) return NextResponse.json({ error: 'teacher_id required' }, { status: 400 })
+    if (school_id != null && Number(school_id) !== Number(authSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     try {
       const vals: (string | number)[] = [teacher_id]

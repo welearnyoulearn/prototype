@@ -235,7 +235,7 @@ const BOARDS = [
   { key: 'TS_SSC', label: 'TS SSC (Telangana)' },
 ]
 
-const GRADES = ['6', '7', '8', '9', '10']
+const GRADES = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']
 
 // Extra Subjects (Dance, Music, Art, ...) use the identical
 // subject→chapter→topic structure as academic ones, filed under a fixed
@@ -249,6 +249,7 @@ export default function PlatformCurriculum() {
   const [category, setCategory] = useState<'academic' | 'extra'>('academic')
   const [selectedBoard, setSelectedBoard] = useState('CBSE')
   const [selectedGrade, setSelectedGrade] = useState('10')
+  const [showCustomGrade, setShowCustomGrade] = useState(false)
   const [activeSubject, setActiveSubject] = useState<Subject | null>(null)
   const [selectedSubjectIds, setSelectedSubjectIds] = useState<Set<number>>(new Set())
   const [bulkDeleting, setBulkDeleting] = useState(false)
@@ -282,6 +283,48 @@ export default function PlatformCurriculum() {
   // (e.g. two Text Books) get their own tab. Only rendered as a switcher
   // when a subject actually has more than one book.
   const [activeBookKey, setActiveBookKey] = useState<string | null>(null)
+
+  // Missing Content — structural QA checklist (subjects with 0 chapters,
+  // chapters with 0 topics) surfaced after a bulk import, via
+  // GET /api/platform/subjects/gaps. Read-only; fixing a gap means going
+  // back to that subject's normal bulk-import/chapter-editing flow, so this
+  // just deep-links into the existing subject list rather than editing here.
+  const [showGapsView, setShowGapsView] = useState(false)
+  const [gapsLoading, setGapsLoading] = useState(false)
+  const [gapsError, setGapsError] = useState('')
+  const [emptySubjects, setEmptySubjects] = useState<{ id: number; board: string; grade: string; subject_name: string; category: string }[]>([])
+  const [emptyChapters, setEmptyChapters] = useState<{ chapter_id: number; chapter_name: string; chapter_order: number; subject_id: number; board: string; grade: string; subject_name: string; category: string }[]>([])
+
+  const loadGaps = useCallback(async () => {
+    setGapsLoading(true)
+    setGapsError('')
+    try {
+      const res = await fetch('/api/platform/subjects/gaps')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to load content gaps')
+      setEmptySubjects(data.empty_subjects || [])
+      setEmptyChapters(data.empty_chapters || [])
+    } catch (err: unknown) {
+      setGapsError(err instanceof Error ? err.message : 'Failed to load content gaps')
+    } finally {
+      setGapsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (showGapsView) loadGaps()
+  }, [showGapsView, loadGaps])
+
+  // Jump from a gap row to that subject in the normal sidebar — sets the
+  // filters that scope the subjects list, then hands off to the existing
+  // click-to-select flow (the sidebar re-fetches for these filters and the
+  // subject becomes clickable there).
+  function goToGapSubject(board: string, grade: string, subjectCategory: string) {
+    setShowGapsView(false)
+    setCategory(subjectCategory === 'extra' ? 'extra' : 'academic')
+    setSelectedBoard(board)
+    setSelectedGrade(grade)
+  }
 
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
   const [editingTopic, setEditingTopic] = useState<{
@@ -840,6 +883,30 @@ export default function PlatformCurriculum() {
     }
   }
 
+  // Deletes every chapter (and its topics) imported for one whole book on
+  // this subject — the counterpart to Bulk Upload JSON, for when an admin
+  // wants a clean slate instead of re-importing over it with "Replace all".
+  const handleDeleteBook = async (group: BookGroup) => {
+    if (!activeSubject) return
+    if (!confirm(
+      `Delete "${group.label}" for "${activeSubject.subject_name}"?\n\nThis permanently deletes all ${group.chapters.length} chapter${group.chapters.length === 1 ? '' : 's'} (and their topics) in this book. Other books on this subject are untouched. This cannot be undone.`
+    )) return
+    setError('')
+    setSuccess('')
+    try {
+      const params = new URLSearchParams({ book_type: group.book_type })
+      if (group.book_name) params.set('book_name', group.book_name)
+      const res = await fetch(`/api/platform/subjects/${activeSubject.id}/chapters?${params.toString()}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to delete book')
+      setSuccess(`"${group.label}" deleted.`)
+      setActiveBookKey(null)
+      loadSubjectDetails()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete book.')
+    }
+  }
+
   // Reads the picked folder (webkitdirectory gives every file's relative
   // path) and groups it as <Subject>/<BookType>/<Book>.pdf, with a chapters
   // JSON expected alongside the PDFs in the same BookType folder.
@@ -964,6 +1031,28 @@ export default function PlatformCurriculum() {
     if (expandedMergeId === mergeId) setExpandedMergeId(null)
   }
 
+  // A big folder-import batch fires many sequential bulk-import calls, each
+  // needing its own DB connection — on Vercel's single-connection pool
+  // (PgBouncer session mode, see lib/db.ts) a request can still queue past
+  // the 10s connect timeout under any concurrent load, even though nothing
+  // here runs in parallel. That failure is purely "the pool was momentarily
+  // busy," not a bad request, so retrying it (with a short backoff to let
+  // the previous connection actually finish releasing) resolves it without
+  // the admin needing to manually re-run failed files.
+  async function postBulkImportWithRetry(body: unknown, attempts = 3): Promise<{ res: Response; data: { error?: string; chapters?: number; topics?: number } }> {
+    for (let attempt = 1; ; attempt++) {
+      const res = await fetch('/api/platform/syllabus/bulk-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      const isTimeout = !res.ok && typeof data.error === 'string' && data.error.includes('Database connection timed out')
+      if (!isTimeout || attempt >= attempts) return { res, data }
+      await new Promise(r => setTimeout(r, 1500 * attempt))
+    }
+  }
+
   // Runs the actual import: resolve/create each subject, bulk-import its
   // JSON if present, then upload+register every PDF as a material tagged by
   // its book-type folder. Continues past per-subject/per-file failures so one
@@ -1015,12 +1104,7 @@ export default function PlatformCurriculum() {
       for (const merge of group.merges) {
         try {
           const jsonBookType = bookTypeChoices[merge.bookType]
-          const res = await fetch('/api/platform/syllabus/bulk-import', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ subject_id: subjectId, mode: 'append', json: merge.combinedJson, book_type: jsonBookType, book_name: merge.bookName }),
-          })
-          const data = await res.json()
+          const { res, data } = await postBulkImportWithRetry({ subject_id: subjectId, mode: 'append', json: merge.combinedJson, book_type: jsonBookType, book_name: merge.bookName })
           if (!res.ok) throw new Error(data.error)
           log(`  ✓ merged (${merge.fileNames.join(' + ')}): ${data.chapters} chapters, ${data.topics} topics`)
           chaptersOk += 1
@@ -1057,12 +1141,7 @@ export default function PlatformCurriculum() {
             }])
           }
           const jsonBookType = bookTypeChoices[jf.bookType]
-          const res = await fetch('/api/platform/syllabus/bulk-import', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ subject_id: subjectId, mode: 'append', json: jsonToSend, book_type: jsonBookType, book_name: jsonBookName }),
-          })
-          const data = await res.json()
+          const { res, data } = await postBulkImportWithRetry({ subject_id: subjectId, mode: 'append', json: jsonToSend, book_type: jsonBookType, book_name: jsonBookName })
           if (!res.ok) throw new Error(data.error)
           log(`  ✓ ${jf.file.name}: ${data.chapters} chapters, ${data.topics} topics`)
           chaptersOk += 1
@@ -1219,16 +1298,128 @@ export default function PlatformCurriculum() {
               </div>
             </div>
           </div>
-          <span
-            className="text-xs font-semibold px-3 py-1 rounded-full"
-            style={{ background: '#EEEDFE', color: '#3C3489' }}
-          >
-            Global Template Mode
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              data-testid="curriculum-missing-content-toggle"
+              onClick={() => setShowGapsView(v => !v)}
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors"
+              style={{
+                background: showGapsView ? PURPLE : 'white',
+                color: showGapsView ? 'white' : '#6b7280',
+                borderColor: showGapsView ? PURPLE : BORDER,
+              }}
+            >
+              <HelpCircle size={13} /> Missing Content
+              {(emptySubjects.length + emptyChapters.length) > 0 && !gapsLoading && (
+                <span
+                  className="text-[10px] px-1.5 py-0.5 rounded-full font-bold"
+                  style={{ background: showGapsView ? 'rgba(255,255,255,0.25)' : '#FCEBEB', color: showGapsView ? 'white' : '#791F1F' }}
+                >
+                  {emptySubjects.length + emptyChapters.length}
+                </span>
+              )}
+            </button>
+            <span
+              className="text-xs font-semibold px-3 py-1 rounded-full"
+              style={{ background: '#EEEDFE', color: '#3C3489' }}
+            >
+              Global Template Mode
+            </span>
+          </div>
         </div>
       </div>
 
-      {editingTopic ? (
+      {showGapsView ? (
+        <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold" style={{ color: INK }}>Missing Content</h2>
+              <p className="text-xs text-gray-500 mt-1">
+                Subjects with zero chapters, and chapters with zero topics — a post-import QA checklist for the master catalog.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowGapsView(false)}
+              className="border text-sm font-medium px-4 py-2 rounded-xl hover:bg-gray-50"
+              style={{ borderColor: BORDER, color: INK }}
+            >
+              Close
+            </button>
+          </div>
+
+          {gapsError && (
+            <div className="px-4 py-3 rounded-xl flex justify-between items-center text-xs" style={{ background: '#FCEBEB', color: '#791F1F' }}>
+              <span className="font-semibold">{gapsError}</span>
+              <button onClick={() => setGapsError('')} aria-label="Dismiss error"><X size={13} /></button>
+            </div>
+          )}
+
+          {gapsLoading ? (
+            <div className="bg-white border rounded-3xl py-24 flex flex-col items-center justify-center gap-4" style={{ borderColor: BORDER }}>
+              <Loader2 size={24} className="animate-spin" style={{ color: PURPLE }} />
+              <p className="text-xs text-gray-400 font-semibold">Scanning catalog for gaps…</p>
+            </div>
+          ) : emptySubjects.length === 0 && emptyChapters.length === 0 ? (
+            <div className="bg-white border border-dashed rounded-3xl py-24 text-center" style={{ borderColor: BORDER }}>
+              <CheckCircle2 size={28} className="mx-auto mb-3" style={{ color: GREEN }} />
+              <h3 className="text-base font-semibold mb-1" style={{ color: INK }}>No gaps found</h3>
+              <p className="text-xs text-gray-500 max-w-sm mx-auto">Every subject has at least one chapter, and every chapter has at least one topic.</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {emptySubjects.length > 0 && (
+                <div className="bg-white border rounded-2xl p-5" style={{ borderColor: BORDER }}>
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
+                    Subjects with 0 chapters ({emptySubjects.length})
+                  </h3>
+                  <div className="divide-y" style={{ borderColor: BORDER }}>
+                    {emptySubjects.map(s => (
+                      <div key={s.id} className="py-2.5 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate" style={{ color: INK }}>{s.subject_name}</p>
+                          <p className="text-[10px] uppercase tracking-widest text-gray-400 mt-0.5">{s.board} · Grade {s.grade}</p>
+                        </div>
+                        <button
+                          onClick={() => goToGapSubject(s.board, s.grade, s.category)}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg border shrink-0"
+                          style={{ borderColor: BORDER, color: INK }}
+                        >
+                          Go fix
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {emptyChapters.length > 0 && (
+                <div className="bg-white border rounded-2xl p-5" style={{ borderColor: BORDER }}>
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
+                    Chapters with 0 topics ({emptyChapters.length})
+                  </h3>
+                  <div className="divide-y" style={{ borderColor: BORDER }}>
+                    {emptyChapters.map(c => (
+                      <div key={c.chapter_id} className="py-2.5 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate" style={{ color: INK }}>{c.chapter_name}</p>
+                          <p className="text-[10px] uppercase tracking-widest text-gray-400 mt-0.5">{c.subject_name} · {c.board} · Grade {c.grade}</p>
+                        </div>
+                        <button
+                          onClick={() => goToGapSubject(c.board, c.grade, c.category)}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg border shrink-0"
+                          style={{ borderColor: BORDER, color: INK }}
+                        >
+                          Go fix
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ) : editingTopic ? (
         <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
           {/* Breadcrumbs and Top Controls */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b" style={{ borderColor: BORDER }}>
@@ -1715,11 +1906,11 @@ export default function PlatformCurriculum() {
                   <label className="block text-xs font-semibold text-gray-400 mb-1.5 uppercase">Grade level</label>
                   <div className="grid grid-cols-5 gap-1 p-1 rounded-xl" style={{ background: SURFACE }}>
                     {GRADES.map(g => {
-                      const active = selectedGrade === g
+                      const active = !showCustomGrade && selectedGrade === g
                       return (
                         <button
                           key={g}
-                          onClick={() => setSelectedGrade(g)}
+                          onClick={() => { setSelectedGrade(g); setShowCustomGrade(false) }}
                           className="py-1.5 rounded-lg text-xs font-bold transition-all"
                           style={{ background: active ? PURPLE : 'transparent', color: active ? 'white' : '#6b7280' }}
                         >
@@ -1728,6 +1919,26 @@ export default function PlatformCurriculum() {
                       )
                     })}
                   </div>
+                  {showCustomGrade ? (
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="e.g. 11, LKG, Nursery"
+                      value={selectedGrade}
+                      onChange={e => setSelectedGrade(e.target.value)}
+                      className="w-full mt-1.5 text-xs font-bold px-2.5 py-1.5 rounded-lg border focus:outline-none focus:ring-2"
+                      style={{ borderColor: PURPLE, color: INK }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => { setShowCustomGrade(true); setSelectedGrade('') }}
+                      className="w-full mt-1.5 text-xs font-medium py-1.5 rounded-lg border hover:bg-gray-50"
+                      style={{ borderColor: BORDER, color: '#6b7280' }}
+                    >
+                      + Custom grade
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1963,30 +2174,46 @@ export default function PlatformCurriculum() {
                     onClose={() => { setShowBulk(false); setBulkError('') }}
                     onCopyPrompt={copyPrompt}
                     actions={[
-                      { label: importing ? 'Importing…' : 'Append', color: TEAL, onClick: (t) => handleBulkImport(t, 'append') },
-                      { label: importing ? 'Importing…' : 'Replace all', color: PURPLE, onClick: (t) => handleBulkImport(t, 'replace') },
+                      { id: 'append', label: importing ? 'Importing…' : 'Append', color: TEAL, onClick: (t) => handleBulkImport(t, 'append') },
+                      { id: 'replace', label: importing ? 'Importing…' : 'Replace all', color: PURPLE, onClick: (t) => handleBulkImport(t, 'replace') },
                     ]}
                   />
                 )}
 
-                {/* Book switcher — only when this subject has more than one book */}
-                {bookGroups.length > 1 && (
-                  <div className="bg-white p-1 rounded-2xl border flex flex-wrap gap-1" style={{ borderColor: BORDER }}>
-                    {bookGroups.map(g => {
-                      const active = g.key === effectiveBookKey
-                      const badge = majorityAudienceBadge(g.chapters)
-                      return (
-                        <button
-                          key={g.key}
-                          type="button"
-                          onClick={() => setActiveBookKey(g.key)}
-                          className="flex-1 text-center py-2 rounded-xl text-xs font-semibold transition-all"
-                          style={{ background: active ? PURPLE : 'transparent', color: active ? 'white' : '#6b7280' }}
-                        >
-                          {g.label}{badge ? ` · ${badge}` : ''}
-                        </button>
-                      )
-                    })}
+                {/* Book switcher (only when this subject has more than one book)
+                    plus a delete action for whichever book is active — the
+                    counterpart to Bulk Upload JSON for removing an imported
+                    book outright instead of overwriting it. */}
+                {chapters.length > 0 && effectiveBookGroup && (
+                  <div className="flex items-center gap-2">
+                    {bookGroups.length > 1 && (
+                      <div className="bg-white p-1 rounded-2xl border flex flex-wrap gap-1 flex-1" style={{ borderColor: BORDER }}>
+                        {bookGroups.map(g => {
+                          const active = g.key === effectiveBookKey
+                          const badge = majorityAudienceBadge(g.chapters)
+                          return (
+                            <button
+                              key={g.key}
+                              type="button"
+                              onClick={() => setActiveBookKey(g.key)}
+                              className="flex-1 text-center py-2 rounded-xl text-xs font-semibold transition-all"
+                              style={{ background: active ? PURPLE : 'transparent', color: active ? 'white' : '#6b7280' }}
+                            >
+                              {g.label}{badge ? ` · ${badge}` : ''}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteBook(effectiveBookGroup)}
+                      title={`Delete ${effectiveBookGroup.label}`}
+                      className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl border hover:bg-red-50 shrink-0"
+                      style={{ borderColor: '#FBD5D5', color: '#B42318' }}
+                    >
+                      <Trash2 size={13} /> Delete {bookGroups.length > 1 ? 'book' : effectiveBookGroup.label}
+                    </button>
                   </div>
                 )}
 

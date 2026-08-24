@@ -10,7 +10,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authSession = await getAnySession()
+    if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { id: exam_id } = await params
     const body = await req.json()
@@ -18,6 +19,9 @@ export async function POST(
 
     if (!school_id || !teacher_id || !Array.isArray(subjects) || subjects.length === 0) {
       return NextResponse.json({ error: 'school_id, teacher_id, subjects[] required' }, { status: 400 })
+    }
+    if (Number(school_id) !== Number(authSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     try {

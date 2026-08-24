@@ -69,7 +69,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2010,6 +2010,53 @@ async function runIncrementalMigrations() {
   //                      and the analytics trends, which scan school_id + a date range
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_attendance_school_date ON attendance(school_id, date)
+  `).catch(() => {})
+
+  // ── Scaling hardening: hot-path indexes on under-indexed tables ─────────────
+  // fee_structures had no dedicated index — only the incidental one from
+  // UNIQUE(school_id, fee_category_id, grade, academic_year). Setup/reports
+  // queries filter by school_id + academic_year before narrowing further.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_fee_structures_school_year
+      ON fee_structures(school_id, academic_year)
+  `).catch(() => {})
+  // fee_waivers had zero indexes — passbook/ledger recompute (student_id) and
+  // reports (school_id) both fell back to sequential scans.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_fee_waivers_student ON fee_waivers(student_id)
+  `).catch(() => {})
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_fee_waivers_school ON fee_waivers(school_id)
+  `).catch(() => {})
+  // notifications had zero indexes despite three recipient columns — every
+  // unread-count / list query for a teacher, student, or school was a full scan.
+  // CONCURRENTLY: this table is actively written, so build without locking it.
+  await pool.query(`
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_recipient_teacher
+      ON notifications(recipient_teacher_id, is_read)
+  `).catch(() => {})
+  await pool.query(`
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_recipient_student
+      ON notifications(recipient_student_id, is_read)
+  `).catch(() => {})
+  await pool.query(`
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_recipient_school
+      ON notifications(recipient_school_id, is_read)
+  `).catch(() => {})
+  // tasks: existing indexes (class, teacher, status+due_date) never lead with
+  // school_id — a bare school-wide task query has no supporting index.
+  await pool.query(`
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tasks_school ON tasks(school_id, status)
+  `).catch(() => {})
+  // exam_subjects: "my pending subject entries" queries filter teacher_id + status.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_exam_subjects_teacher
+      ON exam_subjects(teacher_id, status)
+  `).catch(() => {})
+  // parent_mark_acks: school-wide acknowledgement-rate reports filter by school_id;
+  // only exam_id/student_id were covered via the UNIQUE(exam_id, student_id).
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_parent_mark_acks_school ON parent_mark_acks(school_id)
   `).catch(() => {})
 
   // ── Per-school feature overrides (self-heal) ───────────────────────────────────

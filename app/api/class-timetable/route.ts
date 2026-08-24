@@ -6,7 +6,8 @@ import { getAnySession } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
   try {
-    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authSession = await getAnySession()
+    if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     await ensureDB()
 
     const { searchParams } = new URL(req.url)
@@ -20,6 +21,12 @@ export async function GET(req: NextRequest) {
     const template_id_param   = searchParams.get('template_id')
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    // getAnySession() only confirms SOME valid login exists — without this check
+    // a logged-in user from School A could pass School B's school_id and read
+    // School B's timetable.
+    if (Number(school_id) !== Number(authSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     // Only serve from cache for full structural fetches (no slot-level or date filters)
     if (!date && !day_of_week_filter && !period_number_filter) {
@@ -111,10 +118,21 @@ export async function GET(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   await ensureDB()
   try {
+    const authSession = await getAnySession()
+    if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
     const body = await req.json()
 
     let classId = body.class_id
     let schoolId = body.school_id
+    // getAnySession() only confirms SOME valid login exists — without this check
+    // a logged-in user from School A could pass School B's school_id and write
+    // School B's timetable. schoolId may still be resolved below from an existing
+    // slot (body.id lookup) before this can be checked for that branch — see the
+    // second check after that lookup.
+    if (schoolId != null && Number(schoolId) !== Number(authSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
     let dayOfWeek = body.day_of_week
     let periodNumber = body.period_number
     let templateId = body.template_id
@@ -139,6 +157,12 @@ export async function PUT(req: NextRequest) {
           dayOfWeek = existingSlot.day_of_week
           periodNumber = existingSlot.period_number
           templateId = existingSlot.template_id
+          // body.id may belong to a different school than the caller's session —
+          // re-check now that schoolId has been resolved from the DB row.
+          if (Number(schoolId) !== Number(authSession.schoolId)) {
+            await client.query('ROLLBACK')
+            return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+          }
         }
       } else if (classId && dayOfWeek && periodNumber !== undefined) {
         const { rows } = await client.query(
@@ -265,9 +289,15 @@ export async function PUT(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
+    const authSession = await getAnySession()
+    if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
     const { school_id, period_number, time_from, time_to } = await req.json()
     if (!school_id || period_number == null || !time_from || !time_to) {
       return NextResponse.json({ error: 'school_id, period_number, time_from, time_to required' }, { status: 400 })
+    }
+    if (Number(school_id) !== Number(authSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     await pool.query(
@@ -283,12 +313,18 @@ export async function PATCH(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    const authSession = await getAnySession()
+    if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
     const { searchParams } = new URL(req.url)
     const school_id         = searchParams.get('school_id')
     const class_id          = searchParams.get('class_id')
     const template_id_param = searchParams.get('template_id')
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (Number(school_id) !== Number(authSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     // Build template fragment
     const isDefault = template_id_param === 'default' || template_id_param === null

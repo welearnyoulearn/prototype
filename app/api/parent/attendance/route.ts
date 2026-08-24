@@ -5,12 +5,16 @@ import { getAnySession } from '@/lib/auth'
 // GET /api/parent/attendance?school_id=X&student_id=Y&months=3
 export async function GET(req: NextRequest) {
   try {
-    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authSession = await getAnySession()
+    if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const p = req.nextUrl.searchParams
     const school_id  = p.get('school_id')
     const student_id = p.get('student_id')
     const months     = parseInt(p.get('months') || '3')
     if (!school_id || !student_id) return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
+    if (Number(school_id) !== Number(authSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     try {
       const { rows: records } = await pool.query(
