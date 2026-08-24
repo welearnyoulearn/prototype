@@ -918,7 +918,7 @@ export function SyllabusTracking({
               onClose={() => setBootstrapMode('none')}
               onCopyPrompt={copyPrompt}
               actions={[
-                { label: bootstrapping ? 'Importing…' : 'Import', color: PURPLE, onClick: handleBootstrapImport },
+                { id: 'import', label: bootstrapping ? 'Importing…' : 'Import', color: PURPLE, onClick: handleBootstrapImport },
               ]}
             />
           )}
