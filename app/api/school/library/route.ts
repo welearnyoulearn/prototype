@@ -1,18 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { resolveAcademicYear } from '@/lib/academicYear'
-import { requireSyllabusAccess, schoolHasFeature } from '@/lib/auth'
+import { requireSyllabusAccess, schoolHasFeature, getTeacherSession, getStudentSession, getParentSession } from '@/lib/auth'
 import { gradeOrderSql } from '@/lib/grades'
 
-// GET /api/school/library?school_id=&academic_year=
+// GET /api/school/library?school_id=&academic_year=&student_id=
 //
 // WLYL Digital Library: every textbook/handbook uploaded (once, platform-side)
-// against any subject this school is subscribed to, across every grade — a
-// standalone browsing view, unlike /api/school/subjects/materials which is
-// scoped to one (grade, subject_name) pair for the embedded syllabus panel.
-// Visible to every school role (school admin/principal/VP, teacher, student,
-// parent) with no textbook/handbook restriction — the library is meant to be
-// browsable by everyone, unlike the syllabus view's staff-only handbooks.
+// against any subject this school is subscribed to — scoped per role:
+//   - platform_admin / school_admin / principal / vice_principal: every grade
+//     the school subscribes to (school-wide browsing, same as before).
+//   - teacher: only (grade, subject) pairs they're actually assigned via
+//     Class Management's class_subjects, same source of truth as the
+//     embedded syllabus panel's /api/school/subjects/materials.
+//   - student: only their own grade, textbooks only (handbooks are
+//     staff-only — matches master_subject_materials' schema comment and the
+//     restriction /api/school/subjects/materials already enforces).
+//   - parent: only the selected child's grade, textbooks only — `student_id`
+//     is required and verified against student_parents so a parent can't
+//     pass another family's child to read a different grade's materials.
 export async function GET(req: NextRequest) {
   const school_id = req.nextUrl.searchParams.get('school_id')
   if (!school_id) {
@@ -34,14 +40,53 @@ export async function GET(req: NextRequest) {
     await ensureDB()
     const academic_year = req.nextUrl.searchParams.get('academic_year') || await resolveAcademicYear(school_id)
 
+    let extraWhere = ''
+    let materialTypeFilter = ''
+    const args: (string | number)[] = [school_id, academic_year]
+
+    if (access.role === 'teacher') {
+      const teacherSession = await getTeacherSession()
+      // Grade is looked up from class_subjects/classes server-side, not
+      // trusted from the client, exactly like /api/school/subjects/materials.
+      extraWhere = `AND EXISTS (
+        SELECT 1 FROM class_subjects cs
+        JOIN classes c ON c.id = cs.class_id
+        WHERE cs.teacher_id = $3 AND cs.subject_name = ss.subject_name AND c.grade = ss.grade AND c.school_id = ss.school_id
+      )`
+      args.push(teacherSession?.teacherId ?? -1)
+    } else if (access.role === 'student') {
+      const studentSession = await getStudentSession()
+      if (!studentSession) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      extraWhere = 'AND ss.grade = $3'
+      materialTypeFilter = "AND m.material_type = 'textbook'"
+      args.push(studentSession.grade)
+    } else if (access.role === 'parent') {
+      const parentSession = await getParentSession()
+      const student_id = req.nextUrl.searchParams.get('student_id')
+      if (!parentSession || !student_id) {
+        return NextResponse.json({ error: 'student_id is required for a parent session' }, { status: 400 })
+      }
+      const linkRes = await pool.query(
+        `SELECT grade FROM students WHERE id = $1 AND school_id = $2
+         AND EXISTS (SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $3)`,
+        [student_id, school_id, parentSession.parentId]
+      )
+      if (linkRes.rowCount === 0) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      extraWhere = 'AND ss.grade = $3'
+      materialTypeFilter = "AND m.material_type = 'textbook'"
+      args.push(linkRes.rows[0].grade)
+    }
+    // school_admin / principal / vice_principal / platform_admin: no extra
+    // filter — full school-wide browsing, same as before.
+
     const { rows } = await pool.query(
       `SELECT ss.master_subject_id AS subject_id, ss.board, ss.grade, ss.subject_name, ss.category,
               m.id AS material_id, m.material_type, m.title, m.file_url, m.created_at
        FROM school_subjects ss
        JOIN master_subject_materials m ON m.subject_id = ss.master_subject_id
-       WHERE ss.school_id = $1 AND ss.academic_year = $2
+       WHERE ss.school_id = $1 AND ss.academic_year = $2 ${extraWhere} ${materialTypeFilter}
        ORDER BY ${gradeOrderSql('ss.grade')}, ss.subject_name, m.material_type, m.created_at`,
-      [school_id, academic_year]
+      args
     )
     return NextResponse.json(rows)
   } catch (err) {
