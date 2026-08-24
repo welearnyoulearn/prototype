@@ -193,6 +193,16 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
 
   // Modals and form state
   const [showSubscribeModal, setShowSubscribeModal] = useState(false)
+  // Add Custom Subject — always available regardless of whether the school
+  // has subscribed to any master-catalog subjects. Just subject_name +
+  // grade; chapters/topics are the teacher's job via the syllabus bootstrap
+  // flows (POST /api/syllabus/chapters, /api/school/syllabus/bulk-import,
+  // /api/school/syllabus/bootstrap-chapters).
+  const [showCustomSubjectModal, setShowCustomSubjectModal] = useState(false)
+  const [customSubjectName, setCustomSubjectName] = useState('')
+  const [customSubjectGrade, setCustomSubjectGrade] = useState('')
+  const [creatingCustomSubject, setCreatingCustomSubject] = useState(false)
+  const [customSubjectError, setCustomSubjectError] = useState('')
   const [masterSubjects, setMasterSubjects] = useState<MasterSubject[]>([])
   const [subscribing, setSubscribing] = useState(false)
   const [resyncing, setResyncing] = useState(false)
@@ -438,6 +448,36 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       }
     } finally {
       setSubscribing(false)
+    }
+  }
+
+  const handleCreateCustomSubject = async () => {
+    const name = customSubjectName.trim()
+    if (!name || !customSubjectGrade) return
+    setCreatingCustomSubject(true)
+    setCustomSubjectError('')
+    try {
+      const res = await fetch('/api/school/subjects/create-custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId,
+          grade: customSubjectGrade,
+          subject_name: name,
+          academic_year: selectedYear,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to create subject')
+      setSuccess(`"${name}" added for Grade ${customSubjectGrade}. Assign it to a class in Class Management, then the teacher can build out chapters.`)
+      setShowCustomSubjectModal(false)
+      setCustomSubjectName('')
+      setCustomSubjectGrade('')
+      await loadSchoolSubjects(data.subject.id)
+    } catch (err: unknown) {
+      setCustomSubjectError(err instanceof Error ? err.message : 'Failed to create subject')
+    } finally {
+      setCreatingCustomSubject(false)
     }
   }
 
@@ -772,14 +812,24 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
             Subscribe to Master templates, toggle optional exercises, and insert custom local school chapters/assignments.
           </p>
         </div>
-        <button
-          data-testid="curriculum-subscribe-open-btn"
-          onClick={() => setShowSubscribeModal(true)}
-          className="flex items-center gap-1.5 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-sm"
-          style={{ background: TEAL }}
-        >
-          <Sparkles size={14} /> Subscribe to Board Subject
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            data-testid="curriculum-add-custom-subject-btn"
+            onClick={() => { setCustomSubjectError(''); setShowCustomSubjectModal(true) }}
+            className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2.5 rounded-xl border"
+            style={{ borderColor: BORDER, color: INK }}
+          >
+            <Plus size={14} /> Add Custom Subject
+          </button>
+          <button
+            data-testid="curriculum-subscribe-open-btn"
+            onClick={() => setShowSubscribeModal(true)}
+            className="flex items-center gap-1.5 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-sm"
+            style={{ background: TEAL }}
+          >
+            <Sparkles size={14} /> Subscribe to Board Subject
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -809,14 +859,24 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
           <p className="text-xs text-gray-500 max-w-sm mx-auto mb-6">
             Your school hasn&apos;t subscribed to any global board subjects yet. Subscribe to CBSE/SSC templates to customize your classes.
           </p>
-          <button
-            data-testid="curriculum-subscribe-open-btn-empty"
-            onClick={() => setShowSubscribeModal(true)}
-            className="text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-sm"
-            style={{ background: TEAL }}
-          >
-            Choose & Subscribe to Subject
-          </button>
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            <button
+              data-testid="curriculum-subscribe-open-btn-empty"
+              onClick={() => setShowSubscribeModal(true)}
+              className="text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-sm"
+              style={{ background: TEAL }}
+            >
+              Choose & Subscribe to Subject
+            </button>
+            <button
+              data-testid="curriculum-add-custom-subject-btn-empty"
+              onClick={() => { setCustomSubjectError(''); setShowCustomSubjectModal(true) }}
+              className="text-xs font-semibold px-5 py-2.5 rounded-xl border"
+              style={{ borderColor: BORDER, color: INK }}
+            >
+              Add Custom Subject
+            </button>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
@@ -1631,6 +1691,86 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                   : selectedMasterIds.length > 1
                   ? `Subscribe & Clone (${selectedMasterIds.length})`
                   : 'Subscribe & Clone'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Custom Subject Modal — always available, independent of any
+          master-catalog subscription. Only creates the subject shell
+          (subject_name + grade); chapters/topics are added later by the
+          teacher via the Syllabus tab's Add Chapter / bootstrap flows. */}
+      {showCustomSubjectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto" style={{ background: 'rgba(15,42,63,0.45)' }}>
+          <div className="bg-white rounded-3xl w-full max-w-sm p-6 relative shadow-2xl my-8">
+            <button
+              data-testid="custom-subject-modal-close"
+              onClick={() => setShowCustomSubjectModal(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-700 font-bold text-lg"
+              aria-label="Close add custom subject modal"
+            >
+              <X size={18} />
+            </button>
+
+            <h3 className="text-base font-semibold mb-2" style={{ color: INK }}>Add Custom Subject</h3>
+            <p className="text-xs text-gray-500 mb-4">
+              For a subject Platform Admin&apos;s catalog doesn&apos;t cover (e.g. a locally-taught subject). Only the name and grade are set here — the assigned teacher builds out chapters and topics from the Syllabus tab afterward.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className={labelCls}>Subject Name</label>
+                <input
+                  data-testid="custom-subject-name-input"
+                  value={customSubjectName}
+                  onChange={e => setCustomSubjectName(e.target.value)}
+                  placeholder="e.g. Value Education"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                  style={{ borderColor: BORDER, color: INK }}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Grade</label>
+                <select
+                  data-testid="custom-subject-grade-select"
+                  value={customSubjectGrade}
+                  onChange={e => setCustomSubjectGrade(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2"
+                  style={{ borderColor: BORDER, color: INK }}
+                >
+                  <option value="">Select grade…</option>
+                  {Array.from(new Set(classes.map(c => c.grade))).sort((a, b) => Number(a) - Number(b) || a.localeCompare(b)).map(g => (
+                    <option key={g} value={g}>Grade {g}</option>
+                  ))}
+                </select>
+              </div>
+
+              {customSubjectError && (
+                <div className="px-3 py-2 rounded-lg text-xs" style={{ background: '#FCEBEB', color: '#791F1F' }}>
+                  {customSubjectError}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 mt-2 border-t" style={{ borderColor: '#EFEDE6' }}>
+              <button
+                data-testid="custom-subject-modal-cancel"
+                type="button"
+                onClick={() => setShowCustomSubjectModal(false)}
+                className="px-4 py-2 text-xs font-bold text-gray-500 hover:text-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                data-testid="custom-subject-modal-submit"
+                type="button"
+                onClick={handleCreateCustomSubject}
+                disabled={creatingCustomSubject || !customSubjectName.trim() || !customSubjectGrade}
+                className="text-white text-xs font-semibold px-5 py-2.5 rounded-xl disabled:opacity-50 transition-all shadow-md"
+                style={{ background: TEAL }}
+              >
+                {creatingCustomSubject ? 'Adding…' : 'Add Subject'}
               </button>
             </div>
           </div>

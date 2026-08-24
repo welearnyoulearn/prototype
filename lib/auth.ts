@@ -249,10 +249,26 @@ export async function requireFeeAccess(requestedSchoolId: string | number | null
   return null
 }
 
+// Tier hierarchy: premium includes standard includes basic — a feature only
+// explicitly enabled at 'basic' must still read as enabled for a 'standard'
+// or 'premium' school. Kept in exact sync with the TIER_INCLUDES map in
+// GET /api/platform/features (the platform-admin config page and the
+// school-admin sidebar's tier check both use that route's inheritance);
+// schoolHasFeature used to check only the school's own literal tier, which
+// silently disagreed with those two call sites for every feature enabled at
+// a lower tier than the school's own — e.g. a premium school's student/parent
+// nav would hide a feature that school-admin's own sidebar showed as on.
+const TIER_INCLUDES: Record<string, string[]> = {
+  basic: ['basic'],
+  standard: ['basic', 'standard'],
+  premium: ['basic', 'standard', 'premium'],
+}
+
 // ─── Per-school feature resolution ────────────────────────────────────────────
 // Checks school_feature_overrides first (per-school, takes precedence), then
-// falls back to the school's tier in plan_features. Unconfigured = disabled,
-// matching the convention in GET /api/platform/features.
+// falls back to the school's tier (plus everything it inherits) in
+// plan_features. Unconfigured = disabled, matching the convention in
+// GET /api/platform/features.
 export async function schoolHasFeature(schoolId: number, featureKey: string): Promise<boolean> {
   const overrideRes = await pool.query(
     `SELECT enabled FROM school_feature_overrides WHERE school_id = $1 AND feature_key = $2`,
@@ -260,15 +276,18 @@ export async function schoolHasFeature(schoolId: number, featureKey: string): Pr
   )
   if (overrideRes.rows.length > 0) return overrideRes.rows[0].enabled
 
-  const tierRes = await pool.query(
-    `SELECT sub.tier, pf.enabled
-     FROM school_subscriptions sub
-     LEFT JOIN plan_features pf ON pf.tier = sub.tier AND pf.feature_key = $2
-     WHERE sub.school_id = $1`,
-    [schoolId, featureKey]
+  const subRes = await pool.query(
+    `SELECT tier FROM school_subscriptions WHERE school_id = $1`,
+    [schoolId]
   )
-  if (tierRes.rows.length === 0) return false
-  return tierRes.rows[0].enabled === true
+  if (subRes.rows.length === 0) return false
+  const tiers = TIER_INCLUDES[subRes.rows[0].tier] ?? [subRes.rows[0].tier]
+
+  const tierRes = await pool.query(
+    `SELECT bool_or(enabled) AS enabled FROM plan_features WHERE tier = ANY($1) AND feature_key = $2`,
+    [tiers, featureKey]
+  )
+  return tierRes.rows[0]?.enabled === true
 }
 
 // ─── Any authenticated session ────────────────────────────────────────────────

@@ -21,11 +21,10 @@ type ClassSubjectAssignment = {
 }
 
 export default function TeacherSyllabus({
-  teacher, schoolId, onGoToHomework,
+  teacher, schoolId,
 }: {
   teacher: TeacherObj
   schoolId: number
-  onGoToHomework: (classId: number) => void
 }) {
   const [classes, setClasses] = useState<ClassOption[]>([])
   const [assignments, setAssignments] = useState<ClassSubjectAssignment[]>([])
@@ -58,9 +57,14 @@ export default function TeacherSyllabus({
       const found = Array.from(picked.values())
       setClasses(found)
       setAssignments(assigned)
-      if (found.length > 0) setActiveKey(`${found[0].grade}-${found[0].section}`)
+      // Only auto-select on first load — activeKey starts '' and the caller
+      // (page.tsx) passes `teacher` as a fresh object literal every render,
+      // so this effect can refire on any unrelated parent re-render. Without
+      // this guard, that refire unconditionally snapped a teacher's manual
+      // class-pill selection back to the first class every time.
+      setActiveKey(prev => prev || (found.length > 0 ? `${found[0].grade}-${found[0].section}` : prev))
     }).finally(() => setLoading(false))
-  }, [teacher, schoolId])
+  }, [teacher.id, teacher.class_teacher_grade, teacher.class_teacher_section, schoolId])
 
   if (loading) return <div className="text-sm text-gray-400 p-4">Loading your classes…</div>
 
@@ -103,7 +107,6 @@ export default function TeacherSyllabus({
         teacher={teacher}
         isClassTeacher={isClassTeacher}
         allowedSubjects={allowedSubjects}
-        onGoToHomework={() => onGoToHomework(active.id)}
       />
     </div>
   )
