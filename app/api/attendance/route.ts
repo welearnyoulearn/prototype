@@ -28,6 +28,12 @@ export async function GET(req: NextRequest) {
     if (!school_id) {
       return NextResponse.json({ error: 'school_id required' }, { status: 400 })
     }
+    // getAnySession() only confirms SOME valid login exists — without this check
+    // a logged-in user from School A could pass School B's school_id and read
+    // School B's attendance data.
+    if (Number(school_id) !== Number(authSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     try {
       // ── School-wide: attendance status for every class on a given date
@@ -217,6 +223,12 @@ export async function POST(req: NextRequest) {
 
       if (!school_id || !class_id || !teacher_id || !date || !session || !Array.isArray(records)) {
         return NextResponse.json({ error: 'Missing required fields (including session)' }, { status: 400 })
+      }
+      // getAnySession() only confirms SOME valid login exists — without this check
+      // a logged-in user from School A could pass School B's school_id and write
+      // attendance records (and trigger parent emails) for School B.
+      if (Number(school_id) !== Number(auth.schoolId)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
       if (!['morning', 'afternoon'].includes(session)) {
         return NextResponse.json({ error: 'session must be morning or afternoon' }, { status: 400 })

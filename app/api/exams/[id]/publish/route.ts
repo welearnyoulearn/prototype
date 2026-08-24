@@ -20,7 +20,8 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const authSession = await getAnySession()
+  if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { id: exam_id } = await params
   const body = await req.json()
@@ -28,6 +29,9 @@ export async function POST(
 
   if (!school_id || !teacher_id) {
     return NextResponse.json({ error: 'school_id and teacher_id required' }, { status: 400 })
+  }
+  if (Number(school_id) !== Number(authSession.schoolId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
   try {

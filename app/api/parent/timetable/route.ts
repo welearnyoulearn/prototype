@@ -6,12 +6,16 @@ import { getAnySession } from '@/lib/auth'
 // Returns today's timetable for the student's class (reads class_timetable directly)
 export async function GET(req: NextRequest) {
   try {
-    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authSession = await getAnySession()
+    if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const p = req.nextUrl.searchParams
     const school_id = p.get('school_id')
     const class_id  = p.get('class_id')
     if (!school_id || !class_id) return NextResponse.json({ error: 'school_id, class_id required' }, { status: 400 })
+    if (Number(school_id) !== Number(authSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
     const today = dayNames[new Date().getDay()]

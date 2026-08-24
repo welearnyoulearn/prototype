@@ -5,7 +5,8 @@ import { getAnySession } from '@/lib/auth'
 // GET /api/exams?school_id=&class_id=&teacher_id= (teacher_id = get exams where this teacher has subjects)
 export async function GET(req: NextRequest) {
   try {
-    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authSession = await getAnySession()
+    if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { searchParams } = new URL(req.url)
     const school_id = searchParams.get('school_id')
@@ -13,6 +14,12 @@ export async function GET(req: NextRequest) {
     const teacher_id = searchParams.get('teacher_id') // subject teacher lookup
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    // getAnySession() only confirms SOME valid login exists — without this check
+    // a logged-in user from School A could pass School B's school_id and read
+    // School B's exam data.
+    if (Number(school_id) !== Number(authSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     try {
       let rows

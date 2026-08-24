@@ -4,7 +4,8 @@ import { getAnySession } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
   try {
-    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authSession = await getAnySession()
+    if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { searchParams } = new URL(req.url)
     const school_id = searchParams.get('school_id')
@@ -13,6 +14,9 @@ export async function GET(req: NextRequest) {
 
     if (!school_id || !student_id || !class_id) {
       return NextResponse.json({ error: 'school_id, student_id, class_id required' }, { status: 400 })
+    }
+    if (Number(school_id) !== Number(authSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const sid = parseInt(student_id)
