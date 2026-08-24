@@ -284,6 +284,48 @@ export default function PlatformCurriculum() {
   // when a subject actually has more than one book.
   const [activeBookKey, setActiveBookKey] = useState<string | null>(null)
 
+  // Missing Content — structural QA checklist (subjects with 0 chapters,
+  // chapters with 0 topics) surfaced after a bulk import, via
+  // GET /api/platform/subjects/gaps. Read-only; fixing a gap means going
+  // back to that subject's normal bulk-import/chapter-editing flow, so this
+  // just deep-links into the existing subject list rather than editing here.
+  const [showGapsView, setShowGapsView] = useState(false)
+  const [gapsLoading, setGapsLoading] = useState(false)
+  const [gapsError, setGapsError] = useState('')
+  const [emptySubjects, setEmptySubjects] = useState<{ id: number; board: string; grade: string; subject_name: string; category: string }[]>([])
+  const [emptyChapters, setEmptyChapters] = useState<{ chapter_id: number; chapter_name: string; chapter_order: number; subject_id: number; board: string; grade: string; subject_name: string; category: string }[]>([])
+
+  const loadGaps = useCallback(async () => {
+    setGapsLoading(true)
+    setGapsError('')
+    try {
+      const res = await fetch('/api/platform/subjects/gaps')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to load content gaps')
+      setEmptySubjects(data.empty_subjects || [])
+      setEmptyChapters(data.empty_chapters || [])
+    } catch (err: unknown) {
+      setGapsError(err instanceof Error ? err.message : 'Failed to load content gaps')
+    } finally {
+      setGapsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (showGapsView) loadGaps()
+  }, [showGapsView, loadGaps])
+
+  // Jump from a gap row to that subject in the normal sidebar — sets the
+  // filters that scope the subjects list, then hands off to the existing
+  // click-to-select flow (the sidebar re-fetches for these filters and the
+  // subject becomes clickable there).
+  function goToGapSubject(board: string, grade: string, subjectCategory: string) {
+    setShowGapsView(false)
+    setCategory(subjectCategory === 'extra' ? 'extra' : 'academic')
+    setSelectedBoard(board)
+    setSelectedGrade(grade)
+  }
+
   const [activeChapterId, setActiveChapterId] = useState<number | null>(null)
   const [editingTopic, setEditingTopic] = useState<{
     id?: number
@@ -1256,16 +1298,128 @@ export default function PlatformCurriculum() {
               </div>
             </div>
           </div>
-          <span
-            className="text-xs font-semibold px-3 py-1 rounded-full"
-            style={{ background: '#EEEDFE', color: '#3C3489' }}
-          >
-            Global Template Mode
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              data-testid="curriculum-missing-content-toggle"
+              onClick={() => setShowGapsView(v => !v)}
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors"
+              style={{
+                background: showGapsView ? PURPLE : 'white',
+                color: showGapsView ? 'white' : '#6b7280',
+                borderColor: showGapsView ? PURPLE : BORDER,
+              }}
+            >
+              <HelpCircle size={13} /> Missing Content
+              {(emptySubjects.length + emptyChapters.length) > 0 && !gapsLoading && (
+                <span
+                  className="text-[10px] px-1.5 py-0.5 rounded-full font-bold"
+                  style={{ background: showGapsView ? 'rgba(255,255,255,0.25)' : '#FCEBEB', color: showGapsView ? 'white' : '#791F1F' }}
+                >
+                  {emptySubjects.length + emptyChapters.length}
+                </span>
+              )}
+            </button>
+            <span
+              className="text-xs font-semibold px-3 py-1 rounded-full"
+              style={{ background: '#EEEDFE', color: '#3C3489' }}
+            >
+              Global Template Mode
+            </span>
+          </div>
         </div>
       </div>
 
-      {editingTopic ? (
+      {showGapsView ? (
+        <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold" style={{ color: INK }}>Missing Content</h2>
+              <p className="text-xs text-gray-500 mt-1">
+                Subjects with zero chapters, and chapters with zero topics — a post-import QA checklist for the master catalog.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowGapsView(false)}
+              className="border text-sm font-medium px-4 py-2 rounded-xl hover:bg-gray-50"
+              style={{ borderColor: BORDER, color: INK }}
+            >
+              Close
+            </button>
+          </div>
+
+          {gapsError && (
+            <div className="px-4 py-3 rounded-xl flex justify-between items-center text-xs" style={{ background: '#FCEBEB', color: '#791F1F' }}>
+              <span className="font-semibold">{gapsError}</span>
+              <button onClick={() => setGapsError('')} aria-label="Dismiss error"><X size={13} /></button>
+            </div>
+          )}
+
+          {gapsLoading ? (
+            <div className="bg-white border rounded-3xl py-24 flex flex-col items-center justify-center gap-4" style={{ borderColor: BORDER }}>
+              <Loader2 size={24} className="animate-spin" style={{ color: PURPLE }} />
+              <p className="text-xs text-gray-400 font-semibold">Scanning catalog for gaps…</p>
+            </div>
+          ) : emptySubjects.length === 0 && emptyChapters.length === 0 ? (
+            <div className="bg-white border border-dashed rounded-3xl py-24 text-center" style={{ borderColor: BORDER }}>
+              <CheckCircle2 size={28} className="mx-auto mb-3" style={{ color: GREEN }} />
+              <h3 className="text-base font-semibold mb-1" style={{ color: INK }}>No gaps found</h3>
+              <p className="text-xs text-gray-500 max-w-sm mx-auto">Every subject has at least one chapter, and every chapter has at least one topic.</p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {emptySubjects.length > 0 && (
+                <div className="bg-white border rounded-2xl p-5" style={{ borderColor: BORDER }}>
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
+                    Subjects with 0 chapters ({emptySubjects.length})
+                  </h3>
+                  <div className="divide-y" style={{ borderColor: BORDER }}>
+                    {emptySubjects.map(s => (
+                      <div key={s.id} className="py-2.5 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate" style={{ color: INK }}>{s.subject_name}</p>
+                          <p className="text-[10px] uppercase tracking-widest text-gray-400 mt-0.5">{s.board} · Grade {s.grade}</p>
+                        </div>
+                        <button
+                          onClick={() => goToGapSubject(s.board, s.grade, s.category)}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg border shrink-0"
+                          style={{ borderColor: BORDER, color: INK }}
+                        >
+                          Go fix
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {emptyChapters.length > 0 && (
+                <div className="bg-white border rounded-2xl p-5" style={{ borderColor: BORDER }}>
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-3">
+                    Chapters with 0 topics ({emptyChapters.length})
+                  </h3>
+                  <div className="divide-y" style={{ borderColor: BORDER }}>
+                    {emptyChapters.map(c => (
+                      <div key={c.chapter_id} className="py-2.5 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate" style={{ color: INK }}>{c.chapter_name}</p>
+                          <p className="text-[10px] uppercase tracking-widest text-gray-400 mt-0.5">{c.subject_name} · {c.board} · Grade {c.grade}</p>
+                        </div>
+                        <button
+                          onClick={() => goToGapSubject(c.board, c.grade, c.category)}
+                          className="text-xs font-semibold px-3 py-1.5 rounded-lg border shrink-0"
+                          style={{ borderColor: BORDER, color: INK }}
+                        >
+                          Go fix
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ) : editingTopic ? (
         <div className="max-w-5xl mx-auto px-6 py-8 space-y-6">
           {/* Breadcrumbs and Top Controls */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b" style={{ borderColor: BORDER }}>
