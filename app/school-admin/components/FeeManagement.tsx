@@ -3,127 +3,12 @@
 import { useEffect, useState, useCallback, useMemo, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useFeature } from '@/lib/features-context'
 import { GRADE_SEQUENCE, FINAL_GRADE } from '@/lib/grades'
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type FeeCategory = {
-  id: number; name: string; description: string | null
-  frequency: 'monthly' | 'quarterly' | 'annual' | 'one_time'
-  is_active: boolean; structure_count: number; ledger_count: number
-  category_type: 'fixed' | 'variable'
-  // System-generated categories ("Previous Year Dues", "Passout Dues") are billed
-  // directly to each student's ledger by year-rollover/year-end — they never get a
-  // fee_structures row and must be excluded from the fixed-fee-setup gate below.
-  is_system?: boolean
-}
-
-type ApplStudent = { id: number; name: string; roll_number: string; section: string }
-type ApplCategory = { id: number; name: string; frequency: string }
-
-type FeeStructure = {
-  id: number; fee_category_id: number; category_name: string
-  grade: string; amount: number; due_day: number; frequency: string
-}
-
-type StructureLock = {
-  id: number; school_id: number; academic_year: string
-  locked_by: string; locked_at: string
-} | null
-
-type Amendment = {
-  id: number; grade: string; academic_year: string; category_name: string
-  old_amount: number; new_amount: number; effective_from: string
-  reason: string; changed_by: string; created_at: string
-}
-
-type LedgerEntry = {
-  id: number; student_id: number; student_name: string
-  roll_number: string; school_roll_number: number | null; grade: string; section: string
-  email: string | null; phone: string | null
-  parent_name: string | null; parent_phone: string | null; parent_email: string | null
-  student_status: string
-  category_name: string; period_label: string
-  amount_due: number; amount_paid: number; balance: number; waiver_amount: number
-  due_date: string; status: 'pending' | 'paid' | 'partial' | 'overdue' | 'waived' | 'settled'
-  days_overdue: number; has_edits: boolean
-  source_academic_year: string | null
-  notes: string | null
-}
-
-type FeeStats = {
-  summary: {
-    total_students: number; total_due: number; total_collected: number; total_waived: number
-    discretionary_waived?: number
-    total_outstanding: number; paid_count: number; partial_count: number
-    pending_count: number; overdue_count: number; waived_count: number; defaulters_count: number
-    students_fully_paid: number; students_partial: number; students_not_paid: number
-  }
-  by_category: Array<{ category_name: string; frequency: string; total_due: number; total_collected: number; total_waived?: number; total_outstanding?: number; overdue_count: number }>
-  monthly_trend: Array<{ month: string; collected: number }>
-  top_defaulters: Array<{ student_id: number; student_name: string; grade: string; section: string; roll_number: string; outstanding: number; overdue_entries: number }>
-  by_payment_mode: Array<{ payment_mode: string; count: number; total: number }>
-  by_class?: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
-  unbilled_students?: number
-}
-
-type PendingPayment = {
-  id: number; student_id: number; student_name: string; roll_number: string
-  grade: string; section: string; category_name: string; period_label: string
-  amount: number; payment_mode: string; transaction_ref: string | null
-  receipt_number: string; paid_date: string; notes: string | null
-  ledger_id: number; amount_due: number; ledger_balance: number
-}
-
-type EditRecord = {
-  id: number; old_amount: number; new_amount: number
-  reason: string; changed_by: string; changed_at: string
-}
-
-type ReportData = {
-  balance: { total_billed: number; total_collected: number; total_outstanding: number; total_waived: number; discretionary_waived?: number; paid_entries: number; partial_entries: number; unpaid_entries: number; waived_entries: number; total_students: number }
-  monthly: Array<{ month: string; collected: number; payment_count: number; students_paid: number }>
-  monthlyDue: Array<{ month: string; billed: number }>
-  byGrade: Array<{ grade: string; section?: string; students: number; total_due: number; total_collected: number; total_waived: number; discretionary_waived?: number; outstanding: number; fully_paid_students?: number; defaulter_students?: number }>
-  byCategory: Array<{ category_name: string; frequency: string; students: number; total_due: number; total_collected: number; total_waived: number; discretionary_waived?: number; outstanding: number; paid_count: number; unpaid_count: number }>
-  byMode: Array<{ payment_mode: string; count: number; total: number }>
-  defaulters: Array<{ student_name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; outstanding: number; overdue_entries: number; unpaid_entries: number }>
-}
-
-
-type PaymentRecord = {
-  id: number; receipt_number: string; amount: number
-  payment_mode: string; payment_status: string
-  paid_date: string; collected_by_name: string | null
-  transaction_ref: string | null; notes: string | null
-  verified_by: string | null; verified_at: string | null
-  rejection_reason: string | null; created_at: string
-  bill_year?: string; ledger_id?: number
-}
-
-type ReceiptHeaderBlock = {
-  text: string
-  size: 'sm' | 'md' | 'lg' | 'xl'
-  bold: boolean
-  italic: boolean
-  align: 'left' | 'center' | 'right'
-}
-
-type PaySuccess = {
-  receipt_number: string; student_name: string; amount: number
-  school_name: string; roll_number: string; grade: string; section: string; parent_name: string | null
-  category_name: string; period_label: string; amount_due: number
-  payment_mode: string; paid_date: string; collected_by_name: string | null
-  transaction_ref: string | null; notes: string | null
-  // Outstanding balance snapshotted at the moment of submission, BEFORE the async
-  // loadLedger() refetch — printing the receipt later reads this instead of the live
-  // `row` state, which can still reflect the pre-payment balance if the admin clicks
-  // Print before the refetch has resolved and re-rendered.
-  outstanding_before?: number
-  // Per-fee-head breakdown from the API — a single payment can span multiple fee
-  // categories (e.g. Tuition + Transport + Hostel), so this is the source of truth
-  // for the receipt table rather than the single category_name/period_label above.
-  line_items?: { category_name: string; period_label: string; amount: number }[]
-}
+import type {
+  FeeCategory, ApplStudent, ApplCategory, FeeStructure, StructureLock, Amendment,
+  LedgerEntry, FeeStats, PendingPayment, EditRecord, ReportData, PaymentRecord,
+  ReceiptHeaderBlock, PaySuccess,
+} from './fee-management/types'
+import { escapeHtml, printDualCopyReceipt, writeAndPrint, renderHeaderBlocks } from './fee-management/receipts'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -285,148 +170,6 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
       : `<tr><td>${s.student}</td><td>${s.roll_number}</td><td>${s.class}</td><td>${s.fee_type}</td>${mrow(s)}</tr>`).join('')}</tbody></table>
     </body></html>`
 }
-
-// ─── Shared fee-receipt rendering (branding, signature block, dual-copy layout) ─────
-
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
-}
-
-const RECEIPT_HEADER_SIZE_PX: Record<ReceiptHeaderBlock['size'], number> = { sm: 11, md: 14, lg: 18, xl: 24 }
-
-function renderHeaderBlocks(blocks: ReceiptHeaderBlock[] = []): string {
-  return blocks.map(b =>
-    `<div style="font-size:${RECEIPT_HEADER_SIZE_PX[b.size]}px;font-weight:${b.bold ? 700 : 400};font-style:${b.italic ? 'italic' : 'normal'};text-align:${b.align}">${escapeHtml(b.text)}</div>`
-  ).join('')
-}
-
-type ReceiptCardData = {
-  school_name: string
-  logo_url: string | null
-  logo_align: 'left' | 'center' | 'right'
-  header_blocks: ReceiptHeaderBlock[]
-  student_name: string
-  roll_number: string
-  grade: string
-  section: string
-  parent_name: string | null
-  receipt_number: string
-  lines: { label: string; period: string; amount: number }[]
-  total_paid: number
-  payment_mode: string
-  paid_date: string
-  transaction_ref?: string | null
-  collected_by_name?: string | null
-  notes?: string | null
-  balance_after?: number
-}
-
-const RECEIPT_MODE_LABEL: Record<string, string> = {
-  cash: 'Cash', cheque: 'Cheque', dd: 'Demand Draft', upi: 'UPI', online: 'Online Transfer',
-}
-
-function receiptCard(data: ReceiptCardData, copyLabel: string): string {
-  const lineRows = data.lines.map(l =>
-    `<tr><td>${escapeHtml(l.label)}</td><td>${escapeHtml(l.period)}</td><td style="text-align:right">${RUPEE(l.amount)}</td></tr>`
-  ).join('')
-  return `
-${copyLabel ? `<div class="copy-label">${escapeHtml(copyLabel)}</div>` : ''}
-<div class="hdr">
-  ${data.logo_url && data.logo_align === 'center' ? `<div style="text-align:center;margin-bottom:4px"><img src="${escapeHtml(data.logo_url)}" style="height:56px;object-fit:contain" /></div>` : ''}
-  <div class="hdr-row">
-    ${data.logo_url && data.logo_align === 'left' ? `<img class="hdr-logo left" src="${escapeHtml(data.logo_url)}" style="height:64px;object-fit:contain" />` : ''}
-    <div class="hdr-text">
-      <div class="school">${escapeHtml(data.school_name)}</div>
-      ${renderHeaderBlocks(data.header_blocks)}
-      <div class="rtitle">FEE RECEIPT</div>
-      <div class="rno">Receipt No: <strong>${escapeHtml(data.receipt_number)}</strong></div>
-    </div>
-    ${data.logo_url && data.logo_align === 'right' ? `<img class="hdr-logo right" src="${escapeHtml(data.logo_url)}" style="height:64px;object-fit:contain" />` : ''}
-  </div>
-</div>
-<div class="grid2">
-  <div><div class="lbl">Student Name</div><div class="val">${escapeHtml(data.student_name)}</div></div>
-  <div><div class="lbl">Roll Number</div><div class="val">${escapeHtml(data.roll_number)}</div></div>
-  <div><div class="lbl">Class</div><div class="val">Grade ${escapeHtml(data.grade)}${escapeHtml(data.section)}</div></div>
-  <div><div class="lbl">Parent / Guardian</div><div class="val">${escapeHtml(data.parent_name || '—')}</div></div>
-</div>
-<table><thead><tr><th>Fee Head</th><th>Period</th><th style="text-align:right">Amount</th></tr></thead>
-<tbody>${lineRows}</tbody>
-<tfoot><tr class="tot"><td colspan="2" style="text-align:right">Total Paid:</td><td style="text-align:right">${RUPEE(data.total_paid)}</td></tr></tfoot></table>
-<div class="grid2">
-  <div><div class="lbl">Payment Mode</div><div class="val">${RECEIPT_MODE_LABEL[data.payment_mode] || escapeHtml(data.payment_mode)}</div></div>
-  <div><div class="lbl">Payment Date</div><div class="val">${data.paid_date ? new Date(data.paid_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) : '—'}</div></div>
-  ${data.transaction_ref ? `<div><div class="lbl">Reference</div><div class="val">${escapeHtml(data.transaction_ref)}</div></div>` : ''}
-</div>
-${data.notes ? `<div style="margin-bottom:10px"><div class="lbl">Remarks</div><div class="val">${escapeHtml(data.notes)}</div></div>` : ''}
-<div class="sig-row">
-  <div class="sig-box">${escapeHtml(data.collected_by_name || 'Collected By')}</div>
-  <div class="sig-box">Authorized Signatory</div>
-</div>
-${data.balance_after != null ? `<div class="ftr">Balance after this payment: ${RUPEE(data.balance_after)} &nbsp;·&nbsp; Generated on ${new Date().toLocaleString('en-IN')}</div>` : `<div class="ftr">Generated on ${new Date().toLocaleString('en-IN')} &nbsp;·&nbsp; Computer-generated receipt.</div>`}
-`
-}
-
-const RECEIPT_STYLE = `
-  *{box-sizing:border-box}
-  @page { size: A4; margin: 10mm }
-  body{font-family:Arial,sans-serif;color:#222;max-width:720px;margin:0 auto}
-  .sheet{page-break-inside:avoid;overflow:hidden;position:relative;padding:8px 4px}
-  .cut-line{height:6mm;line-height:6mm;overflow:hidden;border-top:1px dashed #999;text-align:center;color:#999;font-size:10px}
-  .copy-label{position:absolute;top:2px;right:4px;font-size:9px;color:#999;text-transform:uppercase;letter-spacing:.5px}
-  .hdr{text-align:center;border-bottom:2px solid #333;padding-bottom:8px;margin-bottom:10px}
-  .hdr-row{position:relative}
-  .hdr-row .hdr-logo{position:absolute;top:50%;transform:translateY(-50%)}
-  .hdr-row .hdr-logo.left{left:0}.hdr-row .hdr-logo.right{right:0}
-  .hdr-text{text-align:center}
-  .school{font-size:18px;font-weight:bold}.rtitle{font-size:13px;font-weight:bold;margin-top:4px;letter-spacing:1px}
-  .rno{font-size:11px;color:#555;margin-top:3px}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
-  .lbl{font-size:10px;color:#888;margin-bottom:1px}.val{font-size:12px;font-weight:500}
-  table{width:100%;border-collapse:collapse;margin:8px 0}
-  th{background:#f3f4f6;padding:5px 8px;text-align:left;font-size:10px;border:1px solid #ddd}
-  td{padding:5px 8px;font-size:11px;border:1px solid #ddd}
-  .tot td{font-weight:bold;background:#f9fafb}
-  .sig-row{display:flex;justify-content:space-between;margin-top:16px}
-  .sig-box{text-align:center;border-top:1px solid #333;width:150px;padding-top:3px;font-size:10px;color:#555}
-  .ftr{margin-top:8px;text-align:center;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:6px}
-  @media print{body{padding:0}}
-`
-
-// Writes HTML into a popup window and prints only after any <img> tags (e.g. school
-// logo from Cloudinary) have finished loading — printing immediately after
-// document.write() races the image request and can print a blank logo.
-function writeAndPrint(win: Window, html: string) {
-  win.document.write(html); win.document.close()
-
-  const images = Array.from(win.document.images)
-  if (images.length === 0) { win.print(); return }
-  let remaining = images.length
-  const proceed = () => { if (--remaining <= 0) win.print() }
-  images.forEach(img => {
-    if (img.complete) proceed()
-    else { img.addEventListener('load', proceed); img.addEventListener('error', proceed) }
-  })
-}
-
-function openReceiptWindow(receiptNumber: string, bodyHtml: string) {
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${escapeHtml(receiptNumber)}</title>
-<style>${RECEIPT_STYLE}</style></head><body>${bodyHtml}</body></html>`
-  const win = window.open('', '_blank', 'width=800,height=900')
-  if (win) writeAndPrint(win, html)
-}
-
-// Two copies (Office + Payer) on one A4 sheet — used for every printed receipt
-// (payment collection and passbook reprints alike). Sheet heights + cut-line are
-// budgeted to total well under the ~277mm usable A4 height (297mm page - 10mm
-// top/bottom margins) so both copies always land on a single page.
-function printDualCopyReceipt(data: ReceiptCardData) {
-  openReceiptWindow(data.receipt_number, `
-<div class="sheet" style="height:133mm">${receiptCard(data, 'Office Copy')}</div>
-<div class="cut-line">✂ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>
-<div class="sheet" style="height:133mm">${receiptCard(data, 'Payer Copy')}</div>`)
-}
-
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -2730,8 +2473,8 @@ export default function FeeManagement({
 
           {/* ── Stat Cards ── */}
           {statsLoading ? (
-            <div className="grid grid-cols-4 gap-4">
-              {[...Array(4)].map((_, i) => (
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+              {[...Array(5)].map((_, i) => (
                 <div key={i} className="bg-white rounded-xl border border-gray-100 p-5 animate-pulse">
                   <div className="h-3 bg-gray-100 rounded w-24 mb-3" />
                   <div className="h-8 bg-gray-200 rounded w-28 mb-2" />
@@ -2813,7 +2556,7 @@ export default function FeeManagement({
                     </div>
 
                     {/* Highlight cards */}
-                    <div className="grid grid-cols-4 gap-3 mb-5">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
                       <div className="bg-green-50 border border-green-100 rounded-lg px-3 py-2.5">
                         <p className="text-[10px] text-green-600 uppercase font-semibold tracking-wide">Best Class</p>
                         {best ? (
@@ -2912,7 +2655,7 @@ export default function FeeManagement({
               })()}
 
               {/* ── Two Columns ── */}
-              <div className="grid grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
                 {/* Fee Head Health */}
                 <div className="bg-white rounded-xl border border-gray-100 p-5">
@@ -3061,7 +2804,7 @@ export default function FeeManagement({
                           {passoutLoading ? '…' : '↻ Refresh'}
                         </button>
                       </div>
-                      <div className="grid grid-cols-4 gap-2 mb-3">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
                         <div className="bg-indigo-50 rounded-lg px-3 py-2 text-center">
                           <p className="text-xs text-indigo-500 mb-0.5">Outstanding</p>
                           <p className="text-sm font-bold text-indigo-700">{fmt(passoutData.summary.total_outstanding)}</p>
@@ -3291,6 +3034,7 @@ export default function FeeManagement({
               <div className="px-4 py-3 bg-amber-50 border-b border-amber-100">
                 <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">Amendment History</p>
               </div>
+              <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-gray-50 border-b border-gray-100">
@@ -3317,6 +3061,7 @@ export default function FeeManagement({
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
@@ -3699,7 +3444,7 @@ export default function FeeManagement({
                             {/* Individual grades */}
                             <div>
                               <p className="text-[10px] text-gray-400 mb-1.5 uppercase tracking-wide">Individual grades (review &amp; adjust)</p>
-                              <div className="grid grid-cols-4 gap-2">
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                                 {GRADES.map(g => (
                                   <div key={g} className="flex items-center gap-1">
                                     <span className="text-[10px] text-gray-400 w-10 shrink-0">{/^\d+$/.test(g) ? `Gr.${g}` : g}</span>
@@ -3979,7 +3724,7 @@ export default function FeeManagement({
                 </div>
               ) : (
                 <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                  <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 grid grid-cols-12 gap-2 text-xs font-semibold text-gray-500">
+                  <div className="hidden sm:grid px-4 py-2.5 bg-gray-50 border-b border-gray-100 grid-cols-12 gap-2 text-xs font-semibold text-gray-500">
                     <div className="col-span-4">Student</div>
                     <div className="col-span-2 text-right">Billed</div>
                     <div className="col-span-2 text-right">Paid+Waived</div>
@@ -3989,9 +3734,9 @@ export default function FeeManagement({
                   <div className="divide-y divide-gray-50 max-h-[600px] overflow-y-auto">
                     {collectionFiltered.map(row => (
                       <Fragment key={row.student_id}>
-                        <div id={`student-row-${row.student_id}`} className={`px-4 py-3 grid grid-cols-12 gap-2 items-center hover:bg-gray-50/60 cursor-pointer ${openStudentId === row.student_id ? 'bg-blue-50/40' : ''}`}
+                        <div id={`student-row-${row.student_id}`} className={`px-4 py-3 flex flex-col gap-2 sm:grid sm:grid-cols-12 sm:gap-2 sm:items-center hover:bg-gray-50/60 cursor-pointer ${openStudentId === row.student_id ? 'bg-blue-50/40' : ''}`}
                           onClick={() => toggleStudent(row.student_id)}>
-                          <div className="col-span-4">
+                          <div className="sm:col-span-4">
                             <div className="flex items-center gap-2">
                               <p className="text-sm font-medium text-gray-800">{row.student_name}</p>
                               {row.student_status === 'inactive' && (
@@ -4000,10 +3745,15 @@ export default function FeeManagement({
                             </div>
                             <p className="text-xs text-gray-400">Gr.{row.grade}{row.section}{row.school_roll_number != null ? ` · Roll ${row.school_roll_number}` : ''}</p>
                           </div>
-                          <div className="col-span-2 text-right text-sm text-gray-600">{fmt(row.total_billed)}</div>
-                          <div className="col-span-2 text-right text-sm text-green-600">{fmt(row.total_paid)}</div>
-                          <div className="col-span-2 text-right text-sm font-bold text-red-600">{fmt(row.outstanding)}</div>
-                          <div className="col-span-2 flex justify-center gap-1.5" onClick={e => e.stopPropagation()}>
+                          <div className="flex justify-between text-xs text-gray-400 sm:hidden">
+                            <span>Billed: <span className="text-gray-600">{fmt(row.total_billed)}</span></span>
+                            <span>Paid+Waived: <span className="text-green-600">{fmt(row.total_paid)}</span></span>
+                            <span>Outstanding: <span className="font-bold text-red-600">{fmt(row.outstanding)}</span></span>
+                          </div>
+                          <div className="hidden sm:block sm:col-span-2 text-right text-sm text-gray-600">{fmt(row.total_billed)}</div>
+                          <div className="hidden sm:block sm:col-span-2 text-right text-sm text-green-600">{fmt(row.total_paid)}</div>
+                          <div className="hidden sm:block sm:col-span-2 text-right text-sm font-bold text-red-600">{fmt(row.outstanding)}</div>
+                          <div className="flex justify-end sm:justify-center gap-1.5 sm:col-span-2" onClick={e => e.stopPropagation()}>
                             {row.outstanding > 0 ? (
                               <button onClick={() => startCollect(row)}
                                 className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg font-medium hover:bg-blue-700">Collect</button>
@@ -4552,7 +4302,7 @@ export default function FeeManagement({
                   {/* Cash verification */}
                   <div className="bg-white rounded-xl border border-gray-100 p-5">
                     <p className="text-sm font-semibold text-gray-700 mb-3">Cash Verification</p>
-                    <div className="grid grid-cols-3 gap-4 items-end">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
                       <div>
                         <p className="text-xs text-gray-400">System says cash collected</p>
                         <p className="text-lg font-bold text-gray-800">{fmt(dayCloseData.by_mode['cash']?.total || 0)}</p>
@@ -4685,7 +4435,7 @@ export default function FeeManagement({
                   <button onClick={printPassbookStatement}
                     className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">🖨 Print Statement</button>
                 </div>
-                <div className="grid grid-cols-4 gap-3 mt-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
                   {[
                     { l: 'Total Billed', v: pbSummary.total_billed, c: 'text-gray-900' },
                     { l: 'Paid',         v: pbSummary.total_paid,    c: 'text-green-700' },
@@ -4761,6 +4511,7 @@ export default function FeeManagement({
                         </div>
                       </div>
                       {/* Entries table */}
+                      <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="text-xs text-gray-400 border-b border-gray-50">
@@ -4792,6 +4543,7 @@ export default function FeeManagement({
                           ))}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -4825,6 +4577,7 @@ export default function FeeManagement({
                     {pbPayments.length === 0 ? (
                       <p className="text-sm text-gray-400 p-8 text-center">No payments recorded for {academicYear}.</p>
                     ) : (
+                      <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
@@ -4918,6 +4671,7 @@ export default function FeeManagement({
                           ) })}
                         </tbody>
                       </table>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -4931,6 +4685,7 @@ export default function FeeManagement({
                   {pbReceipts.length === 0 ? (
                     <p className="text-sm text-gray-400 p-8 text-center">No receipts for {academicYear}.</p>
                   ) : (
+                    <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
@@ -4960,6 +4715,7 @@ export default function FeeManagement({
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   )}
                 </div>
               )}
@@ -5070,6 +4826,7 @@ export default function FeeManagement({
                   {pbTimeline.length === 0 ? (
                     <p className="text-sm text-gray-400 p-8 text-center">No activity for {academicYear}.</p>
                   ) : (
+                    <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-gray-50 text-xs text-gray-500 border-b border-gray-100">
@@ -5100,6 +4857,7 @@ export default function FeeManagement({
                         })}
                       </tbody>
                     </table>
+                    </div>
                   )}
                 </div>
               )}
@@ -5188,7 +4946,7 @@ export default function FeeManagement({
           </div>
 
           {reportLoading ? (
-            <div className="grid grid-cols-4 gap-4">{[...Array(4)].map((_, i) => <div key={i} className="h-24 bg-white rounded-xl border border-gray-100 animate-pulse" />)}</div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{[...Array(4)].map((_, i) => <div key={i} className="h-24 bg-white rounded-xl border border-gray-100 animate-pulse" />)}</div>
           ) : reportData ? (
             <>
               {/* Balance sheet */}
@@ -5207,7 +4965,7 @@ export default function FeeManagement({
                 ))}
               </div>
 
-              <div className="grid grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                 {/* Class-wise collection */}
                 <div className="bg-white rounded-xl border border-gray-100 p-5">
                   <h3 className="text-sm font-semibold text-gray-700 mb-4">Class-wise Collection</h3>
@@ -5511,7 +5269,7 @@ export default function FeeManagement({
               {/* STEP 1 — Review summary */}
               <div className="bg-white rounded-xl border border-gray-100 p-5">
                 <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Step 1 · Review</p>
-                <div className="grid grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   {[
                     { l: 'Total Billed', v: yearEnd.summary.total_billed,    c: 'text-gray-900' },
                     { l: 'Collected',    v: yearEnd.summary.total_collected, c: 'text-green-700' },
@@ -5750,6 +5508,7 @@ export default function FeeManagement({
                   {removedLoading ? '…' : '↻ Refresh'}
                 </button>
               </div>
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr className="text-xs text-gray-500 border-b border-gray-100">
@@ -5792,6 +5551,7 @@ export default function FeeManagement({
                   ))}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </div>
@@ -6052,7 +5812,7 @@ export default function FeeManagement({
 
             {/* Summary bar */}
             {pbData && (
-              <div className="grid grid-cols-4 gap-3 px-5 py-3 bg-gray-50 border-b border-gray-100 flex-shrink-0">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-5 py-3 bg-gray-50 border-b border-gray-100 flex-shrink-0">
                 {[
                   { l: 'Total Billed', v: pbSummary.total_billed, c: 'text-gray-800' },
                   { l: 'Paid',         v: pbSummary.total_paid,    c: 'text-green-700' },
