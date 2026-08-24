@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import OfflineBanner from "./components/OfflineBanner";
+import { Toaster } from "@/components/ui/sonner";
 
 export const metadata: Metadata = {
   title: "We Learn You Learn – School Management Platform",
@@ -17,6 +18,7 @@ export default function RootLayout({
       <body className="min-h-screen bg-gray-50 antialiased" suppressHydrationWarning>
         <OfflineBanner />
         {children}
+        <Toaster />
       </body>
     </html>
   );
