@@ -8,6 +8,16 @@ import { requireFeeAccess } from '@/lib/auth'
 //   by_class   — per class: total, covered, pct, subjects breakdown
 //   by_teacher — per teacher: total, covered, pct across all assigned classes
 //   by_subject — per subject: total, covered, pct across school
+//
+// Coverage is counted in CHAPTERS, not topics — a chapter counts as
+// "covered" only once every one of its topics is marked covered (a chapter
+// with zero topics is never covered), the same definition the teacher's own
+// Syllabus tab already uses for its per-chapter "Done" badge
+// (ClassView.tsx: pct === 100 when ch.covered === ch.total). This holds
+// regardless of which bootstrap path populated the chapter — a JSON import
+// or a manual "how many chapters" count both just create real
+// school_chapters/school_topics rows, so the same chapter-covered logic
+// applies uniformly either way.
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const school_id = searchParams.get('school_id')
@@ -21,29 +31,46 @@ export async function GET(req: NextRequest) {
     // Every query below joins school_subjects by school_id + grade only, so
     // without an academic_year filter a school that has re-subscribed the
     // same subject in a later year (normal after Year Rollover) would have
-    // that subject's chapters/topics counted once per year — inflating
-    // totals and skewing every percentage. Resolve the single active year
-    // the same way every other feature does and scope all three queries to it.
+    // that subject's chapters counted once per year — inflating totals and
+    // skewing every percentage. Resolve the single active year the same way
+    // every other feature does and scope all three queries to it.
     const academic_year = req.nextUrl.searchParams.get('academic_year') || await resolveAcademicYear(school_id)
 
-    const [byClassRes, byTeacherRes, bySubjectRes] = await Promise.all([
-      // 1. Per class × subject coverage (joins ss, sc, st, and stp for that class)
-      pool.query(`
+    // Per (class, chapter) coverage — one row per chapter, pre-aggregated
+    // from topics up to chapter level (a chapter is covered iff every one of
+    // its topics is covered, and it has at least one topic). Shared by all
+    // three rollups below via three different GROUP BYs over the same base.
+    const chapterCoverageCTE = `
+      WITH chapter_coverage AS (
         SELECT
           c.id AS class_id,
           c.grade,
           c.section,
           ss.subject_name AS subject,
-          COUNT(st.id)::int AS total,
-          COUNT(st.id) FILTER (WHERE stp.status = 'covered')::int AS covered
+          sc.id AS chapter_id,
+          COUNT(st.id) AS topic_count,
+          COUNT(st.id) FILTER (WHERE stp.status = 'covered') AS topics_covered
         FROM classes c
         JOIN school_subjects ss ON ss.school_id = c.school_id AND ss.grade = c.grade AND ss.academic_year = $2
         JOIN school_chapters sc ON sc.school_subject_id = ss.id
-        JOIN school_topics st ON st.school_chapter_id = sc.id
+        LEFT JOIN school_topics st ON st.school_chapter_id = sc.id
         LEFT JOIN school_topic_progress stp ON stp.school_topic_id = st.id AND stp.class_id = c.id
         WHERE c.school_id = $1
-        GROUP BY c.id, c.grade, c.section, ss.subject_name
-        ORDER BY c.grade, c.section, ss.subject_name
+        GROUP BY c.id, c.grade, c.section, ss.subject_name, sc.id
+      )
+    `
+
+    const [byClassRes, byTeacherRes, bySubjectRes] = await Promise.all([
+      // 1. Per class × subject chapter coverage
+      pool.query(`
+        ${chapterCoverageCTE}
+        SELECT
+          class_id, grade, section, subject,
+          COUNT(*) FILTER (WHERE topic_count > 0)::int AS total,
+          COUNT(*) FILTER (WHERE topic_count > 0 AND topics_covered = topic_count)::int AS covered
+        FROM chapter_coverage
+        GROUP BY class_id, grade, section, subject
+        ORDER BY grade, section, subject
       `, [school_id, academic_year]),
 
       // 2. Per teacher: aggregate across all classes/subjects they're
@@ -56,15 +83,21 @@ export async function GET(req: NextRequest) {
           te.id AS teacher_id,
           te.name AS teacher_name,
           cs.subject_name AS subject,
-          COUNT(st.id)::int AS total,
-          COUNT(st.id) FILTER (WHERE stp.status = 'covered')::int AS covered
+          COUNT(sc.id) FILTER (WHERE topic_count.n > 0)::int AS total,
+          COUNT(sc.id) FILTER (WHERE topic_count.n > 0 AND topic_count.covered_n = topic_count.n)::int AS covered
         FROM teachers te
         JOIN class_subjects cs ON cs.teacher_id = te.id
         JOIN classes c ON c.id = cs.class_id
         JOIN school_subjects ss ON ss.school_id = $1 AND ss.grade = c.grade AND ss.subject_name = cs.subject_name AND ss.academic_year = $2
         JOIN school_chapters sc ON sc.school_subject_id = ss.id
-        JOIN school_topics st ON st.school_chapter_id = sc.id
-        LEFT JOIN school_topic_progress stp ON stp.school_topic_id = st.id AND stp.class_id = cs.class_id
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(st.id) AS n,
+            COUNT(st.id) FILTER (WHERE stp.status = 'covered') AS covered_n
+          FROM school_topics st
+          LEFT JOIN school_topic_progress stp ON stp.school_topic_id = st.id AND stp.class_id = cs.class_id
+          WHERE st.school_chapter_id = sc.id
+        ) topic_count ON TRUE
         WHERE te.school_id = $1
         GROUP BY te.id, te.name, cs.subject_name
         ORDER BY te.name, cs.subject_name
@@ -72,18 +105,14 @@ export async function GET(req: NextRequest) {
 
       // 3. Per subject across school (sum over all classes in the grade)
       pool.query(`
+        ${chapterCoverageCTE}
         SELECT
-          ss.subject_name AS subject,
-          COUNT(st.id)::int AS total,
-          COUNT(st.id) FILTER (WHERE stp.status = 'covered')::int AS covered
-        FROM classes c
-        JOIN school_subjects ss ON ss.school_id = c.school_id AND ss.grade = c.grade AND ss.academic_year = $2
-        JOIN school_chapters sc ON sc.school_subject_id = ss.id
-        JOIN school_topics st ON st.school_chapter_id = sc.id
-        LEFT JOIN school_topic_progress stp ON stp.school_topic_id = st.id AND stp.class_id = c.id
-        WHERE c.school_id = $1
-        GROUP BY ss.subject_name
-        ORDER BY ss.subject_name
+          subject,
+          COUNT(*) FILTER (WHERE topic_count > 0)::int AS total,
+          COUNT(*) FILTER (WHERE topic_count > 0 AND topics_covered = topic_count)::int AS covered
+        FROM chapter_coverage
+        GROUP BY subject
+        ORDER BY subject
       `, [school_id, academic_year]),
     ])
 

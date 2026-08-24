@@ -197,8 +197,8 @@ export default function AcademicAnalytics({ schoolId }: { schoolId: number }) {
                 return (
                   <div className="grid grid-cols-4 gap-4">
                     {[
-                      { label: 'Total Topics',    value: total,                      color: 'text-gray-800' },
-                      { label: 'Topics Covered',  value: covered,                    color: 'text-green-600' },
+                      { label: 'Total Chapters',   value: total,                      color: 'text-gray-800' },
+                      { label: 'Chapters Covered', value: covered,                    color: 'text-green-600' },
                       { label: 'School Coverage', value: `${pct}%`,                 color: pct >= 75 ? 'text-green-600' : pct >= 50 ? 'text-amber-500' : 'text-red-500' },
                       { label: 'Classes Behind',  value: behind,                     color: behind > 0 ? 'text-red-500' : 'text-green-600' },
                     ].map(k => (
@@ -250,7 +250,7 @@ export default function AcademicAnalytics({ schoolId }: { schoolId: number }) {
                               <PctBar pct={cls.pct} />
                             </div>
                             <div className="w-24 text-right text-xs text-gray-400">
-                              {cls.covered}/{cls.total} topics
+                              {cls.covered}/{cls.total} chapters
                             </div>
                             <svg className="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -296,7 +296,7 @@ export default function AcademicAnalytics({ schoolId }: { schoolId: number }) {
                               <PctBar pct={t.pct} />
                             </div>
                             <div className="w-24 text-right text-xs text-gray-400">
-                              {t.covered}/{t.total} topics
+                              {t.covered}/{t.total} chapters
                             </div>
                             <svg className="w-4 h-4 text-gray-400 group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -338,7 +338,7 @@ export default function AcademicAnalytics({ schoolId }: { schoolId: number }) {
                             <PctBar pct={s.pct} />
                           </div>
                           <div className="w-28 text-right text-xs text-gray-400">
-                            {s.covered} / {s.total} topics
+                            {s.covered} / {s.total} chapters
                           </div>
                         </div>
                       ))}
