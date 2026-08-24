@@ -9,7 +9,8 @@ import { getAnySession } from '@/lib/auth'
 // GET /api/substitutes?school_id=X&day=Monday&period=N      → get free teachers for a day+period slot
 export async function GET(req: NextRequest) {
   try {
-    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const authSession = await getAnySession()
+    if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { searchParams } = req.nextUrl
     const school_id = searchParams.get('school_id')
@@ -23,6 +24,9 @@ export async function GET(req: NextRequest) {
     const uncovered = searchParams.get('uncovered') // 'true' → find uncovered periods for a date
 
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    if (Number(school_id) !== Number(authSession.schoolId)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     try {
       // Uncovered periods: approved leave days where teacher has timetable slots with no substitute assigned
