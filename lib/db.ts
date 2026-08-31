@@ -69,7 +69,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2390,4 +2390,36 @@ async function runIncrementalMigrations() {
   `).catch(() => {})
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_rollup_school_day ON feature_usage_daily_rollup(school_id, day DESC)`).catch(() => {})
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_rollup_key_day ON feature_usage_daily_rollup(nav_key, day DESC)`).catch(() => {})
+
+  // ── Public school feedback (QR/link-based, anonymous) ────────────────────────
+  // Visitors scan a per-school QR code or open a shareable link at
+  // /feedback/[schoolId] and submit free-text feedback with no login. school_id
+  // is the plain numeric schools.id (not school_code, which is login-adjacent).
+  // Categories are a fixed set (lib/feedbackCategories.ts), not admin-configurable,
+  // so there's no categories table — just a CHECK constraint mirroring that list.
+  // No status workflow in v1 (read-only list); no name/contact/rating fields.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS school_feedback (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      category VARCHAR(40) NOT NULL CHECK (category IN (
+        'academics', 'facilities', 'staff', 'administration', 'safety', 'other'
+      )),
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_feedback_school ON school_feedback(school_id, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_feedback_category ON school_feedback(school_id, category, created_at DESC)`).catch(() => {})
+
+  // 'school-feedback' nav item for school-admin — same self-heal/seed pattern as
+  // 'library'/'expenses' above, enabled by default so existing schools see the
+  // tab (and their QR code) without a platform admin needing to flip it on.
+  // Not in OVERRIDABLE_FEATURE_KEYS — no per-school override needed for v1.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES
+      ('school-feedback', 'basic', true), ('school-feedback', 'standard', true), ('school-feedback', 'premium', true)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
 }
