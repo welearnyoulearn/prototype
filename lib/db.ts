@@ -69,7 +69,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 4
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2421,5 +2421,52 @@ async function runIncrementalMigrations() {
     VALUES
       ('school-feedback', 'basic', true), ('school-feedback', 'standard', true), ('school-feedback', 'premium', true)
     ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+
+  // ── School feedback v1.1: configurable optional fields + photos (#99) ────────
+  // category becomes optional (admin can turn it off), plus name/phone/email/
+  // rating/images for schools that opt in. message stays NOT NULL — it's the one
+  // field that can never be disabled, so it isn't part of the configurable set.
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE school_feedback DROP CONSTRAINT IF EXISTS school_feedback_category_check;
+    EXCEPTION WHEN others THEN NULL; END $$
+  `).catch(() => {})
+  await pool.query(`ALTER TABLE school_feedback ALTER COLUMN category DROP NOT NULL`).catch(() => {})
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE school_feedback ADD CONSTRAINT school_feedback_category_check CHECK (category IS NULL OR category IN (
+        'academics', 'facilities', 'staff', 'administration', 'safety', 'other'
+      ));
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+  `).catch(() => {})
+  await pool.query(`ALTER TABLE school_feedback ADD COLUMN IF NOT EXISTS name VARCHAR(255)`).catch(() => {})
+  await pool.query(`ALTER TABLE school_feedback ADD COLUMN IF NOT EXISTS phone VARCHAR(30)`).catch(() => {})
+  await pool.query(`ALTER TABLE school_feedback ADD COLUMN IF NOT EXISTS email VARCHAR(255)`).catch(() => {})
+  await pool.query(`ALTER TABLE school_feedback ADD COLUMN IF NOT EXISTS rating SMALLINT`).catch(() => {})
+  await pool.query(`ALTER TABLE school_feedback ADD COLUMN IF NOT EXISTS images JSONB NOT NULL DEFAULT '[]'::jsonb`).catch(() => {})
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE school_feedback ADD CONSTRAINT school_feedback_rating_check CHECK (rating IS NULL OR rating BETWEEN 1 AND 5);
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$
+  `).catch(() => {})
+
+  // Per-school toggle for which optional fields the public form shows/requires.
+  // One row per school; absence means "use v1.1 defaults" (category on+required,
+  // everything else off) — see lib/feedbackFields.ts DEFAULT_FEEDBACK_FIELD_CONFIG.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS school_feedback_form_config (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER UNIQUE NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      field_config JSONB NOT NULL DEFAULT '{
+        "category": {"enabled": true, "required": true},
+        "name": {"enabled": false, "required": false},
+        "phone": {"enabled": false, "required": false},
+        "email": {"enabled": false, "required": false},
+        "rating": {"enabled": false, "required": false},
+        "photo": {"enabled": false, "required": false}
+      }'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
   `).catch(() => {})
 }
