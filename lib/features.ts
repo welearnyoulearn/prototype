@@ -35,6 +35,7 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'announcements',      label: 'Announcement Board',              category: 'Communication', portals: ['school-admin'] },
   { key: 'notifications',      label: 'Notification Center',             category: 'Communication', portals: ['school-admin'] },
   { key: 'parent-engagement',  label: 'Parent Engagement',               category: 'Communication', portals: ['school-admin'] },
+  { key: 'school-feedback',    label: 'School Feedback',                 category: 'Communication', portals: ['school-admin'] },
 
   // ── Finance ──────────────────────────────────────────────────────────────────
   { key: 'fee-management',     label: 'Fee Management',                  category: 'Finance', portals: ['school-admin'] },
