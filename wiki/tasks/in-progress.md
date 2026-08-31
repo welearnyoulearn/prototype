@@ -6,6 +6,21 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 
 <!-- Add new entries at the top -->
 
+### School feedback v1.1 — configurable fields, photo uploads, UI redesign (#99)
+**Type:** Feature (follow-up to #98)
+**Portal:** School Admin (+ public page)
+**Assigned to:** Vamsi
+**Branch:** feature/98-school-feedback
+**Started:** 2026-08-31
+**Summary:** School admin can toggle each optional field (Category, Name, Phone, Email, Rating, Photo) on/off and required/optional from a new Form Settings panel; Message stays always-on. Visitors can attach up to 3 photos via a tightly-scoped public Cloudinary signing endpoint. Public form redesigned to a light, mobile-first look.
+**Progress:**
+- [x] DB migration: widened school_feedback (name/phone/email/rating/images, category now nullable) + school_feedback_form_config table
+- [x] API: GET/PUT /api/feedback/config, POST /api/feedback/upload-sign, extended meta/submit/list routes
+- [x] Public form redesign with dynamic field rendering, star rating, photo upload
+- [x] Admin Form Settings panel + expandable row details (name/phone/email/rating/photos)
+- [ ] Playwright e2e extended for field-config-driven rendering
+- [x] Docs
+
 ### Public school feedback — QR code + anonymous form (#98)
 **Type:** Feature
 **Portal:** School Admin (+ new public page)

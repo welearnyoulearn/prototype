@@ -59,7 +59,7 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 | Notification Center | Built | Full notification history for the school |
 | Student Leaderboard | Built | Points-based ranking with badges, streaks, gamification |
 | Parent Engagement | Built | Metrics on parent portal usage |
-| School Feedback | Built | Anonymous, no-login feedback via QR code or shareable link at `/feedback/[schoolId]`; fixed category set; read-only filterable/paginated list in School Admin. Distinct from Anonymous Class Pulse below — this is public-visitor feedback, not in-app student feedback |
+| School Feedback | Built | Anonymous, no-login feedback via QR code or shareable link at `/feedback/[schoolId]`; light mobile-first form. Admin controls which optional fields appear (Category, Name, Phone, Email, Rating, Photo — up to 3 images) via a per-school Form Settings panel; Message is always shown/required. Read-only filterable/paginated list in School Admin, with row detail expand for name/phone/email/rating/photos. Distinct from Anonymous Class Pulse below — this is public-visitor feedback, not in-app student feedback |
 | Anonymous Class Pulse | Planned | Anonymous student feedback. Defined in `lib/features.ts` as `class-pulse` but not implemented |
 
 ### Management
@@ -98,7 +98,9 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 | `GET/POST /api/substitutes` | Substitute assignments |
 | `GET/POST /api/exams` | Exam CRUD |
 | `GET/POST /api/announcements` | Announcement CRUD |
-| `POST /api/feedback/submit`, `GET /api/feedback/meta` | Public anonymous feedback submission + form metadata |
+| `POST /api/feedback/submit`, `GET /api/feedback/meta` | Public anonymous feedback submission + form metadata (incl. field config) |
+| `POST /api/feedback/upload-sign` | Public, tightly-scoped Cloudinary signing for feedback photo attachments |
 | `GET /api/feedback`, `GET /api/feedback/qr` | School-admin feedback list (filters + pagination) and QR code |
+| `GET/PUT /api/feedback/config` | School-admin Form Settings — which optional fields are enabled/required |
 | `GET/POST /api/fees/*` | Fee management |
 | `POST /api/academic-years/rollover` | Year rollover |
