@@ -64,7 +64,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const result = await pool.query(
-      `SELECT id, category, message, created_at FROM school_feedback ${where}
+      `SELECT id, category, message, name, phone, email, rating, images, created_at FROM school_feedback ${where}
        ORDER BY created_at DESC ${pageClause}`,
       values
     )

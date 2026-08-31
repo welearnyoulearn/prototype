@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import pool from '@/lib/db'
 import { schoolHasFeature } from '@/lib/auth'
+import { getFieldConfig } from '@/lib/feedbackFieldsServer'
 
 // No auth required — the public feedback form reads this to render its header
 // and to know whether the form should even show. Returns a bare 404 for both
@@ -31,7 +32,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'not_found' }, { status: 404 })
     }
 
-    return NextResponse.json({ id: school.id, name: school.name })
+    const fields = await getFieldConfig(school_id)
+    return NextResponse.json({ id: school.id, name: school.name, fields })
   } catch (err) {
     console.error('GET /api/feedback/meta error:', err)
     return NextResponse.json({ error: 'Failed to load school' }, { status: 500 })
