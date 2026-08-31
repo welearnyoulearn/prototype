@@ -1,7 +1,7 @@
 # School Admin Portal
 
-**Status:** 22 Built | 3 Partial | 4 Planned
-**Last updated:** 2026-06-18
+**Status:** 23 Built | 3 Partial | 4 Planned
+**Last updated:** 2026-08-31
 
 ---
 
@@ -59,6 +59,7 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 | Notification Center | Built | Full notification history for the school |
 | Student Leaderboard | Built | Points-based ranking with badges, streaks, gamification |
 | Parent Engagement | Built | Metrics on parent portal usage |
+| School Feedback | Built | Anonymous, no-login feedback via QR code or shareable link at `/feedback/[schoolId]`; fixed category set; read-only filterable/paginated list in School Admin. Distinct from Anonymous Class Pulse below — this is public-visitor feedback, not in-app student feedback |
 | Anonymous Class Pulse | Planned | Anonymous student feedback. Defined in `lib/features.ts` as `class-pulse` but not implemented |
 
 ### Management
@@ -97,5 +98,7 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 | `GET/POST /api/substitutes` | Substitute assignments |
 | `GET/POST /api/exams` | Exam CRUD |
 | `GET/POST /api/announcements` | Announcement CRUD |
+| `POST /api/feedback/submit`, `GET /api/feedback/meta` | Public anonymous feedback submission + form metadata |
+| `GET /api/feedback`, `GET /api/feedback/qr` | School-admin feedback list (filters + pagination) and QR code |
 | `GET/POST /api/fees/*` | Fee management |
 | `POST /api/academic-years/rollover` | Year rollover |

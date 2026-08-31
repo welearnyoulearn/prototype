@@ -6,6 +6,21 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 
 <!-- Add new entries at the top -->
 
+### Public school feedback — QR code + anonymous form (#98)
+**Type:** Feature
+**Portal:** School Admin (+ new public page)
+**Assigned to:** Vamsi
+**Branch:** feature/98-school-feedback
+**Started:** 2026-08-31
+**Summary:** Anonymous, no-login feedback form at /feedback/[schoolId] (QR code or shareable link), fixed category set, School Admin gets a read-only filterable/paginated list plus the QR/link panel.
+**Progress:**
+- [x] DB migration: school_feedback table + plan_features seed
+- [x] API: submit, meta, list, qr routes
+- [x] Public form page
+- [x] School-admin SchoolFeedback tab
+- [x] Playwright e2e written (not run end-to-end in dev sandbox — no valid platform-admin credential for this DB)
+- [x] Docs
+
 ### Performance & security audit — login latency, tenant isolation, pagination (#TBD)
 **Type:** Bug Fix / Enhancement
 **Portal:** All (School Admin, Teacher, Student, Parent, Platform Admin)
