@@ -235,9 +235,46 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     timetable_slots: { subject_name: string; grade: string; section: string; day_of_week: string; period_number: number }[]
   } | null>(null)
   const [loadingConsequences, setLoadingConsequences] = useState(false)
+  const [removing, setRemoving] = useState(false)
   const [removeToast, setRemoveToast] = useState<{ name: string; summary: string[] } | null>(null)
 
+  // Primary/core subject dropdown — same source and fallback as
+  // StaffOnboarding's Subject field, so editing a teacher's core subject
+  // stays in sync with the same catalog they were onboarded against, instead
+  // of drifting into free-typed spelling variants over time. This is
+  // teachers.subject only — the per-class assignments made in Class
+  // Management (class_subjects) are a separate, free-text "other subjects
+  // taught" record and are never affected by this dropdown.
+  const [subscribedSubjectNames, setSubscribedSubjectNames] = useState<string[]>([])
+  const [subjectInputMode, setSubjectInputMode] = useState<'dropdown' | 'manual'>('dropdown')
+
   useEffect(() => { loadTeachers() }, [schoolId, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/school/subjects?school_id=${schoolId}`)
+        if (res.ok) {
+          const d = await res.json()
+          const rows: { subject_name: string }[] = Array.isArray(d.subjects) ? d.subjects : []
+          const names = Array.from(new Set(rows.map(r => r.subject_name))).sort()
+          if (names.length > 0) {
+            setSubscribedSubjectNames(names)
+            return
+          }
+        }
+        // No subscribed subjects — same fallback as onboarding: use the full
+        // platform master catalog rather than forcing free text.
+        const masterRes = await fetch('/api/platform/subjects')
+        if (masterRes.ok) {
+          const d = await masterRes.json()
+          const rows: { subject_name: string }[] = Array.isArray(d.subjects) ? d.subjects : []
+          const names = Array.from(new Set(rows.map(r => r.subject_name))).sort()
+          setSubscribedSubjectNames(names)
+        }
+      } catch { /* non-critical — falls back to free text */ }
+    })()
+  }, [schoolId])
 
   async function loadTeachers() {
     setLoading(true)
@@ -361,9 +398,10 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   }
 
   async function confirmDelete() {
-    if (!selected) return
+    if (!selected || removing) return
     const teacherName = selected.name
     const impact = removeConsequences
+    setRemoving(true)
     try {
       const res = await fetch(`/api/teachers/${selected.id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
@@ -385,6 +423,8 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     } catch {
       setError('Failed to remove teacher')
       setShowRemoveDialog(false)
+    } finally {
+      setRemoving(false)
     }
   }
 
@@ -437,6 +477,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
           <span className="text-sm text-gray-400">{teachers.length} total staff</span>
           <button onClick={loadTeachers} disabled={loading}
             title="Refresh staff list"
+            data-testid="staff-refresh"
             className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-500 rounded-lg text-xs hover:bg-gray-50 transition-colors disabled:opacity-40">
             <svg className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -449,6 +490,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       {/* Main tabs: Staff Directory vs Credentials */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit mb-4">
         <button onClick={() => setMainTab('staff')}
+          data-testid="staff-directory-tab"
           className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${mainTab === 'staff' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
           Staff Directory
         </button>
@@ -474,6 +516,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit mb-4">
         {(['teaching', 'non_teaching'] as const).map(t => (
           <button key={t} onClick={() => { setTab(t); setDeptFilter('all'); setStatusFilter('active') }}
+            data-testid={`staff-type-tab-${t}`}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
             {t === 'teaching' ? 'Teaching Staff' : 'Non-Teaching Staff'}
             <span className="ml-1.5 text-xs text-gray-400">({teachers.filter(x => (x.staff_type || 'teaching') === t).length})</span>
@@ -484,6 +527,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       {/* Filters row */}
       <div className="flex gap-3 mb-4 flex-wrap">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or ID..."
+          data-testid="staff-search-input"
           className="flex-1 min-w-[200px] border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300" />
         {/* Status filter */}
         <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
@@ -492,6 +536,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
               : s === 'removed' ? byType.filter(t => t.status === 'removed').length : 0
             return (
               <button key={s} onClick={() => setStatusFilter(s as typeof statusFilter)}
+                data-testid={`staff-status-filter-${s}`}
                 className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${statusFilter === s ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
                 {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
                 {count > 0 && (
@@ -503,6 +548,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
         </div>
         {tab === 'teaching' && departments.length > 1 && (
           <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)}
+            data-testid="staff-department-filter"
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
             {departments.map(d => <option key={d} value={d}>{d === 'all' ? 'All Departments' : d}</option>)}
           </select>
@@ -617,7 +663,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                       {[
                         { field: 'name', label: 'Name *', type: 'text', placeholder: 'Full name' },
                         { field: 'email', label: 'Email', type: 'email', placeholder: 'teacher@school.com' },
-                        { field: 'subject', label: 'Subject', type: 'text', placeholder: 'e.g. Mathematics' },
                         { field: 'phone', label: 'Phone', type: 'tel', placeholder: '10-digit number' },
                         { field: 'department', label: 'Department', type: 'text', placeholder: 'e.g. Science' },
                         { field: 'qualification', label: 'Qualification', type: 'text', placeholder: 'e.g. B.Ed, M.Sc' },
@@ -630,6 +675,41 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                             className={inputCls} />
                         </div>
                       ))}
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">Subject</label>
+                        {subscribedSubjectNames.length > 0 && subjectInputMode !== 'manual' ? (
+                          <select
+                            data-testid="staff-edit-subject-select"
+                            value={subscribedSubjectNames.includes((editForm.subject ?? selected.subject) as string) ? (editForm.subject ?? selected.subject) : ''}
+                            onChange={e => {
+                              if (e.target.value === '__other__') {
+                                setSubjectInputMode('manual')
+                                setEditForm(f => ({ ...f, subject: '' }))
+                              } else {
+                                setEditForm(f => ({ ...f, subject: e.target.value }))
+                              }
+                            }}
+                            className={inputCls}>
+                            <option value="">Select subject</option>
+                            {subscribedSubjectNames.map(name => (
+                              <option key={name} value={name}>{name}</option>
+                            ))}
+                            <option value="__other__">Other (type manually)…</option>
+                          </select>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <input type="text" placeholder="e.g. Mathematics" data-testid="staff-edit-subject-input"
+                              value={editForm.subject ?? selected.subject ?? ''}
+                              onChange={e => setEditForm(f => ({ ...f, subject: e.target.value }))}
+                              className={inputCls} />
+                            {subscribedSubjectNames.length > 0 && (
+                              <button type="button" title="Pick from the subject list"
+                                onClick={() => setSubjectInputMode('dropdown')}
+                                className="text-[10px] text-blue-500 hover:text-blue-700 flex-shrink-0">↺</button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Staff Type</label>
                         <select value={editForm.staff_type ?? selected.staff_type ?? 'teaching'}
@@ -735,25 +815,30 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                   {editing ? (
                     <>
                       <button onClick={handleSave} disabled={saving}
+                        data-testid="staff-save-edit"
                         className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
                         {saving ? 'Saving...' : 'Save Changes'}
                       </button>
                       <button onClick={() => { setEditing(false); setEditForm({}) }}
+                        data-testid="staff-cancel-edit"
                         className="border border-gray-200 text-gray-600 px-5 py-2 rounded-lg text-sm hover:bg-gray-50 transition-colors">
                         Cancel
                       </button>
                     </>
                   ) : (
                     <button onClick={() => setEditing(true)}
+                      data-testid="staff-edit-details"
                       className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors">
                       Edit Details
                     </button>
                   )}
                   <button onClick={() => handleToggleStatus(selected)}
+                    data-testid="staff-toggle-status"
                     className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors border ${selected.status === 'active' ? 'border-orange-200 text-orange-600 hover:bg-orange-50' : 'border-green-200 text-green-600 hover:bg-green-50 font-semibold'}`}>
                     {selected.status === 'active' ? 'Deactivate' : 'Reactivate'}
                   </button>
                   <button onClick={() => handleDelete(selected)}
+                    data-testid="staff-remove"
                     className="ml-auto border border-red-200 text-red-600 px-5 py-2 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">
                     Remove from School
                   </button>
@@ -834,9 +919,10 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                 className="flex-1 border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm hover:bg-gray-50">
                 Cancel
               </button>
-              <button onClick={confirmDelete} disabled={loadingConsequences}
+              <button onClick={confirmDelete} disabled={loadingConsequences || removing}
+                data-testid="confirm-remove-staff"
                 className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
-                Yes, Remove
+                {removing ? 'Removing…' : 'Yes, Remove'}
               </button>
             </div>
           </div>
@@ -971,6 +1057,7 @@ function TeacherCard({ teacher, onClick, onToggle, onDelete }:
   const isRemoved = teacher.status === 'removed'
   return (
     <div onClick={onClick}
+      data-testid={`staff-card-${teacher.id}`}
       className={`flex items-center gap-4 px-5 py-3.5 cursor-pointer transition-colors hover:bg-gray-50 ${isInactive || isRemoved ? 'opacity-60' : ''}`}>
       <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0 ${
         isRemoved ? 'bg-red-300' : isInactive ? 'bg-gray-300' : 'bg-blue-600'
@@ -1007,6 +1094,7 @@ function TeacherCard({ teacher, onClick, onToggle, onDelete }:
       <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
         {isInactive && (
           <button onClick={onToggle}
+            data-testid={`staff-reactivate-${teacher.id}`}
             className="text-xs px-2.5 py-1 rounded border border-green-200 hover:bg-green-50 text-green-600 font-medium transition-colors">
             Reactivate
           </button>

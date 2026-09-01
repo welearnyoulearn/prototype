@@ -6,10 +6,10 @@ import { sendTeacherWelcomeEmail } from '@/lib/email'
 // POST /api/teachers/[id]/reset-credentials
 //
 // Generates a fresh random temp password and emails it to the teacher —
-// mirrors POST /api/students/[id]/reset-credentials. Distinct from the older
-// POST /api/teachers/[id]/reset-password, which resets to the teacher's
-// (guessable) employee_id and sends no email; that route isn't wired to any
-// UI. This one is what the school-admin Credentials tab calls.
+// mirrors POST /api/students/[id]/reset-credentials. This is what the
+// school-admin Credentials tab calls. (An older route that reset the
+// password to the teacher's guessable employee_id and sent no email was
+// removed — it was unwired to any UI and an attractive nuisance.)
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   await ensureDB()
   const admin = await requireSchoolAdmin()
