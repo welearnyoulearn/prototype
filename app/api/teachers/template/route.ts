@@ -4,7 +4,7 @@ import pool from '@/lib/db'
 import { resolveAcademicYear } from '@/lib/academicYear'
 import { requireFeeAccess } from '@/lib/auth'
 
-const MANDATORY_COLS = new Set(['Name', 'Email', 'Subject'])
+const MANDATORY_COLS = new Set(['Name', 'Email', 'Subject', 'Phone'])
 
 // GET /api/teachers/template?school_id=X
 // Same column layout as the plain-CSV template (name,email,subject,phone,
@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
 
   // Two example rows
   ws.addRow(['Priya Sharma', 'priya@school.com', subjectNames[0] ?? 'Mathematics', '9876543210', 'Science', 'B.Ed', '2023-06-01', 'teaching', '8,9,10'])
-  ws.addRow(['Suresh Patel', 'suresh@school.com', '', '', 'Admin', '', '2021-01-10', 'non_teaching', ''])
+  ws.addRow(['Suresh Patel', 'suresh@school.com', '', '9876543212', 'Admin', '', '2021-01-10', 'non_teaching', ''])
 
   // Subject dropdown, applied to a generous range of data rows. Excel's
   // inline list formula ('"A,B,C"') caps out around 255 characters, which a

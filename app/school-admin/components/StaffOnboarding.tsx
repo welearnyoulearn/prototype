@@ -27,7 +27,7 @@ const EMPTY_ROW: TeacherRow = {
 const CSV_HEADER = 'name,email,subject,phone,department,qualification,date_of_joining,staff_type,teaches_grades'
 const CSV_EXAMPLE = `Priya Sharma,priya@school.com,Mathematics,9876543210,Science,B.Ed,2023-06-01,teaching,"8,9,10"
 Raj Kumar,raj@school.com,Physics,9876543211,Science,M.Sc,2022-07-15,teaching,"9,10"
-Suresh Patel,suresh@school.com,,,Admin,,2021-01-10,non_teaching,
+Suresh Patel,suresh@school.com,,9876543212,Admin,,2021-01-10,non_teaching,
 # Note: wrap grades in quotes — "8,9,10" — or leave blank for all grades`
 
 const STUDENT_CSV_MARKERS = ['roll_number', 'parent_name', 'parent_phone', 'parent_email']
@@ -111,6 +111,7 @@ function rowErrors(row: TeacherRow): string[] {
   if (!row.email.trim()) errs.push('Email required — login credentials will be sent here')
   if (row.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email.trim())) errs.push('Invalid email')
   if (row.staff_type === 'teaching' && !row.subject.trim()) errs.push('Subject required for teaching staff')
+  if (!row.phone.trim()) errs.push('Phone required')
   if (row.phone.trim() && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(row.phone.trim())) errs.push('Invalid phone')
   return errs
 }
@@ -301,10 +302,21 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setResult(data)
-      setRows([{ ...EMPTY_ROW }])
-      setShowErrors(false)
+      // Keep failed rows in the grid for correction instead of clearing
+      // everything — a partial-success import (some rows duplicate/invalid)
+      // used to wipe the whole form, forcing a full re-type/re-paste of the
+      // rows that just failed.
+      const failedRowNumbers = new Set(data.errors.map((e: { row: number }) => e.row))
+      const retained = valid.filter((_, i) => failedRowNumbers.has(i + 1))
+      setRows(retained.length > 0 ? retained : [{ ...EMPTY_ROW }])
+      setShowErrors(retained.length > 0)
       fetchStaffCount()
-      onRefresh?.()
+      // onRefresh (which also switches the visible tab back to the
+      // directory, per page.tsx) is deferred to the result banner's Dismiss
+      // button — calling it here switched the tab away in the same instant
+      // the success message rendered, so the admin could never actually see
+      // it or the new employee ID. Same pattern as StudentOnboarding's
+      // "Done" button.
       // Scroll the main content container to top (not window — sidebar layout uses overflow-y-auto on <main>)
       document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })
     } catch (err: unknown) {
@@ -322,6 +334,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
     if (field === 'name' && !row.name.trim()) return inputErrCls
     if (field === 'email' && !row.email.trim()) return inputErrCls
     if (field === 'subject' && row.staff_type === 'teaching' && !row.subject.trim()) return inputErrCls
+    if (field === 'phone' && !row.phone.trim()) return inputErrCls
     return inputCls
   }
 
@@ -344,9 +357,10 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
           )}
         </div>
         <div className="flex gap-2">
-          <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx" onChange={handleFileImport} className="hidden" />
+          <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx" onChange={handleFileImport} className="hidden" data-testid="staff-import-file-input" />
           <button onClick={downloadTemplate}
             title="Download plain CSV template (free-text subject)"
+            data-testid="staff-download-csv-template"
             className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -356,6 +370,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
           {subscribedSubjectNames.length > 0 && (
             <button onClick={() => downloadExcelTemplate(schoolId)}
               title="Download Excel template with a Subject dropdown"
+              data-testid="staff-download-excel-template"
               className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -365,6 +380,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
           )}
           <button onClick={() => fileRef.current?.click()}
             title="Import a .csv or a filled-in .xlsx template"
+            data-testid="staff-import-file-button"
             className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
@@ -372,6 +388,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
             Import File
           </button>
           <button onClick={() => setMode(m => m === 'csv' ? 'manual' : 'csv')}
+            data-testid="staff-toggle-csv-mode"
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === 'csv' ? 'bg-blue-600 text-white' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
             Paste CSV
           </button>
@@ -406,7 +423,8 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                 </div>
               )}
             </div>
-            <button onClick={() => setResult(null)}
+            <button onClick={() => { setResult(null); onRefresh?.() }}
+              data-testid="staff-onboard-dismiss-result"
               className="text-green-400 hover:text-green-600 text-xs border border-green-200 px-2 py-1 rounded flex-shrink-0">
               Dismiss
             </button>
@@ -425,6 +443,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
             <code className="block bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs text-gray-500 font-mono whitespace-pre">{CSV_EXAMPLE}</code>
           </div>
           <textarea
+            data-testid="staff-csv-paste-textarea"
             className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 font-mono resize-none"
             rows={8} placeholder="Paste CSV data here..."
             onChange={e => {
@@ -472,9 +491,9 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                     <tr key={i} className={`hover:bg-gray-50 ${errs.length > 0 ? 'bg-red-50/30' : ''}`}>
                       <td className="px-3 py-2 text-gray-400">{i + 1}</td>
                       <td className="px-3 py-2">
-                        <input className={cellCls(row, 'name')} placeholder="Full name *" value={row.name} onChange={e => updateRow(i, 'name', e.target.value)} />
+                        <input data-testid={`staff-row-name-${i}`} className={cellCls(row, 'name')} placeholder="Full name *" value={row.name} onChange={e => updateRow(i, 'name', e.target.value)} />
                       </td>
-                      <td className="px-3 py-2"><input className={cellCls(row, 'email')} placeholder="Email *" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input data-testid={`staff-row-email-${i}`} className={cellCls(row, 'email')} placeholder="Email *" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
                       <td className="px-3 py-2">
                         {subscribedSubjectNames.length > 0 && subjectInputMode[i] !== 'manual' ? (
                           <select
@@ -505,7 +524,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                           </div>
                         )}
                       </td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="Phone" value={row.phone} onChange={e => updateRow(i, 'phone', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input data-testid={`staff-row-phone-${i}`} className={cellCls(row, 'phone')} placeholder="Phone *" value={row.phone} onChange={e => updateRow(i, 'phone', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="Department" value={row.department} onChange={e => updateRow(i, 'department', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="B.Ed, M.Sc..." value={row.qualification} onChange={e => updateRow(i, 'qualification', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} type="date" value={row.date_of_joining} onChange={e => updateRow(i, 'date_of_joining', e.target.value)} /></td>
@@ -531,7 +550,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        <button onClick={() => removeRow(i)} className="text-red-400 hover:text-red-600 text-base leading-none">×</button>
+                        <button data-testid={`staff-row-remove-${i}`} onClick={() => removeRow(i)} className="text-red-400 hover:text-red-600 text-base leading-none">×</button>
                       </td>
                     </tr>
                   )
@@ -541,6 +560,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
           </div>
           <div className="px-4 py-2 bg-blue-50/30 border-t border-blue-100 flex items-center gap-4 flex-wrap">
             <p className="text-xs text-blue-600 font-medium">Email (blue) is required — login credentials are sent there</p>
+            <p className="text-xs text-gray-400">Phone is required for all staff</p>
             <p className="text-xs text-gray-400">Subject required for teaching staff only</p>
             <p className="text-xs text-amber-600">Teaches Grades — leave blank for all grades</p>
           </div>
@@ -553,10 +573,11 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
             </p>
           </div>
           <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
-            <button onClick={addRow} className="text-sm text-blue-600 hover:text-blue-800 font-medium">+ Add Row</button>
+            <button onClick={addRow} data-testid="staff-add-row" className="text-sm text-blue-600 hover:text-blue-800 font-medium">+ Add Row</button>
             <div className="flex items-center gap-3">
               <span className="text-xs text-gray-400">{rows.filter(r => r.name.trim()).length} of {rows.length} rows ready</span>
               <button onClick={handleSubmit} disabled={submitting || rows.every(r => !r.name.trim())}
+                data-testid="staff-onboard-submit"
                 className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
                 {submitting ? 'Onboarding...' : 'Onboard Staff'}
               </button>

@@ -200,7 +200,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       await client.query('UPDATE exam_marks SET entered_by = NULL WHERE entered_by = $1', [id])
       await client.query('DELETE FROM teacher_unavailability WHERE teacher_id = $1', [id])
       await client.query('DELETE FROM leave_requests WHERE teacher_id = $1', [id])
-      await client.query('DELETE FROM notifications WHERE recipient_teacher_id = $1 OR sender_teacher_id = $1', [id])
+      // Unlink rather than delete, same as every other reference above — a
+      // removed teacher's notification history should stay intact for audit
+      // purposes, not be destroyed just because this table alone used DELETE.
+      await client.query('UPDATE notifications SET recipient_teacher_id = NULL WHERE recipient_teacher_id = $1', [id])
+      await client.query('UPDATE notifications SET sender_teacher_id = NULL WHERE sender_teacher_id = $1', [id])
 
       // Soft-delete: mark as removed (keeps record in DB)
       const result = await client.query(

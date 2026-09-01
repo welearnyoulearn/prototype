@@ -3,6 +3,17 @@ import pool from '@/lib/db'
 import { hashPassword, generateTempPassword, requireSchoolAdmin } from '@/lib/auth'
 import { sendTeacherWelcomeEmail } from '@/lib/email'
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const PHONE_RE = /^\+?[\d\s\-()[\]]{7,15}$/
+
+// Postgres unique-violation error code — raised by the partial unique indexes
+// on (LOWER(email)) and (school_id, phone) added in lib/db.ts. Those indexes
+// are the only thing that actually closes the TOCTOU race between the
+// SELECT-based dup checks below and the INSERT (two near-simultaneous
+// requests could both pass the SELECT); this catch turns that rare conflict
+// into a normal per-row error instead of a 500.
+const UNIQUE_VIOLATION = '23505'
+
 function generateEmployeeId(schoolName: string): string {
   const slug = schoolName
     .toLowerCase()
@@ -30,13 +41,44 @@ export async function POST(req: NextRequest) {
     }
     const schoolName = schoolRes.rows[0].name
 
+    // Batch the dup lookups up front (one query per dimension) instead of
+    // querying per-row inside the loop — for a 200-row import that was ~400
+    // sequential round-trips. This also shrinks the window between "checked"
+    // and "inserted" for every row, narrowing the TOCTOU race the DB unique
+    // indexes now guard against anyway.
+    const phones = Array.from(new Set(
+      teachers.map(t => t.phone?.trim()).filter((p): p is string => !!p)
+    ))
+    const emails = Array.from(new Set(
+      teachers.map(t => t.email?.trim().toLowerCase()).filter((e): e is string => !!e)
+    ))
+
+    const [phoneDupRes, emailDupRes] = await Promise.all([
+      phones.length
+        ? pool.query<{ name: string; phone: string }>(
+            'SELECT name, phone FROM teachers WHERE school_id = $1 AND phone = ANY($2) AND removed_at IS NULL',
+            [school_id, phones]
+          )
+        : Promise.resolve({ rows: [] as { name: string; phone: string }[] }),
+      emails.length
+        ? pool.query<{ name: string; email: string; school_name: string }>(
+            `SELECT t.name, t.email, s.name AS school_name FROM teachers t
+             JOIN schools s ON s.id = t.school_id
+             WHERE LOWER(t.email) = ANY($1) AND t.removed_at IS NULL`,
+            [emails]
+          )
+        : Promise.resolve({ rows: [] as { name: string; email: string; school_name: string }[] }),
+    ])
+    const phoneDupMap = new Map(phoneDupRes.rows.map(r => [r.phone, r.name]))
+    const emailDupMap = new Map(emailDupRes.rows.map(r => [r.email.toLowerCase(), r]))
+
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
       const inserted = []
       const errors: { row: number; message: string }[] = []
       // Two rows in the SAME upload sharing an email/phone previously slipped
-      // through — the DB-lookup checks below only see rows already committed
+      // through — the batched lookups above only see rows already committed
       // from an EARLIER request, never siblings still being inserted in this
       // loop, so both would insert successfully. Track what's been accepted
       // so far in this batch and reject repeats the same way a real duplicate
@@ -50,9 +92,27 @@ export async function POST(req: NextRequest) {
           errors.push({ row: i + 1, message: 'Name is required' })
           continue
         }
+        if (!t.phone?.trim()) {
+          errors.push({ row: i + 1, message: 'Phone is required' })
+          continue
+        }
 
         const normPhone = t.phone?.trim() || ''
         const normEmail = t.email?.trim().toLowerCase() || ''
+
+        // Format re-validation server-side — the manual/CSV/xlsx onboarding
+        // UI already enforces this, but a direct API call bypasses client
+        // checks entirely. Without this, a malformed email would still get a
+        // password generated and a send attempt made (which fails silently,
+        // fire-and-forget), leaving a permanently unusable account.
+        if (normEmail && !EMAIL_RE.test(normEmail)) {
+          errors.push({ row: i + 1, message: `"${t.email}" is not a valid email address` })
+          continue
+        }
+        if (normPhone && !PHONE_RE.test(normPhone)) {
+          errors.push({ row: i + 1, message: `"${t.phone}" is not a valid phone number` })
+          continue
+        }
 
         if (normPhone && seenPhones.has(normPhone)) {
           errors.push({ row: i + 1, message: `Phone ${t.phone} is duplicated earlier in this same upload` })
@@ -64,15 +124,9 @@ export async function POST(req: NextRequest) {
         }
 
         // Phone duplicate check within this school
-        if (normPhone) {
-          const dup = await client.query(
-            'SELECT id, name FROM teachers WHERE school_id = $1 AND phone = $2',
-            [school_id, normPhone]
-          )
-          if (dup.rows.length > 0) {
-            errors.push({ row: i + 1, message: `Phone ${t.phone} already exists (${dup.rows[0].name})` })
-            continue
-          }
+        if (normPhone && phoneDupMap.has(normPhone)) {
+          errors.push({ row: i + 1, message: `Phone ${t.phone} already exists (${phoneDupMap.get(normPhone)})` })
+          continue
         }
 
         // Email is the teacher login identifier and must be unique across the
@@ -80,24 +134,15 @@ export async function POST(req: NextRequest) {
         // queries collide and one silently authenticates into the other's
         // account. An active teacher elsewhere has to be removed by their
         // current school before the same email can be reused here.
-        if (normEmail) {
-          const emailDup = await client.query(
-            `SELECT t.id, t.name, s.name AS school_name FROM teachers t
-             JOIN schools s ON s.id = t.school_id
-             WHERE LOWER(t.email) = $1 AND t.removed_at IS NULL`,
-            [normEmail]
-          )
-          if (emailDup.rows.length > 0) {
-            const existing = emailDup.rows[0]
-            errors.push({
-              row: i + 1,
-              message: `${t.email.trim()} is already registered to ${existing.name} at ${existing.school_name}. That school must remove them before this email can be reused here.`,
-            })
-            continue
-          }
+        if (normEmail && emailDupMap.has(normEmail)) {
+          const existing = emailDupMap.get(normEmail)!
+          errors.push({
+            row: i + 1,
+            message: `${t.email.trim()} is already registered to ${existing.name} at ${existing.school_name}. That school must remove them before this email can be reused here.`,
+          })
+          continue
         }
 
-        const employee_id = generateEmployeeId(schoolName)
         const email = t.email?.trim() || null
         // Same activation model as the single-add route: a temp password is
         // only generated when there's an email to send it to. Without one,
@@ -105,36 +150,61 @@ export async function POST(req: NextRequest) {
         const tempPassword = email ? generateTempPassword(10) : null
         const passwordHash = tempPassword ? await hashPassword(tempPassword) : null
 
+        // employee_id is a random 5-digit suffix with no natural uniqueness
+        // guarantee — retry on collision against the DB unique index rather
+        // than trusting the random draw not to repeat (birthday-paradox risk
+        // grows fast once a school has a few hundred staff).
+        let teacher: Record<string, unknown> | null = null
+        for (let attempt = 0; attempt < 5 && !teacher; attempt++) {
+          const employee_id = generateEmployeeId(schoolName)
+          try {
+            const res = await client.query(
+              `INSERT INTO teachers
+                 (school_id, name, email, subject, phone, employee_id, department, qualification, date_of_joining, staff_type, teaches_grades, password_hash, password_changed)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,FALSE)
+               RETURNING id, school_id, name, email, subject, phone, employee_id, department,
+                         qualification, date_of_joining, staff_type, teaches_grades, password_changed`,
+              [
+                school_id,
+                t.name.trim(),
+                email,
+                t.subject?.trim() || null,
+                normPhone || null,
+                employee_id,
+                t.department?.trim() || null,
+                t.qualification?.trim() || null,
+                t.date_of_joining || null,
+                t.staff_type?.toLowerCase() === 'non_teaching' ? 'non_teaching' : 'teaching',
+                t.teaches_grades?.trim() || null,
+                passwordHash,
+              ]
+            )
+            teacher = res.rows[0]
+          } catch (err: unknown) {
+            const pgErr = err as { code?: string; constraint?: string }
+            if (pgErr.code !== UNIQUE_VIOLATION) throw err
+            // employee_id collision: loop and try a new random suffix.
+            // email/phone collision here means a same-batch race the seen
+            // sets above didn't already reject — treat as a normal dup error.
+            if (pgErr.constraint === 'idx_teachers_school_employee_id_unique') continue
+            errors.push({ row: i + 1, message: `${t.name.trim()}: duplicate email or phone (conflict detected on save)` })
+            break
+          }
+        }
+        if (!teacher) {
+          if (!errors.some(e => e.row === i + 1)) {
+            errors.push({ row: i + 1, message: `${t.name.trim()}: could not generate a unique employee ID, please retry` })
+          }
+          continue
+        }
+
+        inserted.push(teacher)
         if (normPhone) seenPhones.add(normPhone)
         if (normEmail) seenEmails.add(normEmail)
 
-        const res = await client.query(
-          `INSERT INTO teachers
-             (school_id, name, email, subject, phone, employee_id, department, qualification, date_of_joining, staff_type, teaches_grades, password_hash, password_changed)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,FALSE)
-           RETURNING id, school_id, name, email, subject, phone, employee_id, department,
-                     qualification, date_of_joining, staff_type, teaches_grades, password_changed`,
-          [
-            school_id,
-            t.name.trim(),
-            email,
-            t.subject?.trim() || null,
-            t.phone?.trim() || null,
-            employee_id,
-            t.department?.trim() || null,
-            t.qualification?.trim() || null,
-            t.date_of_joining || null,
-            t.staff_type?.toLowerCase() === 'non_teaching' ? 'non_teaching' : 'teaching',
-            t.teaches_grades?.trim() || null,
-            passwordHash,
-          ]
-        )
-        const teacher = res.rows[0]
-        inserted.push(teacher)
-
         if (email && tempPassword) {
           const loginUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/login`
-          sendTeacherWelcomeEmail({ to: email, name: teacher.name, schoolName, tempPassword, loginUrl }).catch(console.error)
+          sendTeacherWelcomeEmail({ to: email, name: teacher.name as string, schoolName, tempPassword, loginUrl }).catch(console.error)
         }
       }
 

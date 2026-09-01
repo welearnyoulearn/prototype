@@ -2390,4 +2390,37 @@ async function runIncrementalMigrations() {
   `).catch(() => {})
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_rollup_school_day ON feature_usage_daily_rollup(school_id, day DESC)`).catch(() => {})
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_feature_rollup_key_day ON feature_usage_daily_rollup(nav_key, day DESC)`).catch(() => {})
+
+  // ── Teacher uniqueness — was app-level-only (SELECT-then-INSERT), so two
+  // concurrent bulk imports/onboards could both pass the check and both
+  // insert, producing real duplicate rows (same login email, or same
+  // employee_id shown in the UI). A concurrent-safe partial unique index is
+  // the only thing that actually closes that race; the app-level checks stay
+  // in place too so a conflict shows as a friendly per-row message instead of
+  // a raw 500. Partial (WHERE removed_at IS NULL) so a soft-deleted teacher's
+  // old email/phone/employee_id can be reused without a manual cleanup step.
+  // CONCURRENTLY skipped (can't run inside this pool's implicit transaction);
+  // guarded by a pre-check against existing dirty data so a startup that hits
+  // real duplicates logs a warning instead of crashing ensureDB() every boot.
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_email_unique
+      ON teachers (LOWER(email))
+      WHERE email IS NOT NULL AND removed_at IS NULL
+  `).catch(err => {
+    console.error('[migration] Skipped idx_teachers_email_unique — likely pre-existing duplicate active teacher emails. Resolve manually (see removed_at IS NULL rows sharing an email) then rerun.', err.message)
+  })
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_school_phone_unique
+      ON teachers (school_id, phone)
+      WHERE phone IS NOT NULL AND removed_at IS NULL
+  `).catch(err => {
+    console.error('[migration] Skipped idx_teachers_school_phone_unique — likely pre-existing duplicate active teacher phones within a school.', err.message)
+  })
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teachers_school_employee_id_unique
+      ON teachers (school_id, employee_id)
+      WHERE employee_id IS NOT NULL AND removed_at IS NULL
+  `).catch(err => {
+    console.error('[migration] Skipped idx_teachers_school_employee_id_unique — likely pre-existing duplicate active employee_ids within a school.', err.message)
+  })
 }
