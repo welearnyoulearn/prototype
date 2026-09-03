@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
-import AppLoader from '@/app/components/AppLoader'
+import { FullPageLoader } from '@/components/loaders'
 import { CURRICULA } from '@/lib/curricula'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ export default function ClassDetailPage() {
 
   const inp = 'border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-300'
 
-  if (loading) return <AppLoader message="Loading class details" sub="Please wait…" />
+  if (loading) return <FullPageLoader portal="school-admin" message="Loading class details" />
 
   if (error) return (
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center gap-4">

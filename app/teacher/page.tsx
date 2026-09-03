@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import AppLoader from '../components/AppLoader'
+import { FullPageLoader } from '@/components/loaders'
 import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
@@ -199,7 +199,7 @@ export default function TeacherPortal() {
       .catch(() => {})
   }, [teacher?.school_id])
 
-  if (loading) return <AppLoader message="Loading your portal" sub="Getting your classes and schedule ready…" />
+  if (loading) return <FullPageLoader portal="teacher" sub="Getting your classes and schedule ready…" />
 
   if (!teacher) return null
 

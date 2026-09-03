@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { useFeature } from '@/lib/features-context'
+import { Skeleton } from '@/components/ui/skeleton'
 
 type Props = { schoolId: number; onNavigate?: (key: string) => void }
 
@@ -37,12 +38,12 @@ function HealthBar({ value, max, color }: { value: number; max: number; color: s
   )
 }
 
-function SkeletonCard() {
+function StatCardSkeleton() {
   return (
-    <div className="bg-gray-50 border border-gray-200 rounded-2xl p-5 animate-pulse">
-      <div className="h-3 bg-gray-200 rounded w-24 mb-3" />
-      <div className="h-8 bg-gray-200 rounded w-16 mb-2" />
-      <div className="h-2.5 bg-gray-100 rounded w-20" />
+    <div className="bg-gray-50 border border-gray-200 rounded-2xl p-5" role="status" aria-busy="true">
+      <Skeleton className="h-3 w-24 mb-3" />
+      <Skeleton className="h-7 w-16 mb-2" />
+      <Skeleton className="h-2.5 w-20" />
     </div>
   )
 }
@@ -298,7 +299,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
       {metricCards.length > 0 && (
         <div className={`grid gap-4 ${metricCards.length === 1 ? 'grid-cols-1' : metricCards.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
           {loading
-            ? Array.from({ length: metricCards.length || 2 }).map((_, i) => <SkeletonCard key={i} />)
+            ? Array.from({ length: metricCards.length || 2 }).map((_, i) => <StatCardSkeleton key={i} />)
             : metricCards.map(card => (
                 <StatCard key={card.nav} label={card.label} value={card.value} sub={card.sub}
                   color={card.color} bg={card.bg} border={card.border}
@@ -461,7 +462,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
         <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-3">School Summary</p>
         <div className="grid grid-cols-3 gap-4">
           {loading
-            ? Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)
+            ? Array.from({ length: 3 }).map((_, i) => <StatCardSkeleton key={i} />)
             : countCards.map(card => (
                 <StatCard key={card.nav} label={card.label} value={card.value} sub={card.sub}
                   color={card.color} bg={card.bg} border={card.border}
