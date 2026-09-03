@@ -287,12 +287,16 @@ function SchoolAdmin() {
 
   const trackOpen = useFeatureTracking('school-admin')
 
-  const navigateTo = useCallback((key: string) => {
+  // `subTab` lets a caller land directly on a specific sub-tab (e.g. Class
+  // Management's "Add Student" jumping straight to Students > Onboard
+  // instead of the default List) — optional, existing callers that only
+  // pass `key` keep the previous always-reset-to-default behavior.
+  const navigateTo = useCallback((key: string, subTab?: string) => {
     setActiveNav(key)
     setVisited(prev => new Set([...prev, key]))
     setSidebarOpen(false)
-    if (key === 'staff') setStaffSubTab('directory')
-    if (key === 'students') setStudentsSubTab('list')
+    if (key === 'staff') setStaffSubTab((subTab as 'directory' | 'onboard') || 'directory')
+    if (key === 'students') setStudentsSubTab((subTab as 'list' | 'onboard') || 'list')
     const params = new URLSearchParams(window.location.search)
     params.set('tab', key)
     router.replace(`/school-admin?${params.toString()}`, { scroll: false })

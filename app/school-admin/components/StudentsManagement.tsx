@@ -1,6 +1,7 @@
 ﻿'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
 
 type Props = { schoolId: number; refreshKey?: number }
 
@@ -370,10 +371,13 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
 
   function validateSave(): string | null {
     const name = (editForm.name ?? selected?.name ?? '').trim()
+    const parentName = (editForm.parent_name ?? selected?.parent_name ?? '').trim()
     const phone = (editForm.phone ?? selected?.phone ?? '').trim()
     const parentPhone = (editForm.parent_phone ?? selected?.parent_phone ?? '').trim()
     const email = (editForm.email ?? selected?.email ?? '').trim()
     if (!name) return 'Student name is required'
+    if (!isValidName(name)) return `Student Name: ${NAME_INVALID_MESSAGE}`
+    if (parentName && !isValidName(parentName)) return `Parent Name: ${NAME_INVALID_MESSAGE}`
     if (phone && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(phone)) return 'Phone must be 7–15 digits'
     if (parentPhone && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(parentPhone)) return "Parent's phone must be 7–15 digits"
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Enter a valid email address'
@@ -396,6 +400,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
       setStudents(prev => prev.map(s => s.id === selected.id ? { ...s, ...data } : s))
       setSelected({ ...selected, ...data })
       setEditing(false)
+      setEditForm({})
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save student')
     } finally {
@@ -611,7 +616,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                       if (b.school_roll_number != null) return 1
                       return a.name.localeCompare(b.name)
                     }).map(s => (
-                      <tr key={s.id} onClick={() => { setSelected(s); setEditing(false); setDetailTab('info'); setStudentPerf(null); setStudentRewards(null) }}
+                      <tr key={s.id} onClick={() => { setSelected(s); setEditing(false); setEditForm({}); setDetailTab('info'); setStudentPerf(null); setStudentRewards(null) }}
                         className={`cursor-pointer transition-colors ${selected?.id === s.id ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-3 text-center font-semibold text-sm text-amber-700 bg-amber-50/40">
                           {s.school_roll_number ?? <span className="text-gray-300 font-normal text-xs">—</span>}

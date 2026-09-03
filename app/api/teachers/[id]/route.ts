@@ -5,6 +5,8 @@ import {
   sendStaffRemovedEmail, sendStaffReactivatedEmail, sendStaffContactChangedEmail,
 } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
+import { findAutoAssignableSubjects, type ClassSubjectRow } from '@/lib/matchTeacher'
+import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -40,7 +42,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   try {
     const { id } = await params
     try {
-      const existingRes = await pool.query('SELECT email, phone, school_id, status FROM teachers WHERE id = $1', [id])
+      const existingRes = await pool.query('SELECT email, phone, school_id, status, subject, teaches_grades, staff_type FROM teachers WHERE id = $1', [id])
       if (existingRes.rowCount === 0) return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
       const existing = existingRes.rows[0]
       const access = await requireFeeAccess(existing.school_id)
@@ -48,6 +50,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
 
       const body = await req.json()
       const { name, email, subject, phone, department, qualification, date_of_joining, staff_type, status, teaches_grades } = body
+      if (typeof name === 'string' && name.trim() && !isValidName(name)) {
+        return NextResponse.json({ error: `Name: ${NAME_INVALID_MESSAGE}` }, { status: 400 })
+      }
       const becomingInactive = status === 'inactive' && existing.status !== 'inactive'
       // Restoring from EITHER the lighter inactive↔active pause or a full
       // removal — both count as "was logged out, needs a fresh credential to
@@ -120,6 +125,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (result.rowCount === 0) return NextResponse.json({ error: 'Teacher not found' }, { status: 404 })
 
       const teacher = result.rows[0]
+      const subjectChanged = subject !== undefined && (subject?.trim() || null) !== (existing.subject || null)
+      const teachesGradesChanged = teaches_grades !== undefined && (teaches_grades?.trim() || null) !== (existing.teaches_grades || null)
       const loginUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/login`
 
       // A deactivated teacher can't log in, so Class Management showing them
@@ -183,6 +190,43 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       invalidateCache(`teachers:${schoolId}:all`)
       invalidateCache(`teachers:${schoolId}:teaching`)
       invalidateCache(`teachers:${schoolId}:non_teaching`)
+
+      // Re-run the same auto-assign scan onboarding does whenever the field
+      // it matches on actually changed — a corrected subject spelling or a
+      // widened grade range can newly match class subjects that sat
+      // unassigned since class creation, same as a brand-new teacher would.
+      if ((subjectChanged || teachesGradesChanged) && teacher.staff_type === 'teaching' && teacher.status === 'active' && teacher.subject) {
+        const { rows: unfilled } = await pool.query<ClassSubjectRow>(
+          `SELECT cs.id, cs.class_id, cs.subject_name, c.grade
+           FROM class_subjects cs
+           JOIN classes c ON c.id = cs.class_id
+           WHERE c.school_id = $1 AND c.deleted_at IS NULL AND cs.teacher_id IS NULL`,
+          [schoolId]
+        )
+        const matches = findAutoAssignableSubjects(
+          { subject: teacher.subject, teaches_grades: teacher.teaches_grades },
+          unfilled
+        )
+        for (const m of matches) {
+          await pool.query('UPDATE class_subjects SET teacher_id = $1 WHERE id = $2', [teacher.id, m.id])
+          await pool.query(
+            `UPDATE class_timetable ct
+             SET teacher_id = $1
+             WHERE ct.class_id = $2 AND ct.subject_name = $3 AND ct.is_break = FALSE
+               AND ct.teacher_id IS DISTINCT FROM $1
+               AND NOT EXISTS (
+                 SELECT 1 FROM class_timetable other
+                 WHERE other.school_id = ct.school_id AND other.class_id != ct.class_id
+                   AND other.day_of_week = ct.day_of_week AND other.period_number = ct.period_number
+                   AND other.teacher_id = $1 AND other.is_break = FALSE
+               )`,
+            [teacher.id, m.class_id, m.subject_name]
+          )
+          invalidateCache(`subjects:class:${m.class_id}`)
+          invalidateCache(`timetable:class:${m.class_id}`)
+        }
+        if (matches.length > 0) invalidateCache(`health:${schoolId}`)
+      }
 
       return NextResponse.json(teacher)
     } catch (error) {

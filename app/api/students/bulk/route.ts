@@ -5,6 +5,7 @@ import { hashPassword, generateTempPassword, requireSchoolAdmin, schoolHasFeatur
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/studentOnboarding'
+import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
 
 export async function POST(req: NextRequest) {
   await ensureDB()
@@ -37,8 +38,10 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < students.length; i++) {
       const s = students[i]
       if (!s.name?.trim()) { errors.push({ row: i + 1, message: 'Name is required' }); continue }
+      if (!isValidName(s.name)) { errors.push({ row: i + 1, message: `Name: ${NAME_INVALID_MESSAGE}` }); continue }
       if (!s.section?.trim()) { errors.push({ row: i + 1, message: 'Section is required' }); continue }
       if (!s.parent_name?.trim()) { errors.push({ row: i + 1, message: 'Parent name is required' }); continue }
+      if (!isValidName(s.parent_name)) { errors.push({ row: i + 1, message: `Parent Name: ${NAME_INVALID_MESSAGE}` }); continue }
       if (!s.parent_phone?.trim()) { errors.push({ row: i + 1, message: 'Parent phone is required' }); continue }
 
       const schoolRollRaw = s.school_roll_number ?? s.roll_no

@@ -3,6 +3,7 @@ import pool from '@/lib/db'
 import { requireSchoolAdmin } from '@/lib/auth'
 import { sendStudentRemovedEmail, sendParentStudentRemovedEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
+import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -37,6 +38,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       if (existing.rows[0].school_id !== admin.schoolId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
       const { name, email, grade, section, phone, parent_name, parent_phone, parent_email, status } = await req.json()
+      if (typeof name === 'string' && name.trim() && !isValidName(name)) {
+        return NextResponse.json({ error: `Name: ${NAME_INVALID_MESSAGE}` }, { status: 400 })
+      }
+      if (typeof parent_name === 'string' && parent_name.trim() && !isValidName(parent_name)) {
+        return NextResponse.json({ error: `Parent Name: ${NAME_INVALID_MESSAGE}` }, { status: 400 })
+      }
       const result = await pool.query(
         `UPDATE students SET
           name = COALESCE($1, name),
