@@ -69,7 +69,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 7
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2080,15 +2080,17 @@ async function runIncrementalMigrations() {
   `).catch(() => {})
 
   // ── Student/parent portal feature keys ────────────────────────────────────────
-  // New keys default to disabled if unconfigured (see GET /api/platform/features).
-  // Seed every existing tier as enabled so onboarding for existing schools is
-  // unaffected by this change — schools that want to disable portals do so via
-  // a per-school override in school_feature_overrides instead.
+  // Tier default: Basic = off, Standard/Premium = on. These two keys are no
+  // longer editable from the platform-admin global features matrix — the
+  // per-school "Portal Access" toggle (school_feature_overrides) is the only
+  // way to turn either on for a Basic-tier school, or off for a
+  // Standard/Premium one. ON CONFLICT DO NOTHING only seeds a genuinely fresh
+  // database; it never overwrites an existing plan_features row.
   await pool.query(`
     INSERT INTO plan_features (feature_key, tier, enabled)
     VALUES
-      ('student-portal', 'basic', true), ('student-portal', 'standard', true), ('student-portal', 'premium', true),
-      ('parent-portal',  'basic', true), ('parent-portal',  'standard', true), ('parent-portal',  'premium', true)
+      ('student-portal', 'basic', false), ('student-portal', 'standard', true), ('student-portal', 'premium', true),
+      ('parent-portal',  'basic', false), ('parent-portal',  'standard', true), ('parent-portal',  'premium', true)
     ON CONFLICT (feature_key, tier) DO NOTHING
   `).catch(() => {})
 
@@ -2112,6 +2114,24 @@ async function runIncrementalMigrations() {
     INSERT INTO plan_features (feature_key, tier, enabled)
     VALUES
       ('expenses', 'basic', true), ('expenses', 'standard', true), ('expenses', 'premium', true)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+
+  // Student/parent portal nav items newly added to ALL_FEATURES' plan-gating
+  // (results, homework, doubts) — same self-heal/seed pattern as library
+  // above, enabled at every tier by default so existing schools keep seeing
+  // Homework/Ask-a-Doubt/Results exactly as before this change. Unlike
+  // attendance/exam-schedule/timetable/fee-management (which reuse the
+  // school-admin feature's EXISTING plan_features rows, and therefore
+  // intentionally restrict basic-tier student/parent portals to match what
+  // school-admin already restricts), these three had no prior concept at
+  // all — so there's no existing row to reuse and no basis to restrict them.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES
+      ('results',  'basic', true), ('results',  'standard', true), ('results',  'premium', true),
+      ('homework', 'basic', true), ('homework', 'standard', true), ('homework', 'premium', true),
+      ('doubts',   'basic', true), ('doubts',   'standard', true), ('doubts',   'premium', true)
     ON CONFLICT (feature_key, tier) DO NOTHING
   `).catch(() => {})
 
@@ -2423,4 +2443,66 @@ async function runIncrementalMigrations() {
   `).catch(err => {
     console.error('[migration] Skipped idx_teachers_school_employee_id_unique — likely pre-existing duplicate active employee_ids within a school.', err.message)
   })
+
+  // Parent phone uniqueness, scoped per school (not global — the same phone
+  // legitimately recurs across different schools' unrelated parents, and
+  // pre-existing data confirms zero same-school collisions today). This is
+  // what makes "phone" a safe login lookup alongside email in
+  // /api/parent/auth/login — without it, a phone-based lookup could match
+  // more than one row within a school.
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_parents_school_phone_unique
+      ON parents (school_id, phone)
+      WHERE phone IS NOT NULL AND phone != ''
+  `).catch(err => {
+    console.error('[migration] Skipped idx_parents_school_phone_unique — likely pre-existing duplicate active parent phones within a school.', err.message)
+  })
+
+  // WhatsApp tables — already present in the fresh-bootstrap migrations[]
+  // array above, but that array only ever runs during initDB()'s fresh-DB
+  // path, never on an existing already-bootstrapped database (same class of
+  // gap as the teacher/parent unique indexes above). Re-declared here,
+  // idempotently, so lib/whatsapp.ts's audit-log insert has somewhere to
+  // write on every database, not just ones bootstrapped after these tables
+  // were added to the schema.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS school_whatsapp_config (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE UNIQUE,
+      provider VARCHAR(20) NOT NULL DEFAULT 'meta',
+      access_token_encrypted TEXT,
+      phone_number_id VARCHAR(50),
+      waba_id VARCHAR(50),
+      fee_reminder_template VARCHAR(100),
+      payment_receipt_template VARCHAR(100),
+      is_active BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_messages (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      sent_by_user_id INTEGER,
+      sent_by_name TEXT,
+      recipient_phone VARCHAR(20) NOT NULL,
+      recipient_name TEXT,
+      message_type VARCHAR(50) NOT NULL,
+      template_name VARCHAR(100),
+      template_params JSONB DEFAULT '{}',
+      provider VARCHAR(20) NOT NULL,
+      provider_message_id TEXT,
+      status VARCHAR(20) NOT NULL DEFAULT 'queued',
+      failure_reason TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      sent_at TIMESTAMPTZ,
+      delivered_at TIMESTAMPTZ,
+      read_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_whatsapp_msg_school ON whatsapp_messages(school_id, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_whatsapp_msg_type ON whatsapp_messages(school_id, message_type)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_whatsapp_msg_status ON whatsapp_messages(school_id, status)`).catch(() => {})
 }

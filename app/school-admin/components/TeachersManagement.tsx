@@ -103,114 +103,10 @@ function GradesDropdown({ value, onChange }: { value: string; onChange: (v: stri
   )
 }
 
-// Passwords are hashed and never recoverable after creation — the temp
-// password shown at onboarding (or a previous reset) is gone from the UI the
-// moment that screen closes. This panel is the only ongoing way to get a
-// usable, visible password for a staff member: click Reset, a fresh one is
-// generated, emailed to them, and shown here once.
-function CredentialsPanel({ teachers }: { teachers: Teacher[] }) {
-  const [search, setSearch] = useState('')
-  const [resettingId, setResettingId] = useState<number | null>(null)
-  const [results, setResults] = useState<Record<number, { password: string; error?: string }>>({})
-
-  async function handleReset(teacher: Teacher) {
-    if (!confirm(`Reset ${teacher.name}'s password? Their current password will stop working immediately, and the new one will be emailed to them.`)) return
-    setResettingId(teacher.id)
-    setResults(prev => {
-      const next = { ...prev }
-      delete next[teacher.id]
-      return next
-    })
-    try {
-      const res = await fetch(`/api/teachers/${teacher.id}/reset-credentials`, { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Reset failed')
-      setResults(prev => ({ ...prev, [teacher.id]: { password: data.temp_password } }))
-    } catch (err: unknown) {
-      setResults(prev => ({ ...prev, [teacher.id]: { password: '', error: err instanceof Error ? err.message : 'Reset failed' } }))
-    } finally {
-      setResettingId(null)
-    }
-  }
-
-  const filtered = teachers.filter(t =>
-    !search.trim() ||
-    t.name.toLowerCase().includes(search.toLowerCase()) ||
-    (t.email || '').toLowerCase().includes(search.toLowerCase())
-  )
-
-  return (
-    <div>
-      <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-xs text-gray-500 max-w-xl">
-          Passwords are never stored in plain text and can&apos;t be shown again after creation.
-          Click <strong>Reset</strong> to generate a new one — it&apos;s emailed to the staff member automatically and shown here once.
-        </p>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or email..."
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 min-w-[220px]" />
-      </div>
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="text-left px-4 py-2.5 font-medium text-gray-500">Staff</th>
-              <th className="text-left px-4 py-2.5 font-medium text-gray-500">Username (Email)</th>
-              <th className="text-left px-4 py-2.5 font-medium text-gray-500">Password</th>
-              <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-28">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {filtered.length === 0 ? (
-              <tr><td colSpan={4} className="text-center py-8 text-gray-400 text-sm">No staff found</td></tr>
-            ) : filtered.map(t => {
-              const result = results[t.id]
-              return (
-                <tr key={t.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center gap-2.5">
-                      <Avatar name={t.name} size="sm" />
-                      <span className="font-medium text-gray-900">{t.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {t.email
-                      ? <span className="font-mono text-gray-700 text-xs">{t.email}</span>
-                      : <span className="text-gray-400 italic text-xs">No email on file</span>}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {result?.error ? (
-                      <span className="text-red-500 text-xs">{result.error}</span>
-                    ) : result?.password ? (
-                      <span className="font-mono bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200 text-xs">{result.password}</span>
-                    ) : (
-                      <span className="text-gray-400 text-xs">•••••••• (hidden)</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <button
-                      data-testid={`reset-staff-credentials-${t.id}`}
-                      onClick={() => handleReset(t)}
-                      disabled={resettingId === t.id || !t.email}
-                      title={!t.email ? 'Add an email first' : 'Reset password'}
-                      className="text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-40 disabled:no-underline font-medium">
-                      {resettingId === t.id ? 'Resetting…' : 'Reset'}
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
-
 export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [mainTab, setMainTab] = useState<'staff' | 'credentials'>('staff')
   const [tab, setTab] = useState<'teaching' | 'non_teaching'>('teaching')
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'removed' | 'all'>('active')
   const [deptFilter, setDeptFilter] = useState('all')
@@ -487,20 +383,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
         </div>
       </div>
 
-      {/* Main tabs: Staff Directory vs Credentials */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit mb-4">
-        <button onClick={() => setMainTab('staff')}
-          data-testid="staff-directory-tab"
-          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${mainTab === 'staff' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-          Staff Directory
-        </button>
-        <button onClick={() => setMainTab('credentials')}
-          data-testid="staff-credentials-tab"
-          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${mainTab === 'credentials' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-          Credentials
-        </button>
-      </div>
-
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
           <span>{error}</span>
@@ -508,10 +390,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
         </div>
       )}
 
-      {mainTab === 'credentials' ? (
-        <CredentialsPanel teachers={teachers.filter(t => t.status === 'active')} />
-      ) : (
-      <>
       {/* Staff type tabs */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit mb-4">
         {(['teaching', 'non_teaching'] as const).map(t => (
@@ -594,8 +472,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
             ))}
           </div>
         </div>
-      )}
-      </>
       )}
 
       {/* ── Full-screen Detail Modal ── */}

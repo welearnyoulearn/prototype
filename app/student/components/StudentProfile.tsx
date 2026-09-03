@@ -1,5 +1,7 @@
 'use client'
 
+import ChangePasswordCard from '@/app/components/ChangePasswordCard'
+
 type Student = {
   id: number
   name: string
@@ -17,7 +19,7 @@ type Props = { student: Student }
 
 export default function StudentProfile({ student }: Props) {
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-2xl mx-auto space-y-6">
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="bg-gradient-to-r from-indigo-500 to-purple-600 px-6 py-8 text-white">
           <div className="flex items-center gap-4">
@@ -55,6 +57,8 @@ export default function StudentProfile({ student }: Props) {
           )}
         </div>
       </div>
+
+      <ChangePasswordCard endpoint="/api/student/auth/change-password" accentGradient="from-indigo-500 to-purple-600" />
     </div>
   )
 }

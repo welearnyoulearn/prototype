@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { hashPassword, generateTempPassword, requireSchoolAdmin } from '@/lib/auth'
 import { sendTeacherWelcomeEmail } from '@/lib/email'
+import { sendWhatsappMessage } from '@/lib/whatsapp'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PHONE_RE = /^\+?[\d\s\-()[\]]{7,15}$/
@@ -202,9 +203,22 @@ export async function POST(req: NextRequest) {
         if (normPhone) seenPhones.add(normPhone)
         if (normEmail) seenEmails.add(normEmail)
 
-        if (email && tempPassword) {
+        // Teacher login is email-only today (/api/teacher/auth/login never
+        // checks employee_id) — WhatsApp is only worth sending when there's
+        // an actual email to log in with, same as why tempPassword itself is
+        // only generated when email is present, a few lines up.
+        if (tempPassword && email) {
           const loginUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/login`
           sendTeacherWelcomeEmail({ to: email, name: teacher.name as string, schoolName, tempPassword, loginUrl }).catch(console.error)
+          if (normPhone) {
+            sendWhatsappMessage({
+              schoolId: Number(school_id), to: normPhone, templateName: 'staff_credentials', recipientName: teacher.name as string,
+              templateParams: {
+                staff_name: teacher.name as string, school_name: schoolName,
+                login: email, temp_password: tempPassword, login_url: loginUrl,
+              },
+            }).catch(console.error)
+          }
         }
       }
 

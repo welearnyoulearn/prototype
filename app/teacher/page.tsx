@@ -151,6 +151,17 @@ export default function TeacherPortal() {
 
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
   const [academicYear, setAcademicYear] = useState('')
+  // The school's own current year — never changes based on what the teacher
+  // is viewing, used only to tell whether selectedAcademicYear is read-only.
+  const [schoolCurrentYear, setSchoolCurrentYear] = useState('')
+  const [availableYears, setAvailableYears] = useState<{ id: number; label: string; is_current: boolean }[]>([])
+  // What the teacher has chosen to VIEW — independent of school admin's
+  // active year. Resets to the school's current year on every fresh login
+  // (session-only state, never persisted), and every read-heavy tab passes
+  // this as ?academic_year= on its fetches. Any year other than the school's
+  // current one is read-only throughout the portal.
+  const [selectedAcademicYear, setSelectedAcademicYear] = useState('')
+  const isViewingPastYear = !!selectedAcademicYear && !!schoolCurrentYear && selectedAcademicYear !== schoolCurrentYear
 
   // Fetch teacher identity from session cookie
   useEffect(() => {
@@ -190,12 +201,25 @@ export default function TeacherPortal() {
   // Ambient "which year am I looking at" badge — every syllabus/class screen
   // already scopes its own data to the school's active academic year, but
   // gave no visible signal when that year is wrong. One fetch here, shown
-  // once in the header, covers every tab.
+  // once in the header, covers every tab. Also seeds the teacher's own year
+  // selector (Profile tab) to the school's current year on every fresh
+  // login — the teacher's choice is session-only and never persisted, so it
+  // always starts here, never wherever they left it last time.
   useEffect(() => {
     if (!teacher?.school_id) return
     fetch(`/api/academic-year/current?school_id=${teacher.school_id}`)
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.label) setAcademicYear(d.label) })
+      .then(d => {
+        if (d?.label) {
+          setAcademicYear(d.label)
+          setSchoolCurrentYear(d.label)
+          setSelectedAcademicYear(d.label)
+        }
+      })
+      .catch(() => {})
+    fetch(`/api/academic-years?school_id=${teacher.school_id}`)
+      .then(r => r.ok ? r.json() : [])
+      .then(rows => setAvailableYears(Array.isArray(rows) ? rows.map((r: { id: number; label: string; is_current: boolean }) => ({ id: r.id, label: r.label, is_current: r.is_current })) : []))
       .catch(() => {})
   }, [teacher?.school_id])
 
@@ -232,13 +256,17 @@ export default function TeacherPortal() {
           </nav>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
-          {academicYear && (
+          {(selectedAcademicYear || academicYear) && (
             <span
               data-testid="academic-year-badge"
-              title="Active academic year — all data on this screen is scoped to this year"
-              className="hidden sm:inline-flex items-center gap-1 bg-gray-100 border border-gray-200 text-gray-500 text-xs font-medium px-2.5 py-1 rounded-full"
+              title={isViewingPastYear
+                ? `Viewing ${selectedAcademicYear} (closed) — read-only. Switch back to ${schoolCurrentYear} in Profile to make changes.`
+                : 'Active academic year — all data on this screen is scoped to this year'}
+              className={`hidden sm:inline-flex items-center gap-1 border text-xs font-medium px-2.5 py-1 rounded-full ${
+                isViewingPastYear ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-gray-100 border-gray-200 text-gray-500'
+              }`}
             >
-              📅 {academicYear}
+              {isViewingPastYear ? '👁' : '📅'} {selectedAcademicYear || academicYear}
             </span>
           )}
           <p className="hidden sm:block text-sm font-medium text-gray-800">{greeting}, {teacher.name}</p>
@@ -319,10 +347,10 @@ export default function TeacherPortal() {
           {visitedNav.has('timetable')      && <div hidden={activeNav !== 'timetable'}><FullTimetable teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('attendance')     && <div hidden={activeNav !== 'attendance'}><Attendance teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('leave')          && <div hidden={activeNav !== 'leave'}><TeacherLeave teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
-          {visitedNav.has('profile')        && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher as (t: unknown) => void} /></div>}
+          {visitedNav.has('profile')        && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher as (t: unknown) => void} availableYears={availableYears} selectedAcademicYear={selectedAcademicYear} schoolCurrentYear={schoolCurrentYear} onSelectYear={setSelectedAcademicYear} /></div>}
           {visitedNav.has('my-classes')     && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} onGoToSyllabus={cls => handleNavigate('class-view', { classId: cls.id, tab: 'Syllabus' })} /></div>}
           {visitedNav.has('my-students')    && <div hidden={activeNav !== 'my-students'}><MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
-          {visitedNav.has('syllabus')       && <div hidden={activeNav !== 'syllabus'}><TeacherSyllabus teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
+          {visitedNav.has('syllabus')       && <div hidden={activeNav !== 'syllabus'}><TeacherSyllabus teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} academicYear={selectedAcademicYear} readOnly={isViewingPastYear} /></div>}
           {visitedNav.has('library')        && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${teacher.school_id}`} /></div>}
         </main>
       </div>

@@ -31,6 +31,7 @@ const en = {
     overview:     'Overview',
     today:        "Today's Schedule",
     syllabus:     'Syllabus',
+    library:      'Digital Library',
     attendance:   'Attendance',
     fees:         'Fees',
     exams:        'Exam Calendar',
@@ -39,6 +40,7 @@ const en = {
     activity:     'Activity Log',
     'ai-chats':   'AI Chat History',
     marketplace:  'Marketplace',
+    profile:      'Profile',
   },
 
   // Language
@@ -185,6 +187,7 @@ const te: typeof en = {
     overview:     'అవలోకనం',
     today:        'నేటి వేళాపట్టిక',
     syllabus:     'పాఠ్యక్రమం',
+    library:      'డిజిటల్ లైబ్రరీ',
     attendance:   'హాజరు',
     fees:         'రుసుములు',
     exams:        'పరీక్షల పంచాంగం',
@@ -193,6 +196,7 @@ const te: typeof en = {
     activity:     'కార్యకలాప నమోదు',
     'ai-chats':   'AI చాట్ చరిత్ర',
     marketplace:  'మార్కెట్‌ప్లేస్',
+    profile:      'ప్రొఫైల్',
   },
 
   // Language

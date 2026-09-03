@@ -21,10 +21,12 @@ type ClassSubjectAssignment = {
 }
 
 export default function TeacherSyllabus({
-  teacher, schoolId,
+  teacher, schoolId, academicYear, readOnly,
 }: {
   teacher: TeacherObj
   schoolId: number
+  academicYear?: string
+  readOnly?: boolean
 }) {
   const [classes, setClasses] = useState<ClassOption[]>([])
   const [assignments, setAssignments] = useState<ClassSubjectAssignment[]>([])
@@ -107,6 +109,8 @@ export default function TeacherSyllabus({
         teacher={teacher}
         isClassTeacher={isClassTeacher}
         allowedSubjects={allowedSubjects}
+        academicYear={academicYear}
+        readOnly={readOnly}
       />
     </div>
   )

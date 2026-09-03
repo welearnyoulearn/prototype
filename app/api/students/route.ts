@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { invalidateCache } from '@/lib/responseCache'
 import { hashPassword, generateTempPassword, getAnySession, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
-import { sendStudentWelcomeEmail, sendParentWelcomeEmail } from '@/lib/email'
-import { findOrCreateParent, linkStudentParent } from '@/lib/studentOnboarding'
+import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
+import { sendWhatsappMessage } from '@/lib/whatsapp'
+import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/studentOnboarding'
 import { gradeOrderSql } from '@/lib/grades'
 
 // Never `SELECT *`: students carries password_hash, which would otherwise be
@@ -175,31 +176,60 @@ export async function POST(req: NextRequest) {
       schoolHasFeature(school_id, 'parent-portal'),
     ])
 
+    let cachedSchoolName = ''
+    const getSchoolName = async (): Promise<string> => {
+      if (cachedSchoolName) return cachedSchoolName
+      const r = await pool.query('SELECT name FROM schools WHERE id = $1', [school_id])
+      cachedSchoolName = (r.rows[0]?.name as string | undefined) || 'Your School'
+      return cachedSchoolName
+    }
+
     // Generate student temp password (only if the portal is enabled for this school)
     const tempPassword = studentPortalEnabled ? generateTempPassword(8) : null
     const passwordHash = tempPassword ? await hashPassword(tempPassword) : null
+
+    // roll_number is the system login id — auto-generate it the same way
+    // bulk import does (via generateStudentId) whenever the caller doesn't
+    // supply one explicitly. Without this, a student created through this
+    // route ended up with roll_number NULL and could never log in even when
+    // the student-portal feature was enabled and a password was generated.
+    const effectiveRollNumber: string = roll_number?.trim() || generateStudentId(await getSchoolName())
 
     const result = await pool.query(
       `INSERT INTO students
          (school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email,
           roll_number, school_roll_number, status, password_hash, password_changed)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',$12,FALSE)
-       RETURNING *`,
+       RETURNING ${STUDENT_COLUMNS}`,
       [school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email,
-       roll_number, school_roll_number ?? null, passwordHash]
+       effectiveRollNumber, school_roll_number ?? null, passwordHash]
     )
 
     const student = result.rows[0]
     const appUrl = process.env.APP_URL || 'http://localhost:3000'
+    const studentRollNumber: string = result.rows[0]?.roll_number || effectiveRollNumber
 
-    // Send student welcome email (if student email provided)
-    if (studentPortalEnabled && email && roll_number && tempPassword) {
-      const schoolResult = await pool.query('SELECT name FROM schools WHERE id = $1', [school_id])
-      const schoolName = schoolResult.rows[0]?.name || 'Your School'
-      sendStudentWelcomeEmail({
-        to: email, name, schoolName, rollNumber: roll_number,
-        tempPassword, loginUrl: `${appUrl}/student/login`,
-      }).catch(console.error)
+    // Send student welcome email/WhatsApp — email needs the student's own
+    // email, WhatsApp needs their own phone. Independent checks since a
+    // student can have one contact method without the other.
+    if (studentPortalEnabled && studentRollNumber && tempPassword) {
+      if (email) {
+        const name_ = await getSchoolName()
+        sendStudentWelcomeEmail({
+          to: email, name, schoolName: name_, rollNumber: studentRollNumber,
+          tempPassword, loginUrl: `${appUrl}/student/login`,
+        }).catch(console.error)
+      }
+      if (phone) {
+        const name_ = await getSchoolName()
+        sendWhatsappMessage({
+          schoolId: school_id, to: phone, templateName: 'student_credentials', recipientName: name,
+          templateParams: {
+            student_name: name, school_name: name_, login: studentRollNumber,
+            temp_password: tempPassword, login_url: `${appUrl}/student/login`,
+          },
+        }).catch(console.error)
+      }
     }
 
     // Create/link parent account + send parent welcome email if parent_email provided.
@@ -207,16 +237,55 @@ export async function POST(req: NextRequest) {
     // sibling onboarded earlier while the flag was on) — only suppress creating a new one.
     let parentWarning: string | null = null
     if (parent_email || parent_phone) {
-      parentWarning = await provisionParentAccount({
+      const parentResult = await provisionParentAccount({
         parentEmail: parent_email, parentPhone: parent_phone, parentName: parent_name,
         studentId: student.id, schoolId: school_id, studentName: name, appUrl,
         allowCreate: parentPortalEnabled,
       })
+      parentWarning = parentResult.warning
+
+      // The parent always gets a copy of their child's OWN student-portal
+      // credentials, sent to the parent's real (resolved) contact email —
+      // not necessarily the parentEmail typed into this form, since an
+      // existing parent's actual account email may differ (typo on this
+      // submission, or this is a later sibling and the parent's email was
+      // set at an earlier onboarding). This fires regardless of whether the
+      // parent account was newly created or already existed, and regardless
+      // of whether the student also has their own email on file.
+      if (studentPortalEnabled && studentRollNumber && tempPassword) {
+        const parentDisplayName = parentResult.resolvedName || parent_name || parentResult.resolvedEmail || parentResult.resolvedPhone || 'there'
+        if (parentResult.resolvedEmail) {
+          const name_ = await getSchoolName()
+          sendChildCredentialsToParentEmail({
+            to: parentResult.resolvedEmail,
+            parentName: parentDisplayName,
+            studentName: name,
+            schoolName: name_,
+            rollNumber: studentRollNumber,
+            tempPassword,
+            loginUrl: `${appUrl}/student/login`,
+          }).catch(console.error)
+        }
+        if (parentResult.resolvedPhone) {
+          const name_ = await getSchoolName()
+          sendWhatsappMessage({
+            schoolId: school_id, to: parentResult.resolvedPhone, templateName: 'student_credentials', recipientName: parentDisplayName,
+            templateParams: {
+              student_name: name, school_name: name_, login: studentRollNumber,
+              temp_password: tempPassword, login_url: `${appUrl}/student/login`,
+            },
+          }).catch(console.error)
+        }
+      }
     }
 
     invalidateCache(`classes:${school_id}`)
     return NextResponse.json(
-      { ...student, ...(parentWarning ? { parent_warning: parentWarning } : {}) },
+      {
+        ...student,
+        ...(tempPassword ? { temp_password: tempPassword } : {}),
+        ...(parentWarning ? { parent_warning: parentWarning } : {}),
+      },
       { status: 201 }
     )
   } catch (error) {
@@ -225,17 +294,20 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// Create or link a parent account, sending welcome email only on first creation.
-// allowCreate=false only links to an existing parent and never inserts a new row —
-// used when parent-portal is disabled for the school.
-// Returns null on success, or a warning string if the operation partially failed
-// (student was created but parent account could not be set up).
+// Create or link a parent account, sending welcome email/WhatsApp only on
+// first creation. allowCreate=false only links to an existing parent and
+// never inserts a new row — used when parent-portal is disabled for the
+// school. Always returns the resolved parent's actual email/phone/name (from
+// the DB row that matched or was created) so the caller can send the child's
+// own credentials there — that's the real login-holding contact info, which
+// can differ from what was typed into this particular submission for an
+// existing parent.
 async function provisionParentAccount({
   parentEmail, parentPhone, parentName, studentId, schoolId, studentName, appUrl, allowCreate
 }: {
   parentEmail: string | null; parentPhone: string | null; parentName: string | null
   studentId: number; schoolId: number; studentName: string; appUrl: string; allowCreate: boolean
-}): Promise<string | null> {
+}): Promise<{ warning: string | null; resolvedEmail: string | null; resolvedPhone: string | null; resolvedName: string | null }> {
   try {
     const batchCache = new Map<string, number>()
     let parentHash: string | null = null
@@ -257,21 +329,39 @@ async function provisionParentAccount({
       client.release()
     }
 
-    if (match?.wasCreated && parentEmail && tempPassword) {
+    if (!match) return { warning: null, resolvedEmail: null, resolvedPhone: null, resolvedName: null }
+
+    const parentRow = await pool.query('SELECT email, phone, name FROM parents WHERE id = $1', [match.parentId])
+    const resolvedEmail: string | null = parentRow.rows[0]?.email || null
+    const resolvedPhone: string | null = parentRow.rows[0]?.phone || null
+    const resolvedName: string | null = parentRow.rows[0]?.name || null
+
+    if (match.wasCreated && tempPassword) {
       const schoolResult = await pool.query('SELECT name FROM schools WHERE id = $1', [schoolId])
       const schoolName = schoolResult.rows[0]?.name || 'Your School'
-      sendParentWelcomeEmail({
-        to: parentEmail,
-        parentName: parentName || parentEmail,
-        studentName,
-        schoolName,
-        tempPassword,
-        loginUrl: `${appUrl}/parent/login`,
-      }).catch(console.error)
+      const displayName = parentName || parentEmail || resolvedPhone || 'there'
+      if (parentEmail) {
+        sendParentWelcomeEmail({
+          to: parentEmail, parentName: displayName, studentName, schoolName,
+          tempPassword, loginUrl: `${appUrl}/parent/login`,
+        }).catch(console.error)
+      }
+      if (resolvedPhone) {
+        sendWhatsappMessage({
+          schoolId, to: resolvedPhone, templateName: 'parent_credentials', recipientName: displayName,
+          templateParams: {
+            parent_name: displayName, student_name: studentName, school_name: schoolName,
+            login: parentEmail || resolvedPhone, temp_password: tempPassword, login_url: `${appUrl}/parent/login`,
+          },
+        }).catch(console.error)
+      }
     }
-    return null
+    return { warning: null, resolvedEmail, resolvedPhone, resolvedName }
   } catch (err) {
     console.error('[provisionParentAccount]', err)
-    return 'Student was created but the parent account could not be set up. Please retry by editing the student or contact support.'
+    return {
+      warning: 'Student was created but the parent account could not be set up. Please retry by editing the student or contact support.',
+      resolvedEmail: null, resolvedPhone: null, resolvedName: null,
+    }
   }
 }

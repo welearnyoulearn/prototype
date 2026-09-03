@@ -120,6 +120,12 @@ type Props = {
   onBack: () => void
   initialTab?: string
   openExamId?: number
+  // Which academic year the teacher has chosen to VIEW (Profile tab
+  // selector) — only affects the Syllabus tab for now. readOnly disables
+  // every write action there (mark covered, add topic, bootstrap import)
+  // when the selected year isn't the school's current one.
+  academicYear?: string
+  readOnly?: boolean
 }
 
 const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Attendance', 'Timetable', 'Marks & Results', 'Homework', 'Doubts', 'Syllabus']
@@ -498,7 +504,7 @@ type SylSubject = {
   chapters: SylChapter[]
 }
 export function SyllabusTracking({
-  classId, schoolId, grade, teacher, isClassTeacher, allowedSubjects,
+  classId, schoolId, grade, teacher, isClassTeacher, allowedSubjects, academicYear, readOnly,
 }: {
   classId: number
   schoolId: number
@@ -510,6 +516,12 @@ export function SyllabusTracking({
   // subject for their own class regardless (kept — a common real-school
   // expectation); everyone else is gated strictly to their assignments.
   allowedSubjects?: string[]
+  // Which academic year to view (Profile tab selector) — defaults to the
+  // school's current year server-side when omitted. readOnly disables every
+  // write action here (mark covered, add topic/chapter, bootstrap import)
+  // when the selected year isn't the school's current one.
+  academicYear?: string
+  readOnly?: boolean
 }) {
   const [subjects, setSubjects] = useState<SylSubject[]>([])
   const [selectedSubject, setSelectedSubject] = useState<string>('')
@@ -563,7 +575,8 @@ export function SyllabusTracking({
       // mutation (add chapter/topic, bootstrap, mark complete), and a
       // subject-scoped response here would silently truncate `subjects` down
       // to just the one being edited, dropping every other subject's tab.
-      const res = await fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}`)
+      const yearParam = academicYear ? `&academic_year=${encodeURIComponent(academicYear)}` : ''
+      const res = await fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}${yearParam}`)
       const data = await res.json()
       const fetched: SylSubject[] = Array.isArray(data.subjects) ? data.subjects : []
       // Class teachers see every subject for their own class; everyone else
@@ -580,9 +593,9 @@ export function SyllabusTracking({
     } finally {
       setLoading(false)
     }
-  }, [classId, schoolId, selectedSubject, teacher, isClassTeacher, allowedSubjects])
+  }, [classId, schoolId, selectedSubject, teacher, isClassTeacher, allowedSubjects, academicYear])
 
-  useEffect(() => { loadSyllabus() }, [classId, schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadSyllabus() }, [classId, schoolId, academicYear]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentSubject = subjects.find(s => s.subject === selectedSubject)
 
@@ -763,7 +776,7 @@ export function SyllabusTracking({
   // this topic's own progress row; it does not lock/unlock siblings. Needs new
   // schema + API work before that flow can be real.
   async function markCovered(topic: SylTopic) {
-    if (!teacher) return
+    if (!teacher || readOnly) return
     const newStatus = topic.status === 'covered' ? 'pending' : 'covered'
     setMarkingId(topic.id)
     try {
@@ -874,7 +887,7 @@ export function SyllabusTracking({
           ChatGPT-generated JSON syllabus, or just say how many chapters the
           textbook has and rename dummy chapters afterward. Both funnel into
           the same chapter accordion below once content exists. */}
-      {currentSubject && currentSubject.chapters.length === 0 && (
+      {currentSubject && currentSubject.chapters.length === 0 && !readOnly && (
         <div className="mb-5">
           {bootstrapMode === 'none' && (
             <div className="bg-white rounded-2xl border border-dashed py-10 px-6 text-center" style={{ borderColor: BORDER }}>
@@ -1036,15 +1049,15 @@ export function SyllabusTracking({
                                   to keep syllabus tracking about completion status only. */}
                               <button
                                 onClick={() => markCovered(topic)}
-                                disabled={isMarking}
-                                title={isCovered ? 'Mark as pending' : 'Mark as complete'}
+                                disabled={isMarking || readOnly}
+                                title={readOnly ? 'Read-only — viewing a past academic year' : isCovered ? 'Mark as pending' : 'Mark as complete'}
                                 data-testid={`syllabus-mark-taught-${topic.id}`}
                                 className="text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1"
                                 style={{
                                   color: isCovered ? GREEN : 'white',
                                   background: isCovered ? '#E8F8EF' : GREEN,
                                   border: `1px solid ${GREEN}`,
-                                  opacity: isMarking ? 0.5 : 1,
+                                  opacity: (isMarking || readOnly) ? 0.5 : 1,
                                 }}>
                                 {isCovered ? <><Check size={11} /> Completed</> : 'Mark Complete'}
                               </button>
@@ -1119,8 +1132,9 @@ export function SyllabusTracking({
 
                 {/* Add custom topic — same POST /api/syllabus used by school-admin's
                     Syllabus Customizer, so it works whether the teacher adds one topic
-                    now and more later, or several in a row before marking anything taught. */}
-                {isExpanded && (
+                    now and more later, or several in a row before marking anything taught.
+                    Hidden entirely (not just disabled) when viewing a closed past year. */}
+                {isExpanded && !readOnly && (
                   <div className="border-t px-5 py-3" style={{ borderColor: BORDER, background: SURFACE }}>
                     {addTopicChapter === ch.chapter_name ? (
                       <div className="flex gap-2 items-center flex-wrap">
@@ -1167,8 +1181,9 @@ export function SyllabusTracking({
 
           {/* Add chapter — subject-level, sibling to the accordion above.
               Uses POST /api/syllabus/chapters so a teacher can lay down a
-              chapter shell before adding any subtopics. */}
-          <div className="pt-1">
+              chapter shell before adding any subtopics. Hidden when
+              viewing a closed past year, same as the add-topic control. */}
+          {!readOnly && <div className="pt-1">
             {addingChapter ? (
               <div className="bg-white rounded-2xl border px-5 py-3 flex gap-2 items-center flex-wrap" style={{ borderColor: BORDER }}>
                 <input
@@ -1204,7 +1219,7 @@ export function SyllabusTracking({
                 + Add Chapter
               </button>
             )}
-          </div>
+          </div>}
         </div>
       )}
 
@@ -1213,7 +1228,7 @@ export function SyllabusTracking({
   )
 }
 
-export default function ClassView({ classId, grade, section, schoolId, teacherName, teacherId, isClassTeacher, teacher, onBack, initialTab, openExamId }: Props) {
+export default function ClassView({ classId, grade, section, schoolId, teacherName, teacherId, isClassTeacher, teacher, onBack, initialTab, openExamId, academicYear, readOnly }: Props) {
   const hasTimetableFeature = useFeature('timetable')
   const hasAttendanceFeature = useFeature('attendance')
   const allTabs = isClassTeacher ? CLASS_TEACHER_TABS : SUBJECT_TEACHER_TABS
@@ -2278,6 +2293,8 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           grade={grade}
           teacher={teacher}
           isClassTeacher={isClassTeacher}
+          academicYear={academicYear}
+          readOnly={readOnly}
         />
       )}
 

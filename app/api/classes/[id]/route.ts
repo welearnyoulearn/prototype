@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { invalidateCache } from '@/lib/responseCache'
+import { requireFeeAccess } from '@/lib/auth'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -13,6 +14,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         [id]
       )
       if (!classRes.rows[0]) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      if (!await requireFeeAccess(classRes.rows[0].school_id)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
 
       // Get subjects from class_subjects (source of truth for what subjects are assigned)
       const subjectsRes = await pool.query(
@@ -41,6 +45,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   try {
     const { id } = await params
     try {
+      const { rows: [existing] } = await pool.query('SELECT school_id FROM classes WHERE id = $1', [id])
+      if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      if (!await requireFeeAccess(existing.school_id)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+
       const { class_teacher_id } = await req.json()
       const result = await pool.query(
         'UPDATE classes SET class_teacher_id = $1 WHERE id = $2 RETURNING *',
@@ -64,6 +74,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   try {
     const { rows: [cls] } = await pool.query('SELECT school_id, grade, section FROM classes WHERE id=$1', [id])
     if (!cls) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    if (!await requireFeeAccess(cls.school_id)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     // Deactivate all students in this class so autoSync won't recreate it
     await pool.query(

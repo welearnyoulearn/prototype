@@ -3,11 +3,18 @@ import pool, { ensureDB } from '@/lib/db'
 import { matchTeacher } from '@/lib/matchTeacher'
 import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
 import { resolveAcademicYear } from '@/lib/academicYear'
+import { requireFeeAccess } from '@/lib/auth'
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
 
     const { id } = await params
+
+    const { rows: [cls] } = await pool.query('SELECT school_id FROM classes WHERE id = $1', [id])
+    if (!cls) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    if (!await requireFeeAccess(cls.school_id)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const cacheKey = `subjects:class:${id}`
     const cached = getCache(cacheKey)
@@ -51,6 +58,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         'SELECT school_id, grade, section FROM classes WHERE id = $1', [id]
       )
       if (!cls) return NextResponse.json({ error: 'Class not found' }, { status: 404 })
+      if (!await requireFeeAccess(cls.school_id)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
 
       // If this grade has subscribed syllabus subjects, class_subjects.subject_name
       // must be byte-identical to school_subjects.subject_name — that string is
@@ -162,6 +172,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         [subject_id, id]
       )
       if (!sub) return NextResponse.json({ error: 'Subject not found' }, { status: 404 })
+      if (!await requireFeeAccess(sub.school_id)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
 
       const updates: string[] = []
       const values: (string | number | null)[] = []
@@ -265,6 +278,9 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         'SELECT cs.subject_name, c.school_id FROM class_subjects cs JOIN classes c ON c.id = cs.class_id WHERE cs.id = $1 AND cs.class_id = $2',
         [subject_id, id]
       )
+      if (sub?.school_id && !await requireFeeAccess(sub.school_id)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
       await pool.query('DELETE FROM class_subjects WHERE id = $1 AND class_id = $2', [subject_id, id])
       // Clear this subject from the timetable so no orphaned slots remain
       if (sub?.subject_name) {

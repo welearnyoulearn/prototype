@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { TRANSLATIONS, type Lang } from './translations'
 import ParentSyllabus from './components/ParentSyllabus'
 import DigitalLibrary from '../components/library/DigitalLibrary'
+import ParentProfile from './components/ParentProfile'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
@@ -99,13 +100,14 @@ const NAV = [
   { key: 'results',    label: 'Results',            icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
   { key: 'syllabus',   label: 'Syllabus',           icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
   { key: 'library',    label: 'Digital Library',    icon: 'M12 6.253C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253m0-13v13' },
+  { key: 'profile',    label: 'Profile',            icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
 ]
 
 // Only nav keys that map to a plan-gated ALL_FEATURES entry get checked
-// against enabledFeatures — everything else has always been unconditionally
-// available and stays that way. 'syllabus' resolves through
-// PORTAL_NAV_KEY_ALIASES to school-admin's 'curriculum' key.
-const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library'])
+// against enabledFeatures — everything else (overview, profile) has always
+// been unconditionally available and stays that way. 'syllabus' and 'today'
+// resolve through PORTAL_NAV_KEY_ALIASES to 'curriculum'/'timetable'.
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'today', 'attendance', 'fees', 'exams', 'results'])
 
 function fmt(n: number | string) { return `₹${Number(n).toLocaleString('en-IN')}` }
 function timeStr(t: string) { return t ? t.slice(0, 5) : '' }
@@ -511,13 +513,13 @@ export default function ParentDashboard() {
               📅 {feeAcYear}
             </span>
           )}
-          {summary?.unacknowledged_count ? (
+          {isNavItemVisible('results') && summary?.unacknowledged_count ? (
             <button onClick={() => navigateTo('results')}
               className="bg-red-100 text-red-700 text-xs font-bold px-2.5 py-1 rounded-full hover:bg-red-200">
               {T.resultsToSign(summary.unacknowledged_count)}
             </button>
           ) : null}
-          {(feeSummary?.overdue_count ?? 0) > 0 && (
+          {isNavItemVisible('fees') && (feeSummary?.overdue_count ?? 0) > 0 && (
             <button onClick={() => navigateTo('fees')}
               className="bg-amber-100 text-amber-700 text-xs font-bold px-2.5 py-1 rounded-full hover:bg-amber-200">
               {T.feeOverdue(feeSummary!.overdue_count)}
@@ -586,7 +588,7 @@ export default function ParentDashboard() {
                   <p className="text-pink-200 text-sm mt-0.5">{T.grade} {student.grade} · {T.section} {student.section} · {T.roll} {student.roll_number}</p>
                 </div>
                 <div className="text-right">
-                  {summary?.attendance_pct !== null && summary?.attendance_pct !== undefined && (
+                  {isNavItemVisible('attendance') && summary?.attendance_pct !== null && summary?.attendance_pct !== undefined && (
                     <div>
                       <div className="text-3xl font-black">{summary.attendance_pct}%</div>
                       <div className="text-pink-200 text-xs">{T.thisMonth}</div>
@@ -596,33 +598,43 @@ export default function ParentDashboard() {
               </div>
             </div>
 
-            {/* Quick stats */}
+            {/* Quick stats — each tile deep-links to a nav section, so it's
+                hidden right alongside that section rather than pointing
+                somewhere the school's plan doesn't actually include. */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <button onClick={() => navigateTo('today')} className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-pink-300 transition-colors group">
-                <div className="text-2xl font-black text-blue-600 group-hover:text-pink-600">{timetable.length || '—'}</div>
-                <div className="text-xs text-gray-500 mt-1">{T.todaysPeriods}</div>
-              </button>
-              <button onClick={() => navigateTo('exams')} className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-pink-300 transition-colors group">
-                <div className="text-2xl font-black text-purple-600 group-hover:text-pink-600">{summary?.upcoming_exams?.length ?? 0}</div>
-                <div className="text-xs text-gray-500 mt-1">{T.upcomingExams}</div>
-              </button>
-              <button onClick={() => navigateTo('results')} className={`bg-white rounded-xl border p-4 text-center hover:border-pink-300 transition-colors group ${summary?.unacknowledged_count ? 'border-red-200 bg-red-50' : 'border-gray-200'}`}>
-                <div className={`text-2xl font-black group-hover:text-pink-600 ${summary?.unacknowledged_count ? 'text-red-600' : 'text-gray-400'}`}>
-                  {summary?.unacknowledged_count ?? 0}
-                </div>
-                <div className="text-xs text-gray-500 mt-1">{T.pendingSignoff}</div>
-              </button>
-              <button onClick={() => navigateTo('fees')} className={`bg-white rounded-xl border p-4 text-center hover:border-pink-300 transition-colors group ${(feeSummary?.overdue_count ?? 0) > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-200'}`}>
-                <div className={`text-lg font-black group-hover:text-pink-600 ${(feeSummary?.overdue_count ?? 0) > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
-                  {feeSummary ? fmt(feeSummary.total_outstanding) : '—'}
-                </div>
-                <div className="text-xs text-gray-500 mt-1">{T.outstandingFees}</div>
-              </button>
+              {isNavItemVisible('today') && (
+                <button onClick={() => navigateTo('today')} className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-pink-300 transition-colors group">
+                  <div className="text-2xl font-black text-blue-600 group-hover:text-pink-600">{timetable.length || '—'}</div>
+                  <div className="text-xs text-gray-500 mt-1">{T.todaysPeriods}</div>
+                </button>
+              )}
+              {isNavItemVisible('exams') && (
+                <button onClick={() => navigateTo('exams')} className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-pink-300 transition-colors group">
+                  <div className="text-2xl font-black text-purple-600 group-hover:text-pink-600">{summary?.upcoming_exams?.length ?? 0}</div>
+                  <div className="text-xs text-gray-500 mt-1">{T.upcomingExams}</div>
+                </button>
+              )}
+              {isNavItemVisible('results') && (
+                <button onClick={() => navigateTo('results')} className={`bg-white rounded-xl border p-4 text-center hover:border-pink-300 transition-colors group ${summary?.unacknowledged_count ? 'border-red-200 bg-red-50' : 'border-gray-200'}`}>
+                  <div className={`text-2xl font-black group-hover:text-pink-600 ${summary?.unacknowledged_count ? 'text-red-600' : 'text-gray-400'}`}>
+                    {summary?.unacknowledged_count ?? 0}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">{T.pendingSignoff}</div>
+                </button>
+              )}
+              {isNavItemVisible('fees') && (
+                <button onClick={() => navigateTo('fees')} className={`bg-white rounded-xl border p-4 text-center hover:border-pink-300 transition-colors group ${(feeSummary?.overdue_count ?? 0) > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-200'}`}>
+                  <div className={`text-lg font-black group-hover:text-pink-600 ${(feeSummary?.overdue_count ?? 0) > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+                    {feeSummary ? fmt(feeSummary.total_outstanding) : '—'}
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">{T.outstandingFees}</div>
+                </button>
+              )}
             </div>
 
 
             {/* Latest result */}
-            {latestResult && (
+            {isNavItemVisible('results') && latestResult && (
               <div className="bg-white rounded-xl border border-gray-200 p-4">
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{T.latestResult}</p>
                 <div className="flex items-center justify-between">
@@ -641,7 +653,7 @@ export default function ParentDashboard() {
             )}
 
             {/* Upcoming exams */}
-            {summary?.upcoming_exams && summary.upcoming_exams.length > 0 && (
+            {isNavItemVisible('exams') && summary?.upcoming_exams && summary.upcoming_exams.length > 0 && (
               <div className="bg-white rounded-xl border border-gray-200 p-4">
                 <p className="text-sm font-bold text-gray-800 mb-3">{T.upcomingExams}</p>
                 <div className="space-y-2">
@@ -668,7 +680,7 @@ export default function ParentDashboard() {
             )}
 
             {/* Sign-off alerts */}
-            {summary?.published_results.filter(r => !r.parent_acknowledged).map(r => {
+            {isNavItemVisible('results') && summary?.published_results.filter(r => !r.parent_acknowledged).map(r => {
               const p = r.total_obtained !== null && r.total_max ? Math.round((r.total_obtained / r.total_max) * 100) : null
               return (
                 <div key={r.id} className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start justify-between gap-3">
@@ -790,6 +802,13 @@ export default function ParentDashboard() {
           {visited.has('library') && isNavItemVisible('library') && (
           <div hidden={activeNav !== 'library'}>
             <DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}&student_id=${student.id}`} />
+          </div>
+          )}
+
+          {/* ── PROFILE ────────────────────────────────────────────────────── */}
+          {visited.has('profile') && parentInfo && (
+          <div hidden={activeNav !== 'profile'}>
+            <ParentProfile parentInfo={parentInfo} />
           </div>
           )}
 

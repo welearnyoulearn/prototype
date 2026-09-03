@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requirePlatformAdmin, getAnySession } from '@/lib/auth'
 import { ALL_FEATURES } from '@/lib/features'
+
+// student-portal/parent-portal are no longer editable from the global
+// tier matrix — their tier default (basic=off, standard/premium=on) is
+// fixed in plan_features (seeded in lib/db.ts) and the ONLY way to change
+// either for a given school is the per-school "Portal Access" toggle on
+// /platform-admin/schools/[id] (school_feature_overrides). Filtered out of
+// both the matrix response and the tier-lookup response so the config page
+// can't show or edit them, and out of the assignments POST accepts so a
+// direct API call can't bypass that either.
+const GLOBAL_MATRIX_EXCLUDED = new Set(['student-portal', 'parent-portal'])
+const MATRIX_FEATURES = ALL_FEATURES.filter(f => !GLOBAL_MATRIX_EXCLUDED.has(f.key))
 
 // GET /api/platform/features?tier=basic
 // Returns enabled feature keys for a given tier (used by school admin sidebar)
@@ -17,6 +29,12 @@ export async function GET(req: NextRequest) {
 
   try {
     if (tier) {
+      // Tier-lookup mode: read by every portal's own sidebar (school-admin,
+      // teacher) to build its nav from that school's tier — not tenant-scoped
+      // data, so any authenticated session (not platform-admin-only) is the
+      // right bar here.
+      if (!(await getAnySession())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
       const tiers = TIER_INCLUDES[tier]
       if (!tiers) return NextResponse.json({ enabled: [] })
 
@@ -41,12 +59,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ enabled })
     }
 
-    // Full matrix for platform admin config page
+    // Full matrix for platform admin config page — platform-admin only,
+    // this is the whole platform's tier configuration, not scoped to a school.
+    if (!(await requirePlatformAdmin())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
     const result = await pool.query(`SELECT feature_key, tier, enabled FROM plan_features`)
     const matrix: Record<string, Record<string, boolean>> = {}
 
     // Default all features to disabled — only explicitly saved values are enabled
-    for (const f of ALL_FEATURES) {
+    for (const f of MATRIX_FEATURES) {
       matrix[f.key] = { basic: false, standard: false, premium: false }
     }
     // Override only what's been explicitly configured in DB
@@ -65,7 +86,7 @@ export async function GET(req: NextRequest) {
       }
     } catch { /* column not yet migrated — return empty, migration will add it on next cold start */ }
 
-    return NextResponse.json({ features: ALL_FEATURES, matrix, staffLimits })
+    return NextResponse.json({ features: MATRIX_FEATURES, matrix, staffLimits })
   } catch (error) {
     console.error('[platform/features GET]', error)
     return NextResponse.json({ error: 'Failed to fetch features' }, { status: 500 })
@@ -75,6 +96,7 @@ export async function GET(req: NextRequest) {
 // POST /api/platform/features
 // Body: { assignments: { feature_key, tier, enabled }[], staffLimits?: { basic, standard, premium, none } }
 export async function POST(req: NextRequest) {
+  if (!(await requirePlatformAdmin())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const { assignments, staffLimits } = await req.json()
     if (!Array.isArray(assignments)) {
@@ -86,6 +108,7 @@ export async function POST(req: NextRequest) {
       await client.query('BEGIN')
       for (const { feature_key, tier, enabled } of assignments) {
         if (!feature_key || !tier) continue
+        if (GLOBAL_MATRIX_EXCLUDED.has(feature_key)) continue
         await client.query(
           `INSERT INTO plan_features (feature_key, tier, enabled, updated_at)
            VALUES ($1, $2, $3, NOW())

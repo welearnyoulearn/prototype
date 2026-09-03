@@ -20,14 +20,20 @@ type Teacher = {
   status: string
 }
 
+type AcademicYearOption = { id: number; label: string; is_current: boolean }
+
 type Props = {
   teacher: Teacher
   onUpdate: (updated: Teacher) => void
+  availableYears: AcademicYearOption[]
+  selectedAcademicYear: string
+  schoolCurrentYear: string
+  onSelectYear: (label: string) => void
 }
 
 type PwForm = { current: string; next: string; confirm: string }
 
-export default function TeacherProfile({ teacher, onUpdate }: Props) {
+export default function TeacherProfile({ teacher, onUpdate, availableYears, selectedAcademicYear, schoolCurrentYear, onSelectYear }: Props) {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<Partial<Teacher>>({})
   const [saving, setSaving] = useState(false)
@@ -255,6 +261,38 @@ export default function TeacherProfile({ teacher, onUpdate }: Props) {
           </div>
         )}
       </div>
+
+      {/* Academic year — independent of school admin's active year. Every
+          fresh login resets this to whatever school admin has set as
+          current; a teacher can look back at a past (closed) year, but that
+          list is view-only here — no add/create, that stays a school-admin
+          capability. Selecting a non-current year makes the rest of the
+          portal (currently: Syllabus tracking) read-only. */}
+      {availableYears.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mt-4">
+          <div className="mb-4">
+            <h3 className="text-base font-semibold text-gray-900">Academic Year</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Choose which year to view across your portal. Only the current year is editable.</p>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <select
+              value={selectedAcademicYear}
+              onChange={e => onSelectYear(e.target.value)}
+              data-testid="teacher-academic-year-select"
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+            >
+              {availableYears.map(y => (
+                <option key={y.id} value={y.label}>{y.label}{y.is_current ? ' (current)' : ''}</option>
+              ))}
+            </select>
+            {selectedAcademicYear && selectedAcademicYear !== schoolCurrentYear && (
+              <span className="text-xs px-3 py-1.5 rounded-full font-medium bg-amber-100 text-amber-700" data-testid="teacher-year-readonly-badge">
+                👁 View only — {selectedAcademicYear} is closed
+              </span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

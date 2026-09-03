@@ -77,12 +77,11 @@ const NAV_SECTIONS: NavSection[] = [
 const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
 
 // Only nav keys that map to a plan-gated ALL_FEATURES entry get checked
-// against enabledFeatures — everything else (dashboard, tasks, doubts,
-// my-marks, profile) has always been unconditionally available and stays
-// that way. 'syllabus' resolves through PORTAL_NAV_KEY_ALIASES to
-// school-admin's 'curriculum' key, since that's the same underlying
-// capability under two different portal-local names.
-const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library'])
+// against enabledFeatures — everything else (dashboard, profile) has always
+// been unconditionally available and stays that way. 'syllabus'/'timetable'/
+// 'my-marks'/'tasks' resolve through PORTAL_NAV_KEY_ALIASES to their real
+// ALL_FEATURES keys ('curriculum'/'timetable'/'results'/'homework').
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'timetable', 'my-marks', 'tasks', 'doubts'])
 
 const BOTTOM_NAV = [
   { key: 'dashboard', label: 'Home',    emoji: '🏠' },
@@ -308,7 +307,7 @@ export default function StudentPortal() {
         {/* ── Main Content ──────────────────────────────────────────── */}
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 pb-24 lg:pb-6 scroll-smooth">
           <div className="max-w-3xl mx-auto">
-            {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} /></div>}
+            {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} isNavItemVisible={isNavItemVisible} /></div>}
             {visitedNav.has('tasks')       && <div hidden={activeNav !== 'tasks'}><StudentTasks student={student} classId={classId} schoolId={student.school_id} /></div>}
             {visitedNav.has('doubts')      && <div hidden={activeNav !== 'doubts'}><StudentDoubts student={student} classId={classId} schoolId={student.school_id} /></div>}
             {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={student.school_id} classId={classId} /></div>}
