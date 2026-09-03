@@ -142,6 +142,14 @@ export default function ParentDashboard() {
     return enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
   }
 
+  // Gates the whole "Pay online via UPI" sub-flow inside the Fees tab —
+  // separate from isNavItemVisible('fees')/'fee-management', which only
+  // controls whether the Fees tab itself is reachable. A school can have
+  // Fee Management on (so the tab, ledger, and history all show) without
+  // Online Payments on — in that case the tab still shows everything except
+  // the Pay button/QR/transaction-ID flow.
+  const hasOnlinePayments = enabledFeatures === null ? true : enabledFeatures.has('online-payments')
+
   // Per-section data
   const [timetable, setTimetable] = useState<TimetablePeriod[]>([])
   const [timetableDay, setTimetableDay] = useState('')
@@ -168,6 +176,8 @@ export default function ParentDashboard() {
   const [payStep, setPayStep] = useState<'form' | 'method' | 'upi-id' | 'qr' | 'txn'>('form')
   const [upiParentId, setUpiParentId] = useState('')
   const [qrRevealed, setQrRevealed] = useState(false)
+  const [upiInfo, setUpiInfo] = useState<{ upi_id: string; school_name: string } | null>(null)
+  const [upiCopied, setUpiCopied] = useState(false)
   const [payTimerSecs, setPayTimerSecs] = useState(0)
   const payTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -1044,8 +1054,15 @@ export default function ParentDashboard() {
                   </div>
                 )}
 
+                {!hasOnlinePayments && feeSummary && feeSummary.total_outstanding > 0 && (
+                  <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 flex items-start gap-2">
+                    <svg className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    <p className="text-xs text-blue-700">Online payment isn&apos;t available for this school yet. Please pay the outstanding balance directly at the school office.</p>
+                  </div>
+                )}
+
                 {/* Multi-select pay bar */}
-                {selectedLedgerIds.size > 0 && !payingLedger && (() => {
+                {hasOnlinePayments && selectedLedgerIds.size > 0 && !payingLedger && (() => {
                   const selectedEntries = feeLedger.filter(e => selectedLedgerIds.has(e.id))
                   const totalSelected = selectedEntries.reduce((s, e) => s + Number(e.balance), 0)
                   return (
@@ -1067,7 +1084,7 @@ export default function ParentDashboard() {
                 })()}
 
                 {/* Payment form (multi or single) */}
-                {payingLedger && (
+                {hasOnlinePayments && payingLedger && (
                   <div className="bg-white border border-blue-200 rounded-2xl overflow-hidden shadow-sm">
                     {/* Payment header */}
                     <div className="bg-blue-600 px-5 py-4">
@@ -1104,7 +1121,15 @@ export default function ParentDashboard() {
                           </div>
                           <div className="flex gap-2">
                             <button
-                              onClick={() => { setPayStep('qr'); setQrRevealed(false) }}
+                              onClick={() => {
+                                setPayStep('qr'); setQrRevealed(false)
+                                if (!upiInfo) {
+                                  fetch(`/api/fees/upi-qr/info?school_id=${student.school_id}`)
+                                    .then(r => r.json())
+                                    .then(d => { if (d.upi_id) setUpiInfo(d) })
+                                    .catch(() => {})
+                                }
+                              }}
                               disabled={!payAmount || Number(payAmount) <= 0}
                               className="flex-1 bg-blue-600 text-white py-3 rounded-xl text-sm font-bold disabled:opacity-40 hover:bg-blue-700">
                               Continue — Pay {payAmount ? fmt(payAmount) : '₹0'}
@@ -1156,6 +1181,24 @@ export default function ParentDashboard() {
                                 <p className="text-xs font-semibold text-purple-800">Scan with GPay, PhonePe, Paytm or any UPI app</p>
                                 <p className="text-xs text-purple-500 mt-0.5">Amount: {fmt(payAmount)} · School Fee Payment</p>
                               </div>
+                              {upiInfo?.upi_id && (
+                                <div className="flex items-center justify-between gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
+                                  <div className="min-w-0">
+                                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Or pay manually to</p>
+                                    <p className="text-sm font-mono font-semibold text-gray-800 truncate">{upiInfo.upi_id}</p>
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      navigator.clipboard?.writeText(upiInfo.upi_id).then(() => {
+                                        setUpiCopied(true)
+                                        setTimeout(() => setUpiCopied(false), 1500)
+                                      }).catch(() => {})
+                                    }}
+                                    className="flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-blue-600 hover:bg-blue-50">
+                                    {upiCopied ? 'Copied!' : 'Copy'}
+                                  </button>
+                                </div>
+                              )}
                               <button
                                 onClick={() => setPayStep('txn')}
                                 className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl text-sm font-bold">
@@ -1229,7 +1272,7 @@ export default function ParentDashboard() {
                   <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
                     <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                       <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{T.feeLedger} — {feeAcYear}</p>
-                      {feeLedger.some(e => ['pending','partial','overdue'].includes(e.status)) && !payingLedger && (
+                      {hasOnlinePayments && feeLedger.some(e => ['pending','partial','overdue'].includes(e.status)) && !payingLedger && (
                         <button
                           onClick={() => {
                             const pendingIds = feeLedger.filter(e => ['pending','partial','overdue'].includes(e.status)).map(e => e.id)
@@ -1250,7 +1293,7 @@ export default function ParentDashboard() {
                         const isSelected = selectedLedgerIds.has(entry.id)
                         return (
                           <div key={entry.id} className={`px-4 py-3 flex items-center gap-3 hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
-                            {isPending && !payingLedger && (
+                            {hasOnlinePayments && isPending && !payingLedger && (
                               <input type="checkbox" checked={isSelected}
                                 onChange={e => {
                                   const next = new Set(selectedLedgerIds)
@@ -1260,7 +1303,7 @@ export default function ParentDashboard() {
                                 }}
                                 className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 flex-shrink-0" />
                             )}
-                            {(!isPending || payingLedger) && <div className="w-4 flex-shrink-0" />}
+                            {(!hasOnlinePayments || !isPending || payingLedger) && <div className="w-4 flex-shrink-0" />}
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium text-gray-800">{entry.category_name}</p>
                               <p className="text-xs text-gray-400">{entry.period_label} · {T.dueDate} {entry.due_date}</p>
@@ -1273,7 +1316,7 @@ export default function ParentDashboard() {
                               <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${STATUS_COLOR[entry.status] || 'bg-gray-100 text-gray-600'}`}>
                                 {entry.status}
                               </span>
-                              {isPending && !payingLedger && selectedLedgerIds.size === 0 && (
+                              {hasOnlinePayments && isPending && !payingLedger && selectedLedgerIds.size === 0 && (
                                 <button onClick={() => { setPayingLedger(entry); setPayAmount(String(entry.balance)); setSelectedLedgerIds(new Set()) }}
                                   className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg hover:bg-blue-700 font-medium">
                                   {T.pay}

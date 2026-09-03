@@ -2135,6 +2135,21 @@ async function runIncrementalMigrations() {
     ON CONFLICT (feature_key, tier) DO NOTHING
   `).catch(() => {})
 
+  // Online Fee Payments (UPI) — 'online-payments' is in OVERRIDABLE_FEATURE_KEYS
+  // (same per-school-override model as student-portal/parent-portal), so it
+  // needs its own tier-default seed the same way those do, or every school
+  // reads as disabled until a platform admin explicitly overrides it on.
+  // Defaults OFF at every tier: this gates a real money-collection flow
+  // (parent-submitted UPI transaction IDs, admin verification), so it should
+  // never silently switch on for an existing school — a platform admin opts
+  // a school in explicitly via the per-school feature-override toggle.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES
+      ('online-payments', 'basic', false), ('online-payments', 'standard', false), ('online-payments', 'premium', false)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+
   // ── Academic year date-order safety ────────────────────────────────────────────
   // Nothing previously stopped start_date >= end_date on academic_years.
   await pool.query(`

@@ -45,6 +45,7 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
 
   // ── Finance ──────────────────────────────────────────────────────────────────
   { key: 'fee-management',     label: 'Fee Management',                  category: 'Finance', portals: ['school-admin', 'parent'] },
+  { key: 'online-payments',    label: 'Online Fee Payments (UPI)',       category: 'Finance', portals: ['school-admin', 'parent'] },
   { key: 'expenses',           label: 'Expense Tracking',                category: 'Finance', portals: ['school-admin'] },
 
   // ── Administration ───────────────────────────────────────────────────────────
@@ -61,7 +62,7 @@ export const CATEGORY_ORDER = ['Core', 'Scheduling', 'Analytics', 'Finance', 'Co
 
 // Features that can be overridden per-school via school_feature_overrides,
 // taking precedence over the tier-level plan_features setting.
-export const OVERRIDABLE_FEATURE_KEYS = ['student-portal', 'parent-portal', 'api-monitoring']
+export const OVERRIDABLE_FEATURE_KEYS = ['student-portal', 'parent-portal', 'api-monitoring', 'online-payments']
 
 // A portal's nav key doesn't always match the ALL_FEATURES key that gates it
 // (e.g. student/parent portals call it 'syllabus', school-admin calls the
@@ -74,4 +75,5 @@ export const PORTAL_NAV_KEY_ALIASES: Record<string, string> = {
   'today': 'timetable',               // parent portal's "Today's Schedule" nav key
   'my-marks': 'results',              // student portal's results nav key
   'tasks': 'homework',                // student portal's homework/tasks nav key
+  'fees': 'fee-management',           // parent portal's fees nav key for the same capability
 }
