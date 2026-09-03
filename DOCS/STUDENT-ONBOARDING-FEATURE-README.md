@@ -2,7 +2,7 @@
 
 > **Flowchart:** https://claude.ai/code/artifact/3d918f8d-f7cc-4e3e-a35a-52422db7e316
 
-> Last verified against code: 2026-09-03
+> Last verified against code: 2026-09-03 (re-verified this session — shared name validation applied to student/parent name fields)
 > Scope: every part of the codebase that touches student onboarding — database tables, API routes, and UI screens across School Admin, Teacher, Student, and Parent portals.
 
 This document explains student onboarding **inch by inch**: what each database table stores, what every API route accepts and returns, what every screen looks like and does, and how the pieces connect into complete end-to-end workflows. Read it top to bottom once if you're new to this part of the codebase.
@@ -204,6 +204,22 @@ Previously bailed out silently unless the student had an email on file. Now: the
 Roll No, Last Name, First Name, Email, Grade, Section, Parent Name, Parent Phone, Parent Email, Phone.
 
 - **Required**: Roll No (positive integer), Last Name, First Name, Grade, Parent Name, Parent Phone.
+- **Name validation (new this session)**: `handleSubmit()`'s validation block now runs `isValidName()` from the shared `lib/nameValidation.ts` module (also used by staff onboarding — see the Staff Onboarding README's §5a) against `last_name`, `first_name`, and `parent_name`, layered onto the existing required-field checks:
+  ```ts
+  if (!r.last_name.trim())    missing.push(`Row ${i + 1}: Last Name is required`)
+  else if (!isValidName(r.last_name)) missing.push(`Row ${i + 1}: Last Name — ${NAME_INVALID_MESSAGE}`)
+  if (!r.first_name.trim())   missing.push(`Row ${i + 1}: First Name is required`)
+  else if (!isValidName(r.first_name)) missing.push(`Row ${i + 1}: First Name — ${NAME_INVALID_MESSAGE}`)
+  ...
+  if (!r.parent_name.trim())  missing.push(`Row ${i + 1}: Parent Name is required`)
+  else if (!isValidName(r.parent_name)) missing.push(`Row ${i + 1}: Parent Name — ${NAME_INVALID_MESSAGE}`)
+  ```
+  Each check is an `else if` chained off the corresponding required-field check — a blank field still reports "is required," and only a non-blank-but-malformed value (digits, symbols, or anything outside letters/Unicode combining marks/space/`'`/`.`/`-`) reports the name-format message instead. `NAME_INVALID_MESSAGE` is the shared constant: *"Only letters, spaces, and ' . - are allowed — no numbers or symbols."*
+- **Server-side, the same rule is applied in four places**, all importing `isValidName`/`NAME_INVALID_MESSAGE` from `lib/nameValidation.ts`:
+  - **`POST /api/students/bulk`** (`app/api/students/bulk/route.ts`): per-row, immediately after the existing `!s.name?.trim()` check (`errors.push({row, message: 'Name is required'})`) and before the section check — `if (!isValidName(s.name)) { errors.push({ row: i + 1, message: \`Name: ${NAME_INVALID_MESSAGE}\` }); continue }`. A second check follows the existing `!s.parent_name?.trim()` guard the same way, pushing `Parent Name: {NAME_INVALID_MESSAGE}`.
+  - **`POST /api/students`** (single-add, `app/api/students/route.ts`): `if (!isValidName(name)) return NextResponse.json({ error: \`Name: ${NAME_INVALID_MESSAGE}\` }, { status: 400 })` immediately after the existing `!school_id || !name` check, and `if (!isValidName(parent_name)) return NextResponse.json({ error: \`Parent Name: ${NAME_INVALID_MESSAGE}\` }, { status: 400 })` immediately after the existing `!parent_name?.trim()` check.
+  - **`PUT /api/students/[id]`** (`app/api/students/[id]/route.ts`): both `name` and `parent_name` are optional fields on this route (partial `COALESCE` update), so each is checked only `if (typeof field === 'string' && field.trim() && !isValidName(field))` — a PUT that omits the field entirely, or that only touches other fields, is unaffected; a PUT that does include a malformed name/parent name for either field returns a 400 before any `UPDATE` runs.
+  - **`StudentsManagement.tsx`'s `validateSave()`** (the directory edit form) — see below; this is a genuine gap closure, not just a new check layered onto an existing one.
 - **Format-checked if present**: Student Email, Parent Email (basic regex). **Neither Student Phone nor Parent Phone has any format check at all in this grid** — despite the edit form in the directory screen enforcing one.
 - **In-batch duplicate check**: keyed by `grade|section|roll`, blocks submission if two pasted rows collide.
 - **Live per-row duplicate warning**: cross-checked against the school's existing active roll numbers (fetched once on load) *and* every other row already typed in the current batch — shown as inline red text under the Roll No cell, and disables the Enroll button entirely until resolved.
@@ -237,7 +253,19 @@ Two-pane layout: a roster list on the left (grouped by "Grade N – Section X"),
 **Removed this session — the Credentials tab and the profile-panel Reset Password button are both gone.** The old version of this document described a flat, searchable "Credentials" tab with an inline Reset button per student, and a "Reset Password" action in the profile detail panel. Both were verified removed: `StudentsManagement.tsx` no longer contains a `CredentialsPanel` component, a `handleResetPassword` function, a "Credentials" tab entry, or any reset-password UI at all. There is now **no manual credential-reset surface anywhere in the Students directory** — the rationale is that delivery is now considered reliable via the combination of email and WhatsApp (see [§6](#6-credentials--generation-delivery-and-recovery)), and self-service forgot-password (now fixed to also work for phone-only students, see [§3](#3-every-api-route-in-detail)) is the intended recovery path. The underlying `POST /api/students/[id]/reset-credentials` endpoint itself is untouched and still works — it's simply not wired to any button in this screen anymore.
 
 - **Duplicates tab**: "Scan for Duplicates" runs the cleanup-tool's GET route and renders each group with a green "KEEP" row (the oldest record) and red "DELETE" rows for the rest, tagged with the match reason. Checkboxes allow selecting individual groups or all of them; deleting routes through a confirmation modal that explicitly warns "Fee records will be reassigned to the kept record" before calling the hard-delete cleanup route.
-- **Profile tab** (in the detail panel): view/edit toggle over name, email, grade, section, phone, parent name/phone/email. Client-side validation here is **stricter than the onboarding grid** — both student and parent phone are format-checked with a regex; the onboarding grid checks neither.
+- **Profile tab** (in the detail panel): view/edit toggle over name, email, grade, section, phone, parent name/phone/email. Client-side validation here is **stricter than the onboarding grid** — both student and parent phone are format-checked with a regex; the onboarding grid checks neither. **`validateSave()` gained a `parentName` check this session** (`app/school-admin/components/StudentsManagement.tsx`):
+  ```ts
+  function validateSave(): string | null {
+    const name = (editForm.name ?? selected?.name ?? '').trim()
+    const parentName = (editForm.parent_name ?? selected?.parent_name ?? '').trim()
+    ...
+    if (!name) return 'Student name is required'
+    if (!isValidName(name)) return `Student Name: ${NAME_INVALID_MESSAGE}`
+    if (parentName && !isValidName(parentName)) return `Parent Name: ${NAME_INVALID_MESSAGE}`
+    ...
+  }
+  ```
+  The student `name` field was already required and is now also format-checked; `parentName` is checked **only if non-empty** (`parentName && !isValidName(...)`) — `parent_name` remains an optional field in this edit form, matching the column's nullable status, so leaving it blank on an edit is still accepted. See [§11](#11-known-quirks-and-gaps) for why this specific addition closes a real pre-existing gap, not just a new rule layered onto an already-validated field.
 - **Actions**: Edit Details, Remove Student (soft-delete, confirm dialog explicitly says "marked inactive and can be restored later"), Restore Student (only shown for inactive students). No Reset Password action remains (see above).
 - **Performance/360° tab**: attendance %, task submission rate, average score %, engagement, class rank, points, streak, badges, plus a read-only parent-info block.
 
@@ -427,6 +455,7 @@ Three different guard styles are used across student-onboarding-adjacent routes,
 - **Disabling the portal produces a generic, uninformative login failure.** A student/parent whose account is fully valid (correct password) but whose school currently has the portal flag off gets the exact same "Invalid email or password" message a wrong-password attempt would produce — no messaging anywhere hints that the real cause is an admin-side feature toggle, not their credentials.
 - **WhatsApp delivery is not actually live yet** — every WhatsApp send across onboarding, removal, forgot-password, and backfill is currently a scaffold: it logs an audit row with `status: 'queued'` and never reaches Meta's API. This is by design for this session (see [§7.2](#72-the-whatsapp-scaffold-what-queued-but-not-sent-means)) and not a bug, but worth flagging clearly since every place in this document that says "sends a WhatsApp message" currently means "queues one."
 - **No admin-UI surface remains for a routine, ad hoc credential reset** (see [§5](#5-school-admin-the-students-directory)) — the underlying endpoint (`POST /api/students/[id]/reset-credentials`) still works, but nothing in the Students directory calls it anymore. If self-service forgot-password or delivery (once WhatsApp goes live) ever fails for a given student, there is currently no in-app fallback button for an admin to use; they'd need to call the endpoint directly.
+- **`StudentsManagement.tsx`'s edit form never validated `parent_name` at all before this session** — a genuine pre-existing gap, closed this session as a side effect of adding shared name validation, not the primary goal of that work. Before this fix, an admin could save an edited student record with `parent_name` set to anything at all (digits, symbols, empty-after-trim-but-not-empty whitespace) through the Profile tab's Save, even though the same field was validated at onboarding time (`StudentOnboarding.tsx`'s grid) and server-side on bulk/single insert. `validateSave()` now checks it the same way the rest of this document's name-validation coverage does — see [§4](#4-school-admin-the-onboarding-screen).
 
 ---
 
@@ -446,4 +475,5 @@ Three different guard styles are used across student-onboarding-adjacent routes,
 | **Per-school override** | A `school_feature_overrides` row that takes precedence over the tier default for one specific school — the only way `student-portal`/`parent-portal` can be changed, since they were removed from the platform-admin global features matrix |
 | **WhatsApp scaffold** | The current state of `lib/whatsapp.ts` — every send logs a `whatsapp_messages` audit row with `status: 'queued'` and never reaches Meta's API; a real integration is a self-contained follow-up change inside that one file |
 | **Soft delete** | "Remove Student" — flips `status` to `inactive`, preserves every linked record untouched, and now fires removal notifications to the student and every linked parent |
+| **`isValidName()` / `NAME_INVALID_MESSAGE`** | `lib/nameValidation.ts` — the shared name-format validator (letters + Unicode combining marks + spaces/apostrophe/period/hyphen, 1–100 chars) applied identically to student, parent, and staff name fields, front-end and back-end. `\p{M}` (combining marks) is included alongside `\p{L}` (letters) so Indic-script names spelled with vowel-sign marks (Devanagari, Telugu, Tamil, ...) aren't rejected. Wired into the onboarding grid, `POST /api/students/bulk`, `POST /api/students`, `PUT /api/students/[id]`, and (new this session, closing a pre-existing gap) `StudentsManagement.tsx`'s `validateSave()` — see [§4](#4-school-admin-the-onboarding-screen) |
 | **Hard delete** | Only happens via duplicate cleanup — actually removes the row, cascading real destruction to any history not explicitly reassigned first |

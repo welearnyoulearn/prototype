@@ -160,10 +160,18 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
       )
     }
 
-    // Clear associated data
-    await pool.query('DELETE FROM class_timetable WHERE class_id = $1', [id])
-    await pool.query('DELETE FROM class_subjects WHERE class_id = $1', [id])
-    await pool.query('DELETE FROM substitute_assignments WHERE class_id = $1', [id])
+    // The class row itself is soft-deleted (deleted_at) so it can still show
+    // up in "Removed" and be restored — but until now the rows describing
+    // what that class actually taught (class_subjects, class_timetable,
+    // substitute_assignments) were hard-deleted right here regardless, so a
+    // restored class came back with no memory of its own subjects/timetable.
+    // Unlink instead, matching the same never-destroy-history pattern used
+    // for teacher removal: clear the live/actionable teacher assignments,
+    // keep every row.
+    await pool.query('UPDATE class_timetable SET teacher_id = NULL, is_manual = FALSE WHERE class_id = $1', [id])
+    await pool.query('UPDATE class_subjects SET teacher_id = NULL WHERE class_id = $1', [id])
+    await pool.query('UPDATE substitute_assignments SET original_teacher_id = NULL WHERE class_id = $1 AND original_teacher_id IS NOT NULL', [id])
+    await pool.query('UPDATE substitute_assignments SET substitute_teacher_id = NULL WHERE class_id = $1 AND substitute_teacher_id IS NOT NULL', [id])
 
     // Soft-delete: mark deleted_at instead of hard deleting so it appears in "Removed" list
     await pool.query('UPDATE classes SET deleted_at = NOW() WHERE id = $1', [id])

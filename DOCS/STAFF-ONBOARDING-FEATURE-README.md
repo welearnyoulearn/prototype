@@ -2,7 +2,7 @@
 
 > **Flowchart:** https://claude.ai/code/artifact/34c0571e-6efc-4e7d-8d02-89ea04adfb1b
 
-> Last verified against code: 2026-09-03
+> Last verified against code: 2026-09-03 (re-verified this session — CSV/paste-CSV removal, always-visible Excel Template button, Staff Type + Teaches Grades template dropdowns, shared name validation, and bidirectional teacher auto-assign)
 > Scope: every part of the codebase that touches staff (teacher) onboarding — database tables, API routes, and UI screens across School Admin and Teacher portals.
 
 This document explains staff onboarding **inch by inch**: what the `teachers` table stores, what every API route accepts and returns, what every screen looks like and does, and how the pieces connect into complete end-to-end workflows. Read it top to bottom once if you're new to this part of the codebase.
@@ -19,6 +19,7 @@ This document explains staff onboarding **inch by inch**: what the `teachers` ta
 6. [School Admin: the Staff/Teachers directory](#6-school-admin-the-staffteachers-directory)
 7. [Credentials — generation, delivery, and recovery](#7-credentials--generation-delivery-and-recovery)
 8. [Class assignment relationship — how staff onboarding connects to Class Management](#8-class-assignment-relationship--how-staff-onboarding-connects-to-class-management)
+   - [8a. Auto-assign on onboard/edit — the reverse direction (new this session)](#8a-auto-assign-on-onboardedit--the-reverse-direction-new-this-session)
 9. [Auth model — who can do what](#9-auth-model--who-can-do-what)
 10. [Teacher-side academic year selector (new this session)](#10-teacher-side-academic-year-selector-new-this-session)
 11. [End-to-end scenarios, step by step](#11-end-to-end-scenarios-step-by-step)
@@ -235,21 +236,63 @@ The file's own header comment lays out the exact steps to go live later: (1) add
 
 **Screen:** `app/school-admin/components/StaffOnboarding.tsx`
 
-### Modes
+### Intake paths — CSV/paste-CSV removed this session
 
-- **Manual grid** (default): a spreadsheet-like table (`data-testid="staff-row-*"` per field, per row), columns: Name, Email, Subject, Phone, Department, Qualification, Joining Date, Staff Type, Teaches Grades.
-- **CSV paste**: a textarea accepting `name,email,subject,phone,department,qualification,date_of_joining,staff_type,teaches_grades`. If a header row is detected and it looks like a **student** CSV instead (any of `roll_number`, `parent_name`, `parent_phone`, `parent_email` present as column headers), it's rejected with a warning rather than silently mis-imported — the mirror image of the same cross-CSV guard on the student side.
-- **Import File button**: accepts `.csv`, `.txt`, `.xlsx`. Unlike the student onboarding screen (which reads every file type via `FileReader.readAsText()`, so a real binary `.xlsx` mis-parses), the staff screen **branches on the extension** — a `.xlsx` file is sent to a real server-side parsing route, `POST /api/teachers/parse-import`, via `FormData`; only non-`.xlsx` files fall through to the client-side `FileReader.readAsText()` + CSV-paste-parser path. This is a genuine difference from the student flow, which has no equivalent server-side Excel-reading route at all.
-- **Excel template with an in-cell Subject dropdown**: `downloadExcelTemplate()` hits `GET /api/teachers/template?school_id=...`, which (per `app/api/teachers/template/route.ts`) generates a real `.xlsx` via ExcelJS with a genuine Excel data-validation dropdown on the Subject column, limited to the school's subscribed subjects — the plain-CSV template can't carry a dropdown at all, so this is offered as a second, richer template option specifically to reduce subject-name typos. Only shown if `subscribedSubjectNames.length > 0`.
+**The `mode` (manual/CSV) toggle is gone entirely.** The manual grid now always renders — there is no branch that swaps it for a textarea. Only **two** ways to get rows into the grid remain:
+
+- **Manual grid** (the only "mode" now): a spreadsheet-like table (`data-testid="staff-row-*"` per field, per row), columns: Name, Email, Subject, Phone, Department, Qualification, Joining Date, Staff Type, Teaches Grades.
+- **Import Excel File**: the toolbar button is now labeled **"Import Excel File"** (was "Import File"), and the underlying `<input type="file">` has `accept=".xlsx"` — confirmed in the current source (`data-testid="staff-import-file-input"`, `accept=".xlsx"`). There is no more extension-branching logic: `handleFileImport()` calls `parseExcelFile()` unconditionally on whatever file is selected, and `parseExcelFile()` always POSTs to `POST /api/teachers/parse-import` via `FormData`, regardless of the file's actual extension. The old CSV-paste textarea, the client-side `FileReader.readAsText()` fallback path, and the "looks like a student CSV, rejected" cross-CSV guard described in a prior version of this document **no longer exist in this component** — there is no code path left that reads a file as plain text or parses a pasted CSV blob.
+  - **Correction to a claim made about this change**: `POST /api/teachers/parse-import` (`app/api/teachers/parse-import/route.ts`) is unchanged and still does genuine server-side `.xlsx` parsing via ExcelJS (`wb.xlsx.load(buf)`, reading real worksheet cells) — it was never a plain-text CSV reader, so there was no "old server route" behavior to reconcile with the removal of CSV/paste-CSV; the route simply lost its `.csv`/`.txt` alternative path on the client side that used to bypass it entirely. If a non-`.xlsx` file is somehow still selected (the file picker's `accept` is an OS-level hint, not a hard block), `ExcelJS.Workbook.xlsx.load()` will throw and the route returns its existing generic 500 `{ error: 'Failed to parse the uploaded file' }` — there's no separate "wrong file type" message.
+- **Excel Template button is now always visible.** `downloadExcelTemplate()` and the "Excel Template" button (`data-testid="staff-download-excel-template"`) are no longer gated behind `subscribedSubjectNames.length > 0` — the gate was removed from the JSX; the button renders unconditionally in the header toolbar next to "Import Excel File". The template itself still adapts its Subject dropdown source based on whether the school has subscribed subjects (see below), so the button being always-visible doesn't imply the template's content is unconditional — only the button's *visibility* changed.
+
+### The Excel template — three in-cell dropdowns
+
+`GET /api/teachers/template?school_id=...` (`app/api/teachers/template/route.ts`) generates a real `.xlsx` via ExcelJS with **three** genuine Excel data-validation dropdowns, up from one:
+
+| Column | Field | Dropdown source | `allowBlank` | `showErrorMessage` |
+|---|---|---|---|---|
+| C | Subject | `_subjects` hidden sheet (`state: 'veryHidden'`) — the school's subscribed subjects if any exist, else the full `master_subjects` catalog | `true` | `true` |
+| H | Staff Type | inline list formula `'"teaching,non_teaching"'` — no reference sheet needed, only two fixed values | `false` | `true` |
+| I | Teaches Grades | `_grades` hidden sheet (`state: 'veryHidden'`), populated `A1:A10` with the strings `'1'` through `'10'` (`Array.from({length:10}, (_,i) => String(i+1))`) | `true` | **`false`** |
+
+- **Staff Type (column H)** is new this session — `allowBlank: false` (every row must pick one), backed by an inline comma-list formula rather than a reference sheet, since there are only two fixed values.
+- **Teaches Grades (column I)** is also new this session — backed by the new `_grades` veryHidden worksheet. `showErrorMessage` is deliberately `false` here (the only one of the three dropdowns with this set false): Excel's single-value list validation would otherwise reject legitimate free-typed multi-grade input like `8,9,10`, since a list-type validation only truly constrains to one value from the list per cell — the dropdown exists to make picking *one* grade easy and typo-proof, while a comma-separated combination still has to be typed by hand and must not be blocked.
+- **The note row's text was rewritten** to document all three conventions in one sentence: *"★ Yellow columns are MANDATORY. {Subject note}. Non-teaching staff can leave Subject blank. Staff Type: pick teaching or non_teaching from the dropdown. Teaches Grades: for one grade, use the dropdown — for several, type them comma-separated with no spaces, e.g. 8,9,10 (leave blank to teach all grades)."*
+- The two-example-row content changed to match: row 1 (`Priya Sharma`) now has `staff_type: 'teaching'` and `teaches_grades: '8,9,10'`; row 2 (`Suresh Patel`) has `staff_type: 'non_teaching'` and blank grades.
 
 ### Grid columns and validation (client-side, `rowErrors()`)
 
 - **Required**: Name, Email (**"Email required — login credentials will be sent here"**), Phone.
+- **Name is now also validated as a real name**, not just non-empty — see [§5a](#5a-name-validation-new-this-session) below.
 - **Format-checked**: Email (`EMAIL_RE`), Phone (`PHONE_RE` — 7–15 digits, optional leading `+`).
 - **Subject required only for teaching staff** (`staff_type === 'teaching'`) — non-teaching rows can leave it blank.
 - Note the UI's own required-field list is **stricter than the server**: the client marks Email required, but the server (`POST /api/teachers/bulk`) only actually requires `name` and `phone` — email is genuinely optional server-side. A row submitted with no email via a route other than this UI (or via a UI bug/future change) is fully accepted by the API; the client-side requirement is a UX guardrail steering admins toward always giving new staff a working login, not a server-enforced rule.
 - **Subject dropdown**: sourced the same way as `TeachersManagement.tsx`'s edit form — `GET /api/school/subjects?school_id=` first (the school's own subscribed-subject catalog from the Syllabus Customizer), falling back to `GET /api/platform/subjects` (the full platform master catalog) if the school has none. An "Other (type manually)…" option switches that row into free-text mode, tracked per-row in a `subjectInputMode` state object that's re-indexed on row deletion so a later row's manual/dropdown choice doesn't silently reattach to the wrong row after a delete.
 - **Teaches Grades**: an inline multi-select grade picker (`InlineGrades`), shown only for teaching staff; leaving it blank is explicitly flagged with an amber "No grades = teaches all" warning once a name has been typed for that row.
+
+### 5a. Name validation (new this session)
+
+A shared module, `lib/nameValidation.ts`, exports `isValidName(value)` and `NAME_INVALID_MESSAGE`:
+
+```ts
+const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M}\s.'-]*$/u
+export function isValidName(value: string): boolean {
+  const v = value.trim()
+  if (!v) return false
+  if (v.length > 100) return false
+  return NAME_RE.test(v)
+}
+export const NAME_INVALID_MESSAGE = 'Only letters, spaces, and \' . - are allowed — no numbers or symbols'
+```
+
+The regex requires the value to start with a letter-or-mark, then allow any run of letters, marks, whitespace, apostrophe, period, or hyphen — rejecting digits and any other symbol. `\p{M}` (Unicode "Mark" category — combining diacritics/vowel signs) is included alongside `\p{L}` (letters) specifically because Indic scripts (Devanagari, Telugu, Tamil, and others) spell most names using vowel signs/matras that Unicode classifies as marks, not letters in their own right — e.g. the Telugu name सुनीता is composed of स + ु (a combining mark) + न + ी (a combining mark) + त + ा (a combining mark). A regex using `\p{L}` alone, without `\p{M}`, would silently reject nearly every real name written in those scripts, since the mark codepoints wouldn't match `\p{L}` even though they're an inseparable part of how the name is spelled.
+
+**This validator is shared verbatim across staff, student, and parent name fields, front-end and back-end** — one module, one rule, applied at every layer so a value that passes the client can never be rejected by the API with a different rule, and vice versa. For staff specifically, it's wired into three places (verified in the current source):
+
+- **`StaffOnboarding.tsx`'s `rowErrors(row)`**: `if (!row.name.trim()) errs.push('Name required'); else if (!isValidName(row.name)) errs.push(\`Name: ${NAME_INVALID_MESSAGE}\`)` — an invalid (but non-empty) name produces its own distinct error message rather than being lumped in with "Name required."
+- **`StaffOnboarding.tsx`'s `cellCls(row, field)`**: the Name cell renders with the red-bordered/red-background error style (`inputErrCls`) if `!row.name.trim() || !isValidName(row.name)` — a name that fails the pattern is visually flagged the same way an empty one is, once `showErrors` is true (i.e., after a submit attempt).
+- **`app/api/teachers/bulk/route.ts`**: per-row, immediately after the existing `!t.name?.trim()` required check and before the phone check — `if (!isValidName(t.name)) { errors.push({ row: i + 1, message: \`${t.name.trim()}: ${NAME_INVALID_MESSAGE}\` }); continue }`. This runs before format validation of email/phone, so an invalid name short-circuits the row before any other check.
+- **`app/api/teachers/[id]/route.ts` PUT handler**: `if (typeof name === 'string' && name.trim() && !isValidName(name)) return NextResponse.json({ error: \`Name: ${NAME_INVALID_MESSAGE}\` }, { status: 400 })` — only checked if a non-empty `name` is actually present in the request body (an edit that doesn't touch `name` at all is unaffected), and rejects the whole PUT with a 400 rather than silently dropping just the name field.
 
 ### The real submit
 
@@ -323,6 +366,50 @@ No main-tab switcher anymore — the roster view described below renders directl
 The real source of truth for "who teaches what, in which class" is the `class_subjects` table (`class_id`, `subject_name`, `teacher_id`), populated and edited exclusively through **Class Management** — a separate screen from both Staff Onboarding and the Staff Directory. When a class/subject row is created there without an explicit `teacher_id`, `matchTeacher()` (`lib/matchTeacher.ts`) runs a three-level fallback match against the school's teacher list purely by comparing `subject_name` strings: (1) exact case-insensitive match against a teacher's `teachers.subject`, (2) partial containment either direction (e.g. "Maths" matches a teacher whose `subject` is "Mathematics"), (3) shared significant words split on `[\s/,&]+` (e.g. "Social Studies" matches "Social Science" via the shared word "social"). This is the only place `teachers.subject` feeds back into actual class-level teaching assignments — and even then, only as an automatic best-effort fallback when Class Management is given no explicit teacher_id; an explicit assignment there always wins outright.
 
 `class_subjects`'s per-class subject names are otherwise entirely free text, entered directly in Class Management, and are **never synced back** to `teachers.subject`. TeachersManagement's onboarding-level Subject dropdown edit only ever writes to `teachers.subject` — it has no code path that touches `class_subjects` at all. This split is a deliberate product decision, restated verbatim in a code comment in `TeachersManagement.tsx`: the onboarding-level "primary subject" is dropdown-editable and drawn from a controlled catalog (the school's subscribed subjects, or the platform master list as fallback) specifically to avoid typo drift, while Class Management's per-class subject assignments remain free-text and independent, so a teacher legitimately covering an unusual or one-off subject in one class doesn't force their whole onboarding-level identity to match it.
+
+### 8a. Auto-assign on onboard/edit — the reverse direction (new this session)
+
+[§8](#8-class-assignment-relationship--how-staff-onboarding-connects-to-class-management) above describes `matchTeacher()` — subject→teacher matching, run when Class Management creates a `class_subjects` row with no explicit teacher. This session added the mirror-image direction, teacher→subjects, so a `class_subjects` row left unfilled at creation time (because no teacher existed for that subject yet) gets picked up automatically the moment a matching teacher is later onboarded or edited, rather than sitting unfilled until an admin notices.
+
+**`findAutoAssignableSubjects()`** (`lib/matchTeacher.ts`), alongside a private `subjectMatchesTeacher()` helper and a private `gradeInRange()` helper:
+
+```ts
+function subjectMatchesTeacher(subjectName: string, teacherSubject: string): boolean {
+  const sn = subjectName.trim().toLowerCase()
+  const ts = teacherSubject.trim().toLowerCase()
+  if (sn === ts) return true
+  if (ts.includes(sn) || sn.includes(ts)) return true
+  const snWords = sn.split(/[\s/,&]+/).filter(w => w.length > 2)
+  const tWords = ts.split(/[\s/,&]+/)
+  return snWords.some(sw => tWords.some(tw => tw.includes(sw) || sw.includes(tw)))
+}
+
+function gradeInRange(teachesGrades: string | null, grade: string): boolean {
+  if (!teachesGrades || !teachesGrades.trim()) return true
+  return teachesGrades.split(',').map(g => g.trim().toUpperCase()).includes(grade.trim().toUpperCase())
+}
+
+export function findAutoAssignableSubjects(
+  teacher: { subject: string | null; teaches_grades: string | null },
+  unfilledSubjects: ClassSubjectRow[]
+): ClassSubjectRow[] {
+  if (!teacher.subject?.trim()) return []
+  return unfilledSubjects.filter(s =>
+    gradeInRange(teacher.teaches_grades, s.grade) &&
+    subjectMatchesTeacher(s.subject_name, teacher.subject as string)
+  )
+}
+```
+
+`subjectMatchesTeacher()` runs the exact same 3-level fallback logic as `matchTeacher()`'s per-candidate check (exact case-insensitive match → partial containment either direction → shared significant word split on `[\s/,&]+`, words `> 2` chars only) — just phrased as "does this one subject match this one teacher" instead of "find the best teacher for this subject among many." The additional filter `matchTeacher()` doesn't have: **grade eligibility** — a match is only returned if `gradeInRange(teacher.teaches_grades, s.grade)` is true, so a teacher restricted to grades 6–8 will never be auto-assigned to a matching Grade 9 subject, even if the subject-name match is exact. An unrestricted teacher (`teaches_grades` empty/null) matches every grade.
+
+**Wired into `POST /api/teachers/bulk`** (staff onboarding): after each successful teaching-staff insert where `teacher.subject` is set, the route queries every `class_subjects` row at the school with `teacher_id IS NULL` (joined to `classes` for `grade`, filtered to `deleted_at IS NULL`), runs them through `findAutoAssignableSubjects()`, and for each match `UPDATE`s `class_subjects.teacher_id`. It then also conditionally fills the matching `class_timetable` slot for that subject — but only if doing so wouldn't double-book the teacher at the same day/period in a different class already (`NOT EXISTS` subquery checking `other.teacher_id = $1` at the same `day_of_week`/`period_number`, excluding break rows) — the same conflict-safe propagation `POST /api/classes/[id]/subjects` already uses when a subject is manually assigned a teacher. Relevant response caches (`subjects:class:{id}`, `timetable:class:{id}`, and `health:{school_id}` if anything matched) are invalidated per affected class.
+
+**Wired into `PUT /api/teachers/[id]`** (staff edit): the same scan-and-assign logic runs again, but only if the PUT request actually changed `subject` and/or `teaches_grades` relative to the row's prior values (`subjectChanged`/`teachesGradesChanged`, computed by comparing the trimmed new value against the existing one) — an edit that leaves both fields untouched never re-triggers the scan. It's further gated on the teacher's post-update `status === 'active'` and `staff_type === 'teaching'` and a non-empty `subject` — a deactivated, non-teaching, or subject-less teacher is never scanned.
+
+**An explicit assignment made directly in Class Management always wins outright** — auto-assign only ever touches rows where `teacher_id IS NULL`; there is no code path anywhere that overwrites a manually-set `teacher_id` with an auto-match.
+
+This was **live-verified this session via curl**: onboarding a "Telugu Teacher" with `teaches_grades: "6,7,8"` against seeded unassigned Telugu `class_subjects` rows in grades 6, 7, 8, and 9 confirmed grades 6–8 auto-assigned correctly and grade 9 stayed unassigned (correctly excluded by the `gradeInRange` check). Widening `teaches_grades` to include 9 via a follow-up `PUT` then retroactively picked up grade 9's previously-unfilled subject, confirming the `teachesGradesChanged` trigger on the PUT route works as designed.
 
 ---
 
@@ -451,7 +538,9 @@ When `readOnly` is true:
 - **An onboarding row with no email produces zero credential delivery on any channel**, not a "WhatsApp-only" fallback — because `tempPassword` itself is only generated when `email` is present, the WhatsApp send (gated on `tempPassword && email`, and further on `normPhone`) never fires for an email-less row either, even though phone is guaranteed present (it's mandatory). Anyone assuming a phone-only teacher at least gets their credentials over WhatsApp at onboarding time would be wrong — no credentials exist yet to send at all until a later, separate admin-triggered reset.
 - **The reactivation-vs-routine-edit precedence rule is genuinely easy to miss when reading the PUT route quickly**: `emailChanged`/`phoneChanged` are computed as `!becomingActive && ...`, so a single request that both reactivates a teacher *and* changes their email/phone silently skips the routine-edit notification entirely (no `sendStaffContactChangedEmail`, no `contact_info_changed` WhatsApp) even though the new contact value is still saved. Only the reactivation email/WhatsApp fires. This is very likely intentional (the reactivation message already communicates "your login details are new"), but it's not documented anywhere in the code beyond the boolean expression itself, and a future maintainer adding a new field-changed notification elsewhere in this route should be aware this precedence pattern exists.
 - **No pre-submit duplicate-preview endpoint exists for staff**, unlike the student feature's `check-duplicates` dry-run route and modal. A staff duplicate is only discovered at the moment of the real bulk-insert submission, surfaced as a per-row `errors[]` entry rather than a separate "N would be skipped" preview screen.
-- **The Excel import path for staff genuinely works** (via `POST /api/teachers/parse-import`), unlike the student feature's `.xlsx` import which silently mis-parses because it's read client-side as plain text regardless of extension. This is a real, positive divergence worth knowing about if debugging an import issue — check the extension-branching logic in `StaffOnboarding.tsx`'s `handleFileImport()` before assuming the same bug applies here.
+- **The Excel import path for staff genuinely works** (via `POST /api/teachers/parse-import`, real server-side ExcelJS parsing), unlike the student feature's `.xlsx` import which silently mis-parses because it's read client-side as plain text regardless of extension. This divergence is **still accurate after this session's changes** — if anything it's now simpler to reason about, since staff onboarding no longer has an extension-branching decision at all: `.xlsx` is the *only* file type the picker accepts (`accept=".xlsx"`) and the *only* path `handleFileImport()` calls (unconditionally, straight to `parseExcelFile()` → `POST /api/teachers/parse-import`). There is no more CSV/`.txt` client-side-parsed fallback to branch away from. Worth knowing about if debugging an import issue: staff `.xlsx` uploads are parsed server-side and should reflect real cell values; a staff CSV/paste import bug report should be treated with suspicion, since that intake path no longer exists in the UI at all.
+- **CSV paste and CSV/`.txt` file import are gone from staff onboarding** — a genuine, deliberate feature reduction this session, not a regression: the only two ways to onboard staff now are the manual grid and a `.xlsx` upload. Anyone maintaining muscle memory for pasting a CSV blob into this screen, or automation that used to construct a `.csv`/`.txt` file for the old import button, needs to switch to either typing rows manually or generating a real `.xlsx` (the downloadable Excel Template, or any spreadsheet tool's own `.xlsx` export).
+- **The Excel Template button no longer depends on the school having subscribed subjects.** Previously hidden until `subscribedSubjectNames.length > 0`, it's now always present — a school with zero subscribed subjects still gets a template, just one whose Subject column dropdown is sourced from the full platform master catalog (`master_subjects`) instead of a school-specific list. This mirrors the on-screen Subject dropdown's own existing fallback behavior, just extended to gate the template button's visibility too.
 
 ---
 
@@ -462,6 +551,8 @@ When `readOnly` is true:
 | **`employee_id`** | Server-generated staff ID, format `wlyl-tea-{school-slug}-{5-digit-random}` — unique per school (not globally) via `idx_teachers_school_employee_id_unique`, with a 5-attempt collision-retry loop on insert |
 | **`teachers.subject`** vs **`class_subjects`** | `teachers.subject` is the single onboarding-level "primary subject," dropdown-editable from a controlled catalog. `class_subjects` is the real per-class teaching-assignment table, set via Class Management, free-text, and never synced from/to `teachers.subject` |
 | **`matchTeacher()`** | `lib/matchTeacher.ts` — a 3-level fallback subject-name matcher (exact → partial containment → shared significant word) used only when Class Management creates a class/subject row with no explicit `teacher_id`; an explicit assignment always overrides it |
+| **`findAutoAssignableSubjects()`** | `lib/matchTeacher.ts` — the reverse direction of `matchTeacher()`: given one newly-onboarded/edited teacher, finds every unfilled `class_subjects` row at their school whose subject name fuzzy-matches (same 3-level rule) and whose grade falls within the teacher's `teaches_grades`. Wired into both `POST /api/teachers/bulk` and `PUT /api/teachers/[id]` — see [§8a](#8a-auto-assign-on-onboardedit--the-reverse-direction-new-this-session) |
+| **`isValidName()` / `NAME_INVALID_MESSAGE`** | `lib/nameValidation.ts` — the shared name-format validator (letters + Unicode combining marks + spaces/apostrophe/period/hyphen, 1–100 chars) used identically across staff, student, and parent name fields, client and server. `\p{M}` is included alongside `\p{L}` so Indic-script names spelled with vowel-sign marks (Devanagari, Telugu, Tamil, ...) aren't rejected — see [§5a](#5a-name-validation-new-this-session) |
 | **Reactivation** | `status` transitioning to `'active'` from either `'inactive'` or `'removed'` (`becomingActive`) — issues a brand-new 10-char temp password, sends `staff_reactivated` notifications, clears `removed_at`, but does **not** restore any previously-unlinked class/subject assignments |
 | **The lighter inactive↔active pause** | `status` toggling to `'inactive'` (`becomingInactive`) — unlinks class/subject/timetable assignments the same as full removal, but issues no new password and sends no notification by itself; reversible via the same Reactivate action, which also restores login |
 | **`becomingActive` / `becomingInactive`** | The two booleans computed at the top of the PUT handler, comparing the requested `status` against the row's existing `status` before any update runs — they gate which of the three PUT behaviors (routine edit / reactivation / becoming-inactive) actually executes |
