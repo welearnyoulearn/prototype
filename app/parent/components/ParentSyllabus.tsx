@@ -7,9 +7,9 @@
 // scores are NOT wired to real data: see the TODO below the topic row.
 
 import { useEffect, useState } from 'react'
-import { CheckCircle2 } from 'lucide-react'
-import { INK, GREEN, CORAL } from '@/app/components/ulearn/theme'
-import { Pills, ProgressBar, UlearnCard } from '@/app/components/ulearn/primitives'
+import { CheckCircle2, Lock } from 'lucide-react'
+import { INK, GREEN, CORAL, SURFACE, BORDER } from '@/app/components/ulearn/theme'
+import { Pills, ProgressBar, UlearnCard, StatusPill } from '@/app/components/ulearn/primitives'
 
 type Topic = {
   id: number
@@ -23,6 +23,8 @@ type Topic = {
 type Chapter = {
   chapter_name: string
   chapter_order: number
+  // Per-class semester grouping from the teacher's own Setup screen.
+  class_semester_label?: string | null
   total: number
   covered: number
   topics: Topic[]
@@ -34,6 +36,9 @@ type Subject = {
   covered: number
   completion_pct: number
   chapters: Chapter[]
+  setup_completed_at?: string | null
+  semester_mode?: boolean
+  semester_count?: number | null
 }
 
 type Props = {
@@ -48,6 +53,7 @@ export default function ParentSyllabus({ schoolId, classId, studentName, grade, 
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [loading, setLoading] = useState(true)
   const [activeSubject, setActiveSubject] = useState('')
+  const [activeClassSemester, setActiveClassSemester] = useState('')
 
   useEffect(() => {
     setLoading(true)
@@ -84,10 +90,24 @@ export default function ParentSyllabus({ schoolId, classId, studentName, grade, 
   }
 
   const subj = subjects.find(s => s.subject === activeSubject) ?? subjects[0]
-  const taughtChapters = subj.chapters
-    .map(ch => ({ ...ch, topics: ch.topics.filter(t => t.status === 'covered') }))
-    .filter(ch => ch.topics.length > 0)
-    .sort((a, b) => a.chapter_order - b.chapter_order)
+
+  // This class's own Semester 1/2/... tabs — from the teacher's Setup
+  // screen, only shown when Setup actually ran in Semester Wise mode.
+  const classSemesterChoices = subj.semester_mode && subj.semester_count
+    ? Array.from({ length: subj.semester_count }, (_, i) => `Semester ${i + 1}`)
+    : []
+  const effectiveClassSemester = classSemesterChoices.includes(activeClassSemester)
+    ? activeClassSemester
+    : (classSemesterChoices[0] || '')
+  const chaptersForSemester = classSemesterChoices.length > 0
+    ? subj.chapters.filter(ch => ch.class_semester_label === effectiveClassSemester)
+    : subj.chapters
+
+  // Full syllabus, not just what's been taught — every active chapter/topic
+  // the teacher's Setup kept, same as the student view. Each topic row below
+  // distinguishes taught (checkmark) from not-yet-taught (locked, name-only)
+  // rather than hiding untaught content entirely.
+  const allChapters = [...chaptersForSemester].sort((a, b) => a.chapter_order - b.chapter_order)
 
   return (
     <div className="max-w-2xl space-y-4" data-testid="parent-syllabus">
@@ -105,6 +125,15 @@ export default function ParentSyllabus({ schoolId, classId, studentName, grade, 
         color={CORAL}
       />
 
+      {classSemesterChoices.length > 0 && (
+        <Pills
+          items={classSemesterChoices}
+          value={effectiveClassSemester}
+          onChange={setActiveClassSemester}
+          color={CORAL}
+        />
+      )}
+
       <UlearnCard className="p-4 flex items-center gap-4">
         <div className="flex-1">
           <div className="text-sm font-medium mb-1.5" style={{ color: INK }}>
@@ -112,13 +141,12 @@ export default function ParentSyllabus({ schoolId, classId, studentName, grade, 
           </div>
           <ProgressBar pct={subj.completion_pct} color={CORAL} className="w-full" />
         </div>
-        <div className="text-right shrink-0">
-          {/* TODO(parent-syllabus): no API persists a real per-child average quiz
-              score today, so this is left blank rather than fabricated — see the
-              per-topic note below for what's missing. */}
-          <div className="text-2xl font-semibold" style={{ color: INK }}>—</div>
-          <div className="text-xs text-gray-400">avg score /10</div>
-        </div>
+        {/* FUTURE: "avg score /10" quiz-average card — hidden, matching the
+            removal of the interactive quiz itself in TopicContentViewer.tsx.
+            No API has ever persisted a real per-child quiz score, so this
+            was always a fabricated "—" placeholder, not real data. Bring
+            back once quiz attempts are actually persisted (see the note in
+            TopicContentViewer.tsx for what that needs). */}
       </UlearnCard>
 
       {subj.covered === 0 && (
@@ -127,34 +155,51 @@ export default function ParentSyllabus({ schoolId, classId, studentName, grade, 
         </UlearnCard>
       )}
 
-      {taughtChapters.map(ch => (
-        <UlearnCard key={ch.chapter_name} className="p-4">
-          <div className="font-medium text-sm mb-2" style={{ color: INK }}>{ch.chapter_name}</div>
+      {allChapters.map(ch => (
+        <UlearnCard key={ch.chapter_name} className="p-4" borderColor={BORDER}>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="font-medium text-sm" style={{ color: INK }}>{ch.chapter_name}</span>
+            <span className="text-xs text-gray-400 ml-auto">{ch.covered}/{ch.topics.length} taught</span>
+          </div>
           <div className="space-y-2">
-            {ch.topics.map(t => (
-              <div key={t.id} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: '#FAFAF8' }}>
-                <CheckCircle2 size={14} style={{ color: GREEN }} className="shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm truncate" style={{ color: INK }}>{t.topic_name}</p>
-                  {t.covered_date && (
-                    <p className="text-[10px] text-gray-400 mt-0.5">
-                      Taught {new Date(t.covered_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-                      {t.covered_by_name && ` · ${t.covered_by_name}`}
-                    </p>
-                  )}
+            {ch.topics.length === 0 && (
+              <p className="text-xs text-gray-400 italic">No topics added to this chapter yet.</p>
+            )}
+            {ch.topics.map(t => {
+              const taught = t.status === 'covered'
+              if (!taught) {
+                // Not-yet-taught topics stay visible so a parent can see the
+                // road ahead, same treatment as the student view's locked rows.
+                return (
+                  <div key={t.id} className="flex items-center gap-3 rounded-lg px-3 py-2 flex-wrap" style={{ background: SURFACE, opacity: 0.7 }}>
+                    <Lock size={14} className="shrink-0" style={{ color: '#9b978d' }} />
+                    <span className="text-sm flex-1 min-w-[140px]" style={{ color: '#5F5E5A' }}>{t.topic_name}</span>
+                    <StatusPill status="locked" />
+                  </div>
+                )
+              }
+              return (
+                <div key={t.id} className="flex items-center gap-3 rounded-lg px-3 py-2 flex-wrap" style={{ background: SURFACE }}>
+                  <CheckCircle2 size={14} style={{ color: GREEN }} className="shrink-0" />
+                  <div className="flex-1 min-w-[140px]">
+                    <p className="text-sm truncate" style={{ color: INK }}>{t.topic_name}</p>
+                    {t.covered_date && (
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        Taught {new Date(t.covered_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                        {t.covered_by_name && ` · ${t.covered_by_name}`}
+                      </p>
+                    )}
+                  </div>
+                  <StatusPill status="taught" />
+                  {/* FUTURE: per-topic quiz-score pill — hidden, matching the
+                      removal of the interactive quiz itself in
+                      TopicContentViewer.tsx. This was always a static label,
+                      never real data (no quiz result has ever been persisted
+                      anywhere). Bring back once a real per-topic score exists
+                      to read (e.g. a quiz_attempts table + an API route). */}
                 </div>
-                {/* TODO(parent-syllabus): real per-topic quiz scores aren't wired
-                    up because they don't exist yet anywhere in the backend. The
-                    in-topic quiz in app/components/TopicContentViewer.tsx
-                    (handleSubmitQuiz) grades entirely client-side and never POSTs
-                    a result, so there is no student-scoped "score for this topic"
-                    to read. Once a persistence endpoint exists (e.g. a
-                    student_topic_quiz_attempts table + /api/parent/topic-scores),
-                    swap this static pill for the real score, matching the
-                    prototype's `p.quizScore != null ? "{score}/10" : "not attempted"`. */}
-                <span className="text-xs text-gray-400 shrink-0">not attempted</span>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </UlearnCard>
       ))}

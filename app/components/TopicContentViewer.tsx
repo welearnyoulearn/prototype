@@ -33,52 +33,10 @@ type Props = {
 }
 
 export default function TopicContentViewer({ topic, onClose, role }: Props) {
-  const [activeTab, setActiveTab] = useState<'study_guide' | 'textbook' | 'media' | 'quiz'>('study_guide')
-
-  // Parse questions safely
-  let parsedQuestions: Question[] = []
-  if (topic.questions) {
-    if (typeof topic.questions === 'string') {
-      try {
-        parsedQuestions = JSON.parse(topic.questions)
-      } catch (e) {
-        console.error('Failed to parse questions JSON string', e)
-      }
-    } else if (Array.isArray(topic.questions)) {
-      parsedQuestions = topic.questions
-    }
-  }
+  const [activeTab, setActiveTab] = useState<'study_guide' | 'textbook' | 'media'>('study_guide')
 
   // Parse resources
   const resources: Resource[] = Array.isArray(topic.resources) ? topic.resources : []
-
-  // Quiz States
-  const [selectedAnswers, setSelectedAnswers] = useState<Record<number, number>>({}) // questionIndex -> optionIndex
-  const [submitted, setSubmitted] = useState(false)
-  const [score, setScore] = useState(0)
-
-  const handleSelectOption = (qIdx: number, oIdx: number) => {
-    if (submitted) return
-    setSelectedAnswers(prev => ({ ...prev, [qIdx]: oIdx }))
-  }
-
-  const handleSubmitQuiz = () => {
-    if (submitted) return
-    let correctCount = 0
-    parsedQuestions.forEach((q, idx) => {
-      if (selectedAnswers[idx] === q.answer) {
-        correctCount++
-      }
-    })
-    setScore(correctCount)
-    setSubmitted(true)
-  }
-
-  const handleResetQuiz = () => {
-    setSelectedAnswers({})
-    setSubmitted(false)
-    setScore(0)
-  }
 
   // A helper function to parse simple markdown safely and render it beautifully
   const renderContentText = (text: string) => {
@@ -317,23 +275,18 @@ export default function TopicContentViewer({ topic, onClose, role }: Props) {
           >
             🔗 Media & Attachments
           </button>
-          <button
-            onClick={() => setActiveTab('quiz')}
-            className={`px-4 py-2.5 rounded-xl font-semibold text-sm transition-all flex items-center gap-2 whitespace-nowrap ${
-              activeTab === 'quiz'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-800'
-            }`}
-          >
-            ❓ Assessment Questions
-            {parsedQuestions.length > 0 && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ml-1 ${
-                activeTab === 'quiz' ? 'bg-indigo-700 text-indigo-100' : 'bg-slate-200 text-slate-700'
-              }`}>
-                {parsedQuestions.length}
-              </span>
-            )}
-          </button>
+          {/* FUTURE: Quiz / Assessment Questions tab — removed for now (was
+              here, rendering topic.questions as an interactive MCQ practice
+              quiz). Grading was entirely client-side and never persisted
+              anywhere — no score was ever written to the database, so a
+              student's result vanished the moment this modal closed, and
+              ParentSyllabus's "avg score" / "not attempted" fields are
+              permanently static placeholders with nothing behind them.
+              Bringing this back for real needs a persistence story (a
+              quiz_attempts-style table, an API route, and ParentSyllabus
+              reading from it) before it's shown to users again — not just
+              re-adding the tab. topic.questions itself is untouched; only
+              the UI that rendered it as a quiz was removed. */}
         </div>
 
         {/* Tab Body */}
@@ -463,138 +416,6 @@ export default function TopicContentViewer({ topic, onClose, role }: Props) {
                   <h3 className="font-bold text-slate-700 text-sm">No additional media resources</h3>
                   <p className="text-slate-400 text-xs mt-1 max-w-sm mx-auto">
                     There are no dynamic video explanations, external links, or supplementary slides attached to this topic.
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* TAB 4: PRACTICE QUIZ */}
-          {activeTab === 'quiz' && (
-            <div className="max-w-2xl mx-auto space-y-6">
-              {parsedQuestions.length > 0 ? (
-                <>
-                  {/* Status Banner */}
-                  {submitted ? (
-                    <div className="bg-emerald-50 rounded-2xl p-5 border border-emerald-100 flex items-center gap-4">
-                      <div className="text-3xl">🏆</div>
-                      <div className="flex-1">
-                        <h4 className="font-bold text-emerald-800 text-sm">Quiz Submitted!</h4>
-                        <p className="text-emerald-600 text-xs mt-1">
-                          You scored <span className="font-extrabold text-sm">{score}</span> out of <span className="font-extrabold text-sm">{parsedQuestions.length}</span> (
-                          {Math.round((score / parsedQuestions.length) * 100)}%)
-                        </p>
-                      </div>
-                      <button
-                        onClick={handleResetQuiz}
-                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all"
-                      >
-                        Try Again
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 flex items-center gap-4">
-                      <div className="text-3xl">🎯</div>
-                      <div>
-                        <h4 className="font-bold text-slate-800 text-sm">Interactive Practice Quiz</h4>
-                        <p className="text-slate-500 text-xs mt-1">
-                          Select the correct answers for each multiple-choice question. Press &quot;Submit Answers&quot; when you are finished!
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* MCQ List */}
-                  <div className="space-y-6">
-                    {parsedQuestions.map((q, qIdx) => {
-                      const selectedOption = selectedAnswers[qIdx]
-                      const isCorrect = selectedOption === q.answer
-
-                      return (
-                        <div key={qIdx} className="bg-white rounded-2xl border border-slate-150 p-5 shadow-sm space-y-4">
-                          <div className="flex gap-2.5 items-start">
-                            <span className="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">
-                              {qIdx + 1}
-                            </span>
-                            <h4 className="font-bold text-slate-800 text-sm leading-normal">
-                              {q.q}
-                            </h4>
-                          </div>
-
-                          <div className="grid gap-2.5">
-                            {q.options.map((opt, oIdx) => {
-                              const isSelected = selectedOption === oIdx
-                              
-                              let optionStyle = 'border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
-                              let checkIcon = null
-
-                              if (submitted) {
-                                if (isSelected) {
-                                  if (isCorrect) {
-                                    optionStyle = 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                                    checkIcon = <span className="text-emerald-500 font-bold text-sm">✓</span>
-                                  } else {
-                                    optionStyle = 'bg-red-50 border-red-300 text-red-800'
-                                    checkIcon = <span className="text-red-500 font-bold text-sm">✕</span>
-                                  }
-                                } else if (oIdx === q.answer) {
-                                  optionStyle = 'bg-emerald-50 border-emerald-300 text-emerald-800 font-medium'
-                                  checkIcon = <span className="text-emerald-500 font-bold text-sm">✓</span>
-                                } else {
-                                  optionStyle = 'border-slate-100 text-slate-400 opacity-60'
-                                }
-                              } else if (isSelected) {
-                                optionStyle = 'bg-indigo-50 border-indigo-400 text-indigo-900 font-semibold ring-2 ring-indigo-500/10'
-                              }
-
-                              return (
-                                <button
-                                  key={oIdx}
-                                  onClick={() => handleSelectOption(qIdx, oIdx)}
-                                  disabled={submitted}
-                                  className={`w-full text-left px-4 py-3 rounded-xl border text-xs transition-all flex items-center justify-between gap-3 ${optionStyle}`}
-                                >
-                                  <div className="flex items-center gap-3">
-                                    <span className={`w-5 h-5 rounded-full border flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
-                                      isSelected
-                                        ? 'bg-indigo-600 border-indigo-600 text-white'
-                                        : 'border-slate-300 text-slate-400'
-                                    }`}>
-                                      {String.fromCharCode(65 + oIdx)}
-                                    </span>
-                                    <span>{opt}</span>
-                                  </div>
-                                  {checkIcon}
-                                </button>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-
-                  {/* Submission Button */}
-                  {!submitted && (
-                    <button
-                      onClick={handleSubmitQuiz}
-                      disabled={Object.keys(selectedAnswers).length < parsedQuestions.length}
-                      className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold shadow-md shadow-indigo-600/10 transition-all flex items-center justify-center gap-2"
-                    >
-                      Submit Answers ({Object.keys(selectedAnswers).length}/{parsedQuestions.length})
-                    </button>
-                  )}
-                </>
-              ) : (
-                <div className="text-center py-20 bg-slate-50 border border-dashed border-slate-200 rounded-3xl">
-                  <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                  <h3 className="font-bold text-slate-700 text-sm">No assessment questions</h3>
-                  <p className="text-slate-400 text-xs mt-1 max-w-sm mx-auto">
-                    The course administrators have not added MCQ questions to this topic yet.
                   </p>
                 </div>
               )}

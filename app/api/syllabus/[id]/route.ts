@@ -1,6 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { requireSyllabusWriteAccess } from '@/lib/auth'
+import { requireSyllabusWriteAccess, getTeacherSession } from '@/lib/auth'
+
+// Same reasoning as the chapter-delete route (app/api/syllabus/route.ts) —
+// deleting a custom topic cascades away its school_topic_progress history,
+// so it's scoped tighter than add/mark-covered: only the class's own
+// assigned teacher for that topic's subject, or the class teacher.
+async function assertAssignedTeacherForDelete(role: string, classId: string, subject: string): Promise<NextResponse | null> {
+  if (role !== 'teacher') return null
+  const session = await getTeacherSession()
+  if (!session) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const { rows: [cls] } = await pool.query('SELECT class_teacher_id FROM classes WHERE id = $1', [classId])
+  if (cls?.class_teacher_id === session.teacherId) return null
+  const { rows: [assignment] } = await pool.query(
+    'SELECT 1 FROM class_subjects WHERE class_id = $1 AND subject_name = $2 AND teacher_id = $3',
+    [classId, subject, session.teacherId]
+  )
+  if (assignment) return null
+  return NextResponse.json({ error: 'Only this class’s assigned teacher for this subject can delete custom content' }, { status: 403 })
+}
 
 // PATCH /api/syllabus/[id] — update status, target dates, delay reasons, topic details
 // Body: { school_id, class_id?, status?, covered_by?, topic_name?, topic_order?,
@@ -139,7 +157,12 @@ export async function PATCH(
   }
 }
 
-// DELETE /api/syllabus/[id]?school_id= — delete a custom topic
+// DELETE /api/syllabus/[id]?school_id=&class_id= — delete a custom topic
+// class_id is required (not just school_id) so the assigned-teacher scope
+// check below has a class to check the requester's assignment against — a
+// topic belongs to a subject (shared across every class of that grade), not
+// to one class, so there's no other way to know which class's assignment
+// should govern who's allowed to delete it.
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -147,14 +170,21 @@ export async function DELETE(
   await ensureDB()
   const { id } = await params
   const school_id = req.nextUrl.searchParams.get('school_id')
+  const class_id = req.nextUrl.searchParams.get('class_id')
 
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
-  if (!await requireSyllabusWriteAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!class_id) return NextResponse.json({ error: 'class_id required' }, { status: 400 })
+  const writeSession = await requireSyllabusWriteAccess(school_id)
+  if (!writeSession) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
-    // 1. Fetch topic
+    // 1. Fetch topic (joined up to its subject name for the scope check)
     const { rows: [topicRow] } = await pool.query(
-      'SELECT * FROM school_topics WHERE id = $1',
+      `SELECT st.*, ss.subject_name
+       FROM school_topics st
+       JOIN school_chapters sc ON sc.id = st.school_chapter_id
+       JOIN school_subjects ss ON ss.id = sc.school_subject_id
+       WHERE st.id = $1`,
       [id]
     )
 
@@ -166,6 +196,9 @@ export async function DELETE(
     if (!topicRow.is_custom) {
       return NextResponse.json({ error: 'Cannot delete a board-mandated topic' }, { status: 403 })
     }
+
+    const scopeError = await assertAssignedTeacherForDelete(writeSession.role, class_id, topicRow.subject_name)
+    if (scopeError) return scopeError
 
     // 2. Perform delete
     await pool.query(

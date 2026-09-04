@@ -45,8 +45,25 @@ export async function POST(req: NextRequest) {
       [school_id, grade, subject, academic_year]
     )
     if (subjectRes.rows.length === 0) {
+      // Link to master_subjects when exactly one board matches this
+      // (grade, subject_name) — same match as the school_subjects.master_subject_id
+      // backfill in lib/db.ts — so the Digital Library and syllabus materials
+      // panel can find this subject's uploaded textbooks/handbooks. Left NULL
+      // when there's no match or the match is ambiguous across boards.
+      // $2 (grade) and $3 (subject) are cast explicitly — each is used both
+      // as a plain SELECT target (feeding school_subjects' columns) and
+      // inside the WHERE clause (grade directly, subject through lower());
+      // without the casts, pg's single-statement parameter-type inference
+      // can deduce two different types for the same parameter across those
+      // positions and Postgres errors with 42P08 "inconsistent types
+      // deduced for parameter" — confirmed both $2 and $3 need it, not just $2.
       const insertSubj = await pool.query(
-        'INSERT INTO school_subjects (school_id, grade, subject_name, academic_year) VALUES ($1, $2, $3, $4) RETURNING id',
+        `INSERT INTO school_subjects (school_id, grade, subject_name, academic_year, master_subject_id, board)
+         SELECT $1, $2::varchar, $3::varchar, $4,
+           CASE WHEN COUNT(*) = 1 THEN MAX(id) END,
+           CASE WHEN COUNT(*) = 1 THEN MAX(board) END
+         FROM master_subjects WHERE grade = $2::varchar AND lower(subject_name) = lower($3::varchar)
+         RETURNING id`,
         [school_id, grade, subject, academic_year]
       )
       school_subject_id = insertSubj.rows[0].id

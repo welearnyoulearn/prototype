@@ -34,7 +34,7 @@ const TeacherProfile = dynamic(() => import('./components/TeacherProfile'), { lo
 const Attendance     = dynamic(() => import('./components/Attendance'),     { loading: () => <ModuleSkeleton /> })
 const MyStudents     = dynamic(() => import('./components/MyStudents'),     { loading: () => <ModuleSkeleton /> })
 const MyClasses      = dynamic(() => import('./components/MyClasses'),      { loading: () => <ModuleSkeleton /> })
-const DigitalLibrary = dynamic(() => import('../components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
+const TeacherLibrary = dynamic(() => import('./components/TeacherLibrary'), { loading: () => <ModuleSkeleton /> })
 
 type Teacher = {
   id: number
@@ -68,6 +68,7 @@ const NAV_KEY_TO_FEATURE: Record<string, string> = {
   timetable: 'timetable',
   attendance: 'attendance',
   library: 'library',
+  leave: 'leave-requests',
 }
 
 const NAV_SECTIONS: NavSection[] = [
@@ -298,8 +299,8 @@ export default function TeacherPortal() {
           <nav className="flex-1 py-3 overflow-y-auto">
             {NAV_SECTIONS.map(section => {
               // Only these nav keys correspond to a school-plan feature gate —
-              // the rest (My Classes, My Students, Syllabus, Profile, Leave)
-              // aren't plan-gated features and always show.
+              // the rest (My Classes, My Students, Syllabus, Profile) aren't
+              // plan-gated features and always show.
               const visibleItems = section.items.filter(item => {
                 const featureKey = NAV_KEY_TO_FEATURE[item.key]
                 return !featureKey || enabledFeatures.size === 0 || enabledFeatures.has(featureKey)
@@ -351,7 +352,7 @@ export default function TeacherPortal() {
           {visitedNav.has('my-classes')     && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} onGoToSyllabus={cls => handleNavigate('class-view', { classId: cls.id, tab: 'Syllabus' })} /></div>}
           {visitedNav.has('my-students')    && <div hidden={activeNav !== 'my-students'}><MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('syllabus')       && <div hidden={activeNav !== 'syllabus'}><TeacherSyllabus teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} academicYear={selectedAcademicYear} readOnly={isViewingPastYear} /></div>}
-          {visitedNav.has('library')        && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${teacher.school_id}`} /></div>}
+          {visitedNav.has('library')        && <div hidden={activeNav !== 'library'}><TeacherLibrary teacher={{ id: teacher.id, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
         </main>
       </div>
     </div>
