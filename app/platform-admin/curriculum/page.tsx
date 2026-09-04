@@ -7,6 +7,7 @@ import {
   HelpCircle, CheckCircle2, Layers, ArrowLeft, Trash2, Check, FolderInput, Loader2, Download,
 } from 'lucide-react'
 import { INK, TEAL, CREAM, GREEN, PURPLE, BORDER, SURFACE } from '@/app/components/ulearn/theme'
+import { ProgressBar } from '@/components/loaders'
 import { BulkImportPanel } from '@/app/components/ulearn/BulkImportPanel'
 import { Toast } from '@/app/components/ulearn/primitives'
 import { useToast } from '@/app/components/ulearn/useToast'
@@ -1632,11 +1633,8 @@ export default function PlatformCurriculum() {
                     <div className="space-y-2">
                       <FileText size={22} className="mx-auto" style={{ color: PURPLE }} />
                       {uploading ? (
-                        <div className="space-y-1">
-                          <p className="text-xs font-bold" style={{ color: PURPLE }}>Uploading… {uploadProgress}%</p>
-                          <div className="w-48 h-1.5 rounded-full mx-auto overflow-hidden bg-gray-100">
-                            <div className="h-full rounded-full transition-all" style={{ width: `${uploadProgress}%`, background: PURPLE }} />
-                          </div>
+                        <div className="w-48 mx-auto">
+                          <ProgressBar portal="platform-admin" progress={uploadProgress} label="Uploading" />
                         </div>
                       ) : (
                         <div>
@@ -1738,7 +1736,9 @@ export default function PlatformCurriculum() {
                     />
                     <Upload size={18} className="mx-auto mb-1" style={{ color: PURPLE }} />
                     {uploading ? (
-                      <p className="text-[11px] font-bold" style={{ color: PURPLE }}>Uploading… {uploadProgress}%</p>
+                      <div className="w-32 mx-auto">
+                        <ProgressBar portal="platform-admin" progress={uploadProgress} label="Uploading" />
+                      </div>
                     ) : (
                       <p className="text-[11px] font-bold" style={{ color: INK }}>Upload file, or <span style={{ color: PURPLE }}>browse</span></p>
                     )}
@@ -2556,7 +2556,11 @@ export default function PlatformCurriculum() {
                     {newMaterialFiles.length > 0 && (
                       <p className="text-[10px] text-gray-400 mt-1">{newMaterialFiles.length} file{newMaterialFiles.length === 1 ? '' : 's'} selected</p>
                     )}
-                    {uploading && <p className="text-[10px] mt-1" style={{ color: PURPLE }}>Uploading… {uploadProgress}%</p>}
+                    {uploading && (
+                      <div className="mt-1.5">
+                        <ProgressBar portal="platform-admin" progress={uploadProgress} label="Uploading" />
+                      </div>
+                    )}
                   </div>
 
                   {materialUploadLog.length > 0 && (

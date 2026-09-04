@@ -8,6 +8,7 @@ import { SCHEDULE } from '@/lib/schedule'
 import { BookOpen, ChevronDown, Check, Loader2, X, CalendarClock, Upload, Hash } from 'lucide-react'
 import { INK, GOLD, PURPLE, GREEN, BORDER, SURFACE } from '@/app/components/ulearn/theme'
 import { ProgressBar, Toast } from '@/app/components/ulearn/primitives'
+import { InlineLoader } from '@/components/loaders'
 import { BulkImportPanel } from '@/app/components/ulearn/BulkImportPanel'
 import { useToast } from '@/app/components/ulearn/useToast'
 import { useFeature } from '@/lib/features-context'
@@ -173,7 +174,7 @@ function SubjectTeacherOverview({
 
   if (loading) return (
     <div className="flex items-center justify-center py-16">
-      <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      <InlineLoader portal="teacher" label="" />
     </div>
   )
 

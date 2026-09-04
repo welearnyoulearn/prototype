@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { ButtonLoader } from '@/components/loaders'
 
 type MarketplaceItem = { id: number; name: string; description: string; emoji: string; cost_points: number }
 type Order = { id: number; item_name: string; item_emoji: string; points_spent: number; status: string; ordered_at: string }
@@ -113,7 +114,7 @@ export default function ParentMarketplace({ studentId, schoolId, studentName }: 
             </button>
             <button onClick={() => placeOrder(confirmItem)} disabled={ordering}
               className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2">
-              {ordering ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Ordering...</> : 'Confirm Order'}
+              {ordering ? <ButtonLoader label="Ordering..." /> : 'Confirm Order'}
             </button>
           </div>
         </div>

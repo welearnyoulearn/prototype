@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
+import { Skeleton } from '@/components/ui/skeleton'
 
 type School = {
   id: number
@@ -586,9 +587,17 @@ export default function PlatformAdmin() {
         {/* ── Table ── */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           {loading ? (
-            <div className="py-16 text-center">
-              <div className="w-6 h-6 border-2 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-gray-400 text-sm">Loading schools…</p>
+            <div className="px-5 py-4" role="status" aria-busy="true" aria-label="Loading schools">
+              <div className="flex gap-4 pb-3 border-b border-gray-100">
+                {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-2.5 flex-1" />)}
+              </div>
+              {Array.from({ length: 6 }).map((_, r) => (
+                <div key={r} className="flex gap-4 py-3 border-b border-gray-50">
+                  {Array.from({ length: 5 }).map((_, c) => (
+                    <Skeleton key={c} className={`h-3 flex-1 ${c === 0 ? 'max-w-32' : ''}`} />
+                  ))}
+                </div>
+              ))}
             </div>
           ) : sorted.length === 0 ? (
             <div className="py-16 text-center">

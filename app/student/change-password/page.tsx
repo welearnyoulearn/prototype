@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import AuthShell, { THEMES, AuthError, PasswordField } from '@/app/components/AuthShell'
+import { ButtonLoader } from '@/components/loaders'
 
 export default function StudentChangePasswordPage() {
   const router = useRouter()
@@ -81,7 +82,7 @@ export default function StudentChangePasswordPage() {
           className={`w-full bg-gradient-to-r ${theme.btnGradient} text-white font-semibold py-3 rounded-xl text-sm transition-all disabled:opacity-50 shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2`}
         >
           {loading
-            ? <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Saving...</>
+            ? <ButtonLoader label="Saving..." />
             : 'Save & Start Learning →'}
         </button>
       </form>
