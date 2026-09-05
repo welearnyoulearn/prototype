@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import AppLoader from '../components/AppLoader'
+import { FullPageLoader } from '@/components/loaders'
 import Link from 'next/link'
 import { TRANSLATIONS, type Lang } from './translations'
 import ParentSyllabus from './components/ParentSyllabus'
@@ -461,7 +461,7 @@ export default function ParentDashboard() {
   }
 
   // ── Loading / child picker screens ───────────────────────────────────────────
-  if (loading) return <AppLoader message="Loading parent dashboard" sub="Fetching your child's progress…" />
+  if (loading) return <FullPageLoader portal="parent" message="Loading parent dashboard" sub="Fetching your child's progress…" />
 
   if (showChildPicker && parentInfo) return (
     <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50 flex items-center justify-center p-4">

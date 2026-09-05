@@ -79,6 +79,25 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+/* ─────────────────────────────────────────────────
+   PORTAL BRAND TOKENS
+   One canonical accent per portal, formalized from
+   each portal's actual dominant color in existing UI
+   (see components/loaders/ for the consuming system).
+───────────────────────────────────────────────── */
+:root {
+  --portal-student: #3b82f6;   /* blue-500 */
+  --portal-student-soft: #eff6ff;
+  --portal-teacher: #3b82f6;   /* blue-500 */
+  --portal-teacher-soft: #eff6ff;
+  --portal-school-admin: #7c3aed; /* violet-600 */
+  --portal-school-admin-soft: #f5f3ff;
+  --portal-parent: #ec4899;    /* pink-500, paired with purple in gradients */
+  --portal-parent-soft: #fdf2f8;
+  --portal-platform-admin: #5b4e8a; /* matches ulearn/theme.ts PURPLE, already in use on platform-admin */
+  --portal-platform-admin-soft: #f5f3ff;
+}
+
 body {
   background: #ffffff;
   color: #171717;

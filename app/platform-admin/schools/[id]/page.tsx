@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import AppLoader from '@/app/components/AppLoader'
+import { FullPageLoader } from '@/components/loaders'
 
 type SchoolDetail = {
   id: number
@@ -260,7 +260,7 @@ export default function SchoolDetailPage() {
   const hasChanged = school?.tier !== selectedTier
   const currentBadge = TIER_META.find(t => t.key === (school?.tier || 'none'))
 
-  if (loading) return <AppLoader message="Loading school details" sub="Please wait…" />
+  if (loading) return <FullPageLoader portal="platform-admin" message="Loading school details" />
 
   if (!school) {
     return (

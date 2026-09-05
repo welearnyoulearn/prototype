@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react'
 import StudentSyllabus from '../../student/components/StudentSyllabus'
 import { useFeature } from '@/lib/features-context'
 import { GRADE_SEQUENCE } from '@/lib/grades'
+import { InlineLoader, ButtonLoader } from '@/components/loaders'
 
 type Props = { schoolId: number; onNavigate?: (tab: string, subTab?: string) => void }
 
@@ -188,9 +189,8 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
   })
 
   if (loading) return (
-    <div className="py-16 flex flex-col items-center justify-center gap-3">
-      <div className="w-10 h-10 rounded-full border-3 border-gray-200 border-t-violet-600 animate-spin" style={{ borderWidth: 3 }} />
-      <p className="text-gray-400 text-sm">Loading classes…</p>
+    <div className="py-16">
+      <InlineLoader portal="school-admin" label="Loading classes…" size="lg" />
     </div>
   )
 
@@ -313,7 +313,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
         )}
       </div>
 
-      {/* ── Right panel: class detail or default sets ── */}
+      {/* ── Right panel: class detail ── */}
       <div ref={rightPanelRef} className="flex-1 min-w-0 bg-white rounded-r-xl overflow-hidden overflow-y-auto">
         {selectedClass ? (
           <ClassDetail
@@ -1011,8 +1011,8 @@ function ClassDetail({
             )}
 
             {ttLoading ? (
-              <div className="py-10 text-center text-gray-400 text-sm flex items-center justify-center gap-2">
-                <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />Loading...
+              <div className="py-10">
+                <InlineLoader portal="school-admin" />
               </div>
             ) : timetable.length === 0 ? (
               <div className="bg-white rounded-xl border border-gray-200 py-16 flex flex-col items-center justify-center gap-4 text-center">
@@ -1041,7 +1041,7 @@ function ClassDetail({
                     <button onClick={() => generateTimetable(false)} disabled={generating}
                       className="px-6 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
                       {generating
-                        ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Generating...</>
+                        ? <ButtonLoader label="Generating..." />
                         : <>⚡ Generate Timetable</>}
                     </button>
                   </>
@@ -1093,8 +1093,8 @@ function ClassDetail({
               </div>
 
               {studLoading ? (
-                <div className="py-8 text-center">
-                  <div className="w-5 h-5 border-2 border-violet-400 border-t-transparent rounded-full animate-spin mx-auto" />
+                <div className="py-8">
+                  <InlineLoader portal="school-admin" label="" />
                 </div>
               ) : students.length === 0 ? (
                 <div className="py-8 text-center text-gray-400 text-sm">

@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic'
 import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
 import { useRouter, useSearchParams } from 'next/navigation'
-import AppLoader from '../components/AppLoader'
+import { FullPageLoader } from '@/components/loaders'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
@@ -408,7 +408,7 @@ function SchoolAdmin() {
     !(isStaffAccount && item.key === 'settings')
   )
 
-  if (loading) return <AppLoader message="Loading your dashboard" sub="Setting up your school workspace…" />
+  if (loading) return <FullPageLoader portal="school-admin" sub="Setting up your school workspace…" />
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-slate-50">

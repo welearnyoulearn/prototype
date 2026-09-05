@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import AppLoader from '../components/AppLoader'
+import { FullPageLoader } from '@/components/loaders'
 import NotificationBell from '../components/NotificationBell'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
@@ -164,7 +164,7 @@ export default function StudentPortal() {
     router.push('/student/login')
   }
 
-  if (loading) return <AppLoader message="Loading your portal" sub="Fetching your courses and progress…" />
+  if (loading) return <FullPageLoader portal="student" sub="Fetching your courses and progress…" />
 
   if (!student) return null
 
