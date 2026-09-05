@@ -46,14 +46,21 @@ export async function GET(req: NextRequest) {
 
     if (access.role === 'teacher') {
       const teacherSession = await getTeacherSession()
+      const class_id = req.nextUrl.searchParams.get('class_id')
       // Grade is looked up from class_subjects/classes server-side, not
       // trusted from the client, exactly like /api/school/subjects/materials.
+      // Optional class_id further restricts to just that one class's own
+      // subject assignments — used by the teacher portal's "enter a class,
+      // see its books" library view — instead of every class the teacher
+      // teaches at that grade.
       extraWhere = `AND EXISTS (
         SELECT 1 FROM class_subjects cs
         JOIN classes c ON c.id = cs.class_id
         WHERE cs.teacher_id = $3 AND cs.subject_name = ss.subject_name AND c.grade = ss.grade AND c.school_id = ss.school_id
+        ${class_id ? 'AND c.id = $4' : ''}
       )`
       args.push(teacherSession?.teacherId ?? -1)
+      if (class_id) args.push(Number(class_id))
     } else if (access.role === 'student') {
       const studentSession = await getStudentSession()
       if (!studentSession) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })

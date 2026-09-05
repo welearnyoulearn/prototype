@@ -75,15 +75,12 @@ export async function GET(req: NextRequest) {
   // inline list formula ('"A,B,C"') caps out around 255 characters, which a
   // long subject list could exceed — so the allowed values live on a hidden
   // reference sheet instead, and the dropdown points at that range.
+  const lastRow = 1000 // comfortably covers a full staff roster in one upload
   if (subjectNames.length > 0) {
     const refSheet = wb.addWorksheet('_subjects')
     refSheet.state = 'veryHidden'
     subjectNames.forEach((name, i) => { refSheet.getCell(`A${i + 1}`).value = name })
 
-    // 1000 rows comfortably covers a full staff roster in one upload —
-    // previously capped at 200, which silently dropped dropdown protection
-    // (falling back to free text with no warning) for any larger school.
-    const lastRow = 1000
     for (let r = 2; r <= lastRow; r++) {
       ws.getCell(`C${r}`).dataValidation = {
         type: 'list',
@@ -96,13 +93,47 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Staff Type dropdown (column H) — same two values the manual onboarding
+  // table and the API both already accept (anything else normalizes to
+  // 'teaching' server-side), given a real dropdown here so a typo can't
+  // silently produce the wrong default.
+  for (let r = 2; r <= lastRow; r++) {
+    ws.getCell(`H${r}`).dataValidation = {
+      type: 'list',
+      allowBlank: false,
+      formulae: ['"teaching,non_teaching"'],
+      showErrorMessage: true,
+      errorTitle: 'Invalid staff type',
+      error: 'Pick either teaching or non_teaching.',
+    }
+  }
+
+  // Teaches Grades dropdown (column I) — same grade list InlineGrades offers
+  // in the manual table. Excel data validation only picks ONE list value per
+  // cell, so multi-grade selection ("8,9,10") still has to be typed by hand;
+  // the dropdown's job is just making sure each value typed is a real grade,
+  // not open-ended free text. The note row below spells out the comma format.
+  const gradeRefSheet = wb.addWorksheet('_grades')
+  gradeRefSheet.state = 'veryHidden'
+  const numericGrades = Array.from({ length: 10 }, (_, i) => String(i + 1))
+  numericGrades.forEach((g, i) => { gradeRefSheet.getCell(`A${i + 1}`).value = g })
+  for (let r = 2; r <= lastRow; r++) {
+    ws.getCell(`I${r}`).dataValidation = {
+      type: 'list',
+      allowBlank: true,
+      formulae: [`_grades!$A$1:$A$${numericGrades.length}`],
+      showErrorMessage: false, // free text like "8,9,10" is valid here — see note row
+    }
+  }
+
   // Note row
   const noteRow = ws.addRow([])
   ws.mergeCells(`A${noteRow.number}:I${noteRow.number}`)
   const noteCell = ws.getCell(`A${noteRow.number}`)
-  noteCell.value = isSubscribedList
-    ? '★ Yellow columns are MANDATORY. Subject must be one of the school’s subscribed subjects — click the cell and use the dropdown. Non-teaching staff can leave Subject blank.'
-    : '★ Yellow columns are MANDATORY. This school hasn’t subscribed to any subjects yet, so Subject uses the full master catalog — click the cell and use the dropdown. Non-teaching staff can leave Subject blank.'
+  const subjectNote = isSubscribedList
+    ? 'Subject must be one of the school’s subscribed subjects — click the cell and use the dropdown.'
+    : 'This school hasn’t subscribed to any subjects yet, so Subject uses the full master catalog — click the cell and use the dropdown.'
+  noteCell.value = `★ Yellow columns are MANDATORY. ${subjectNote} Non-teaching staff can leave Subject blank. Staff Type: pick teaching or non_teaching from the dropdown. Teaches Grades: for one grade, use the dropdown — for several, type them comma-separated with no spaces, e.g. 8,9,10 (leave blank to teach all grades).`
   noteCell.font = { italic: true, color: { argb: 'FFB45309' }, size: 9 }
   noteCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF9E6' } }
   noteCell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true }

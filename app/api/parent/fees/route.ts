@@ -118,6 +118,28 @@ export async function GET(req: NextRequest) {
 // Multi-entry:   { school_id, student_id, ledger_ids: [1,2,3], total_amount, transaction_ref?, upi_id? }
 //   Multi-entry uses FIFO allocation — same as admin payments API.
 //
+// ============================================================================
+// FUTURE: Payment Gateway Integration (Cashfree)
+// ----------------------------------------------------------------------------
+// Today: this is a self-reported payment. The parent pays via the school's
+// static UPI ID/QR (see /api/fees/upi-qr) in their own UPI app, then types the
+// resulting transaction ID back in here as `transaction_ref` — landing as
+// payment_status='pending_verification' until a school admin manually
+// reviews and approves/rejects it (see POST /api/fees/payments/verify).
+//
+// Planned: once Cashfree is wired up, this whole self-report step goes away.
+// Instead: this endpoint (or a Cashfree-specific sibling) creates a real
+// Cashfree order tied to the exact bill(s)/amount, the parent completes
+// payment inside Cashfree's own checkout, and Cashfree's webhook callback —
+// not the parent — is what actually creates the fee_payments row, already
+// verified (payment_status='completed' from the start, no pending_verification
+// state at all). The receipt then generates and delivers automatically
+// (email/WhatsApp) the moment the webhook lands, and the school admin's
+// Collect → Online queue becomes a live settled-payments feed rather than a
+// review queue. See the matching comment in app/api/fees/upi-qr/route.ts for
+// the full planned flow.
+// ============================================================================
+//
 export async function POST(req: NextRequest) {
   try {
     if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

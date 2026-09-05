@@ -34,6 +34,25 @@ export const GET = withWatchline(handleGET, { route: '/api/fees/payments/verify'
 
 // POST /api/fees/payments/verify — approve or reject a pending payment
 // Body: { payment_id, action: 'approve'|'reject', verified_by, rejection_reason? }
+//
+// ============================================================================
+// FUTURE: Payment Gateway Integration (Cashfree)
+// ----------------------------------------------------------------------------
+// Today: every online payment lands here as payment_status='pending_verification'
+// (self-reported by the parent, see POST /api/parent/fees) and a school admin
+// has to manually approve/reject it in Collect → Online before the parent's
+// receipt becomes visible in their Fees tab.
+//
+// Planned: once Cashfree's webhook is live, a gateway-completed payment skips
+// this manual step entirely — the webhook handler inserts the fee_payments
+// row already 'completed' (never 'pending_verification'), applies the same
+// ledger update this route does above, and triggers receipt
+// generation/delivery (email/WhatsApp) automatically, in real time. This
+// route stays in place for genuinely offline/manual submissions (or as a
+// fallback if a webhook is ever missed), but stops being the only path to a
+// confirmed receipt. School-side tracking becomes a live settled-payments
+// feed rather than a review queue.
+// ============================================================================
 async function handlePOST(req: NextRequest) {
   try {
     const client = await pool.connect()

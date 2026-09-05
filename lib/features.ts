@@ -17,14 +17,21 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'student-portal',     label: 'Student Portal Access',           category: 'Core', portals: ['school-admin'] },
   { key: 'parent-portal',      label: 'Parent Portal Access',            category: 'Core', portals: ['school-admin'] },
   { key: 'library',            label: 'WLYL Digital Library',            category: 'Core', portals: ['school-admin', 'student', 'parent'] },
+  { key: 'results',            label: 'Exam Results',                    category: 'Core', portals: ['school-admin', 'student', 'parent'] },
+  { key: 'homework',           label: 'Homework / Tasks',                category: 'Core', portals: ['school-admin', 'student'] },
+  { key: 'doubts',             label: 'Ask a Doubt',                     category: 'Core', portals: ['school-admin', 'student'] },
 
   // ── Scheduling ───────────────────────────────────────────────────────────────
-  { key: 'attendance',         label: 'Attendance Tracking',             category: 'Scheduling', portals: ['school-admin'] },
+  { key: 'attendance',         label: 'Attendance Tracking',             category: 'Scheduling', portals: ['school-admin', 'student', 'parent'] },
   { key: 'leave-requests',     label: 'Leave Requests',                  category: 'Scheduling', portals: ['school-admin'] },
   { key: 'emergency-cover',    label: 'Emergency Cover',                 category: 'Scheduling', portals: ['school-admin'] },
-  { key: 'timetable',          label: 'Timetable Management',            category: 'Scheduling', portals: ['school-admin'] },
+  // Standalone, independently-sellable main feature (own tier row, and
+  // per-school overridable the same as any other feature). Class Management
+  // reads schoolHasFeature('timetable') directly and shows/hides its whole
+  // Timetable tab and generation/editing UI based on it — see ClassManagement.tsx.
+  { key: 'timetable',          label: 'Timetable Management',            category: 'Scheduling', portals: ['school-admin', 'student', 'parent'] },
   { key: 'curriculum',         label: 'Syllabus Customizer',             category: 'Scheduling', portals: ['school-admin', 'student', 'parent'] },
-  { key: 'exam-schedule',      label: 'Exam Schedule',                   category: 'Scheduling', portals: ['school-admin'] },
+  { key: 'exam-schedule',      label: 'Exam Schedule',                   category: 'Scheduling', portals: ['school-admin', 'parent'] },
 
   // ── Analytics & Intelligence ─────────────────────────────────────────────────
   { key: 'briefing',           label: 'Daily Briefing',                  category: 'Analytics', portals: ['school-admin'] },
@@ -37,7 +44,8 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'parent-engagement',  label: 'Parent Engagement',               category: 'Communication', portals: ['school-admin'] },
 
   // ── Finance ──────────────────────────────────────────────────────────────────
-  { key: 'fee-management',     label: 'Fee Management',                  category: 'Finance', portals: ['school-admin'] },
+  { key: 'fee-management',     label: 'Fee Management',                  category: 'Finance', portals: ['school-admin', 'parent'] },
+  { key: 'online-payments',    label: 'Online Fee Payments (UPI)',       category: 'Finance', portals: ['school-admin', 'parent'] },
   { key: 'expenses',           label: 'Expense Tracking',                category: 'Finance', portals: ['school-admin'] },
 
   // ── Administration ───────────────────────────────────────────────────────────
@@ -54,7 +62,7 @@ export const CATEGORY_ORDER = ['Core', 'Scheduling', 'Analytics', 'Finance', 'Co
 
 // Features that can be overridden per-school via school_feature_overrides,
 // taking precedence over the tier-level plan_features setting.
-export const OVERRIDABLE_FEATURE_KEYS = ['student-portal', 'parent-portal', 'api-monitoring']
+export const OVERRIDABLE_FEATURE_KEYS = ['student-portal', 'parent-portal', 'api-monitoring', 'online-payments']
 
 // A portal's nav key doesn't always match the ALL_FEATURES key that gates it
 // (e.g. student/parent portals call it 'syllabus', school-admin calls the
@@ -64,4 +72,8 @@ export const OVERRIDABLE_FEATURE_KEYS = ['student-portal', 'parent-portal', 'api
 export const PORTAL_NAV_KEY_ALIASES: Record<string, string> = {
   'syllabus-tracking': 'curriculum',  // school-admin's own alias, pre-existing
   'syllabus': 'curriculum',           // student/parent portals' nav key for the same capability
+  'today': 'timetable',               // parent portal's "Today's Schedule" nav key
+  'my-marks': 'results',              // student portal's results nav key
+  'tasks': 'homework',                // student portal's homework/tasks nav key
+  'fees': 'fee-management',           // parent portal's fees nav key for the same capability
 }

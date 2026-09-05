@@ -1,7 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { resolveAcademicYear } from '@/lib/academicYear'
-import { requireSyllabusAccess, requireSyllabusWriteAccess } from '@/lib/auth'
+import { requireSyllabusAccess, requireSyllabusWriteAccess, getTeacherSession } from '@/lib/auth'
+
+// Deleting a custom chapter/topic is destructive (cascades away any
+// school_topic_progress history recorded against it) — unlike add/mark-
+// covered, which any teacher role can already do via requireSyllabusWriteAccess,
+// delete is scoped to only the class's OWN assigned teacher for that subject:
+// the class teacher (sees/manages every subject for their own class), or
+// whoever class_subjects.teacher_id names for this exact (class, subject)
+// pair. School-admin/principal/VP/platform_admin bypass this — they're not
+// "a teacher" and already passed the broader requireSyllabusWriteAccess role
+// check above the call site.
+async function assertAssignedTeacherForDelete(role: string, classId: string, subject: string): Promise<NextResponse | null> {
+  if (role !== 'teacher') return null // non-teacher roles already passed the write-access role check
+  const session = await getTeacherSession()
+  if (!session) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const { rows: [cls] } = await pool.query('SELECT class_teacher_id FROM classes WHERE id = $1', [classId])
+  if (cls?.class_teacher_id === session.teacherId) return null
+  const { rows: [assignment] } = await pool.query(
+    'SELECT 1 FROM class_subjects WHERE class_id = $1 AND subject_name = $2 AND teacher_id = $3',
+    [classId, subject, session.teacherId]
+  )
+  if (assignment) return null
+  return NextResponse.json({ error: 'Only this class’s assigned teacher for this subject can delete custom content' }, { status: 403 })
+}
 
 type SyllabusTopicRow = {
   id: number
@@ -53,16 +76,27 @@ export async function GET(req: NextRequest) {
     const academic_year = req.nextUrl.searchParams.get('academic_year') || await resolveAcademicYear(school_id)
 
     // 2. Query subjects, chapters, topics, and join with section progress for class_id
+    //
+    // Class Syllabus Setup: LEFT JOIN class_chapter_visibility/class_topic_visibility
+    // scoped to THIS class_id — absence of a row means active (COALESCE ...,
+    // TRUE), matching the DB-level default documented on the tables
+    // themselves. A chapter/topic explicitly deactivated for this class is
+    // filtered out in the WHERE clause below, never just hidden in the app
+    // layer — this is what a teacher who never opened Setup for a subject
+    // keeps seeing everything, unchanged from before this feature existed.
     let query = `
       SELECT
         ss.subject_name AS subject,
         ss.board AS board,
+        sc.id AS school_chapter_id,
         sc.chapter_name AS chapter_name,
         sc.chapter_order AS chapter_order,
         sc.semester AS semester,
         sc.book_type AS book_type,
         sc.audience AS audience,
         sc.book_name AS book_name,
+        sc.is_custom AS chapter_is_custom,
+        ccv.semester_label AS class_semester_label,
         st.id AS id,
         st.topic_name AS topic_name,
         st.topic_order AS topic_order,
@@ -76,6 +110,7 @@ export async function GET(req: NextRequest) {
           WHERE r.school_topic_id = st.id
         ), '[]'::json) AS resources,
         st.is_custom AS is_custom,
+        COALESCE(ctv.is_active, TRUE) AS topic_is_active,
         COALESCE(stp.status, 'pending') AS status,
         stp.covered_date AS covered_date,
         stp.covered_by AS covered_by,
@@ -87,8 +122,20 @@ export async function GET(req: NextRequest) {
       LEFT JOIN school_topics st ON st.school_chapter_id = sc.id
       LEFT JOIN school_topic_progress stp ON stp.school_topic_id = st.id AND stp.class_id = $1
       LEFT JOIN teachers t ON t.id = stp.covered_by
+      LEFT JOIN class_chapter_visibility ccv ON ccv.class_id = $1 AND ccv.school_chapter_id = sc.id
+      LEFT JOIN class_topic_visibility ctv ON ctv.class_id = $1 AND ctv.school_topic_id = st.id
       WHERE ss.school_id = $2 AND ss.grade = $3 AND ss.academic_year = $4
+        AND (sc.id IS NULL OR COALESCE(ccv.is_active, TRUE))
     `
+    // Topic-level visibility is deliberately NOT filtered in SQL (unlike the
+    // chapter-level filter above) — a chapter whose every topic is
+    // individually deactivated but is itself still active must still appear
+    // (empty topics list), the same as a genuinely topic-less chapter. A
+    // WHERE-clause exclusion would drop every row for that chapter and make
+    // it vanish entirely, since there'd be no surviving row to carry the
+    // chapter's own columns. Instead each topic row carries its own
+    // `topic_is_active` flag through to the grouping loop below, which skips
+    // adding an inactive topic to `ch.topics` without discarding the chapter.
     const args: (string | number)[] = [class_id, school_id, grade, academic_year]
 
     if (subject) {
@@ -107,12 +154,20 @@ export async function GET(req: NextRequest) {
       total: number
       covered: number
       chapters: Record<string, {
+        school_chapter_id: number
         chapter_name: string
         chapter_order: number
         semester: string | null
         book_type: string | null
         audience: string | null
         book_name: string | null
+        is_custom: boolean
+        // Per-CLASS semester grouping assigned via the teacher's Setup
+        // screen — distinct from `semester` above (school_chapters' own
+        // shared column, used by the pre-existing book-tab switcher). This
+        // is what drives the real Semester 1/2 tabs in tracking/student/
+        // parent views.
+        class_semester_label: string | null
         total: number
         covered: number
         topics: SyllabusTopicRow[]
@@ -135,12 +190,15 @@ export async function GET(req: NextRequest) {
 
       if (!subj.chapters[chName]) {
         subj.chapters[chName] = {
+          school_chapter_id: row.school_chapter_id,
           chapter_name: chName,
           chapter_order: row.chapter_order,
           semester: row.semester ?? null,
           book_type: row.book_type ?? null,
           audience: row.audience ?? null,
           book_name: row.book_name ?? null,
+          is_custom: !!row.chapter_is_custom,
+          class_semester_label: row.class_semester_label ?? null,
           total: 0,
           covered: 0,
           topics: [],
@@ -152,6 +210,12 @@ export async function GET(req: NextRequest) {
       // one all-null topic row for it) — just don't count or list a topic
       // that doesn't exist.
       if (row.id == null) continue
+
+      // A topic explicitly deactivated for this class is skipped here rather
+      // than filtered in SQL (see the WHERE-clause comment above) — this is
+      // what keeps the chapter itself in the response even when every one
+      // of its topics is individually hidden.
+      if (!row.topic_is_active) continue
 
       subj.total++
       if (row.status === 'covered') subj.covered++
@@ -184,12 +248,47 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // setup_completed_at per subject — lets the caller (teacher tracking
+    // screen) tell "never set up yet" apart from "set up, everything just
+    // happens to be active," and lets student/parent build Semester 1/2
+    // tabs only for a subject that's actually semester_mode. Joined by
+    // subject_name against school_subjects for this class's grade+year,
+    // matching how the main query above resolves a subject.
+    const setupStatusRes = await pool.query(
+      `SELECT ss.subject_name, css.setup_completed_at, css.semester_mode, css.semester_count
+       FROM school_subjects ss
+       JOIN class_subject_setup_status css ON css.school_subject_id = ss.id AND css.class_id = $1
+       WHERE ss.school_id = $2 AND ss.grade = $3 AND ss.academic_year = $4`,
+      [class_id, school_id, grade, academic_year]
+    )
+    const setupStatusBySubject = new Map(setupStatusRes.rows.map(r => [r.subject_name, r]))
+
     return NextResponse.json({
-      subjects: Object.values(grouped).map(s => ({
-        ...s,
-        chapters: Object.values(s.chapters).sort((a, b) => a.chapter_order - b.chapter_order),
-        completion_pct: s.total > 0 ? Math.round(100 * s.covered / s.total) : 0,
-      }))
+      subjects: Object.values(grouped).map(s => {
+        const status = setupStatusBySubject.get(s.subject)
+        const chapters = Object.values(s.chapters).sort((a, b) => a.chapter_order - b.chapter_order)
+        // Chapter-weighted completion — every chapter is an equal 1/N share
+        // of the subject (e.g. 10 chapters -> each worth 10%), split evenly
+        // among its own topics, rather than one flat covered/total ratio
+        // across every topic in the subject. This is what school admin's
+        // tracking sidebar and parent's tracking view need to read as
+        // "how much syllabus is done" in a way that isn't skewed by a few
+        // chapters happening to carry far more topics than the rest — a
+        // chapter with 2 topics counts the same as one with 20. A chapter
+        // with zero topics still occupies its 1/N share (can't be complete
+        // with nothing taught in it) rather than being excluded from N.
+        const completion_pct = chapters.length > 0
+          ? Math.round(100 * chapters.reduce((sum, ch) => sum + (ch.total > 0 ? ch.covered / ch.total : 0), 0) / chapters.length)
+          : 0
+        return {
+          ...s,
+          chapters,
+          completion_pct,
+          setup_completed_at: status?.setup_completed_at ?? null,
+          semester_mode: status?.semester_mode ?? false,
+          semester_count: status?.semester_count ?? null,
+        }
+      })
     })
   } catch (err) {
     console.error('Syllabus GET error:', err)
@@ -208,7 +307,10 @@ export async function DELETE(req: NextRequest) {
   if (!school_id || !class_id || !subject || !chapter) {
     return NextResponse.json({ error: 'school_id, class_id, subject, chapter_name required' }, { status: 400 })
   }
-  if (!await requireSyllabusWriteAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const writeSession = await requireSyllabusWriteAccess(school_id)
+  if (!writeSession) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  const scopeError = await assertAssignedTeacherForDelete(writeSession.role, class_id, subject)
+  if (scopeError) return scopeError
 
   try {
     await ensureDB()
@@ -243,12 +345,13 @@ export async function DELETE(req: NextRequest) {
     }
     const chapterRow = chapterRes.rows[0]
 
-    // Guardrail: Locked board chapters cannot be deleted
-    if (!chapterRow.is_custom) {
-      return NextResponse.json({ error: 'Cannot delete a board-mandated chapter' }, { status: 403 })
-    }
+    // A teacher can delete any chapter in their school's own copy —
+    // board-mandated or custom. Only ever removes the school's own
+    // school_chapters row (cascading to its own topics/tasks/progress);
+    // the platform-wide master_chapters catalog other schools draw from is
+    // completely untouched either way.
 
-    // 4. Delete custom chapter (will cascade delete custom topics, tasks, and progress)
+    // 4. Delete chapter (will cascade delete its topics, tasks, and progress)
     await pool.query(
       'DELETE FROM school_chapters WHERE id = $1',
       [chapterRow.id]
@@ -275,7 +378,7 @@ export async function POST(req: NextRequest) {
     const inserted = []
 
     for (const t of topics) {
-      const { school_id, class_id, subject, chapter_name, chapter_order, topic_name, topic_order } = t
+      const { school_id, class_id, subject, chapter_name, chapter_order, topic_name, topic_order, book_type, book_name, audience } = t
       if (!school_id || !class_id || !subject || !chapter_name || !topic_name) {
         return NextResponse.json({ error: 'school_id, class_id, subject, chapter_name, topic_name required' }, { status: 400 })
       }
@@ -300,8 +403,24 @@ export async function POST(req: NextRequest) {
         [school_id, grade, subject, academic_year]
       )
       if (subjectRes.rows.length === 0) {
+        // Link to master_subjects when exactly one board matches this
+        // (grade, subject_name) — same match as the school_subjects.master_subject_id
+        // backfill in lib/db.ts — so the Digital Library and syllabus materials
+        // panel can find this subject's uploaded textbooks/handbooks. Left NULL
+        // when there's no match or the match is ambiguous across boards. $2
+        // (grade) and $3 (subject) are cast explicitly — each is used both
+        // as a plain SELECT target and inside the WHERE clause (subject
+        // through lower()); without the casts, pg's single-statement
+        // parameter-type inference can deduce two different types for the
+        // same parameter and Postgres errors with 42P08 "inconsistent types
+        // deduced for parameter".
         const insertSubj = await pool.query(
-          'INSERT INTO school_subjects (school_id, grade, subject_name, academic_year) VALUES ($1, $2, $3, $4) RETURNING id',
+          `INSERT INTO school_subjects (school_id, grade, subject_name, academic_year, master_subject_id, board)
+           SELECT $1, $2::varchar, $3::varchar, $4,
+             CASE WHEN COUNT(*) = 1 THEN MAX(id) END,
+             CASE WHEN COUNT(*) = 1 THEN MAX(board) END
+           FROM master_subjects WHERE grade = $2::varchar AND lower(subject_name) = lower($3::varchar)
+           RETURNING id`,
           [school_id, grade, subject, academic_year]
         )
         school_subject_id = insertSubj.rows[0].id
@@ -329,9 +448,20 @@ export async function POST(req: NextRequest) {
           )
           resolvedChapterOrder = orderRes.rows[0].next
         }
+        // book_type/audience are NOT NULL columns with their own defaults
+        // ('textbook'/'student') — fall back to those exact values in JS
+        // when omitted, same fix as POST /api/syllabus/chapters (a literal
+        // NULL here violates the constraint). book_name has no default and
+        // stays genuinely nullable. This find-or-create usually only runs
+        // for a chapter name that doesn't exist yet in this subject at all
+        // (see POST /api/syllabus/chapters for the case this matters more: a
+        // teacher's explicit "Add Chapter" action, where the caller should
+        // pass the active book tab's own values so the new chapter joins
+        // that book's group instead of starting a new one).
         const insertCh = await pool.query(
-          'INSERT INTO school_chapters (school_subject_id, chapter_name, chapter_order, is_custom) VALUES ($1, $2, $3, TRUE) RETURNING id',
-          [school_subject_id, chapter_name, resolvedChapterOrder]
+          `INSERT INTO school_chapters (school_subject_id, chapter_name, chapter_order, is_custom, book_type, book_name, audience)
+           VALUES ($1, $2, $3, TRUE, $4, $5, $6) RETURNING id`,
+          [school_subject_id, chapter_name, resolvedChapterOrder, book_type || 'textbook', book_name || null, audience || 'student']
         )
         school_chapter_id = insertCh.rows[0].id
       } else {

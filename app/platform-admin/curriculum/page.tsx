@@ -661,7 +661,7 @@ export default function PlatformCurriculum() {
       const signRes = await fetch('/api/platform/materials/upload-sign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: file.name, content_type: file.type || 'application/pdf' }),
+        body: JSON.stringify({ filename: file.name, content_type: file.type || 'application/pdf', subject_id: activeSubject?.id }),
       })
       const signData = await signRes.json()
       if (!signRes.ok) throw new Error(signData?.error || 'Failed to get upload URL')

@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { hashPassword, generateTempPassword, requireSchoolAdmin } from '@/lib/auth'
 import { sendTeacherWelcomeEmail } from '@/lib/email'
+import { sendWhatsappMessage } from '@/lib/whatsapp'
+import { findAutoAssignableSubjects, type ClassSubjectRow } from '@/lib/matchTeacher'
+import { invalidateCache } from '@/lib/responseCache'
+import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PHONE_RE = /^\+?[\d\s\-()[\]]{7,15}$/
@@ -90,6 +94,10 @@ export async function POST(req: NextRequest) {
         const t = teachers[i]
         if (!t.name?.trim()) {
           errors.push({ row: i + 1, message: 'Name is required' })
+          continue
+        }
+        if (!isValidName(t.name)) {
+          errors.push({ row: i + 1, message: `${t.name.trim()}: ${NAME_INVALID_MESSAGE}` })
           continue
         }
         if (!t.phone?.trim()) {
@@ -202,9 +210,64 @@ export async function POST(req: NextRequest) {
         if (normPhone) seenPhones.add(normPhone)
         if (normEmail) seenEmails.add(normEmail)
 
-        if (email && tempPassword) {
+        // Auto-fill any class subjects at this school that were left
+        // unassigned (no teacher matched at class-creation time) but whose
+        // subject name matches this newly-onboarded teacher, within the
+        // grades they're eligible to teach. Mirrors the same auto-assign
+        // logic POST /api/classes runs at class-creation time — this is the
+        // other direction: teacher arrives after the class already existed.
+        if (teacher.staff_type === 'teaching' && teacher.subject) {
+          const { rows: unfilled } = await client.query<ClassSubjectRow>(
+            `SELECT cs.id, cs.class_id, cs.subject_name, c.grade
+             FROM class_subjects cs
+             JOIN classes c ON c.id = cs.class_id
+             WHERE c.school_id = $1 AND c.deleted_at IS NULL AND cs.teacher_id IS NULL`,
+            [school_id]
+          )
+          const matches = findAutoAssignableSubjects(
+            { subject: teacher.subject as string, teaches_grades: teacher.teaches_grades as string | null },
+            unfilled
+          )
+          for (const m of matches) {
+            await client.query('UPDATE class_subjects SET teacher_id = $1 WHERE id = $2', [teacher.id, m.id])
+            // Same conflict-safe propagation as POST /api/classes/[id]/subjects —
+            // only fill an existing timetable slot for this subject if doing so
+            // wouldn't double-book the teacher at the same day/period elsewhere.
+            await client.query(
+              `UPDATE class_timetable ct
+               SET teacher_id = $1
+               WHERE ct.class_id = $2 AND ct.subject_name = $3 AND ct.is_break = FALSE
+                 AND ct.teacher_id IS DISTINCT FROM $1
+                 AND NOT EXISTS (
+                   SELECT 1 FROM class_timetable other
+                   WHERE other.school_id = ct.school_id AND other.class_id != ct.class_id
+                     AND other.day_of_week = ct.day_of_week AND other.period_number = ct.period_number
+                     AND other.teacher_id = $1 AND other.is_break = FALSE
+                 )`,
+              [teacher.id, m.class_id, m.subject_name]
+            )
+            invalidateCache(`subjects:class:${m.class_id}`)
+            invalidateCache(`timetable:class:${m.class_id}`)
+          }
+          if (matches.length > 0) invalidateCache(`health:${school_id}`)
+        }
+
+        // Teacher login is email-only today (/api/teacher/auth/login never
+        // checks employee_id) — WhatsApp is only worth sending when there's
+        // an actual email to log in with, same as why tempPassword itself is
+        // only generated when email is present, a few lines up.
+        if (tempPassword && email) {
           const loginUrl = `${process.env.APP_URL || 'http://localhost:3000'}/teacher/login`
           sendTeacherWelcomeEmail({ to: email, name: teacher.name as string, schoolName, tempPassword, loginUrl }).catch(console.error)
+          if (normPhone) {
+            sendWhatsappMessage({
+              schoolId: Number(school_id), to: normPhone, templateName: 'staff_credentials', recipientName: teacher.name as string,
+              templateParams: {
+                staff_name: teacher.name as string, school_name: schoolName,
+                login: email, temp_password: tempPassword, login_url: loginUrl,
+              },
+            }).catch(console.error)
+          }
         }
       }
 

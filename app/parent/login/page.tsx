@@ -10,7 +10,7 @@ export default function ParentLoginPage() {
   const router = useRouter()
   const theme = THEMES.parent
 
-  const [email, setEmail]       = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
@@ -22,7 +22,7 @@ export default function ParentLoginPage() {
       const res = await fetch('/api/parent/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify({ identifier: identifier.trim(), password }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Login failed'); return }
@@ -58,18 +58,18 @@ export default function ParentLoginPage() {
 
       <form onSubmit={handleSubmit} data-testid="parent-login-form" className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-white/70 mb-1.5">Email Address</label>
+          <label className="block text-sm font-medium text-white/70 mb-1.5">Email or Phone Number</label>
           <input
-            type="email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            placeholder="your@email.com"
+            type="text"
+            value={identifier}
+            onChange={e => setIdentifier(e.target.value)}
+            placeholder="your@email.com or phone number"
             required
-            autoComplete="email"
+            autoComplete="username"
             data-testid="parent-email-input"
             className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent transition backdrop-blur-sm`}
           />
-          <p className="text-xs text-white/30 mt-1.5">Use the email address your school has on record</p>
+          <p className="text-xs text-white/30 mt-1.5">Use the email or phone number your school has on record</p>
         </div>
 
         <PasswordField

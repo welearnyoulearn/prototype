@@ -261,11 +261,21 @@ export default function FeeManagement({
   // ── Fee Plan (new Tab 2) ──
   // Sub-view: 'heads' = fee head cards (existing); 'variable' = combined all-variable-fees grid
   const [planView, setPlanView] = useState<'heads' | 'variable'>('heads')
-  // School UPI ID (for online fee payments) — managed here in Fee Setup
+  // School UPI ID (for online fee payments) — managed here in Fee Setup.
+  // Once saved it's locked: changing it needs the logged-in admin's own
+  // password (POST /api/fees/upi-id/verify) to mint a short-lived unlock
+  // token before PUT /api/fees/upi-id will accept a new value — see the
+  // route comments for why. It re-locks immediately after every save.
   const [upiId, setUpiId]           = useState('')
   const [upiSaving, setUpiSaving]   = useState(false)
   const [upiMsg, setUpiMsg]         = useState('')
   const [upiLoaded, setUpiLoaded]   = useState(false)
+  const [upiLocked, setUpiLocked]   = useState(false)
+  const [upiUnlockToken, setUpiUnlockToken] = useState('')
+  const [upiShowUnlock, setUpiShowUnlock]   = useState(false)
+  const [upiUnlockPassword, setUpiUnlockPassword] = useState('')
+  const [upiUnlockError, setUpiUnlockError] = useState('')
+  const [upiUnlocking, setUpiUnlocking]     = useState(false)
   // Combined variable-fee grid (class scoped)
   type VarGridStudent = { id: number; name: string; roll_number: string; section: string }
   type VarGridCategory = { id: number; name: string; frequency: string }
@@ -828,8 +838,8 @@ export default function FeeManagement({
   useEffect(() => {
     if (activeTab === 'setup' && !upiLoaded) {
       fetch(`/api/fees/upi-id?school_id=${schoolId}`)
-        .then(r => r.ok ? r.json() : { upi_id: '' })
-        .then(d => { setUpiId(d.upi_id || ''); setUpiLoaded(true) })
+        .then(r => r.ok ? r.json() : { upi_id: '', locked: false })
+        .then(d => { setUpiId(d.upi_id || ''); setUpiLocked(!!d.locked); setUpiLoaded(true) })
         .catch(() => setUpiLoaded(true))
     }
   }, [activeTab, upiLoaded, schoolId])
@@ -839,12 +849,47 @@ export default function FeeManagement({
     try {
       const r = await fetch('/api/fees/upi-id', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, upi_id: upiId }),
+        body: JSON.stringify({ school_id: schoolId, upi_id: upiId, unlockToken: upiUnlockToken || undefined }),
       })
       const d = await r.json().catch(() => ({}))
-      setUpiMsg(r.ok ? '✓ UPI ID saved' : ((d as { error?: string }).error || 'Failed to save'))
+      if (r.ok) {
+        setUpiMsg('✓ UPI ID saved')
+        setUpiLocked(!!d.locked)
+      } else {
+        setUpiMsg((d as { error?: string }).error || 'Failed to save')
+        if (r.status === 423) setUpiLocked(true)
+      }
+      // Re-lock immediately after every save attempt, success or not — the
+      // one-time unlock token is spent either way (or expired/invalid), so
+      // there's nothing left to "stay unlocked" with.
+      setUpiUnlockToken('')
     } catch { setUpiMsg('Network error — could not save UPI ID') }
     setUpiSaving(false)
+  }
+
+  async function verifyUpiUnlock() {
+    setUpiUnlocking(true); setUpiUnlockError('')
+    try {
+      const r = await fetch('/api/fees/upi-id/verify', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, password: upiUnlockPassword }),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (r.ok && d.unlockToken) {
+        setUpiUnlockToken(d.unlockToken)
+        setUpiLocked(false)
+        setUpiShowUnlock(false)
+        setUpiUnlockPassword('')
+        setUpiMsg('')
+      } else {
+        setUpiUnlockError((d as { error?: string }).error || 'Incorrect password')
+      }
+    } catch { setUpiUnlockError('Network error — could not verify') }
+    setUpiUnlocking(false)
+  }
+
+  function cancelUpiUnlock() {
+    setUpiShowUnlock(false); setUpiUnlockPassword(''); setUpiUnlockError('')
   }
 
   const loadReports = useCallback(async () => {
@@ -2973,23 +3018,65 @@ export default function FeeManagement({
             <div className="bg-white rounded-xl border border-gray-100 p-4">
               <div className="flex items-center justify-between mb-1">
                 <p className="text-sm font-semibold text-gray-700">School UPI ID — for online fee payments</p>
-                {upiId && <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">Configured</span>}
+                <div className="flex items-center gap-1.5">
+                  {upiLocked && (
+                    <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium flex items-center gap-1">
+                      <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" /></svg>
+                      Locked
+                    </span>
+                  )}
+                  {upiId && <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">Configured</span>}
+                </div>
               </div>
               <p className="text-xs text-gray-400 mb-3">
                 Parents pay to this UPI ID via the QR code in their portal. Without it, online payment is disabled.
+                {upiLocked && ' Saved — verify your password to make changes.'}
               </p>
-              <div className="flex items-center gap-2 flex-wrap">
-                <div className="relative flex-1 min-w-56">
-                  <input type="text" value={upiId} onChange={e => { setUpiId(e.target.value); setUpiMsg('') }}
-                    placeholder="e.g. school@okhdfcbank"
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+
+              {upiShowUnlock ? (
+                <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 space-y-2">
+                  <p className="text-xs font-medium text-amber-800">Enter your password to unlock this field</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <input type="password" value={upiUnlockPassword}
+                      onChange={e => { setUpiUnlockPassword(e.target.value); setUpiUnlockError('') }}
+                      onKeyDown={e => { if (e.key === 'Enter' && upiUnlockPassword) verifyUpiUnlock() }}
+                      placeholder="Your account password"
+                      autoFocus
+                      className="flex-1 min-w-40 border border-amber-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+                    <button onClick={verifyUpiUnlock} disabled={upiUnlocking || !upiUnlockPassword}
+                      className="text-sm bg-amber-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50">
+                      {upiUnlocking ? 'Verifying…' : 'Unlock'}
+                    </button>
+                    <button onClick={cancelUpiUnlock}
+                      className="text-sm text-gray-500 px-3 py-2 rounded-lg hover:bg-gray-100">
+                      Cancel
+                    </button>
+                  </div>
+                  {upiUnlockError && <p className="text-xs text-red-600">{upiUnlockError}</p>}
                 </div>
-                <button onClick={saveUpiId} disabled={upiSaving}
-                  className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
-                  {upiSaving ? 'Saving…' : 'Save UPI ID'}
-                </button>
-                {upiMsg && <span className={`text-sm ${upiMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{upiMsg}</span>}
-              </div>
+              ) : (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="relative flex-1 min-w-56">
+                    <input type="text" value={upiId}
+                      onChange={e => { setUpiId(e.target.value); setUpiMsg('') }}
+                      placeholder="e.g. school@okhdfcbank"
+                      readOnly={upiLocked}
+                      className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none ${upiLocked ? 'border-gray-200 bg-gray-50 text-gray-500 cursor-not-allowed' : 'border-gray-200 focus:ring-2 focus:ring-blue-500'}`} />
+                  </div>
+                  {upiLocked ? (
+                    <button onClick={() => setUpiShowUnlock(true)}
+                      className="text-sm bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200">
+                      Unlock to Edit
+                    </button>
+                  ) : (
+                    <button onClick={saveUpiId} disabled={upiSaving}
+                      className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
+                      {upiSaving ? 'Saving…' : 'Save UPI ID'}
+                    </button>
+                  )}
+                  {upiMsg && <span className={`text-sm ${upiMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{upiMsg}</span>}
+                </div>
+              )}
             </div>
           )}
 

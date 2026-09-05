@@ -6,10 +6,13 @@ import { sendTeacherWelcomeEmail } from '@/lib/email'
 // POST /api/teachers/[id]/reset-credentials
 //
 // Generates a fresh random temp password and emails it to the teacher —
-// mirrors POST /api/students/[id]/reset-credentials. This is what the
-// school-admin Credentials tab calls. (An older route that reset the
-// password to the teacher's guessable employee_id and sent no email was
-// removed — it was unwired to any UI and an attractive nuisance.)
+// mirrors POST /api/students/[id]/reset-credentials. No UI calls this
+// anymore (the school-admin Credentials tab that used to was removed, same
+// as the equivalent student-side UI) — kept as a live API for any future
+// admin-tool or internal use, not currently reachable from any screen.
+// Recovery paths that still work from the UI: reactivation (deactivate then
+// reactivate — issues a fresh password automatically) and the teacher's own
+// self-service forgot-password flow.
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   await ensureDB()
   const admin = await requireSchoolAdmin()

@@ -2,6 +2,7 @@
 
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { parseCSV } from '@/lib/parseCSV'
+import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
 
 type Props = { schoolId: number; onRefresh?: () => void }
 
@@ -262,11 +263,14 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     const missing: string[] = []
     valid.forEach((r, i) => {
       if (!r.last_name.trim())    missing.push(`Row ${i + 1}: Last Name is required`)
+      else if (!isValidName(r.last_name)) missing.push(`Row ${i + 1}: Last Name — ${NAME_INVALID_MESSAGE}`)
       if (!r.first_name.trim())   missing.push(`Row ${i + 1}: First Name is required`)
+      else if (!isValidName(r.first_name)) missing.push(`Row ${i + 1}: First Name — ${NAME_INVALID_MESSAGE}`)
       if (r.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email.trim())) missing.push(`Row ${i + 1}: Invalid student email`)
       if (r.parent_email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.parent_email.trim())) missing.push(`Row ${i + 1}: Invalid parent email`)
       if (!r.grade.trim())        missing.push(`Row ${i + 1}: Grade is required`)
       if (!r.parent_name.trim())  missing.push(`Row ${i + 1}: Parent Name is required`)
+      else if (!isValidName(r.parent_name)) missing.push(`Row ${i + 1}: Parent Name — ${NAME_INVALID_MESSAGE}`)
       if (!r.parent_phone.trim()) missing.push(`Row ${i + 1}: Parent Phone is required`)
       if (!r.school_roll_number.trim()) missing.push(`Row ${i + 1}: Roll No is required`)
       else if (!/^\d+$/.test(r.school_roll_number.trim()) || parseInt(r.school_roll_number.trim()) <= 0)

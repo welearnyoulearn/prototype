@@ -146,6 +146,32 @@ export async function sendStudentWelcomeEmail(params: {
   return sendMail(params.to, `Welcome to WLYL — ${params.schoolName}`, html)
 }
 
+// ─── 3b. Child's student-portal credentials, sent to the parent ──────────────
+// Distinct from sendParentWelcomeEmail below — that one is about the parent's
+// OWN portal account. This one hands the parent a copy of their CHILD's
+// student-portal login (roll number + password), sent to the parent's own
+// address so the credentials aren't only reachable through a child's inbox
+// they may not check. Sent alongside the student's own welcome email
+// whenever the student has a linked parent with an email on file, regardless
+// of whether the student also has their own email — parents commonly manage
+// a young child's login anyway.
+export async function sendChildCredentialsToParentEmail(params: {
+  to: string; parentName: string; studentName: string; schoolName: string
+  rollNumber: string; tempPassword: string; loginUrl: string
+}) {
+  const html = template('#f97316',
+    `<h1>${params.studentName}'s Student Login</h1><p>Credentials for their WLYL student account.</p>`,
+    `<p class="greeting">Hi <strong>${params.parentName}</strong>! Here are <strong>${params.studentName}</strong>'s login details for the WLYL student portal at <strong>${params.schoolName}</strong> — useful to keep on hand, since many families share one login between parent and child.</p>
+    <div class="cred-box">
+      <div class="cred-title">${params.studentName}'s Login Details</div>
+      <div class="cred-row"><span class="cred-label">Roll Number</span><span class="cred-value">${params.rollNumber}</span></div>
+      <div class="cred-row"><span class="cred-label">Temporary Password</span><span class="cred-value">${params.tempPassword}</span></div>
+    </div>
+    <div class="warning-box">⚠️ This password should be changed after the first login to keep the account safe.</div>
+    <a href="${params.loginUrl}" class="btn">Open Student Portal →</a>`)
+  return sendMail(params.to, `${params.studentName}'s Student Login — ${params.schoolName}`, html)
+}
+
 // ─── 4. Parent welcome ────────────────────────────────────────────────────────
 export async function sendParentWelcomeEmail(params: {
   to: string; parentName: string; studentName: string; schoolName: string; tempPassword: string; loginUrl: string
@@ -272,4 +298,65 @@ export async function sendFeeOverdueReminderEmail(params: {
     </div>
     <div class="warning-box">Please pay as soon as possible to avoid any inconvenience. Log in to the parent portal to pay online.</div>`)
   return sendMail(params.to, `Fee Overdue — ${params.categoryName} · ${params.periodLabel} · ${params.schoolName}`, html)
+}
+
+// ─── 10. Student account deactivated — to the student ─────────────────────────
+export async function sendStudentRemovedEmail(params: {
+  to: string; name: string; schoolName: string
+}) {
+  const html = template('#6b7280',
+    `<h1>Account Deactivated</h1><p>${params.schoolName}</p>`,
+    `<p class="greeting">Hi <strong>${params.name}</strong>, your WLYL student account at <strong>${params.schoolName}</strong> has been deactivated by your school. You will no longer be able to log in.</p>
+    <p style="font-size:13px;color:#6b7280">If you believe this is a mistake, please contact your school directly.</p>`)
+  return sendMail(params.to, `Account Deactivated — ${params.schoolName}`, html)
+}
+
+// ─── 10b. Student account deactivated — to the parent ─────────────────────────
+export async function sendParentStudentRemovedEmail(params: {
+  to: string; parentName: string; studentName: string; schoolName: string
+}) {
+  const html = template('#6b7280',
+    `<h1>Account Deactivated</h1><p>${params.schoolName}</p>`,
+    `<p class="greeting">Hi <strong>${params.parentName}</strong>, ${params.studentName}'s WLYL student account at <strong>${params.schoolName}</strong> has been deactivated by the school. They will no longer be able to log in.</p>
+    <p style="font-size:13px;color:#6b7280">If you believe this is a mistake, please contact the school directly.</p>`)
+  return sendMail(params.to, `${params.studentName}'s Account Deactivated — ${params.schoolName}`, html)
+}
+
+// ─── 11. Staff account deactivated ─────────────────────────────────────────────
+export async function sendStaffRemovedEmail(params: {
+  to: string; name: string; schoolName: string
+}) {
+  const html = template('#6b7280',
+    `<h1>Account Deactivated</h1><p>${params.schoolName}</p>`,
+    `<p class="greeting">Hi <strong>${params.name}</strong>, your WLYL staff account at <strong>${params.schoolName}</strong> has been deactivated. You will no longer be able to log in.</p>
+    <p style="font-size:13px;color:#6b7280">If you believe this is a mistake, please contact your school directly.</p>`)
+  return sendMail(params.to, `Account Deactivated — ${params.schoolName}`, html)
+}
+
+// ─── 12. Staff account reactivated (new password issued) ──────────────────────
+export async function sendStaffReactivatedEmail(params: {
+  to: string; name: string; schoolName: string; tempPassword: string; loginUrl: string
+}) {
+  const html = template('#059669',
+    `<h1>Welcome Back to ${params.schoolName}!</h1><p>Your WLYL staff account has been reactivated.</p>`,
+    `<p class="greeting">Hi <strong>${params.name}</strong>, your WLYL staff account at <strong>${params.schoolName}</strong> has been reactivated with a new password.</p>
+    <div class="cred-box">
+      <div class="cred-title">Your Login Credentials</div>
+      <div class="cred-row"><span class="cred-label">Email</span><span class="cred-value">${params.to}</span></div>
+      <div class="cred-row"><span class="cred-label">Temporary Password</span><span class="cred-value">${params.tempPassword}</span></div>
+    </div>
+    <div class="warning-box">⚠️ This is a one-time temporary password. You will be asked to change it immediately after your first login.</div>
+    <a href="${params.loginUrl}" class="btn">Log In as Teacher →</a>`)
+  return sendMail(params.to, `Welcome Back — ${params.schoolName}`, html)
+}
+
+// ─── 13. Staff login (email/phone) changed by school admin ────────────────────
+export async function sendStaffContactChangedEmail(params: {
+  to: string; name: string; schoolName: string; field: 'email' | 'phone'; newValue: string
+}) {
+  const html = template('#2563eb',
+    `<h1>Login Details Updated</h1><p>${params.schoolName}</p>`,
+    `<p class="greeting">Hi <strong>${params.name}</strong>, your login ${params.field} at <strong>${params.schoolName}</strong> was changed to <strong>${params.newValue}</strong> by your school.</p>
+    <p style="font-size:13px;color:#6b7280">Your password is unchanged — continue using it to log in with the updated ${params.field}. If you didn't expect this change, contact your school directly.</p>`)
+  return sendMail(params.to, `Login Updated — ${params.schoolName}`, html)
 }

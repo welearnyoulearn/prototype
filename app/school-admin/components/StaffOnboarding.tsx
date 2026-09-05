@@ -1,8 +1,9 @@
 'use client'
 
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { parseCSV } from '@/lib/parseCSV'
+import { createPortal } from 'react-dom'
 import { GRADE_SEQUENCE } from '@/lib/grades'
+import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
 
 type Props = { schoolId: number; onRefresh?: () => void }
 
@@ -24,27 +25,11 @@ const EMPTY_ROW: TeacherRow = {
   teaches_grades: ''
 }
 
-const CSV_HEADER = 'name,email,subject,phone,department,qualification,date_of_joining,staff_type,teaches_grades'
-const CSV_EXAMPLE = `Priya Sharma,priya@school.com,Mathematics,9876543210,Science,B.Ed,2023-06-01,teaching,"8,9,10"
-Raj Kumar,raj@school.com,Physics,9876543211,Science,M.Sc,2022-07-15,teaching,"9,10"
-Suresh Patel,suresh@school.com,,9876543212,Admin,,2021-01-10,non_teaching,
-# Note: wrap grades in quotes — "8,9,10" — or leave blank for all grades`
-
-const STUDENT_CSV_MARKERS = ['roll_number', 'parent_name', 'parent_phone', 'parent_email']
 const ALL_GRADES = GRADE_SEQUENCE.filter(g => /^\d+$/.test(g))
 
 function normalizeStaffType(raw: string): string {
   const v = raw.toLowerCase().replace(/[\s\-]/g, '_')
   return v.includes('non') ? 'non_teaching' : 'teaching'
-}
-
-function downloadTemplate() {
-  const content = CSV_HEADER + '\n' + CSV_EXAMPLE
-  const blob = new Blob([content], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = 'staff_template.csv'; a.click()
-  URL.revokeObjectURL(url)
 }
 
 // Excel template with a real in-cell Subject dropdown (limited to the
@@ -58,56 +43,115 @@ function downloadExcelTemplate(schoolId: number) {
   a.click()
 }
 
-// Inline grade multi-select for table rows
+// Inline grade multi-select for table rows. This is always the last real
+// column before the row's delete button, inside a horizontally-scrolling
+// table — any `absolute`-positioned popover here is still clipped by the
+// table's own overflow-x-auto no matter which edge it's anchored to (grades
+// 9/10 cut off, panel invisible entirely near the right edge). Rendered
+// through a portal to document.body instead, positioned in fixed viewport
+// coordinates computed from the trigger's own rect, so the table's overflow
+// can never clip it.
 function InlineGrades({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const selected = value ? value.split(',').map(s => s.trim()).filter(Boolean) : []
+  const PANEL_WIDTH = 240
+
+  const updatePosition = useCallback(() => {
+    const r = triggerRef.current?.getBoundingClientRect()
+    if (!r) return
+    // Right-align the panel to the trigger, but never let it run off the
+    // left edge of the viewport on a narrow screen.
+    const left = Math.max(8, Math.min(r.right - PANEL_WIDTH, window.innerWidth - PANEL_WIDTH - 8))
+    setPos({ top: r.bottom + 6, left })
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    updatePosition()
+    function onClickOutside(e: MouseEvent) {
+      if (
+        triggerRef.current && !triggerRef.current.contains(e.target as Node) &&
+        panelRef.current && !panelRef.current.contains(e.target as Node)
+      ) setOpen(false)
+    }
+    function onScrollOrResize() { updatePosition() }
+    document.addEventListener('mousedown', onClickOutside)
+    // capture:true so this also fires for scroll on the table's own
+    // overflow-x-auto container, not just window-level scroll.
+    window.addEventListener('scroll', onScrollOrResize, true)
+    window.addEventListener('resize', onScrollOrResize)
+    return () => {
+      document.removeEventListener('mousedown', onClickOutside)
+      window.removeEventListener('scroll', onScrollOrResize, true)
+      window.removeEventListener('resize', onScrollOrResize)
+    }
+  }, [open, updatePosition])
 
   function toggle(g: string) {
     const next = selected.includes(g) ? selected.filter(x => x !== g) : [...selected, g]
     onChange(next.sort((a, b) => parseInt(a) - parseInt(b)).join(','))
   }
 
+  const allSelected = selected.length === ALL_GRADES.length
+
   return (
-    <div className="relative">
-      <button type="button" onClick={() => setOpen(v => !v)}
-        className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs text-left bg-white focus:outline-none focus:ring-1 focus:ring-blue-300 flex justify-between items-center min-w-[110px]">
-        <span className={selected.length ? 'text-gray-900 truncate' : 'text-gray-400'}>
-          {selected.length ? selected.join(', ') : 'All grades'}
+    <>
+      <button ref={triggerRef} type="button" onClick={() => setOpen(v => !v)}
+        data-testid="teaches-grades-trigger"
+        className={`w-full border rounded-lg px-2.5 py-1.5 text-xs text-left bg-white transition-colors flex justify-between items-center gap-1.5 min-w-[120px] ${
+          open ? 'border-blue-400 ring-1 ring-blue-300' : 'border-gray-200 hover:border-gray-300'
+        }`}>
+        <span className={`truncate ${selected.length ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>
+          {selected.length === 0 ? 'All grades' : allSelected ? 'All grades (1–10)' : `Grade${selected.length > 1 ? 's' : ''} ${selected.join(', ')}`}
         </span>
-        <svg className="w-3 h-3 text-gray-400 flex-shrink-0 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </button>
-      {open && (
-        <div className="absolute z-50 top-full left-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg p-2 w-44">
-          <div className="grid grid-cols-4 gap-1">
-            {ALL_GRADES.map(g => (
-              <button key={g} type="button" onClick={() => toggle(g)}
-                className={`py-1 rounded text-xs font-medium transition-colors ${
-                  selected.includes(g) ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}>
-                {g}
-              </button>
-            ))}
+      {open && typeof document !== 'undefined' && createPortal(
+        <div ref={panelRef} style={{ position: 'fixed', top: pos.top, left: pos.left, width: PANEL_WIDTH }}
+          className="z-50 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+          <div className="px-3 py-2 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+            <span className="text-xs font-semibold text-gray-600">Teaches Grades</span>
+            <span className="text-[10px] text-gray-400">{selected.length === 0 ? 'All grades' : `${selected.length} selected`}</span>
           </div>
-          <div className="flex justify-between mt-2 pt-1 border-t border-gray-100">
-            <button type="button" onClick={() => onChange(ALL_GRADES.join(','))}
-              className="text-[10px] text-blue-500 hover:text-blue-700">All</button>
-            <button type="button" onClick={() => { onChange(''); setOpen(false) }}
-              className="text-[10px] text-red-500 hover:text-red-700">Clear</button>
+          <div className="p-3">
+            <div className="grid grid-cols-5 gap-1.5">
+              {ALL_GRADES.map(g => (
+                <button key={g} type="button" onClick={() => toggle(g)}
+                  data-testid={`teaches-grade-${g}`}
+                  className={`h-8 rounded-lg text-xs font-semibold transition-colors ${
+                    selected.includes(g) ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}>
+                  {g}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center justify-between px-3 py-2 border-t border-gray-100 bg-gray-50">
+            <div className="flex gap-3">
+              <button type="button" onClick={() => onChange(ALL_GRADES.join(','))}
+                className="text-[11px] text-blue-600 hover:text-blue-800 font-medium">Select all</button>
+              <button type="button" onClick={() => onChange('')}
+                className="text-[11px] text-gray-500 hover:text-gray-700 font-medium">Clear</button>
+            </div>
             <button type="button" onClick={() => setOpen(false)}
-              className="text-[10px] text-gray-500 hover:text-gray-700">Done</button>
+              className="text-[11px] text-white bg-blue-600 hover:bg-blue-700 font-medium px-3 py-1 rounded-md">Done</button>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   )
 }
 
 function rowErrors(row: TeacherRow): string[] {
   const errs: string[] = []
   if (!row.name.trim()) errs.push('Name required')
+  else if (!isValidName(row.name)) errs.push(`Name: ${NAME_INVALID_MESSAGE}`)
   if (!row.email.trim()) errs.push('Email required — login credentials will be sent here')
   if (row.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email.trim())) errs.push('Invalid email')
   if (row.staff_type === 'teaching' && !row.subject.trim()) errs.push('Subject required for teaching staff')
@@ -118,7 +162,6 @@ function rowErrors(row: TeacherRow): string[] {
 
 export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
   const [rows, setRows] = useState<TeacherRow[]>([{ ...EMPTY_ROW }])
-  const [mode, setMode] = useState<'manual' | 'csv'>('manual')
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<{ inserted: number; teachers: { employee_id: string }[]; errors: { row: number; message: string }[] } | null>(null)
   const [error, setError] = useState('')
@@ -200,49 +243,6 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
     })
   }
 
-  function parseText(text: string) {
-    setCsvWarn('')
-    const allRows = parseCSV(text.trim())
-    if (allRows.length === 0) return
-
-    const firstRowLower = allRows[0].map(c => c.toLowerCase().trim())
-    const hasHeader = firstRowLower.some(c => ['name', 'email', 'subject', 'phone', 'department'].includes(c))
-
-    if (hasHeader) {
-      const isStudentCsv = STUDENT_CSV_MARKERS.some(m => firstRowLower.includes(m))
-      if (isStudentCsv) {
-        setCsvWarn('This looks like a Student CSV. Please use this form only for staff data.')
-        return
-      }
-    }
-
-    const dataRows = (hasHeader ? allRows.slice(1) : allRows)
-      .filter(cols => !(cols[0] ?? '').trim().startsWith('#'))
-    const parsed: TeacherRow[] = dataRows.map(cols => {
-      // Grades recovery: if user wrote 8,9,10 without quotes, CSV parser spills them into cols 8,9,10...
-      // Detect: col 8 onwards are all valid numeric grades, merge them back
-      const maxGrade = Math.max(...GRADE_SEQUENCE.filter(g => /^\d+$/.test(g)).map(Number))
-      const isGrade = (v: string) => /^\d{1,2}$/.test(v.trim()) && +v.trim() >= 1 && +v.trim() <= maxGrade
-      let teachesGrades = cols[8] ?? ''
-      if (cols.length > 9 && isGrade(cols[8] ?? '')) {
-        const spilledGrades = cols.slice(8).filter(c => isGrade(c))
-        if (spilledGrades.length > 1) teachesGrades = spilledGrades.map(g => g.trim()).join(',')
-      }
-      return {
-        name:            cols[0] ?? '',
-        email:           cols[1] ?? '',
-        subject:         cols[2] ?? '',
-        phone:           cols[3] ?? '',
-        department:      cols[4] ?? '',
-        qualification:   cols[5] ?? '',
-        date_of_joining: cols[6] ?? '',
-        staff_type:      normalizeStaffType(cols[7] ?? ''),
-        teaches_grades:  teachesGrades,
-      }
-    })
-    if (parsed.length > 0) { setRows(parsed); setMode('manual') }
-  }
-
   async function parseExcelFile(file: File) {
     setCsvWarn('')
     try {
@@ -262,7 +262,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
         staff_type:      normalizeStaffType(r.staff_type ?? ''),
         teaches_grades:  r.teaches_grades ?? '',
       }))
-      if (parsed.length > 0) { setRows(parsed); setMode('manual') }
+      if (parsed.length > 0) setRows(parsed)
       else setCsvWarn('No staff rows found in that file.')
     } catch (err) {
       setCsvWarn(err instanceof Error ? err.message : 'Failed to read the Excel file')
@@ -272,14 +272,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
   function handleFileImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    if (file.name.toLowerCase().endsWith('.xlsx')) {
-      parseExcelFile(file)
-      e.target.value = ''
-      return
-    }
-    const reader = new FileReader()
-    reader.onload = ev => { parseText(ev.target?.result as string) }
-    reader.readAsText(file)
+    parseExcelFile(file)
     e.target.value = ''
   }
 
@@ -331,7 +324,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
 
   function cellCls(row: TeacherRow, field: keyof TeacherRow) {
     if (!showErrors) return inputCls
-    if (field === 'name' && !row.name.trim()) return inputErrCls
+    if (field === 'name' && (!row.name.trim() || !isValidName(row.name))) return inputErrCls
     if (field === 'email' && !row.email.trim()) return inputErrCls
     if (field === 'subject' && row.staff_type === 'teaching' && !row.subject.trim()) return inputErrCls
     if (field === 'phone' && !row.phone.trim()) return inputErrCls
@@ -357,40 +350,24 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
           )}
         </div>
         <div className="flex gap-2">
-          <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx" onChange={handleFileImport} className="hidden" data-testid="staff-import-file-input" />
-          <button onClick={downloadTemplate}
-            title="Download plain CSV template (free-text subject)"
-            data-testid="staff-download-csv-template"
+          <input ref={fileRef} type="file" accept=".xlsx" onChange={handleFileImport} className="hidden" data-testid="staff-import-file-input" />
+          <button onClick={() => downloadExcelTemplate(schoolId)}
+            title="Download Excel template with Subject, Staff Type and Teaches Grades dropdowns"
+            data-testid="staff-download-excel-template"
             className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
-            CSV Template
+            Excel Template
           </button>
-          {subscribedSubjectNames.length > 0 && (
-            <button onClick={() => downloadExcelTemplate(schoolId)}
-              title="Download Excel template with a Subject dropdown"
-              data-testid="staff-download-excel-template"
-              className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-              </svg>
-              Excel Template
-            </button>
-          )}
           <button onClick={() => fileRef.current?.click()}
-            title="Import a .csv or a filled-in .xlsx template"
+            title="Import a filled-in .xlsx template"
             data-testid="staff-import-file-button"
             className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
-            Import File
-          </button>
-          <button onClick={() => setMode(m => m === 'csv' ? 'manual' : 'csv')}
-            data-testid="staff-toggle-csv-mode"
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === 'csv' ? 'bg-blue-600 text-white' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-            Paste CSV
+            Import Excel File
           </button>
         </div>
       </div>
@@ -432,38 +409,6 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
         </div>
       )}
 
-      {mode === 'csv' ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <div className="mb-3">
-            <p className="text-sm font-medium text-gray-700 mb-1">CSV Format</p>
-            <code className="block bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs text-gray-600 font-mono">{CSV_HEADER}</code>
-          </div>
-          <div className="mb-3">
-            <p className="text-xs text-gray-400 mb-1">Example:</p>
-            <code className="block bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs text-gray-500 font-mono whitespace-pre">{CSV_EXAMPLE}</code>
-          </div>
-          <textarea
-            data-testid="staff-csv-paste-textarea"
-            className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 font-mono resize-none"
-            rows={8} placeholder="Paste CSV data here..."
-            onChange={e => {
-              if (e.target.value.trim()) {
-                parseText(e.target.value)
-                e.target.value = ''
-              }
-            }}
-          />
-          <div className="mt-2 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            <svg className="w-3.5 h-3.5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-            </svg>
-            <p className="text-xs text-amber-700">
-              <strong>Grades column:</strong> always wrap in quotes — <code className="bg-amber-100 px-1 rounded font-mono">&quot;8,9,10&quot;</code> — or leave blank for all grades. Without quotes, the CSV parser will split grades into wrong columns.
-            </p>
-          </div>
-          <p className="text-xs text-gray-400 mt-1.5">Paste triggers auto-parse — or use &quot;Import CSV&quot; button above</p>
-        </div>
-      ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
@@ -569,7 +514,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <p className="text-xs text-gray-400">
-              <strong className="text-gray-500">Teaches Grades</strong> — use the dropdown to select grades. In CSV, always wrap grades in quotes: <code className="bg-gray-100 px-1 rounded font-mono text-[10px]">&quot;8,9,10&quot;</code>
+              <strong className="text-gray-500">Teaches Grades</strong> — use the dropdown to select grades, or leave blank to teach all grades.
             </p>
           </div>
           <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
@@ -584,7 +529,6 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
             </div>
           </div>
         </div>
-      )}
     </div>
   )
 }

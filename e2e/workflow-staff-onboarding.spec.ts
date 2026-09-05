@@ -70,7 +70,10 @@ async function goToStaffDirectory(page: Page) {
   await page.getByRole('button', { name: /Staff Management/i }).click()
   await expect(page.getByRole('heading', { name: 'Staff' })).toBeVisible({ timeout: 10000 })
   await page.getByRole('button', { name: 'Staff Directory' }).click()
-  await expect(page.getByTestId('staff-directory-tab')).toBeVisible({ timeout: 30000 })
+  // TeachersManagement no longer has an internal Directory/Credentials
+  // toggle (removed along with the manual reset UI) — the staff-type tabs
+  // are the first thing it renders, so they're the waypoint now.
+  await expect(page.getByTestId('staff-type-tab-teaching')).toBeVisible({ timeout: 30000 })
 }
 
 // Columns rendered by StaffOnboarding.tsx's manual grid, row i.
@@ -191,7 +194,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
     // First navigation to the Directory sub-tab compiles the TeachersManagement
     // lazy chunk in dev mode (visible as "Compiling…" in the corner) — slower
     // than a normal render, same class of delay as goToStaffOnboarding's chunk.
-    await expect(page.getByTestId('staff-directory-tab')).toBeVisible({ timeout: 30000 })
+    await expect(page.getByTestId('staff-type-tab-teaching')).toBeVisible({ timeout: 30000 })
 
     const found = await teachersByNames(['Priya Sharma'])
     expect(found).toHaveLength(1)
@@ -438,20 +441,6 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
     await submitAndExpect(page, 'staff-onboard-submit', /1 staff member.*onboarded/i)
     const found = await teachersByNames(['New Hire Reused Email'])
     expect(found).toHaveLength(1)
-  })
-
-  // ─── 16. Credentials tab — reset shows a new password ──────────────────────
-  test('16. Credentials tab resets a password and displays it once', async ({ page }) => {
-    test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
-    await page.getByRole('button', { name: /Staff Management/i }).click()
-    await page.getByTestId('staff-credentials-tab').click()
-
-    const row = page.locator('tr', { hasText: 'Priya Sharma' })
-    await expect(row).toBeVisible({ timeout: 10000 })
-    await row.getByRole('button', { name: /^Reset$/i }).click()
-
-    await expect(row.locator('span.font-mono.bg-green-50')).toBeVisible({ timeout: 15000 })
   })
 
   // ─── 17. Unauthorized bulk onboarding call → 401 ──────────────────────────

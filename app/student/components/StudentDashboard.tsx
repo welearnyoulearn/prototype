@@ -24,6 +24,7 @@ type AnnouncementItem = {
 }
 type Props = {
   student: Student; classId: number; schoolId: number; onNavigate?: (key: string) => void
+  isNavItemVisible?: (key: string) => boolean
 }
 
 /* ── Helpers ────────────────────────────────────────────────── */
@@ -124,7 +125,7 @@ function StatCard({
 /* ══════════════════════════════════════════════════════════════
    MAIN COMPONENT
 ══════════════════════════════════════════════════════════════ */
-export default function StudentDashboard({ student, classId, schoolId, onNavigate }: Props) {
+export default function StudentDashboard({ student, classId, schoolId, onNavigate, isNavItemVisible }: Props) {
   const [tasks,           setTasks]           = useState<Task[]>([])
   const [submissions,     setSubmissions]     = useState<Submission[]>([])
   const [doubts,          setDoubts]          = useState<Doubt[]>([])
@@ -373,26 +374,32 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
       </div>
 
       {/* ── Quick Actions ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
+      {(() => {
+        const quickActions = [
           { label: 'Ask a Doubt', emoji: '💬', key: 'doubts'   },
           { label: 'My Marks',   emoji: '📊', key: 'my-marks' },
           { label: 'Timetable',  emoji: '🗓️', key: 'timetable' },
-        ].map((item, i) => (
-          <button
-            key={item.key}
-            onClick={() => onNavigate?.(item.key)}
-            className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col items-center gap-2 shadow-sm card-lift anim-scale-in"
-            style={{ animationDelay: `${0.5 + i * 0.07}s` }}
-          >
-            <div className="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center text-2xl emoji-wobble
-                            group-hover:bg-orange-100 transition-colors duration-200">
-              {item.emoji}
-            </div>
-            <p className="text-xs font-bold text-gray-700 text-center leading-tight">{item.label}</p>
-          </button>
-        ))}
-      </div>
+        ].filter(item => isNavItemVisible?.(item.key) ?? true)
+        if (quickActions.length === 0) return null
+        return (
+          <div className={`grid gap-3 ${quickActions.length === 1 ? 'grid-cols-1' : quickActions.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+            {quickActions.map((item, i) => (
+              <button
+                key={item.key}
+                onClick={() => onNavigate?.(item.key)}
+                className="bg-white border border-gray-100 rounded-2xl p-4 flex flex-col items-center gap-2 shadow-sm card-lift anim-scale-in"
+                style={{ animationDelay: `${0.5 + i * 0.07}s` }}
+              >
+                <div className="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center text-2xl emoji-wobble
+                                group-hover:bg-orange-100 transition-colors duration-200">
+                  {item.emoji}
+                </div>
+                <p className="text-xs font-bold text-gray-700 text-center leading-tight">{item.label}</p>
+              </button>
+            ))}
+          </div>
+        )
+      })()}
 
       {/* ── My Doubts ─────────────────────────────────────────────── */}
       {doubts.length > 0 && (
