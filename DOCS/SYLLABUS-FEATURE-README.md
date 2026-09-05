@@ -1,8 +1,8 @@
 # Syllabus Feature — Complete Reference
 
-> Last verified against code: 2026-09-04
+> Last verified against code: 2026-09-06
 > Scope: every part of the codebase that touches "syllabus" — database tables, API routes, and UI screens across all five portals (Platform Admin, School Admin, Teacher, Student, Parent).
-> Historical context: `docs/syllabus-integration-plan.md` (the original build plan, now superseded by this document). This revision supersedes the 2026-08-24 version of this same file — the biggest change since then is **Class Syllabus Setup**, a whole new per-class curation layer sitting between "a school's copy of the syllabus" and "what students/parents/school-admin actually see."
+> Historical context: `docs/syllabus-integration-plan.md` (the original build plan, now superseded by this document). This revision supersedes the 2026-09-04 version of this same file. The biggest changes since then: **teachers now have full rename/delete control over every chapter/topic in their school's own copy** (the earlier `is_custom` "board-mandated content is locked" guardrail was removed entirely, by explicit product decision — see [§4](#4-every-api-route-in-detail) and [§7](#7-teacher-syllabus-tracking-and-class-syllabus-setup)); a new **sibling-setup-copy** flow lets a teacher clone an already-completed Class Syllabus Setup from another section of the same grade instead of repeating it from scratch; subscribing a subject now **auto-assigns it to every existing class of that grade** (and Class Management no longer offers a manual "click to add" suggestion list); and the School Admin **Syllabus Tracking** screen was rebuilt from scratch as a two-pane class/teacher coverage view with a real trend chart.
 
 This document explains the syllabus feature **inch by inch**: what each database table stores, what every API route accepts and returns, what every screen looks like and does, and how the pieces connect into complete end-to-end workflows. If you're new to this part of the codebase, read it top to bottom once — it's written in the order you'd actually learn the system.
 
@@ -16,6 +16,7 @@ This document explains the syllabus feature **inch by inch**: what each database
 4. [Every API route, in detail](#4-every-api-route-in-detail)
 5. [Platform Admin: building the master catalog](#5-platform-admin-building-the-master-catalog)
 6. [School Admin: subject management only](#6-school-admin-subject-management-only)
+6b. [School Admin: the Syllabus Tracking screen](#6b-school-admin-the-syllabus-tracking-screen--rebuilt-this-session)
 7. [Teacher: syllabus tracking and Class Syllabus Setup](#7-teacher-syllabus-tracking-and-class-syllabus-setup)
 8. [Student: what a child sees](#8-student-what-a-child-sees)
 9. [Parent: the read-only summary](#9-parent-the-read-only-summary)
@@ -191,12 +192,14 @@ Same shape as `master_chapters`, plus:
 |---|---|---|
 | `school_subject_id` | FK → school_subjects, CASCADE delete | |
 | `master_chapter_id` | FK → master_chapters, `ON DELETE SET NULL`, nullable | NULL if this chapter has no master-catalog origin |
-| `is_custom` | BOOLEAN, default FALSE | **TRUE means a teacher or admin created this at the school level** — it cannot be deleted/renamed the same way as a board-mandated chapter (see the DELETE/PATCH guardrails in [§4](#4-every-api-route-in-detail)) |
+| `is_custom` | BOOLEAN, default FALSE | TRUE means a teacher or admin created this at the school level (vs. inherited from the master catalog at subscribe time). **No longer gates rename/delete permission** — see the note below. |
 
 Plus the identical `semester`, `book_type`, `audience`, `book_name` columns as `master_chapters`.
 
+**`is_custom` and edit permission — changed this session.** `is_custom` used to double as a hard rename/delete guardrail: a board-mandated chapter/topic (`is_custom: false`) could never be renamed or deleted, only ones a teacher created themselves. That guardrail has been **removed entirely, by explicit product decision** — a teacher can now rename or delete *any* chapter or topic in their school's own copy, board-mandated or custom. The column itself still exists and is still set correctly at copy/creation time (it's meaningful provenance metadata — "did this come from the master catalog or not" — and other logic like `DELETE /api/school/subjects/:id`'s "has real teaching data" check doesn't touch it), it just no longer restricts who can edit what. The reasoning, verbatim from the product decision: an edit here only ever touches `school_chapters`/`school_topics` — the school's own copy — never `master_chapters`/`master_topics`, so it can never leak into another school's catalog or the platform-wide master data. See [§4](#4-every-api-route-in-detail) for exactly which routes changed.
+
 ### `school_topics`
-Same shape as `master_topics`, plus `master_topic_id` (nullable) and `is_custom` (same meaning as above), plus `subtopics` (JSONB array of strings).
+Same shape as `master_topics`, plus `master_topic_id` (nullable) and `is_custom` (provenance only, doesn't gate edits — see above), plus `subtopics` (JSONB array of strings).
 
 ### `school_resources`
 School-side mirror of `master_resources`, plus `master_resource_id` and `is_custom`.
@@ -278,6 +281,11 @@ Unique constraint: `(class_id, subject_name)` — this is what makes the `ON CON
 
 **Why this table matters so much:** it's the source of truth for "which subjects can this teacher see for this class" everywhere in the app — the teacher's Syllabus tab, the Digital Library, materials visibility. A subject can exist in `class_subjects` with **no corresponding `school_subjects` row at all** — the syllabus GET route specifically handles this case by surfacing it as an empty, zero-chapter subject rather than silently hiding it.
 
+**Auto-assignment, both directions — changed this session.** Two related gaps existed before this session: (1) subscribing a subject only assigned it to class-sections the admin explicitly checked in the Subscribe modal, so a class created later, or simply left unchecked, never got the subject at all; (2) Class Management's Subjects tab showed a manual "click to add" suggestion list for subjects the grade was already subscribed to, requiring the admin to separately re-add what should have been automatic. Both are now closed:
+- `POST /api/school/subscribe` queries every existing, non-deleted class of the target grade (`SELECT id, grade FROM classes WHERE school_id = $1 AND grade = $2 AND deleted_at IS NULL`) and assigns the subject to all of them, with a teacher auto-matched where possible — not just the classes checked in the modal.
+- Class Management's manual suggestion list was removed outright (dead `addSubject`/`availableSuggestions`/`existingNames` code deleted) since auto-assign now covers the same ground automatically.
+- A **one-time backfill migration** (bumped `SCHEMA_VERSION`) retroactively assigns every existing `(school_subjects, class)` pair that was missing a `class_subjects` row before this fix existed. This is deliberately a **one-time backfill, not a live reconciliation** — it runs once on schema-version bump and never again, because `class_subjects` has no soft-delete column; re-running the same check on every load would silently resurrect a subject an admin had deliberately removed from a specific class.
+
 ---
 
 ## 4. Every API route, in detail
@@ -311,16 +319,16 @@ The **mark-taught / schedule / rename** endpoint, where `:id` is a `school_topic
 
 Handles three independent kinds of update in one route, based on which body fields are present:
 1. **Progress update** (`status`, `target_date`, and/or `delay_reason` present): requires `class_id`. Upserts `school_topic_progress` via `ON CONFLICT (class_id, school_topic_id) DO UPDATE`. Marking `status: 'covered'` sets `covered_date` to today **only if it wasn't already set**; any other status clears both `covered_date` and `covered_by`.
-2. **Rename/reorder** (`topic_name` and/or `topic_order` present): **guardrail — a non-custom (board-mandated) topic cannot be renamed**, returns 403.
+2. **Rename/reorder** (`topic_name` and/or `topic_order` present): a teacher can rename **any** topic in their school's own copy — board-mandated or custom (the earlier `!is_custom → 403` guardrail was removed this session, by explicit product decision — see the `is_custom` note in [§3](#3-database-schema-table-by-table)). This only ever writes to `school_topics`, never `master_topics`, so it can't leak across schools or touch the shared platform catalog.
 3. Neither present → 400 `'Nothing to update'`.
 
 Response: `{ success: true, progress: <row or null>, topic: <row or null> }`.
 
 ### `DELETE /api/syllabus/:id`
-Deletes a topic. Same board-mandated guardrail as PATCH (403 if `!is_custom`).
+Deletes a topic. **The board-mandated guardrail was removed this session** — same reasoning as the PATCH rename above: a teacher can delete any topic (board-mandated or custom), since it only ever removes that school's own `school_topics` row (cascading away only that class's own progress history against it), never touching another school's data or the master catalog.
 
 ### `DELETE /api/syllabus?school_id=&class_id=&subject=&chapter_name=`
-Deletes a whole chapter (and cascades to its topics). Same guardrail — 403 if the chapter isn't `is_custom`.
+Deletes a whole chapter (and cascades to its topics). Same removed guardrail — any chapter, board-mandated or custom, can now be deleted.
 
 ### `POST /api/syllabus/chapters`
 **Creates an empty chapter shell** — no topic required. Auth: `requireSyllabusWriteAccess`.
@@ -329,24 +337,42 @@ Deletes a whole chapter (and cascades to its topics). Same guardrail — 403 if 
 - **New this session — `semester_label` in the body:** when the teacher adds a chapter from inside the tracking screen while the subject is in Semester Wise mode, the frontend passes the currently-active semester tab's label, and the route writes a matching `class_chapter_visibility` row for it immediately. Without this, a freshly-added chapter would be created active but invisible under every semester tab (having no label to match any of them) until a separate trip through "Edit Syllabus Setup" to assign one — this was a real reported bug, fixed by auto-assigning to whatever the teacher was actually looking at when they clicked Add Chapter.
 - **Parameter-type bug fixed this session:** the SELECT-based INSERT used to link `master_subject_id` threw a Postgres `42P08 "inconsistent types deduced for parameter"` error whenever a genuinely new `school_subjects` row had to be created (i.e. every first-time bootstrap of a brand-new subject) — caused by the same `$` parameter (grade, then subject) appearing in both a plain `SELECT` target position and inside a `WHERE`/`lower()` position within one statement, which lets pg infer two different types for it. Fixed by casting both explicitly (`$2::varchar`, `$3::varchar`) everywhere this pattern appears — this same fix was applied identically in `bootstrap-chapters`, `bulk-import`, and `POST /api/syllabus`'s own find-or-create.
 
-### `PATCH /api/syllabus/chapters/:id` — NEW this session
+### `PATCH /api/syllabus/chapters/:id`
 Renames a chapter. Body: `{ school_id, chapter_name }`.
 
-- Same guardrail as topic rename: 403 if the chapter isn't `is_custom` — board-mandated chapters are never renamable, only ones the school/teacher created themselves (most commonly, the "Chapter 1"/"Chapter 2" placeholders `bootstrap-chapters` creates, which a teacher fills in and needs to rename to the textbook's real chapter titles).
+- A teacher can rename **any** chapter in their school's own copy — board-mandated or custom (the earlier `!is_custom → 403` guardrail was removed this session; it was originally scoped mainly to renaming the "Chapter 1"/"Chapter 2" placeholders `bootstrap-chapters` creates, opened up to every chapter per explicit product direction). Only ever updates `school_chapters`, never the master catalog.
 - 409 on a duplicate name within the same subject.
-- Exposed in the teacher's tracking screen as a pencil icon next to each custom chapter's delete button — both icons were made more visible this session (previously a near-invisible `text-gray-300` at rest; now `text-gray-500`/`text-red-400` respectively, darkening further on hover).
+- Exposed in the teacher's tracking screen as a pencil icon next to every chapter's delete button (no longer conditional on `is_custom`) — both icons were made more visible in an earlier pass this session (previously a near-invisible `text-gray-300` at rest; now `text-gray-500`/`text-red-400` respectively, darkening further on hover).
 
 ### `GET /api/syllabus/analytics?school_id=&academic_year=`
-The school-wide **admin dashboard** data source. Auth: `requireFeeAccess` (note: not a syllabus-specific guard — this is the same tenant check fee routes use).
+The school-wide **admin dashboard** data source, and the data backing the School Admin **Syllabus Tracking** screen (§7 in the school-admin section below). Auth: `requireFeeAccess` (note: not a syllabus-specific guard — this is the same tenant check fee routes use).
 
-**`pct` is chapter-weighted with partial credit** (changed this session — previously a chapter only counted at all once every one of its topics was covered, an all-or-nothing binary; see [§11](#11-progress-percentages--the-chapter-weighted-formula) for the exact formula and why it changed). `total`/`covered` remain raw chapter counts for display purposes, but `pct` is computed separately from a weighted sum, not `covered/total`.
+**`pct` is chapter-weighted with partial credit** (see [§11](#11-progress-percentages--the-chapter-weighted-formula) for the exact formula). `total`/`covered` remain raw chapter counts for display purposes, but `pct` is computed separately from a weighted sum, not `covered/total`.
 
 Returns three breakdowns in one response:
-- `by_class` — grouped by class, with a per-subject sub-breakdown.
-- `by_teacher` — joins through `class_subjects` (the real "who teaches what" source of truth, not a timetable) so this reflects actual teaching assignments.
-- `by_subject` — school-wide totals per subject name.
+- **`by_class`** — grouped by class, with a per-subject sub-breakdown. Each subject entry now also carries **`teacher_name`** (joined via `class_subjects → teachers` for that exact class+subject pair) — `null` if no `class_subjects` row exists yet for that subject/class.
+- **`by_teacher`** — restructured this session from a `subjects[]` array merged by subject name across every class a teacher taught, into an **`assignments[]`** array with **one row per (class, subject)** — `{ class_id, grade, section, subject, total, covered, pct }`. A teacher holding Mathematics in both 9-A and 9-B now shows two separate assignment rows instead of one blended total; this is what lets the Syllabus Tracking screen's teacher view drill into per-class-per-subject detail instead of a merged number that hides which specific class is behind.
+- `by_subject` — school-wide totals per subject name (unchanged).
 
 A class/teacher/subject with zero chapters gets `pct: null` (shown as an em-dash in the UI) rather than `0`.
+
+**Denominator bug fixed this session:** `total` in every one of the three queries above used to be computed with `FILTER (WHERE topic_count > 0)`, silently dropping any active-but-zero-topic chapter from the count — for one real class with 15 active chapters (6 genuinely empty), this shrank the denominator to 9 and inflated the reported percentage from a correct 47% to 78%, disagreeing with the teacher's own `GET /api/syllabus`-driven tracking screen for the identical data. Fixed by removing that filter from `total` only (every active chapter counts toward the denominator, zero-topic ones included) while keeping it on `covered` (a chapter with zero topics still never counts as "covered" — that stricter display-only count is correct as-is). See [§11](#11-progress-percentages--the-chapter-weighted-formula) for the full story.
+
+### `GET /api/syllabus/analytics/trend?school_id=&class_id=&academic_year=` (or `&teacher_id=` instead of `class_id`) — NEW this session
+Coverage-over-time data for the Syllabus Tracking screen's trend chart. Auth: `requireFeeAccess`. Exactly one of `class_id`/`teacher_id` is required.
+
+- Reads from `syllabus_coverage_snapshots` (below) — a **binary**, chapter-covered/chapter-total weekly snapshot, not the live chapter-weighted number the rest of this feature uses elsewhere. It answers "how has coverage trended week over week," not "what's the precise progress right now" (that's still `GET /api/syllabus/analytics`).
+- **Class mode** (`class_id`): one series per subject taught in that class.
+- **Teacher mode** (`teacher_id`): one series per `"{grade}-{section} · {subject}"` assignment, so a teacher's different classes/subjects don't get blended into one line.
+- Response: `{ weeks: [...dates], series: [{ subject, values: [...pct per week, null if no snapshot exists for that week] }] }`.
+
+### `syllabus_coverage_snapshots` table + weekly cron — NEW this session
+A new table (`id, school_id, class_id, school_subject_id, academic_year, snapshot_date, total_chapters, covered_chapters, created_at`, unique on `(class_id, school_subject_id, snapshot_date)`) purely for historical trend data — nothing else in the feature reads from it.
+
+`GET/POST /api/cron/syllabus-coverage-snapshot` (Vercel cron, `vercel.json` schedules it Mondays 02:00 UTC) iterates every active school, resolves its current academic year, computes the same binary chapter-covered/chapter-total count used here (not the weighted formula), and upserts one row per (class, subject) with `ON CONFLICT (class_id, school_subject_id, snapshot_date) DO NOTHING` — so a manual re-run on the same day never double-writes. Auth: `Authorization: Bearer <CRON_SECRET>` (skipped if the env var is unset, so it's a no-op rather than a hard failure in environments without it configured).
+
+### `POST /api/notifications/nudge-teacher` — NEW this session
+Body: `{ school_id, teacher_id, subject, class_label, pct }`. Lets a school admin flag a subject/class as behind schedule directly from the Syllabus Tracking screen. Auth: `requireFeeAccess`, plus a check that the target teacher actually belongs to the school. Inserts a plain notification (`"{adminName} flagged {subject} for {class_label} as behind schedule ({pct}% covered)."`) — same fire-and-forget pattern every other notification in the app uses, no new abstraction introduced.
 
 ### `GET /api/syllabus/setup?school_id=&class_id=&subject=&academic_year=` — NEW this session
 The Setup screen's own data source — same chapter→topic tree shape as `GET /api/syllabus`, but **deliberately without any `school_topic_progress` join**: this is a selection screen (what should this class even see), not a tracking screen (what's been covered). Auth: `requireSyllabusAccess`.
@@ -363,6 +389,18 @@ Body: `{ school_id, class_id, subject, academic_year?, semester_mode?, semester_
 - Runs the whole per-chapter/per-topic write loop inside one transaction, with a defense-in-depth check per item confirming it actually belongs to the target subject/chapter (rejects a malformed or stale payload trying to write visibility for the wrong subject's chapter).
 - Also upserts `class_subject_setup_status` (`setup_completed_at = NOW()`, `setup_by`, `semester_mode`, `semester_count`).
 - Returns the updated tree in the same shape as the GET, so the frontend can render the post-Apply state without a second round trip.
+
+### `GET /api/syllabus/setup/siblings?school_id=&class_id=&subject=&academic_year=` — NEW this session
+Finds other classes of the **same grade** (never a different grade) that have already **completed** Class Syllabus Setup for the same `school_subject_id`, excluding the requesting class itself. Auth: `requireSyllabusAccess`.
+
+Response: `{ school_subject_id, siblings: [{ class_id, grade, section, setup_completed_at, setup_by_name, semester_mode, semester_count, active_chapters }] }`, ordered most-recently-completed first. Powers the sibling-setup-prompt described in [§7](#7-teacher-syllabus-tracking-and-class-syllabus-setup) — this is a **read-only lookup**, it never writes anything; the actual copy only happens via the route below, and only once the teacher explicitly confirms.
+
+### `POST /api/syllabus/setup/copy-from-sibling` — NEW this session
+Body: `{ school_id, source_class_id, target_class_id, school_subject_id }`. Auth: `requireSyllabusWriteAccess`.
+
+- Verifies both classes belong to the school and share the same grade, and that the source class has actually completed Setup — refuses otherwise.
+- In one transaction: copies every `class_chapter_visibility` row (`is_active`, `semester_label`) and every `class_topic_visibility` row (`is_active`) from source to target via `INSERT ... SELECT ... ON CONFLICT DO UPDATE`, then upserts `class_subject_setup_status` for the target class with `setup_completed_at = NOW()`.
+- This is a **one-time clone, not a live link** — after copying, the target class's visibility rows are its own; editing 10-A's setup later never retroactively changes what was copied to 10-B, and vice versa. If the source class's setup later changes and the target should pick that up too, the teacher would need to re-run the copy explicitly.
 
 ### `GET /api/syllabus/setup/status?school_id=&school_subject_id=` — NEW this session
 **School-admin's read-only view of Class Syllabus Setup.** Auth: `requireFeeAccess`.
@@ -458,27 +496,57 @@ Unchanged this session. This is where the shared catalog every school draws from
 ### What the page now shows
 
 1. **Subject list** (sidebar) — every subscribed/custom subject for the school, grouped by grade. Each row has a **delete button** (trash icon, `data-testid="curriculum-delete-subject-btn-{id}"`) that confirms destructively, calls `DELETE /api/school/subjects/:id`, and surfaces the API's 409 error clearly if a class has already set up or taught something under it (see §4).
-2. **Subscribe modal** — filter by category/board/grade/academic year, pick one or more master subjects, select which class-sections to auto-assign teachers to. Unchanged in mechanics this session, except the board dropdown now defaults to the school's own registered board instead of a hardcoded `'CBSE'` (see §3).
+2. **Subscribe modal** — filter by category/board/grade/academic year, pick one or more master subjects. The board dropdown defaults to the school's own registered board instead of a hardcoded `'CBSE'` (see §3). **The class-section checklist ("Sections Selector") was removed this session** — since `POST /api/school/subscribe` now auto-assigns to every existing class of the grade server-side (see §3's auto-assignment note), picking sections in the modal became redundant. In its place, a static info line: *"Will be assigned automatically to every Grade {grade} class, with a teacher auto-matched where possible."*
 3. **"Add Custom Subject"** — always available regardless of subscription state; creates a bare `school_subjects` row with no chapters, hands off to the teacher's own bootstrap flows.
-4. **Academic Years selector** and the **year-rollover carry-forward prompt** — unchanged.
-5. **Textbooks & Handbooks** — a simple list of uploaded PDF links for the active subject (reference material, not chapter/topic browsing, so this stayed).
-6. **Class Syllabus Setup — read-only per-class status** (`GET /api/syllabus/setup/status`) — the section that survived the rewrite unchanged. For each class in the active subject's grade, a row shows whether that class has completed Setup and who did it. **Expanding a class row now renders the exact same visual the teacher sees in their own tracking view** (Semester 1/Semester 2 pill tabs when the subject is in semester mode, only that class's active chapters/topics, a collapsible inactive-chapters section) — this replaced an earlier flat checklist and was a deliberate fix so admin sees precisely what students/parents of that class actually see, not an abstract summary.
+4. **Academic Years selector** and **carry-forward from a prior year** — the carry-forward UI was rebuilt this session (see below).
+5. **Textbooks & Handbooks**, followed immediately by **Class Syllabus Setup — read-only per-class status** (relocated this session — see below).
+
+### Class Syllabus Setup's read-only view — relocated this session
+
+Before this session, clicking a "Class Syllabus Setup" row expanded its read-only tree **inline, directly under that row** — one class at a time, nested inside the class list itself. That inline-expand pattern is gone. Class rows are now **pure selectors**: clicking one just highlights it (teal), and the actual read-only tree renders once, in a **new fixed section placed below Textbooks & Handbooks** (`expandedClassDetail` state), showing whichever class is currently selected. Same underlying data source (`GET /api/syllabus/setup/status`) and same visual — Semester 1/Semester 2 pill tabs when the subject is in semester mode, only that class's active chapters/topics, a collapsible inactive-chapters section, matching exactly what the teacher/student/parent of that class actually see — just relocated out of the class list into its own stable spot on the page, so switching between classes doesn't reflow the whole subject list around an expanding/collapsing row.
+
+**Admin never edits anything here** — this view exists purely so an admin can see what each class curated, never to change it; per-item selection stays exclusive to that class's own assigned teacher via the Setup screen (or, now, via copying a sibling class's setup — see [§7](#7-teacher-syllabus-tracking-and-class-syllabus-setup)).
+
+### Carry-forward from a prior year — rebuilt this session
+
+The old carry-forward UI was a banner listing every candidate subject as its own row (potentially dozens of rows for a school with many subjects). It's now a **slim one-line nudge** ("You have N subjects from {prior year} not yet carried forward — Copy from {year}") that opens a **bulk modal**: pick a grade → check which subjects to carry forward → confirm, calling `handleBulkCopyFromPriorYear` for the whole batch in one action instead of one subject at a time.
+
+When candidates exist, subscribing to a subject that's also available to carry forward now opens a **"Subscribe chooser"** first — "Clone Master Syllabus" (the normal fresh subscribe) vs. "Copy from Previous Year" (preserves whatever custom chapters/topics/renames the school already made last year, instead of starting from the master catalog again). The superseded one-subject-at-a-time `handleCopyFromPriorYear` and the dead `handleResubscribeFromMaster`/`copyingSubjectId` were removed.
 
 ### Subscribing to a master subject, step by step
 
 1. School admin clicks **"Subscribe to Board Subject"**, opening a modal.
 2. Filters by category, board, grade, and academic year; sees matching master subjects with checkboxes.
-3. Selects one or more class-sections to auto-assign teachers to.
-4. Submits. For **each** selected master subject, `POST /api/school/subscribe` runs sequentially:
+3. Submits. For **each** selected master subject, `POST /api/school/subscribe` runs sequentially:
    - Checks the subject isn't already subscribed for that grade+year — 409 if it is.
    - Inserts one `school_subjects` row, copying `board`, `grade`, `category` from the master row.
    - Deep-copies every chapter, topic, resource, and task template.
-   - **Auto-assigns teachers:** matches active staff by `teaches_grades` + subject name, inserts/updates `class_subjects` — the moment a teacher becomes able to see the subject on their own Syllabus tab.
-5. Each subject's subscribe/copy/assign sequence is one database transaction.
+   - **Auto-assigns to every existing class of the grade** (not just classes explicitly checked — see §3): queries `SELECT id, grade FROM classes WHERE school_id = $1 AND grade = $2 AND deleted_at IS NULL`, and for each one, matches an active staff member by `teaches_grades` + subject name and inserts/updates `class_subjects` — the moment a teacher becomes able to see the subject on their own Syllabus tab.
+4. Each subject's subscribe/copy/assign sequence is one database transaction.
 
 ### Resyncing after the master catalog changes
 
 A **"Resync"** button on each subscribed subject pulls in any *new* master chapters not part of the original copy — additive only. Kept unchanged this session (it never showed the chapter tree UI to begin with, only a button + a count).
+
+---
+
+## 6b. School Admin: the Syllabus Tracking screen — rebuilt this session
+
+**Screen:** `app/school-admin/components/SyllabusTracking.tsx`, rendered as the "Syllabus Coverage" tab inside `AcademicAnalytics.tsx` (which now only owns the top-level tab switcher plus its own separate Tasks tab — all Syllabus Coverage rendering was delegated out to this new component).
+
+This is a full rebuild of what used to be a simpler bar-chart-only view, matching a provided mockup and re-skinned onto the app's own palette (teal/gold/coral/ink) rather than the mockup's original colors. Data source throughout: `GET /api/syllabus/analytics` (§4) plus `GET /api/syllabus/analytics/trend` (§4) for the chart.
+
+**Layout:**
+- A real **academic year selector** (`GET /api/academic-years`) — not hardcoded to the current year, so an admin can look back at a closed year's final coverage.
+- A **KPI strip**: overall coverage %, count of classes "on track," count of classes "behind" — computed from `by_class`.
+- A **class/teacher view toggle** — class mode lists every class with a per-subject breakdown; teacher mode lists every teacher with a per-(class, subject) breakdown (using the new `assignments[]` shape from §4, so a teacher's two different classes never get blended into one row).
+- A searchable, sortable **left-hand list** (classes or teachers, depending on the toggle) and a **right-hand detail table** — Subject / Teacher / Chapters covered / Status / Nudge in class mode; Class / Subject / ... / Nudge in teacher mode.
+- A **trend chart** (Recharts `LineChart` — the first chart library in this codebase; installed specifically for this screen) wired to `GET /api/syllabus/analytics/trend`, one line per subject (class mode) or per class-subject assignment (teacher mode).
+- A **"Nudge teacher"** button per row, calling `POST /api/notifications/nudge-teacher` (§4), with a sent/disabled state once used.
+
+**Status thresholds are deliberately its own scale**, not shared with any other component: ≥75% green "On track," 50–74% amber "Watch," <50% red "Behind" (`statusOf()`). This intentionally does **not** reuse `AcademicAnalytics.tsx`'s differently-tuned banding (which uses 75/40 as its cutoffs) — the two screens were specified with different thresholds and merging them would silently change one screen's meaning to match the other's.
+
+**Per-section tracking accuracy — by design, not an add-on.** Every layer this screen reads from is keyed on `class_id`, never merged by grade: `class_chapter_visibility`, `class_topic_visibility`, `school_topic_progress`, and `GET /api/syllabus/analytics`'s own `by_class` rollup. So if 10-B's teacher renames a chapter, deletes a topic, or marks something covered, it only ever changes 10-B's own row in this screen and only ever reflects to 10-B's own students/parents — 10-A stays completely independent unless a teacher explicitly uses the sibling-copy feature (§7) to clone it. There is no code path anywhere in this feature that merges two sections' visibility or progress together.
 
 ---
 
@@ -498,7 +566,11 @@ This is the screen teachers actually live in day to day, and it's where the bulk
 
 A subject with real chapters that has **never** completed Setup renders **nothing** of the normal tracking view — no chapter list, no book tabs, no progress bar — until the teacher runs Setup at least once. This is computed synchronously from the same `GET /api/syllabus` response that populates the subject list (`chapters.length > 0 && !setup_completed_at`), so there's no timing gap where the tracking view could flash empty/wrong content before a separate fetch resolves. A genuinely empty subject (0 chapters) is unaffected by this gate — it goes to the existing bootstrap panel instead, which is itself a prerequisite to ever running Setup.
 
-The very first time this fires for a subject, the Setup screen opens automatically, **unchecked by default** — nothing is written until the teacher actually clicks Apply.
+**Before opening blank Setup, a sibling check now runs first — new this session.** If any other class of the **same grade** has already completed Setup for this exact subject (checked via `GET /api/syllabus/setup/siblings`, §4), the teacher is shown a **sibling-setup prompt** instead of going straight to blank Setup: a list of sibling classes, each with who set it up and when, and a "Preview & use this setup" button per sibling plus a "No, set up this class on my own" fallback that proceeds to the normal blank Setup screen. Clicking a sibling opens a **read-only preview** of that class's exact chapter/topic selection (the same tree visual admin's read-only drill-down uses); confirming calls `POST /api/syllabus/setup/copy-from-sibling` (§4), which clones the sibling's visibility rows onto this class and marks Setup complete immediately — no manual re-checking every chapter by hand. If multiple siblings exist, all are listed and the teacher picks which one to copy.
+
+The very first time blank Setup fires for a subject (no sibling found, or the teacher declined to copy one), the screen opens automatically, **unchecked by default** — nothing is written until the teacher actually clicks Apply.
+
+**Implementation note — a real race condition was found and fixed in this flow.** The `useEffect` driving this whole check originally called its own dependency-triggering state setter (`setSetupStatus`) *before* the async sibling-check fetch had fully resolved. Since that setter is listed in the effect's own dependency array, calling it mid-flight triggered React to re-run the effect and fire its cleanup (`cancelled = true`) — silently aborting the still-in-flight sibling-check fetch's continuation before it could ever call `setSetupMode('sibling-prompt')`, even though the fetch itself succeeded and returned correct sibling data. The visible symptom was a completely blank Syllabus tab for the affected class (confirmed via network logs showing every API call succeeding while the rendered page contained no sibling-related text at all). Fixed by resolving the full `nextMode` decision first (checking `cancelled` at each async step), then calling `setSetupMode`/`setSetupStatus` together at the very end in one synchronous tick, so React batches both updates before the next effect re-run's cleanup has a chance to fire.
 
 ### The Setup screen itself
 
@@ -518,8 +590,8 @@ Clicking **Apply** calls `POST /api/syllabus/setup/apply` (§4), then reloads th
 - **Semester 1/Semester 2/... pill tabs** (only shown when the subject is in semester mode) — filters the chapter list down to just that semester's active chapters, with a live count per tab.
 - **An "Inactive Chapters" pill** alongside the semester tabs — a new, always-visible tab showing every chapter the teacher excluded via Setup (name + topic count), read-only, with an "Edit Syllabus Setup" button to actually act on it. This exists so a teacher can see at a glance what they deselected without having to re-open the full Setup screen just to check.
 - The old book-tab switcher (Text Book / Hand Book / ...) was **removed entirely** from this screen — semester tabs (in semester mode) or a flat chapter list (in full-syllabus mode) are now the only organizing structure. This was a deliberate simplification after user feedback that showing both semester tabs and book tabs side by side was confusing and the book split added no value once semester grouping existed.
-- An overall progress card (now **chapter-weighted**, §11), a Textbooks & Handbooks card, and the chapter accordion — each chapter has a **rename** (pencil) and **delete** (trash) control if it's custom (`is_custom`), both made visibly colored this session instead of near-invisible at rest.
-- Inside each chapter, every topic has **Mark Complete** and a **Schedule** button (target date + delay reason).
+- An overall progress card (now **chapter-weighted**, §11), a Textbooks & Handbooks card, and the chapter accordion — every chapter has a **rename** (pencil) and **delete** (trash) control, **regardless of `is_custom`** (the earlier board-mandated-content lock was removed this session — see the `is_custom` note in [§3](#3-database-schema-table-by-table) and the route changes in [§4](#4-every-api-route-in-detail)).
+- Inside each chapter, every topic has **Mark Complete**, a **Schedule** button (target date + delay reason), and — **new this session** — its own **rename** (pencil) and **delete** (trash) controls, matching the chapter-level UI exactly (inline edit input, autofocus, Enter-to-save, Save/Cancel). Topic rename previously didn't exist as a UI at all (only delete did, and only for custom topics); it's now built and, like chapter rename, works on any topic.
 - **"+ Add Chapter"** at the subject level — when the subject is in semester mode, a newly-added chapter is now auto-assigned to whichever semester tab the teacher currently has open (§4), so it appears immediately instead of vanishing until a separate Setup trip.
 - **"+ Add Subtopic"** per chapter.
 
@@ -720,6 +792,9 @@ Documenting these here so they're not mistaken for bugs when someone notices the
 - **`DELETE /api/syllabus` (whole-chapter delete) doesn't filter by `academic_year`** when resolving which subject to delete a chapter from, unlike every sibling route. Low practical risk, not yet observed to trigger, but worth fixing if a school ever has the same subject name duplicated across years in a way that hits it.
 - **A handful of helper functions were duplicated across files even before this session** (`computeBookGroups`, `audienceBadge`/`majorityAudienceBadge`, `BOOK_TYPE_LABELS`/`AUDIENCE_LABELS`) — this session actually reduced that duplication somewhat by deleting the teacher/student book-tab copies outright rather than keeping them in sync, but platform-admin's curriculum page still has its own copy since that page's book browser was intentionally left alone.
 - **Two different completion-percentage formulas existed as recently as this session's start** (topic-flat on tracking screens, chapter-binary on admin analytics) — both are now unified on the same chapter-weighted-with-partial-credit formula (§11). Getting there took two passes: the first pass unified the *formula* but left a real bug in the analytics route's SQL — its `total` denominator used `FILTER (WHERE topic_count > 0)`, silently excluding any active-but-zero-topic chapter from the count. For a real class with 15 active chapters (6 of them genuinely empty), this shrank the analytics denominator to 9, producing 78% there against 47% on the teacher's own screen for the identical data. Fixed by dropping that filter from `total` (every active chapter now counts, zero-topic or not — matching `GET /api/syllabus`'s own semantics exactly) while keeping it on `covered` (a stricter "fully done, non-empty" display count is still meaningful on its own). Verified against real data: both routes now report 15 chapters / 47% for the same class+subject.
+- **Full edit access has no undo.** Since a teacher can now rename or delete any chapter/topic (board-mandated or custom), deleting a board-imported chapter by mistake removes it from that school's copy permanently — there's no "restore from master catalog" button. The only recovery path today is manually re-running the subject's Resync (§6, additive-only) if the deleted chapter still exists in the master catalog, or recreating it by hand otherwise.
+- **The sibling-setup-copy feature only offers *completed* setups, and only within the same grade.** A class whose Setup is still in-progress (started but never Applied) never appears as a copyable sibling, and a teacher can't copy from a different grade's setup even if the syllabus content happens to be similar — both are deliberate scope limits, not bugs.
+- **A copied sibling setup is a one-time clone, not a live link.** If the source class's teacher edits their Setup afterward (excludes another chapter, reorganizes semesters), the class that copied from them earlier does **not** pick up that change automatically — there's no propagation, by design (see the route note in §4).
 - **A real data-integrity bug was found and fixed for one specific school during this session** (not a systemic issue going forward, but worth knowing the shape of it if it recurs elsewhere): a subject's *current* academic year's `school_subjects` row can end up with the wrong `board` value if it was ever created via a "find-or-create" side-effect path before this session's `master_subject_id`-linking fix, then carried forward year-to-year via `copy-from-year` — meaning a school genuinely correctly subscribed under one board (e.g. AP_SSC) could have a *separate*, silently mislabeled row under a different board (e.g. CBSE) for the same subject/grade, permanently orphaned from any real catalog content because no master-catalog entry existed under the wrong board. The root cause (Subscribe's board dropdown defaulting to a hardcoded value instead of the school's own registered board) is fixed going forward (§3), but any school with this exact mislabel already baked into an existing academic year's data needs a manual one-off correction (`UPDATE school_subjects SET board = ..., master_subject_id = ... WHERE id = ...`), not something the app self-heals.
 
 ---
@@ -734,7 +809,8 @@ Documenting these here so they're not mistaken for bugs when someone notices the
 | **`is_active` (visibility row)** | Whether a chapter/topic is included for one specific class, per Class Syllabus Setup. **Absence of a row means active** — this is the rule the whole feature is built on |
 | **`semester_label`** (per-class) | A teacher-assigned Semester 1/2/... grouping, set during Setup, unique to one class — distinct from the shared `school_chapters.semester` column |
 | **`semester`** (shared) | The board-level column on `school_chapters` driving the (now removed from tracking screens) book-tab-style grouping every class of a subscribed subject sees identically |
-| **`is_custom`** | Flag on a school-side chapter/topic meaning it has no master-catalog origin — created directly at the school level. Controls whether it can be renamed/deleted (board-mandated content cannot be) |
+| **`is_custom`** | Flag on a school-side chapter/topic meaning it has no master-catalog origin — created directly at the school level. Provenance only — it no longer gates rename/delete permission (removed this session; a teacher can now edit any chapter/topic, board-mandated or custom) |
+| **Sibling class** | Another class-section of the **same grade** studying the same subject — Class Syllabus Setup completed by one can be copied to another via `POST /api/syllabus/setup/copy-from-sibling`, instead of repeating Setup from scratch |
 | **Bootstrap** | Populating an otherwise-empty subject with chapters, via JSON import or by entering a chapter count |
 | **Book** | A subject can have more than one — distinguished by `(book_type, book_name)` |
 | **`book_type`** | `'textbook' \| 'handbook' \| 'workbook'` |

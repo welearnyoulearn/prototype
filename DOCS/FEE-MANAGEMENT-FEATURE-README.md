@@ -1,8 +1,9 @@
 # Fee Management Feature — Complete Reference
 
-> Last verified against code: 2026-08-31
+> Last verified against code: 2026-09-06
 > Scope: every part of the codebase that touches school fees — database tables, API routes, and the School Admin and Parent portal screens.
 > Online payments (Cashfree) and WhatsApp integration are **not merged into this branch** — see [§6](#6-online-payments-integration--status-absent-on-this-branch) for exactly what does and doesn't exist.
+> No fee database tables, API routes, or School Admin screens changed since the 2026-08-31 revision of this document. The one change this session was a **Parent Overview data-freshness fix** — see the note at the end of [§2](#2-screen-by-screen-tab-by-tab) and [§10](#10-known-quirks-and-gaps).
 
 This document explains fee management **inch by inch**: what each database table stores, what every API route accepts and returns, what every screen and tab does, and how the pieces connect into complete end-to-end workflows.
 
@@ -95,6 +96,10 @@ A table of every non-active student (soft-removed or already passed out) who sti
 
 - **Grant Waiver**: pick an open bill, choose Percentage / Fixed ₹ / Full, see a live preview of the resulting balance, enter a required reason.
 - **Cancel/Correct payment** and **Revoke/Correct waiver**: the same inline-form pattern reused in both the Collect tab and the Passbook, always requiring a reason and always leaving a permanent audit trail rather than silently editing history.
+
+### Parent Overview's Outstanding Fees tile — fixed this session
+
+The Parent portal's own Overview screen (`app/parent/page.tsx`, separate from the ledger-style fee views this document otherwise focuses on) shows a summary tile for the selected child's outstanding balance. It read from the same fee-loading function (`loadFees`) the portal's dedicated Fees tab uses, but that function was previously only ever triggered **lazily**, the first time a parent actually visited the Fees tab — so a parent who stayed on Overview never triggered it at all, and the tile silently rendered "—" instead of the real balance, even when the school-admin side showed a genuine non-zero outstanding amount for the same student. Fixed by also calling `loadFees(...)` eagerly inside `selectChild()`'s existing academic-year-resolution step, so the balance is fetched as soon as a child is selected, regardless of which tab the parent lands on first. No fee calculation logic changed — this was purely a "when does the existing correct data actually get fetched" timing bug.
 
 ### `fee-management/receipts.ts`
 
@@ -347,6 +352,7 @@ Either way, any unresolved balance becomes a single lump "Previous Year Dues" bi
 - **Client-supplied "done by" names are trusted, not independently verified** against the authenticated session — consistent with the rest of the app's conventions, but worth remembering that the name on a receipt or audit entry is a display convenience, not proof of who acted.
 - **Reopening a closed year unlocks editing for every bill, payment, and waiver in that entire year at once** — even if the actual need was to fix a single record. This is the intended behavior, but it's a wide blast radius for what's often meant to be a narrow correction, and worth treating with real caution operationally.
 - **The variable-fee assignment grid has no pagination**, unlike the ledger and payments lists, which both deliberately support it — fine at typical school sizes today, but an inconsistency in an otherwise careful pattern.
+- **The Parent Overview tile and the Parent Fees tab both call the same `loadFees` function independently** rather than sharing one fetch-on-child-select lifecycle — fixed this session so Overview also triggers it eagerly (see §2), but worth knowing there are still two call sites for the same fetch rather than one central one, should a similar timing gap reappear elsewhere in the Parent portal.
 
 ---
 
