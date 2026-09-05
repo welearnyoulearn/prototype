@@ -75,8 +75,30 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
   // the newest one being opened for the first time.
   const [priorYearLabel, setPriorYearLabel] = useState<string>('')
   const [carryForwardCandidates, setCarryForwardCandidates] = useState<Subject[]>([])
-  const [copyingSubjectId, setCopyingSubjectId] = useState<number | null>(null)
   const [dismissedCarryForward, setDismissedCarryForward] = useState(false)
+
+  // Bulk carry-forward modal — a grade-then-subjects picker so a school with
+  // many classes/subjects (e.g. 10 grades × 7 subjects = 70 candidates)
+  // doesn't have to click a separate "Copy from last year" button per
+  // subject one at a time. Step 1 picks which grade to roll forward, step 2
+  // checks which of that grade's carried-over subjects to actually copy —
+  // grade, not class, because copy-from-year operates on (subject, grade)
+  // pairs, same as a fresh Subscribe; which classes actually get taught a
+  // subject is a separate Class Management decision either way.
+  const [showCarryForwardModal, setShowCarryForwardModal] = useState(false)
+  const [carryForwardStep, setCarryForwardStep] = useState<'grade' | 'subjects'>('grade')
+  const [carryForwardGrade, setCarryForwardGrade] = useState<string>('')
+  const [carryForwardSelectedIds, setCarryForwardSelectedIds] = useState<number[]>([])
+  const [bulkCopying, setBulkCopying] = useState(false)
+  const [bulkCopyError, setBulkCopyError] = useState('')
+
+  // First-click chooser when Subscribe is opened while carry-forward
+  // candidates exist for this year — "clone fresh from the master
+  // template" vs "copy last year's content as-is" are different enough
+  // actions (and the second one is now a whole grade/subject picker of its
+  // own, not a single click) that they get a beat to choose between rather
+  // than always landing straight in the Subscribe-from-template modal.
+  const [showSubscribeChooser, setShowSubscribeChooser] = useState(false)
 
   // Class Syllabus Setup — READ-ONLY status per class for the active
   // subject. Admin sees which classes have curated their own selection and
@@ -100,9 +122,11 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
   const [activeClassDetailSemester, setActiveClassDetailSemester] = useState('')
   const [classDetailLoading, setClassDetailLoading] = useState(false)
 
-  // Classes state for section mapping
+  // Classes state — used for the custom-subject grade dropdown. Subscribing
+  // now auto-assigns to every existing class of the subscribed grade
+  // server-side (POST /api/school/subscribe), so this no longer needs a
+  // per-class selection UI in the Subscribe modal.
   const [classes, setClasses] = useState<{ id: number; grade: string; section: string }[]>([])
-  const [selectedClassIds, setSelectedClassIds] = useState<number[]>([])
 
   // Modals and form state
   const [showSubscribeModal, setShowSubscribeModal] = useState(false)
@@ -248,54 +272,65 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       .catch(() => setCarryForwardCandidates([]))
   }, [loading, selectedYear, academicYears, subjects, schoolId])
 
-  const handleCopyFromPriorYear = async (sourceSubjectId: number) => {
-    setCopyingSubjectId(sourceSubjectId)
-    setError('')
+  // Grades that actually have at least one pending carry-forward subject —
+  // what the modal's step-1 grade picker offers.
+  const carryForwardGrades = Array.from(new Set(carryForwardCandidates.map(c => c.grade))).sort()
+
+  function openCarryForwardModal() {
+    setBulkCopyError('')
+    setCarryForwardSelectedIds([])
+    setCarryForwardGrade(carryForwardGrades[0] || '')
+    setCarryForwardStep('grade')
+    setShowCarryForwardModal(true)
+  }
+
+  // Bulk-copies every checked subject sequentially (same one-at-a-time
+  // pattern as handleSubscribe's multi-select submit, for the same reason:
+  // a partial failure only leaves the not-yet-copied ones still selected,
+  // so retrying is safe and never re-submits — and re-errors on — one
+  // that already succeeded).
+  const handleBulkCopyFromPriorYear = async () => {
+    if (carryForwardSelectedIds.length === 0) return
+    setBulkCopying(true)
+    setBulkCopyError('')
+    const remaining = [...carryForwardSelectedIds]
+    let lastSchoolSubjectId: number | undefined
     try {
-      const res = await fetch('/api/school/subjects/copy-from-year', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, source_school_subject_id: sourceSubjectId, target_academic_year: selectedYear }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      setCarryForwardCandidates(prev => prev.filter(s => s.id !== sourceSubjectId))
-      setSuccess('Copied last year’s syllabus for this subject.')
-      await loadSchoolSubjects(data.school_subject_id, selectedYear)
+      while (remaining.length > 0) {
+        const sourceId = remaining[0]
+        const res = await fetch('/api/school/subjects/copy-from-year', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ school_id: schoolId, source_school_subject_id: sourceId, target_academic_year: selectedYear }),
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error)
+        lastSchoolSubjectId = data.school_subject_id
+        setCarryForwardCandidates(prev => prev.filter(s => s.id !== sourceId))
+        remaining.shift()
+        setCarryForwardSelectedIds([...remaining])
+      }
+      setSuccess(
+        carryForwardSelectedIds.length === 1
+          ? 'Copied last year’s syllabus for this subject.'
+          : `Copied last year’s syllabus for ${carryForwardSelectedIds.length} subjects.`
+      )
+      setShowCarryForwardModal(false)
+      await loadSchoolSubjects(lastSchoolSubjectId, selectedYear)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to copy subject from last year')
+      const done = carryForwardSelectedIds.length - remaining.length
+      setBulkCopyError(
+        (err instanceof Error ? err.message : 'Failed to copy subject') +
+          (done > 0 ? ` (${done} of ${carryForwardSelectedIds.length} subjects copied before this failure)` : '')
+      )
+      if (lastSchoolSubjectId !== undefined) {
+        await loadSchoolSubjects(lastSchoolSubjectId, selectedYear)
+      }
     } finally {
-      setCopyingSubjectId(null)
+      setBulkCopying(false)
     }
   }
 
-  // "Re-sync from master template" for one carry-forward candidate — the
-  // same clone POST /api/school/subscribe does for the modal's multi-select
-  // flow, just pre-targeted at one subject's own master_subject_id instead
-  // of going through the picker. Only offered for a candidate that actually
-  // has one (a custom subject with no master link has nothing to re-sync
-  // from — see the "Copy from last year" button being its only option below).
-  const handleResubscribeFromMaster = async (candidate: Subject) => {
-    if (!candidate.master_subject_id) return
-    setCopyingSubjectId(candidate.id)
-    setError('')
-    try {
-      const res = await fetch('/api/school/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, master_subject_id: candidate.master_subject_id, academic_year: selectedYear }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      setCarryForwardCandidates(prev => prev.filter(s => s.id !== candidate.id))
-      setSuccess('Subscribed fresh from the master template for this year.')
-      await loadSchoolSubjects(data.school_subject_id, selectedYear)
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to subscribe from master template')
-    } finally {
-      setCopyingSubjectId(null)
-    }
-  }
 
   const toggleGrade = (grade: string) => {
     setExpandedGrades(prev => ({
@@ -329,16 +364,6 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       })
       .catch(() => {})
   }, [schoolId])
-
-  // Automatically select all sections for the chosen grade when opening modal or changing grade
-  useEffect(() => {
-    if (showSubscribeModal) {
-      const matching = classes.filter(c => c.grade.toString().trim().toLowerCase() === filterGrade.toString().trim().toLowerCase())
-      setSelectedClassIds(matching.map(c => c.id))
-    } else {
-      setSelectedClassIds([])
-    }
-  }, [filterGrade, showSubscribeModal, classes])
 
   // Master subject list is scoped to a single board+grade+category — clear
   // stale selections when the filters change or the modal opens/closes, so a
@@ -431,7 +456,6 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
             school_id: schoolId,
             master_subject_id: parseInt(masterId),
             academic_year: subscribeYear || selectedYear,
-            class_ids: selectedClassIds
           })
         })
         const data = await res.json()
@@ -572,7 +596,7 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
           </button>
           <button
             data-testid="curriculum-subscribe-open-btn"
-            onClick={() => setShowSubscribeModal(true)}
+            onClick={() => (carryForwardCandidates.length > 0 ? setShowSubscribeChooser(true) : setShowSubscribeModal(true))}
             className="flex items-center gap-1.5 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-sm"
             style={{ background: TEAL }}
           >
@@ -596,64 +620,39 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
         </div>
       )}
 
-      {/* New-academic-year carry-forward prompt — subjects present last year
-          but not yet in this one. Per-subject choice: copy last year's
-          content as-is (keeps custom chapters/topics, no rework for
-          teachers), or subscribe fresh from the master template (picks up
-          any board-catalog updates, starts clean like a normal subscribe). */}
+      {/* New-academic-year carry-forward nudge — subjects present last year
+          but not yet in this one. Deliberately a slim one-line banner, not a
+          per-subject list: a school with many grades/subjects can have
+          dozens of these, and a row-per-subject list (the previous version
+          of this banner) didn't scale. Its only action opens the bulk
+          grade→subjects picker modal below. */}
       {!dismissedCarryForward && carryForwardCandidates.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 space-y-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-amber-900">
-                {carryForwardCandidates.length} subject{carryForwardCandidates.length === 1 ? '' : 's'} from {priorYearLabel} {carryForwardCandidates.length === 1 ? "isn't" : "aren't"} in {selectedYear} yet
-              </h3>
-              <p className="text-xs text-amber-700 mt-0.5">
-                Almost every school&apos;s syllabus barely changes year to year — copy last year&apos;s content as-is, or subscribe fresh to pick up any board updates.
-              </p>
-            </div>
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h3 className="text-sm font-semibold text-amber-900">
+              {carryForwardCandidates.length} subject{carryForwardCandidates.length === 1 ? '' : 's'} from {priorYearLabel} {carryForwardCandidates.length === 1 ? "isn't" : "aren't"} in {selectedYear} yet
+            </h3>
+            <p className="text-xs text-amber-700 mt-0.5">
+              Almost every school&apos;s syllabus barely changes year to year — copy last year&apos;s content as-is, or subscribe fresh to pick up any board updates.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              data-testid="curriculum-carry-forward-open-btn"
+              onClick={openCarryForwardModal}
+              className="text-xs font-semibold px-4 py-2 rounded-xl text-white"
+              style={{ background: TEAL }}
+            >
+              Copy from {priorYearLabel}
+            </button>
             <button
               data-testid="curriculum-carry-forward-dismiss"
               onClick={() => setDismissedCarryForward(true)}
-              className="text-amber-500 hover:text-amber-700 flex-shrink-0"
+              className="text-amber-500 hover:text-amber-700"
               aria-label="Dismiss"
             >
               <X size={14} />
             </button>
-          </div>
-          <div className="space-y-2">
-            {carryForwardCandidates.map(candidate => (
-              <div key={candidate.id} className="bg-white border border-amber-100 rounded-xl px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap">
-                <div className="text-xs">
-                  <span className="font-semibold text-gray-800">{candidate.subject_name}</span>
-                  <span className="text-gray-400"> · Grade {candidate.grade}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    data-testid={`curriculum-carry-forward-copy-${candidate.id}`}
-                    onClick={() => handleCopyFromPriorYear(candidate.id)}
-                    disabled={copyingSubjectId === candidate.id}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg text-white disabled:opacity-50"
-                    style={{ background: TEAL }}
-                  >
-                    {copyingSubjectId === candidate.id ? 'Copying…' : `Copy from ${priorYearLabel}`}
-                  </button>
-                  {candidate.master_subject_id ? (
-                    <button
-                      data-testid={`curriculum-carry-forward-resync-${candidate.id}`}
-                      onClick={() => handleResubscribeFromMaster(candidate)}
-                      disabled={copyingSubjectId === candidate.id}
-                      className="text-xs font-semibold px-3 py-1.5 rounded-lg border disabled:opacity-50"
-                      style={{ borderColor: BORDER, color: INK }}
-                    >
-                      Re-sync from master template
-                    </button>
-                  ) : (
-                    <span className="text-[10px] text-gray-400 italic px-1">custom subject — no master template</span>
-                  )}
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       )}
@@ -877,116 +876,34 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                     <div className="space-y-1.5">
                       {setupStatusRows.map(row => {
                         const isDone = !!row.setup_completed_at
-                        const isExpanded = expandedClassDetail === row.class_id
+                        const isSelected = expandedClassDetail === row.class_id
                         return (
-                          <div key={row.class_id} className="rounded-xl border overflow-hidden" style={{ borderColor: BORDER }}>
-                            <button
-                              onClick={() => toggleClassDetail(row.class_id, activeSubject.subject_name)}
-                              data-testid={`curriculum-setup-status-${row.class_id}`}
-                              className="w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left hover:bg-gray-50"
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-semibold" style={{ color: INK }}>Grade {row.grade} – {row.section}</span>
-                                {isDone ? (
-                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: '#E1F5EE', color: '#085041' }}>
-                                    Set up{row.setup_by_name ? ` by ${row.setup_by_name}` : ''}
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: SURFACE, color: '#9ca3af' }}>
-                                    Not set up yet — showing everything
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2 flex-shrink-0">
-                                <span className="text-[11px] text-gray-400">
-                                  {row.active_chapters}/{setupStatusTotals?.total_chapters ?? row.active_chapters} chapters · {row.active_topics}/{setupStatusTotals?.total_topics ?? row.active_topics} topics
+                          <button
+                            key={row.class_id}
+                            onClick={() => toggleClassDetail(row.class_id, activeSubject.subject_name)}
+                            data-testid={`curriculum-setup-status-${row.class_id}`}
+                            className="w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left rounded-xl border hover:bg-gray-50"
+                            style={{ borderColor: isSelected ? TEAL : BORDER, background: isSelected ? '#EDF9F6' : 'white' }}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold" style={{ color: INK }}>Grade {row.grade} – {row.section}</span>
+                              {isDone ? (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: '#E1F5EE', color: '#085041' }}>
+                                  Set up{row.setup_by_name ? ` by ${row.setup_by_name}` : ''}
                                 </span>
-                                {isExpanded ? <ChevronDown size={13} className="text-gray-400" /> : <ChevronRight size={13} className="text-gray-400" />}
-                              </div>
-                            </button>
-                            {isExpanded && (() => {
-                              const tree = classDetailTree ?? []
-                              const activeChapters = tree.filter(ch => ch.is_active).sort((a, b) => a.chapter_order - b.chapter_order)
-                              const inactiveChapters = tree.filter(ch => !ch.is_active).sort((a, b) => a.chapter_order - b.chapter_order)
-                              const semesterChoices = classDetailSemesterMode && classDetailSemesterCount
-                                ? Array.from({ length: classDetailSemesterCount }, (_, i) => `Semester ${i + 1}`)
-                                : []
-                              const effectiveSemester = semesterChoices.includes(activeClassDetailSemester)
-                                ? activeClassDetailSemester
-                                : (semesterChoices[0] || '')
-                              const visibleChapters = semesterChoices.length > 0
-                                ? activeChapters.filter(ch => ch.semester_label === effectiveSemester)
-                                : activeChapters
-                              return (
-                                <div className="border-t px-3 py-3 space-y-3" style={{ borderColor: BORDER, background: SURFACE }}>
-                                  {classDetailLoading ? (
-                                    <p className="text-xs text-gray-400">Loading selection…</p>
-                                  ) : tree.length === 0 ? (
-                                    <p className="text-xs text-gray-400">No chapters in this subject yet.</p>
-                                  ) : (
-                                    <>
-                                      {/* Same visual the teacher sees in their own tracking view —
-                                          Semester pill tabs (when Setup ran in Semester Wise mode)
-                                          over only the chapters/topics the teacher actually kept
-                                          active. Read-only mirror; editing stays in the teacher's
-                                          own Setup screen. */}
-                                      {semesterChoices.length > 0 && (
-                                        <div className="flex gap-1.5 flex-wrap">
-                                          {semesterChoices.map(label => {
-                                            const active = label === effectiveSemester
-                                            const count = activeChapters.filter(ch => ch.semester_label === label).length
-                                            return (
-                                              <button key={label} type="button"
-                                                onClick={() => setActiveClassDetailSemester(label)}
-                                                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors"
-                                                style={{ background: active ? TEAL : 'white', color: active ? 'white' : TEAL, borderColor: active ? TEAL : BORDER }}>
-                                                {label} <span style={{ opacity: 0.75 }}>({count})</span>
-                                              </button>
-                                            )
-                                          })}
-                                        </div>
-                                      )}
-
-                                      {visibleChapters.length === 0 ? (
-                                        <p className="text-xs text-gray-400">No active chapters in this semester.</p>
-                                      ) : (
-                                        <div className="space-y-2 max-h-96 overflow-y-auto">
-                                          {visibleChapters.map(ch => (
-                                            <div key={ch.school_chapter_id} className="rounded-xl border p-3" style={{ borderColor: BORDER, background: 'white' }}>
-                                              <div className="flex items-center justify-between gap-2 mb-1.5">
-                                                <span className="text-xs font-semibold" style={{ color: INK }}>{ch.chapter_name}</span>
-                                                <span className="text-[10px] text-gray-400 flex-shrink-0">{ch.topics.filter(t => t.is_active).length}/{ch.topics.length} topics</span>
-                                              </div>
-                                              <div className="space-y-1">
-                                                {ch.topics.filter(t => t.is_active).sort((a, b) => a.topic_order - b.topic_order).map(t => (
-                                                  <div key={t.school_topic_id} className="text-[11px] px-2 py-1 rounded-lg" style={{ background: SURFACE, color: INK }}>
-                                                    {t.topic_name}
-                                                  </div>
-                                                ))}
-                                              </div>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )}
-
-                                      {inactiveChapters.length > 0 && (
-                                        <details className="text-xs">
-                                          <summary className="cursor-pointer font-medium text-gray-400 select-none">
-                                            {inactiveChapters.length} inactive chapter{inactiveChapters.length === 1 ? '' : 's'}
-                                          </summary>
-                                          <div className="mt-1.5 space-y-0.5">
-                                            {inactiveChapters.map(ch => (
-                                              <div key={ch.school_chapter_id} className="line-through text-gray-400 text-[11px]">{ch.chapter_name}</div>
-                                            ))}
-                                          </div>
-                                        </details>
-                                      )}
-                                    </>
-                                  )}
-                                </div>
-                              )
-                            })()}
-                          </div>
+                              ) : (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: SURFACE, color: '#9ca3af' }}>
+                                  Not set up yet — showing everything
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span className="text-[11px] text-gray-400">
+                                {row.active_chapters}/{setupStatusTotals?.total_chapters ?? row.active_chapters} chapters · {row.active_topics}/{setupStatusTotals?.total_topics ?? row.active_topics} topics
+                              </span>
+                              <ChevronRight size={13} className="text-gray-400" style={{ transform: isSelected ? 'rotate(90deg)' : undefined }} />
+                            </div>
+                          </button>
                         )
                       })}
                     </div>
@@ -1010,6 +927,99 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
                   </div>
                 )}
 
+                {/* Read-only syllabus for whichever class is selected above —
+                    always the same visual the teacher sees in their own
+                    tracking view (Semester pill tabs when Setup ran in
+                    Semester Wise mode, active-only chapters/topics), fixed
+                    in one place below Textbooks & Handbooks rather than
+                    expanding inline under the clicked row. Live off the same
+                    GET /api/syllabus/setup fetch a class-row click already
+                    triggers, so it reflects the teacher's current Setup
+                    immediately — including for student/parent, who read the
+                    identical underlying visibility tables. Read-only: admin
+                    never edits here, only the class's own teacher can. */}
+                {expandedClassDetail != null && (() => {
+                  const selectedRow = setupStatusRows.find(r => r.class_id === expandedClassDetail)
+                  const tree = classDetailTree ?? []
+                  const activeChapters = tree.filter(ch => ch.is_active).sort((a, b) => a.chapter_order - b.chapter_order)
+                  const inactiveChapters = tree.filter(ch => !ch.is_active).sort((a, b) => a.chapter_order - b.chapter_order)
+                  const semesterChoices = classDetailSemesterMode && classDetailSemesterCount
+                    ? Array.from({ length: classDetailSemesterCount }, (_, i) => `Semester ${i + 1}`)
+                    : []
+                  const effectiveSemester = semesterChoices.includes(activeClassDetailSemester)
+                    ? activeClassDetailSemester
+                    : (semesterChoices[0] || '')
+                  const visibleChapters = semesterChoices.length > 0
+                    ? activeChapters.filter(ch => ch.semester_label === effectiveSemester)
+                    : activeChapters
+                  return (
+                    <div className="bg-white border rounded-2xl p-5 space-y-3" style={{ borderColor: BORDER }}>
+                      <h5 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                        {selectedRow ? `Grade ${selectedRow.grade} – ${selectedRow.section}` : 'Class'}&apos;s Syllabus
+                      </h5>
+                      {classDetailLoading ? (
+                        <p className="text-xs text-gray-400">Loading selection…</p>
+                      ) : tree.length === 0 ? (
+                        <p className="text-xs text-gray-400">No chapters in this subject yet.</p>
+                      ) : (
+                        <>
+                          {semesterChoices.length > 0 && (
+                            <div className="flex gap-1.5 flex-wrap">
+                              {semesterChoices.map(label => {
+                                const active = label === effectiveSemester
+                                const count = activeChapters.filter(ch => ch.semester_label === label).length
+                                return (
+                                  <button key={label} type="button"
+                                    onClick={() => setActiveClassDetailSemester(label)}
+                                    className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-colors"
+                                    style={{ background: active ? TEAL : 'white', color: active ? 'white' : TEAL, borderColor: active ? TEAL : BORDER }}>
+                                    {label} <span style={{ opacity: 0.75 }}>({count})</span>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          )}
+
+                          {visibleChapters.length === 0 ? (
+                            <p className="text-xs text-gray-400">No active chapters in this semester.</p>
+                          ) : (
+                            <div className="space-y-2 max-h-96 overflow-y-auto">
+                              {visibleChapters.map(ch => (
+                                <div key={ch.school_chapter_id} className="rounded-xl border p-3" style={{ borderColor: BORDER, background: SURFACE }}>
+                                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                                    <span className="text-xs font-semibold" style={{ color: INK }}>{ch.chapter_name}</span>
+                                    <span className="text-[10px] text-gray-400 flex-shrink-0">{ch.topics.filter(t => t.is_active).length}/{ch.topics.length} topics</span>
+                                  </div>
+                                  <div className="space-y-1">
+                                    {ch.topics.filter(t => t.is_active).sort((a, b) => a.topic_order - b.topic_order).map(t => (
+                                      <div key={t.school_topic_id} className="text-[11px] px-2 py-1 rounded-lg" style={{ background: 'white', color: INK }}>
+                                        {t.topic_name}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {inactiveChapters.length > 0 && (
+                            <details className="text-xs">
+                              <summary className="cursor-pointer font-medium text-gray-400 select-none">
+                                {inactiveChapters.length} inactive chapter{inactiveChapters.length === 1 ? '' : 's'}
+                              </summary>
+                              <div className="mt-1.5 space-y-0.5">
+                                {inactiveChapters.map(ch => (
+                                  <div key={ch.school_chapter_id} className="line-through text-gray-400 text-[11px]">{ch.chapter_name}</div>
+                                ))}
+                              </div>
+                            </details>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )
+                })()}
+
               </>
             )}
           </div>
@@ -1018,6 +1028,141 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       )}
 
       {/* ── MODALS ── */}
+
+      {/* Subscribe chooser — only shown when carry-forward candidates exist
+          for this year (otherwise Subscribe goes straight to the master-
+          template modal, no extra click for the common no-prior-year case).
+          "Clone Master Syllabus" is the existing Subscribe-from-template
+          flow; "Copy from Previous Year" opens the bulk grade→subjects
+          picker below instead of the old one-button-per-subject list. */}
+      {showSubscribeChooser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,42,63,0.45)' }}>
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 relative shadow-2xl">
+            <button data-testid="subscribe-chooser-close" onClick={() => setShowSubscribeChooser(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-700" aria-label="Close">
+              <X size={18} />
+            </button>
+            <h3 className="text-lg font-semibold mb-1" style={{ color: INK }}>Subscribe to a Subject</h3>
+            <p className="text-xs text-gray-500 mb-5">
+              {carryForwardCandidates.length} subject{carryForwardCandidates.length === 1 ? '' : 's'} from {priorYearLabel} {carryForwardCandidates.length === 1 ? "hasn't" : "haven't"} carried forward yet — clone fresh from the board template, or copy last year&apos;s content as-is.
+            </p>
+            <div className="space-y-3">
+              <button
+                data-testid="subscribe-chooser-clone-master"
+                onClick={() => { setShowSubscribeChooser(false); setShowSubscribeModal(true) }}
+                className="w-full text-left p-4 rounded-2xl border hover:border-teal-300 transition-colors"
+                style={{ borderColor: BORDER }}
+              >
+                <div className="flex items-center gap-2 font-semibold text-sm mb-1" style={{ color: INK }}>
+                  <Sparkles size={15} style={{ color: TEAL }} /> Clone Master Syllabus
+                </div>
+                <p className="text-xs text-gray-500">Subscribe fresh from the board&apos;s master template — picks up any catalog updates, starts clean.</p>
+              </button>
+              <button
+                data-testid="subscribe-chooser-copy-prior-year"
+                onClick={() => { setShowSubscribeChooser(false); openCarryForwardModal() }}
+                className="w-full text-left p-4 rounded-2xl border hover:border-teal-300 transition-colors"
+                style={{ borderColor: BORDER }}
+              >
+                <div className="flex items-center gap-2 font-semibold text-sm mb-1" style={{ color: INK }}>
+                  <BookOpen size={15} style={{ color: TEAL }} /> Copy from Previous Year
+                </div>
+                <p className="text-xs text-gray-500">Carry {priorYearLabel}&apos;s content into {selectedYear} as-is — keeps any custom chapters/topics your teachers already added.</p>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk carry-forward modal — step 1: pick a grade; step 2: check
+          which of that grade's pending subjects to copy. One submit copies
+          all checked subjects sequentially via handleBulkCopyFromPriorYear. */}
+      {showCarryForwardModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(15,42,63,0.45)' }}>
+          <div className="bg-white rounded-3xl w-full max-w-lg p-6 relative shadow-2xl max-h-[85vh] overflow-y-auto">
+            <button data-testid="carry-forward-modal-close" onClick={() => setShowCarryForwardModal(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-700" aria-label="Close">
+              <X size={18} />
+            </button>
+            <h3 className="text-lg font-semibold mb-1" style={{ color: INK }}>Copy from {priorYearLabel}</h3>
+
+            {carryForwardStep === 'grade' ? (
+              <>
+                <p className="text-xs text-gray-500 mb-5">Which grade are you rolling forward?</p>
+                <div className="space-y-2">
+                  {carryForwardGrades.map(grade => {
+                    const count = carryForwardCandidates.filter(c => c.grade === grade).length
+                    return (
+                      <button
+                        key={grade}
+                        data-testid={`carry-forward-grade-${grade}`}
+                        onClick={() => { setCarryForwardGrade(grade); setCarryForwardSelectedIds(carryForwardCandidates.filter(c => c.grade === grade).map(c => c.id)); setCarryForwardStep('subjects') }}
+                        className="w-full flex items-center justify-between px-4 py-3 rounded-xl border hover:border-teal-300 transition-colors text-left"
+                        style={{ borderColor: BORDER }}
+                      >
+                        <span className="font-semibold text-sm" style={{ color: INK }}>Grade {grade}</span>
+                        <span className="text-xs text-gray-400">{count} subject{count === 1 ? '' : 's'} pending</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setCarryForwardStep('grade')}
+                  className="text-xs font-semibold mb-3"
+                  style={{ color: TEAL }}
+                >
+                  ← Change grade
+                </button>
+                <p className="text-xs text-gray-500 mb-3">
+                  Grade {carryForwardGrade} — check which subjects to copy from {priorYearLabel} into {selectedYear}.
+                </p>
+                <div className="space-y-1.5 mb-4">
+                  {carryForwardCandidates.filter(c => c.grade === carryForwardGrade).map(candidate => {
+                    const checked = carryForwardSelectedIds.includes(candidate.id)
+                    return (
+                      <label key={candidate.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl border cursor-pointer" style={{ borderColor: BORDER, background: checked ? '#EDF9F6' : 'white' }}>
+                        <input
+                          type="checkbox"
+                          data-testid={`carry-forward-subject-${candidate.id}`}
+                          checked={checked}
+                          onChange={e => setCarryForwardSelectedIds(prev => e.target.checked ? [...prev, candidate.id] : prev.filter(id => id !== candidate.id))}
+                          className="w-4 h-4"
+                        />
+                        <span className="text-sm font-medium flex-1" style={{ color: INK }}>{candidate.subject_name}</span>
+                        {!candidate.master_subject_id && (
+                          <span className="text-[10px] text-gray-400 italic">custom — no master template</span>
+                        )}
+                      </label>
+                    )
+                  })}
+                </div>
+                {bulkCopyError && (
+                  <div className="px-3 py-2 rounded-lg text-xs mb-3" style={{ background: '#FCEBEB', color: '#791F1F' }}>{bulkCopyError}</div>
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    data-testid="carry-forward-submit"
+                    onClick={handleBulkCopyFromPriorYear}
+                    disabled={bulkCopying || carryForwardSelectedIds.length === 0}
+                    className="text-sm font-semibold px-4 py-2.5 rounded-xl text-white disabled:opacity-50"
+                    style={{ background: TEAL }}
+                  >
+                    {bulkCopying ? 'Copying…' : `Copy ${carryForwardSelectedIds.length} Subject${carryForwardSelectedIds.length === 1 ? '' : 's'}`}
+                  </button>
+                  <button
+                    onClick={() => setShowCarryForwardModal(false)}
+                    className="text-sm px-3 py-2.5 rounded-xl border"
+                    style={{ borderColor: BORDER, color: INK }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Subscribe Master Modal */}
       {showSubscribeModal && (
@@ -1100,45 +1245,12 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
               </div>
             </div>
 
-            {/* Sections Selector */}
-            <div className="mb-5 rounded-2xl p-4" style={{ background: SURFACE, border: `1px solid ${BORDER}` }}>
-              <label className="block text-[10px] font-bold text-gray-500 mb-2 uppercase tracking-wider">
-                Assign to Class Sections (Grade {filterGrade})
-              </label>
-              {classes.filter(c => c.grade.toString().trim() === filterGrade.toString().trim()).length === 0 ? (
-                <p className="text-[11px] text-gray-400 italic">
-                  No sections found in database for Grade {filterGrade}.
-                </p>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {classes
-                    .filter(c => c.grade.toString().trim() === filterGrade.toString().trim())
-                    .map(cls => {
-                      const isChecked = selectedClassIds.includes(cls.id)
-                      return (
-                        <button
-                          key={cls.id}
-                          data-testid={`subscribe-class-${cls.id}-toggle`}
-                          type="button"
-                          onClick={() => {
-                            setSelectedClassIds(prev =>
-                              isChecked ? prev.filter(id => id !== cls.id) : [...prev, cls.id]
-                            )
-                          }}
-                          className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all"
-                          style={{
-                            background: isChecked ? TEAL : 'white',
-                            borderColor: isChecked ? TEAL : BORDER,
-                            color: isChecked ? 'white' : '#6b7280',
-                          }}
-                        >
-                          <Check size={12} className={isChecked ? 'opacity-100' : 'opacity-0'} />
-                          <span>Section {cls.section}</span>
-                        </button>
-                      )
-                    })}
-                </div>
-              )}
+            {/* Subscribing now auto-assigns this subject to every existing
+                class of Grade {filterGrade} server-side — no per-section
+                picker needed here anymore. */}
+            <div className="mb-5 rounded-2xl p-3 text-xs text-gray-500 flex items-center gap-2" style={{ background: SURFACE, border: `1px solid ${BORDER}` }}>
+              <Check size={13} style={{ color: TEAL }} className="flex-shrink-0" />
+              Will be assigned automatically to every Grade {filterGrade} class, with a teacher auto-matched where possible.
             </div>
 
             <div className="space-y-2 mb-6">

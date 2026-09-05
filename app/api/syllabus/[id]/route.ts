@@ -62,7 +62,7 @@ export async function PATCH(
       const current = existingProgress[0] || {}
 
       // Calculate status and dates
-      let newStatus = status !== undefined ? status : (current.status || 'pending')
+      const newStatus = status !== undefined ? status : (current.status || 'pending')
       let newCoveredDate = current.covered_date
       let newCoveredBy = current.covered_by
 
@@ -106,7 +106,6 @@ export async function PATCH(
     const isUpdatingTopic = (topic_name !== undefined || topic_order !== undefined)
 
     if (isUpdatingTopic) {
-      // Verify topic exists and is custom if they are trying to rename it
       const { rows: [topicRow] } = await pool.query(
         'SELECT * FROM school_topics WHERE id = $1',
         [id]
@@ -116,10 +115,10 @@ export async function PATCH(
         return NextResponse.json({ error: 'Topic not found' }, { status: 404 })
       }
 
-      if (topic_name !== undefined && !topicRow.is_custom) {
-        return NextResponse.json({ error: 'Cannot rename a board-mandated topic' }, { status: 403 })
-      }
-
+      // A teacher can rename any topic in their school's own copy —
+      // board-mandated or custom. This only ever touches school_topics,
+      // never master_topics, so it can never leak across schools or affect
+      // the shared platform catalog other schools draw from.
       const setClauses: string[] = []
       const args: (string | number)[] = []
 
@@ -192,11 +191,11 @@ export async function DELETE(
       return NextResponse.json({ error: 'Topic not found' }, { status: 404 })
     }
 
-    // Guardrail: Locked board topics cannot be deleted
-    if (!topicRow.is_custom) {
-      return NextResponse.json({ error: 'Cannot delete a board-mandated topic' }, { status: 403 })
-    }
-
+    // A teacher can delete any topic in their school's own copy —
+    // board-mandated or custom. This only ever removes the school's own
+    // school_topics row (and cascades away only that class's own progress
+    // history against it); the platform-wide master_topics catalog other
+    // schools draw from is completely untouched either way.
     const scopeError = await assertAssignedTeacherForDelete(writeSession.role, class_id, topicRow.subject_name)
     if (scopeError) return scopeError
 

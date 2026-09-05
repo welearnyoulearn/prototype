@@ -126,9 +126,23 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 7. Map subjects to chosen class sections if provided
-      const { class_ids } = body
-      if (Array.isArray(class_ids) && class_ids.length > 0) {
+      // 7. Auto-assign this subject to EVERY existing class of this grade —
+      // not just whatever the admin happened to check in the Subscribe
+      // modal's class-picker. A class left unchecked there (or simply not
+      // created yet at subscribe time) used to never catch up on its own,
+      // permanently stuck on Class Management's manual "click to add"
+      // suggestion list even though the subject was genuinely subscribed
+      // for its grade. The modal's own class_ids selection still exists for
+      // the UI (it drives which sections get a *pre-picked* teacher
+      // highlighted there), but assignment itself is no longer gated on it —
+      // every class of the grade gets the subject, matching exactly what
+      // POST /api/classes already does for a class created AFTER a subject
+      // is subscribed.
+      const { rows: gradeClasses } = await client.query(
+        'SELECT id, grade FROM classes WHERE school_id = $1 AND grade = $2 AND deleted_at IS NULL',
+        [school_id, masterSub.grade]
+      )
+      if (gradeClasses.length > 0) {
         const { rows: staff } = await client.query(
           `SELECT id, subject, teaches_grades FROM teachers
            WHERE school_id = $1 AND staff_type = 'teaching' AND status = 'active'
@@ -136,15 +150,7 @@ export async function POST(req: NextRequest) {
           [school_id]
         )
 
-        for (const classId of class_ids) {
-          // Verify class exists and belongs to school
-          const classRes = await client.query(
-            'SELECT id, grade FROM classes WHERE id = $1 AND school_id = $2',
-            [classId, school_id]
-          )
-          if (classRes.rows.length === 0) continue
-          const classObj = classRes.rows[0]
-
+        for (const classObj of gradeClasses) {
           // Filter by teaches_grades
           const eligible = staff.filter(t => {
             if (!t.teaches_grades) return true
@@ -159,11 +165,11 @@ export async function POST(req: NextRequest) {
              VALUES ($1, $2, $3, 4)
              ON CONFLICT (class_id, subject_name) DO UPDATE
                SET teacher_id = EXCLUDED.teacher_id, periods_per_week = EXCLUDED.periods_per_week`,
-            [classId, masterSub.subject_name.trim(), resolvedTeacherId]
+            [classObj.id, masterSub.subject_name.trim(), resolvedTeacherId]
           )
 
-          invalidateCache(`subjects:class:${classId}`)
-          invalidateCache(`timetable:class:${classId}`)
+          invalidateCache(`subjects:class:${classObj.id}`)
+          invalidateCache(`timetable:class:${classObj.id}`)
         }
         invalidateCache(`health:${school_id}`)
       }
@@ -172,13 +178,13 @@ export async function POST(req: NextRequest) {
       client.release()
 
       return NextResponse.json({ ok: true, school_subject_id: schoolSubjectId })
-    } catch (err: any) {
+    } catch (err: unknown) {
       await client.query('ROLLBACK')
       client.release()
       throw err
     }
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('School subscribe POST error:', err)
-    return NextResponse.json({ error: err.message || 'Failed to subscribe to master subject' }, { status: 500 })
+    return NextResponse.json({ error: err instanceof Error ? err.message : 'Failed to subscribe to master subject' }, { status: 500 })
   }
 }

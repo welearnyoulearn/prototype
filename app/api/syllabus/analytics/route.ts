@@ -10,14 +10,24 @@ import { requireFeeAccess } from '@/lib/auth'
 //   by_subject — per subject: total, covered, pct across school
 //
 // pct is CHAPTER-WEIGHTED with partial credit, matching GET /api/syllabus's
-// own completion_pct exactly: every chapter is an equal 1/N share of its
-// subject (10 chapters -> each worth 10%), and a chapter's own share is
-// scaled by topics_covered/topic_count rather than being all-or-nothing —
-// a chapter with 5 of 8 topics done contributes 5/8 of its 1/N share, not
-// 0%. total/covered stay chapter counts (chapters with >0 topics / fully
-// covered chapters) for the raw counts shown alongside pct, but pct itself
-// is computed separately as the weighted average below — it is NOT simply
-// covered/total once partial credit is involved.
+// own completion_pct exactly: every ACTIVE chapter (for this class, per
+// class_chapter_visibility) is an equal 1/N share of its subject (10 active
+// chapters -> each worth 10%), and a chapter's own share is scaled by
+// topics_covered/topic_count rather than being all-or-nothing — a chapter
+// with 5 of 8 topics done contributes 5/8 of its 1/N share, not 0%.
+//
+// `total` MUST include every active chapter, even one with zero topics
+// (topic_count = 0) — it still occupies its 1/N share and contributes 0 to
+// the weighted sum, exactly like GET /api/syllabus's completion_pct does.
+// Excluding zero-topic chapters from `total` (an earlier version of this
+// route did, via `FILTER (WHERE topic_count > 0)`) shrinks the denominator
+// and inflates pct — confirmed as a real bug: a class with 15 active
+// chapters (6 of them genuinely empty) showed 47% on the teacher's own
+// screen but 78% here, because this route's denominator silently dropped
+// to 9. `covered` stays a stricter "fully complete, non-empty chapter"
+// count (a zero-topic chapter is never "covered", it just isn't excluded
+// from `total` either) — it's a display-only raw count, not what pct is
+// derived from.
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const school_id = searchParams.get('school_id')
@@ -77,24 +87,36 @@ export async function GET(req: NextRequest) {
     `
 
     const [byClassRes, byTeacherRes, bySubjectRes] = await Promise.all([
-      // 1. Per class × subject chapter coverage
+      // 1. Per class × subject chapter coverage, with the assigned teacher's
+      //    name for that (class, subject) pair — class_subjects is the real
+      //    source of truth for who teaches what; a subject with no
+      //    class_subjects row yet (assigned via a path other than Class
+      //    Management, or simply unassigned) surfaces teacher_name as NULL
+      //    rather than dropping the subject from the response.
       pool.query(`
         ${chapterCoverageCTE}
         SELECT
-          class_id, grade, section, subject,
-          COUNT(*) FILTER (WHERE topic_count > 0)::int AS total,
-          COUNT(*) FILTER (WHERE topic_count > 0 AND topics_covered = topic_count)::int AS covered,
-          COALESCE(SUM(topics_covered::numeric / NULLIF(topic_count, 0)) FILTER (WHERE topic_count > 0), 0) AS weighted_sum
-        FROM chapter_coverage
-        GROUP BY class_id, grade, section, subject
-        ORDER BY grade, section, subject
+          cc.class_id, cc.grade, cc.section, cc.subject,
+          te.name AS teacher_name,
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE cc.topic_count > 0 AND cc.topics_covered = cc.topic_count)::int AS covered,
+          COALESCE(SUM(cc.topics_covered::numeric / NULLIF(cc.topic_count, 0)) FILTER (WHERE cc.topic_count > 0), 0) AS weighted_sum
+        FROM chapter_coverage cc
+        LEFT JOIN class_subjects cs ON cs.class_id = cc.class_id AND cs.subject_name = cc.subject
+        LEFT JOIN teachers te ON te.id = cs.teacher_id
+        GROUP BY cc.class_id, cc.grade, cc.section, cc.subject, te.name
+        ORDER BY cc.grade, cc.section, cc.subject
       `, [school_id, academic_year]),
 
-      // 2. Per teacher: aggregate across all classes/subjects they're
-      //    actually assigned via Class Management's class_subjects — the
-      //    real source of truth (not a timetable, which may not exist for
-      //    schools without that feature, or a class_id/subject the teacher
-      //    was never assigned by the school admin).
+      // 2. Per teacher × (class, subject) assignment — one row per
+      //    assignment, NOT merged across classes, so a teacher holding
+      //    Mathematics in both 9-A and 9-B gets two separate rows here
+      //    (class/grade shown for each) instead of one blended "Mathematics"
+      //    total. Aggregate across all classes/subjects they're actually
+      //    assigned via Class Management's class_subjects — the real source
+      //    of truth (not a timetable, which may not exist for schools
+      //    without that feature, or a class_id/subject the teacher was never
+      //    assigned by the school admin).
       //    Same class-scoped visibility rules as chapter_coverage above:
       //    a chapter deactivated for cs.class_id is excluded via the JOIN
       //    condition (never counted at all, not even as topic_count=0);
@@ -104,8 +126,11 @@ export async function GET(req: NextRequest) {
         SELECT
           te.id AS teacher_id,
           te.name AS teacher_name,
+          c.id AS class_id,
+          c.grade,
+          c.section,
           cs.subject_name AS subject,
-          COUNT(sc.id) FILTER (WHERE topic_count.n > 0)::int AS total,
+          COUNT(sc.id)::int AS total,
           COUNT(sc.id) FILTER (WHERE topic_count.n > 0 AND topic_count.covered_n = topic_count.n)::int AS covered,
           COALESCE(SUM(topic_count.covered_n::numeric / NULLIF(topic_count.n, 0)) FILTER (WHERE topic_count.n > 0), 0) AS weighted_sum
         FROM teachers te
@@ -124,8 +149,8 @@ export async function GET(req: NextRequest) {
           WHERE st.school_chapter_id = sc.id
         ) topic_count ON TRUE
         WHERE te.school_id = $1 AND COALESCE(ccv.is_active, TRUE)
-        GROUP BY te.id, te.name, cs.subject_name
-        ORDER BY te.name, cs.subject_name
+        GROUP BY te.id, te.name, c.id, c.grade, c.section, cs.subject_name
+        ORDER BY te.name, c.grade, c.section, cs.subject_name
       `, [school_id, academic_year]),
 
       // 3. Per subject across school (sum over all classes in the grade)
@@ -133,7 +158,7 @@ export async function GET(req: NextRequest) {
         ${chapterCoverageCTE}
         SELECT
           subject,
-          COUNT(*) FILTER (WHERE topic_count > 0)::int AS total,
+          COUNT(*)::int AS total,
           COUNT(*) FILTER (WHERE topic_count > 0 AND topics_covered = topic_count)::int AS covered,
           COALESCE(SUM(topics_covered::numeric / NULLIF(topic_count, 0)) FILTER (WHERE topic_count > 0), 0) AS weighted_sum
         FROM chapter_coverage
@@ -142,14 +167,15 @@ export async function GET(req: NextRequest) {
       `, [school_id, academic_year]),
     ])
 
-    // Roll up by_class rows into class objects with subject breakdown.
-    // weighted_sum accumulates separately from covered (chapter counts) —
-    // pct is always weighted_sum/total, never covered/total, once a
-    // subject/class spans more than one chapter with partial progress.
+    // Roll up by_class rows into class objects with a per-subject breakdown
+    // that now also carries the assigned teacher's name. weighted_sum
+    // accumulates separately from covered (chapter counts) — pct is always
+    // weighted_sum/total, never covered/total, once a subject/class spans
+    // more than one chapter with partial progress.
     const classMap: Record<number, {
       class_id: number; grade: string; section: string
       total: number; covered: number; weighted_sum: number
-      subjects: { subject: string; total: number; covered: number; pct: number }[]
+      subjects: { subject: string; teacher_name: string | null; total: number; covered: number; pct: number }[]
     }> = {}
 
     for (const r of byClassRes.rows) {
@@ -168,17 +194,20 @@ export async function GET(req: NextRequest) {
       cls.weighted_sum  += Number(r.weighted_sum)
       cls.subjects.push({
         subject: r.subject,
+        teacher_name: r.teacher_name ?? null,
         total:   r.total,
         covered: r.covered,
         pct:     r.total > 0 ? Math.round((Number(r.weighted_sum) / r.total) * 100) : 0,
       })
     }
 
-    // Roll up by_teacher rows
+    // Roll up by_teacher rows — one entry per (class, subject) assignment,
+    // NOT merged across classes, so the frontend can render a teacher's
+    // Mathematics-in-9-A and Mathematics-in-9-B as two distinct rows.
     const teacherMap: Record<number, {
       teacher_id: number; teacher_name: string
       total: number; covered: number; weighted_sum: number
-      subjects: { subject: string; total: number; covered: number; pct: number }[]
+      assignments: { class_id: number; grade: string; section: string; subject: string; total: number; covered: number; pct: number }[]
     }> = {}
 
     for (const r of byTeacherRes.rows) {
@@ -187,14 +216,17 @@ export async function GET(req: NextRequest) {
           teacher_id: r.teacher_id,
           teacher_name: r.teacher_name,
           total: 0, covered: 0, weighted_sum: 0,
-          subjects: [],
+          assignments: [],
         }
       }
       const t = teacherMap[r.teacher_id]
       t.total        += r.total
       t.covered       += r.covered
       t.weighted_sum  += Number(r.weighted_sum)
-      t.subjects.push({
+      t.assignments.push({
+        class_id: r.class_id,
+        grade: r.grade,
+        section: r.section,
         subject: r.subject,
         total:   r.total,
         covered: r.covered,

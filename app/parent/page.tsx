@@ -301,6 +301,15 @@ export default function ParentDashboard() {
       if (!allLabels.length) allLabels.push(currentLabel)
       setFeeAcYears(allLabels)
       setFeeAcYear(currentLabel)
+      // Overview's "Outstanding Fees" tile reads feeSummary immediately, but
+      // fee data was previously only ever fetched lazily on first visit to
+      // the Fees tab — so a parent landing on Overview (the default screen)
+      // always saw a bare "—" regardless of real outstanding dues, even
+      // though the same student's ledger correctly showed a balance
+      // everywhere else (e.g. school-admin's Fee Collection view). Load it
+      // here too, as soon as the real current year resolves, so the tile is
+      // accurate on first paint.
+      loadFees(s, currentLabel)
     }).catch(() => { setFeeAcYears(['2025-26']); setFeeAcYear('2025-26') })
   }
 

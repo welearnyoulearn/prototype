@@ -445,7 +445,6 @@ function ClassDetail({
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [subLoading, setSubLoading] = useState(true)
   const [subjectMsg, setSubjectMsg] = useState<{ text: string; ok: boolean } | null>(null)
-  const [addingSubject, setAddingSubject] = useState(false)
   const [removingId, setRemovingId] = useState<number | null>(null)
   const [editingClassTeacher, setEditingClassTeacher] = useState(false)
   const [ctId, setCtId] = useState(String(cls.class_teacher_id || ''))
@@ -545,39 +544,6 @@ function ClassDetail({
     if (tab === 'students') loadStudents()
   }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function addSubject(name: string) {
-    const subjectName = name.trim()
-    if (!subjectName) return
-    if (subjects.some(s => s.subject_name.toLowerCase() === subjectName.toLowerCase())) {
-      setSubjectMsg({ text: `"${subjectName}" is already added`, ok: false })
-      setTimeout(() => setSubjectMsg(null), 3000)
-      return
-    }
-    setAddingSubject(true)
-    setSubjectMsg(null)
-    try {
-      const res = await fetch(`/api/classes/${cls.id}/subjects`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject_name: subjectName, teacher_id: null, periods_per_week: 4 }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      await loadSubjects()
-      // No auto-matched teacher isn't an error, but it shouldn't read like a
-      // fully-done success either — no teacher's "subject" field matched this
-      // name (e.g. "Mathematics" typed at onboarding vs "Maths" subscribed
-      // here), so it needs a manual pick via "Assign Teacher" below.
-      setSubjectMsg(
-        data.teacher_name
-          ? { text: `✓ ${subjectName} added · Teacher: ${data.teacher_name}`, ok: true }
-          : { text: `${subjectName} added, but no teacher's subject matched — assign one manually below.`, ok: false }
-      )
-      setTimeout(() => setSubjectMsg(null), data.teacher_name ? 4000 : 7000)
-    } catch (err: unknown) {
-      setSubjectMsg({ text: err instanceof Error ? err.message : 'Failed to add subject', ok: false })
-    } finally { setAddingSubject(false) }
-  }
-
   async function removeSubject(subjectId: number, name: string) {
     if (!confirm(`Remove "${name}"?`)) return
     setRemovingId(subjectId)
@@ -658,12 +624,6 @@ function ClassDetail({
 
   const hasTimetable = timetable.length > 0
   const totalPPW = subjects.reduce((a, s) => a + s.periods_per_week, 0)
-  const existingNames = new Set(subjects.map(s => s.subject_name.toLowerCase()))
-  // Subjects only ever come from the Syllabus Customizer subscription now —
-  // no static curriculum guess-list fallback and no free-typed custom
-  // subjects, so class_subjects.subject_name always matches
-  // school_subjects.subject_name exactly.
-  const availableSuggestions = (subscribedSubjects ?? []).filter(s => !existingNames.has(s.toLowerCase()))
 
   return (
     <div className="flex flex-col h-full">
@@ -1000,27 +960,14 @@ function ClassDetail({
             </div>
 
             {/* Subjects are subscribed via Syllabus Customizer, not added here.
-                Subscribing auto-populates class_subjects for every class in
-                that grade with a matching teacher already assigned — no
-                separate "add subject" flow needed in Class Management. */}
-            {subscribedSubjects ? (
-              availableSuggestions.length > 0 && (
-                <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-3">
-                  <div>
-                    <p className="text-xs font-semibold text-gray-700">Subscribed Syllabus Subjects — Grade {cls.grade}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">From the Syllabus Customizer subscription · click to add · teacher auto-assigned</p>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {availableSuggestions.map(name => (
-                      <button key={name} onClick={() => addSubject(name)} disabled={addingSubject}
-                        className="text-xs px-2.5 py-1.5 rounded-lg border border-violet-200 text-violet-700 bg-violet-50 hover:bg-violet-100 hover:border-violet-400 transition-colors disabled:opacity-50 flex items-center gap-1">
-                        <span className="text-violet-400 font-bold">+</span> {name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )
-            ) : (
+                Subscribing auto-populates class_subjects for EVERY existing
+                class of that grade (not just ones checked in the Subscribe
+                modal), and creating a new class for an already-subscribed
+                grade does the same — a matching teacher is auto-assigned
+                either way, so there's no manual "add subject" step needed
+                here anymore. A one-time migration backfilled any gap that
+                existed from before this was fixed. */}
+            {!subscribedSubjects && (
               <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 flex items-center justify-between gap-3 flex-wrap">
                 <div>
                   <p className="text-sm font-medium text-violet-800">No subjects subscribed for Grade {cls.grade} yet</p>

@@ -5,11 +5,14 @@ import { requireSyllabusWriteAccess } from '@/lib/auth'
 // PATCH /api/syllabus/chapters/:id — rename a chapter.
 // Body: { school_id, chapter_name }
 //
-// Board-mandated chapters stay locked (never renamable here, same rule as
-// delete) — this only ever touches a chapter this class's own teacher (or
-// school admin) created, most commonly the "Chapter 1"/"Chapter 2"
-// placeholders POST /api/school/syllabus/bootstrap-chapters lays down for a
-// teacher to fill in and rename to the textbook's real chapter names.
+// A teacher (or school admin) can rename any chapter in their school's own
+// copy — board-mandated or custom. This only ever updates school_chapters,
+// never the platform-wide master_chapters catalog other schools draw from,
+// so it can't leak across schools. Originally scoped to custom-only
+// (mainly for renaming the "Chapter 1"/"Chapter 2" placeholders
+// POST /api/school/syllabus/bootstrap-chapters lays down), opened up to
+// every chapter per explicit product direction — teachers get full editing
+// control over their own school's syllabus copy.
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     await ensureDB()
@@ -23,7 +26,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (!await requireSyllabusWriteAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const { rows } = await pool.query(
-      `SELECT sc.id, sc.is_custom, sc.school_subject_id
+      `SELECT sc.id, sc.school_subject_id
        FROM school_chapters sc
        JOIN school_subjects ss ON ss.id = sc.school_subject_id
        WHERE sc.id = $1 AND ss.school_id = $2`,
@@ -31,9 +34,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     )
     if (rows.length === 0) {
       return NextResponse.json({ error: 'Chapter not found' }, { status: 404 })
-    }
-    if (!rows[0].is_custom) {
-      return NextResponse.json({ error: 'Board-mandated chapters cannot be renamed' }, { status: 403 })
     }
 
     const name = String(chapter_name).trim()

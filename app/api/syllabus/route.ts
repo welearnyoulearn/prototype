@@ -345,12 +345,13 @@ export async function DELETE(req: NextRequest) {
     }
     const chapterRow = chapterRes.rows[0]
 
-    // Guardrail: Locked board chapters cannot be deleted
-    if (!chapterRow.is_custom) {
-      return NextResponse.json({ error: 'Cannot delete a board-mandated chapter' }, { status: 403 })
-    }
+    // A teacher can delete any chapter in their school's own copy —
+    // board-mandated or custom. Only ever removes the school's own
+    // school_chapters row (cascading to its own topics/tasks/progress);
+    // the platform-wide master_chapters catalog other schools draw from is
+    // completely untouched either way.
 
-    // 4. Delete custom chapter (will cascade delete custom topics, tasks, and progress)
+    // 4. Delete chapter (will cascade delete its topics, tasks, and progress)
     await pool.query(
       'DELETE FROM school_chapters WHERE id = $1',
       [chapterRow.id]

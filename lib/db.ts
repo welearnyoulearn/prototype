@@ -1,4 +1,5 @@
 import { Pool, types } from 'pg'
+import { matchTeacher } from './matchTeacher'
 
 // Return DATE columns as plain "YYYY-MM-DD" strings instead of JS Date objects.
 // Without this, pg serialises dates as UTC midnight which JSON-stringifies to
@@ -69,7 +70,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 10
+const SCHEMA_VERSION = 12
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2613,4 +2614,93 @@ async function runIncrementalMigrations() {
   `).catch((e: unknown) => {
     console.error('[db] school_subjects.master_subject_id backfill failed', e)
   })
+
+  // ── Syllabus coverage trend (school-admin's Syllabus Tracking screen) ──────
+  // One row per (class, school_subject, snapshot_date) captured weekly by
+  // /api/cron/syllabus-coverage-snapshot, so the trend chart has a real
+  // history to plot instead of only ever showing today's single point.
+  // total_chapters/covered_chapters here use the exact same chapter-covered
+  // definition as GET /api/syllabus/analytics (a chapter counts as covered
+  // only when every one of its (visible) topics is covered) — captured as a
+  // point-in-time count, not recomputed retroactively, so past weeks keep
+  // reading correctly even if a class's chapter set changes later (a chapter
+  // added/removed via Class Syllabus Setup only affects snapshots taken
+  // after that change).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS syllabus_coverage_snapshots (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      school_subject_id INTEGER NOT NULL REFERENCES school_subjects(id) ON DELETE CASCADE,
+      academic_year VARCHAR(20) NOT NULL,
+      snapshot_date DATE NOT NULL,
+      total_chapters INTEGER NOT NULL,
+      covered_chapters INTEGER NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(class_id, school_subject_id, snapshot_date)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_syllabus_coverage_snapshots_lookup ON syllabus_coverage_snapshots(school_id, class_id, academic_year)`).catch(() => {})
+
+  // ── One-time backfill: class_subjects gaps for already-subscribed grades ──
+  // Before this session, a subject subscribed via Syllabus Customizer was
+  // only auto-assigned to classes that (a) already existed AND were
+  // explicitly checked in the Subscribe modal's class-picker, or (b) were
+  // created AFTER the subject was subscribed. A class created earlier, or
+  // left unchecked at subscribe time, never caught up on its own — stuck
+  // showing that subject as a manual "click to add" suggestion in Class
+  // Management forever. POST /api/school/subscribe and POST /api/classes
+  // both now auto-assign correctly going forward; this fixes the gap for
+  // data that already exists.
+  //
+  // Deliberately a ONE-TIME pass, not a check that re-runs on every page
+  // load: class_subjects has no soft-delete, so a subject an admin
+  // genuinely removed from one specific class (e.g. that section doesn't
+  // take an elective) is indistinguishable from one that was simply never
+  // added — a live reconciliation would silently resurrect a deliberate
+  // removal. Running once, gated by SCHEMA_VERSION like every other
+  // migration here, fixes today's real gaps without ever touching a
+  // decision made after this point.
+  try {
+    const { rows: gaps } = await pool.query(`
+      SELECT DISTINCT ss.school_id, ss.grade, ss.subject_name, c.id AS class_id
+      FROM school_subjects ss
+      JOIN classes c ON c.school_id = ss.school_id AND c.grade = ss.grade AND c.deleted_at IS NULL
+      WHERE NOT EXISTS (
+        SELECT 1 FROM class_subjects cs WHERE cs.class_id = c.id AND cs.subject_name = ss.subject_name
+      )
+    `)
+    if (gaps.length > 0) {
+      // Cache each school's active teaching staff — most schools have many
+      // gap rows sharing the same school_id, no need to re-query per row.
+      const staffCache = new Map<number, { id: number; subject: string; teaches_grades: string | null }[]>()
+      for (const gap of gaps) {
+        if (!staffCache.has(gap.school_id)) {
+          const { rows: staff } = await pool.query(
+            `SELECT id, subject, teaches_grades FROM teachers
+             WHERE school_id = $1 AND staff_type = 'teaching' AND status = 'active'
+               AND subject IS NOT NULL AND subject != ''`,
+            [gap.school_id]
+          )
+          staffCache.set(gap.school_id, staff)
+        }
+        const staff = staffCache.get(gap.school_id)!
+        const eligible = staff.filter(t => {
+          if (!t.teaches_grades) return true
+          const allowed = t.teaches_grades.split(',').map((g: string) => g.trim().toUpperCase())
+          return allowed.includes(gap.grade.toUpperCase())
+        })
+        const resolvedTeacherId = matchTeacher(gap.subject_name, eligible.length > 0 ? eligible : staff)
+        await pool.query(
+          `INSERT INTO class_subjects (class_id, subject_name, teacher_id, periods_per_week)
+           VALUES ($1, $2, $3, 4)
+           ON CONFLICT (class_id, subject_name) DO NOTHING`,
+          [gap.class_id, gap.subject_name, resolvedTeacherId]
+        )
+      }
+      console.log(`[db] class_subjects backfill: filled ${gaps.length} missing (class, subscribed subject) gap(s)`)
+    }
+  } catch (e: unknown) {
+    console.error('[db] class_subjects backfill failed', e)
+  }
 }

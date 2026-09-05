@@ -562,9 +562,29 @@ export function SyllabusTracking({
   // writing anything until Apply is actually clicked.
   const [setupChapterChecked, setSetupChapterChecked] = useState<Record<number, boolean>>({})
   const [setupTopicChecked, setSetupTopicChecked] = useState<Record<number, boolean>>({})
-  const [setupMode, setSetupMode] = useState<'closed' | 'first-time' | 'edit'>('closed')
+  // 'sibling-prompt': another class in this grade already completed Setup
+  // for this subject — offer to copy it before falling through to a blank
+  // first-time Setup. 'sibling-preview': the teacher picked one of those
+  // sibling classes and is looking at its read-only chapter/topic tree
+  // before confirming the copy.
+  const [setupMode, setSetupMode] = useState<'closed' | 'sibling-prompt' | 'sibling-preview' | 'first-time' | 'edit'>('closed')
   const [applyingSetup, setApplyingSetup] = useState(false)
   const [setupError, setSetupError] = useState('')
+
+  // Sibling-setup copy prompt — populated by the first-time-Setup check
+  // effect below, alongside (not instead of) the normal first-time flow.
+  type SiblingSetup = {
+    class_id: number; grade: string; section: string
+    setup_completed_at: string; setup_by_name: string | null
+    semester_mode: boolean; semester_count: number | null
+    active_chapters: number
+  }
+  const [siblingSetups, setSiblingSetups] = useState<SiblingSetup[]>([])
+  const [siblingSchoolSubjectId, setSiblingSchoolSubjectId] = useState<number | null>(null)
+  const [previewSibling, setPreviewSibling] = useState<SiblingSetup | null>(null)
+  const [previewTree, setPreviewTree] = useState<SetupChapter[] | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [copyingSibling, setCopyingSibling] = useState(false)
 
   // Full Syllabus (flat list, today's default) vs Semester Wise (chapters
   // grouped under Semester 1/2/... headers the teacher assigns per chapter).
@@ -629,24 +649,53 @@ export function SyllabusTracking({
     if (selectedSubject in setupStatus) return
     let cancelled = false
     const yearParam = academicYear ? `&academic_year=${encodeURIComponent(academicYear)}` : ''
-    fetch(`/api/syllabus/setup?school_id=${schoolId}&class_id=${classId}&subject=${encodeURIComponent(selectedSubject)}${yearParam}`)
-      .then(r => r.json())
-      .then((data: { setup_completed_at: string | null; chapters?: SetupChapter[] }) => {
-        if (cancelled) return
-        setSetupStatus(prev => ({ ...prev, [selectedSubject]: data.setup_completed_at ?? null }))
+    ;(async () => {
+      try {
+        const res = await fetch(`/api/syllabus/setup?school_id=${schoolId}&class_id=${classId}&subject=${encodeURIComponent(selectedSubject)}${yearParam}`)
+        const data: { setup_completed_at: string | null; chapters?: SetupChapter[] } = await res.json()
+
+        // Resolve the sibling check (if needed) BEFORE writing setupStatus —
+        // setupStatus is this effect's own dependency, so writing it triggers
+        // an immediate re-run whose cleanup sets `cancelled = true`. Writing
+        // it first (as the previous version of this effect did) raced the
+        // cleanup against this same async chain's still-pending sibling
+        // fetch: by the time the fetch resolved, `cancelled` was already
+        // true and setSetupMode('sibling-prompt') silently never ran,
+        // leaving the whole tracking view blank (needsSetup still true, but
+        // no Setup screen and no sibling prompt ever opened either). Doing
+        // every step that depends on `cancelled` first, and writing
+        // setupStatus only once as the very last state update, avoids the
+        // self-cancellation entirely.
+        let nextMode: 'first-time' | 'sibling-prompt' | null = null
         if (!data.setup_completed_at && Array.isArray(data.chapters)) {
-          // First time — open the Setup screen straight away with everything
-          // unchecked (UI-only default; nothing is written until Apply).
+          if (cancelled) return
           setSetupTree(data.chapters)
           setSetupChapterChecked({})
           setSetupTopicChecked({})
           setSetupOrg('full')
           setSetupSemesterCount('')
           setSetupSemesterLabels({})
-          setSetupMode('first-time')
+
+          nextMode = 'first-time'
+          try {
+            const siblingRes = await fetch(`/api/syllabus/setup/siblings?school_id=${schoolId}&class_id=${classId}&subject=${encodeURIComponent(selectedSubject)}${yearParam}`)
+            const siblingData = await siblingRes.json()
+            if (cancelled) return
+            if (Array.isArray(siblingData.siblings) && siblingData.siblings.length > 0) {
+              setSiblingSetups(siblingData.siblings)
+              setSiblingSchoolSubjectId(siblingData.school_subject_id ?? null)
+              nextMode = 'sibling-prompt'
+            }
+          } catch { /* fall through to the normal first-time flow */ }
         }
-      })
-      .catch(() => { if (!cancelled) setSetupStatus(prev => ({ ...prev, [selectedSubject]: 'error' })) })
+
+        if (cancelled) return
+        if (nextMode) setSetupMode(nextMode)
+        setSetupStatus(prev => ({ ...prev, [selectedSubject]: data.setup_completed_at ?? null }))
+      } catch {
+        if (!cancelled) setSetupStatus(prev => ({ ...prev, [selectedSubject]: 'error' }))
+      }
+    })()
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSubject, currentSubject?.chapters.length, readOnly, setupStatus])
@@ -794,11 +843,11 @@ export function SyllabusTracking({
   const [deletingChapter, setDeletingChapter] = useState<string | null>(null)
   const [deletingTopicId, setDeletingTopicId] = useState<number | null>(null)
 
-  // Rename a custom chapter — same is_custom guardrail as delete (board-
-  // mandated chapters are never renamable), but non-destructive so it skips
-  // delete's confirm(). Exists mainly for the bootstrap-chapters flow, whose
-  // placeholder "Chapter 1"/"Chapter 2" names need renaming to the
-  // textbook's real chapter names once the teacher fills them in.
+  // Rename any chapter — board-mandated or custom, per explicit product
+  // direction: this only ever edits the school's own school_chapters copy,
+  // never the platform-wide master_chapters catalog other schools draw
+  // from, so there's no cross-school leakage risk in opening this up.
+  // Non-destructive, so it skips delete's confirm().
   const [renamingChapterId, setRenamingChapterId] = useState<number | null>(null)
   const [renameChapterName, setRenameChapterName] = useState('')
   const [savingChapterRename, setSavingChapterRename] = useState(false)
@@ -823,6 +872,35 @@ export function SyllabusTracking({
       flash(err instanceof Error ? err.message : 'Failed to rename chapter')
     } finally {
       setSavingChapterRename(false)
+    }
+  }
+
+  // Rename any topic — same "board-mandated or custom, school's own copy
+  // only" reasoning as chapter rename above. Mirrors saveChapterRename's
+  // shape exactly, just against PATCH /api/syllabus/:id instead.
+  const [renamingTopicId, setRenamingTopicId] = useState<number | null>(null)
+  const [renameTopicName, setRenameTopicName] = useState('')
+  const [savingTopicRename, setSavingTopicRename] = useState(false)
+
+  async function saveTopicRename(topic: SylTopic) {
+    const name = renameTopicName.trim()
+    if (!name) return
+    setSavingTopicRename(true)
+    try {
+      const res = await fetch(`/api/syllabus/${topic.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, topic_name: name }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to rename topic')
+      flash(`Renamed to "${name}"`)
+      setRenamingTopicId(null)
+      await loadSyllabus()
+    } catch (err: unknown) {
+      flash(err instanceof Error ? err.message : 'Failed to rename topic')
+    } finally {
+      setSavingTopicRename(false)
     }
   }
 
@@ -1010,6 +1088,58 @@ export function SyllabusTracking({
     setSetupError('')
   }
 
+  // Loads the read-only preview tree for a sibling class's setup — same data
+  // source (GET /api/syllabus/setup) the teacher's own Setup screen and
+  // admin's drill-down already use, just pointed at the sibling's class_id.
+  async function openSiblingPreview(sibling: SiblingSetup) {
+    setPreviewSibling(sibling)
+    setPreviewTree(null)
+    setPreviewLoading(true)
+    setSetupMode('sibling-preview')
+    try {
+      const yearParam = academicYear ? `&academic_year=${encodeURIComponent(academicYear)}` : ''
+      const res = await fetch(`/api/syllabus/setup?school_id=${schoolId}&class_id=${sibling.class_id}&subject=${encodeURIComponent(selectedSubject)}${yearParam}`)
+      const data = await res.json()
+      setPreviewTree(Array.isArray(data.chapters) ? data.chapters : [])
+    } catch {
+      setPreviewTree([])
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  async function confirmSiblingCopy() {
+    if (!previewSibling || !siblingSchoolSubjectId) return
+    setCopyingSibling(true)
+    setSetupError('')
+    try {
+      const res = await fetch('/api/syllabus/setup/copy-from-sibling', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId,
+          source_class_id: previewSibling.class_id,
+          target_class_id: classId,
+          school_subject_id: siblingSchoolSubjectId,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to copy syllabus setup')
+      setSetupStatus(prev => ({ ...prev, [selectedSubject]: data.setup_completed_at ?? new Date().toISOString() }))
+      setSetupMode('closed')
+      setSetupTree(null)
+      setPreviewSibling(null)
+      setPreviewTree(null)
+      setSiblingSetups([])
+      flash(`Copied Section ${previewSibling.section}'s syllabus setup`)
+      await loadSyllabus()
+    } catch (err: unknown) {
+      setSetupError(err instanceof Error ? err.message : 'Failed to copy syllabus setup')
+    } finally {
+      setCopyingSibling(false)
+    }
+  }
+
   async function handleBootstrapImport(json: string) {
     if (!selectedSubject) return
     setBootstrapError('')
@@ -1130,6 +1260,127 @@ export function SyllabusTracking({
         </div>
       )}
 
+      {/* Sibling-setup copy prompt — shown instead of the blank first-time
+          Setup screen when another class in this grade already completed
+          Setup for this subject. "No" falls through to the exact same
+          blank first-time flow as before this feature existed. */}
+      {setupMode === 'sibling-prompt' && currentSubject && (
+        <div className="mb-5 bg-white rounded-2xl border shadow-sm" style={{ borderColor: PURPLE }}>
+          <div className="px-5 py-4 border-b" style={{ borderColor: BORDER }}>
+            <div className="text-sm font-semibold flex items-center gap-2" style={{ color: INK }}>
+              <BookOpen size={15} style={{ color: PURPLE }} />
+              Already set up for this grade
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              {siblingSetups.length === 1
+                ? `${siblingSetups[0].setup_by_name ?? 'A teacher'} already set up ${selectedSubject} for Grade ${siblingSetups[0].grade} (Section ${siblingSetups[0].section}). Use the same setup for this class?`
+                : `${siblingSetups.length} other sections of Grade ${siblingSetups[0]?.grade} already have ${selectedSubject} set up. Copy one of them, or set up this class on your own.`}
+            </p>
+          </div>
+          <div className="p-5 space-y-2">
+            {siblingSetups.map(s => (
+              <div key={s.class_id} className="flex items-center justify-between gap-3 rounded-xl border px-4 py-3" style={{ borderColor: BORDER }}>
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: INK }}>Section {s.section}{s.setup_by_name ? ` — ${s.setup_by_name}` : ''}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {s.active_chapters} chapter{s.active_chapters === 1 ? '' : 's'}{s.semester_mode && s.semester_count ? ` · ${s.semester_count} semesters` : ''}
+                  </p>
+                </div>
+                <button
+                  onClick={() => openSiblingPreview(s)}
+                  data-testid={`setup-sibling-preview-${s.class_id}`}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg text-white flex-shrink-0"
+                  style={{ background: PURPLE }}>
+                  Preview & use this
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => setSetupMode('first-time')}
+              data-testid="setup-sibling-decline"
+              className="text-xs font-semibold px-3 py-2 rounded-lg border mt-1"
+              style={{ borderColor: BORDER, color: INK }}>
+              No, set up this class on my own
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sibling-setup preview — read-only, same visual as admin's own
+          per-class Setup drill-down, so the teacher sees exactly what
+          they're about to copy before confirming. */}
+      {setupMode === 'sibling-preview' && previewSibling && currentSubject && (
+        <div className="mb-5 bg-white rounded-2xl border shadow-sm" style={{ borderColor: PURPLE }}>
+          <div className="px-5 py-4 border-b flex items-center justify-between gap-3" style={{ borderColor: BORDER }}>
+            <div>
+              <div className="text-sm font-semibold flex items-center gap-2" style={{ color: INK }}>
+                <BookOpen size={15} style={{ color: PURPLE }} />
+                Section {previewSibling.section}&apos;s setup — {selectedSubject}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">Read-only preview. Confirm to copy this exact setup to your class.</p>
+            </div>
+            <button onClick={() => setSetupMode('sibling-prompt')} className="p-1 rounded hover:bg-gray-100 text-gray-400 flex-shrink-0" aria-label="Back">
+              <X size={15} />
+            </button>
+          </div>
+          <div className="p-5 space-y-3">
+            {previewLoading || !previewTree ? (
+              <p className="text-xs text-gray-400 py-4">Loading…</p>
+            ) : (() => {
+              const active = previewTree.filter(ch => ch.is_active).sort((a, b) => a.chapter_order - b.chapter_order)
+              const inactive = previewTree.filter(ch => !ch.is_active).sort((a, b) => a.chapter_order - b.chapter_order)
+              return (
+                <>
+                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                    {active.map(ch => (
+                      <div key={ch.school_chapter_id} className="rounded-xl border p-3" style={{ borderColor: BORDER, background: SURFACE }}>
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <span className="text-xs font-semibold" style={{ color: INK }}>{ch.chapter_name}</span>
+                          <span className="text-[10px] text-gray-400 flex-shrink-0">
+                            {ch.topics.filter(t => t.is_active).length}/{ch.topics.length} topics
+                            {ch.semester_label ? ` · ${ch.semester_label}` : ''}
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          {ch.topics.filter(t => t.is_active).sort((a, b) => a.topic_order - b.topic_order).map(t => (
+                            <div key={t.school_topic_id} className="text-[11px] px-2 py-1 rounded-lg" style={{ background: 'white', color: INK }}>
+                              {t.topic_name}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {inactive.length > 0 && (
+                    <details className="text-xs">
+                      <summary className="cursor-pointer font-medium text-gray-400 select-none">
+                        {inactive.length} inactive chapter{inactive.length === 1 ? '' : 's'}
+                      </summary>
+                      <div className="mt-1.5 space-y-0.5">
+                        {inactive.map(ch => (
+                          <div key={ch.school_chapter_id} className="line-through text-gray-400 text-[11px]">{ch.chapter_name}</div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </>
+              )
+            })()}
+          </div>
+          <div className="px-5 py-4 border-t flex items-center gap-2" style={{ borderColor: BORDER }}>
+            <button onClick={confirmSiblingCopy} disabled={copyingSibling || previewLoading}
+              data-testid="setup-sibling-confirm"
+              className="text-sm font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-50"
+              style={{ background: PURPLE }}>
+              {copyingSibling ? 'Applying…' : 'Use this setup'}
+            </button>
+            <button onClick={() => setSetupMode('sibling-prompt')} className="text-sm px-3 py-2 rounded-xl border" style={{ borderColor: BORDER, color: INK }}>
+              Back
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Class Syllabus Setup — a one-time-per-(class,subject) curation
           checkpoint, reusing the same dashed/solid-card visual pattern as
           the empty-subject bootstrap panel below. First-time: opened
@@ -1137,7 +1388,7 @@ export function SyllabusTracking({
           actively opts in. Re-edit (via "Edit Syllabus Setup"): pre-filled
           with the actual current selection. Either way, nothing is written
           to class_chapter_visibility/class_topic_visibility until Apply. */}
-      {(setupMode !== 'closed' || needsSetup) && currentSubject && (
+      {(setupMode === 'first-time' || setupMode === 'edit') && currentSubject && (
         <div className="mb-5">
           {setupLoading || !setupTree ? (
             <div className="bg-white rounded-2xl border py-10 text-center" style={{ borderColor: BORDER }}>
@@ -1666,13 +1917,11 @@ export function SyllabusTracking({
                       </div>
                     </button>
                   )}
-                  {/* Rename/Delete — custom chapters only; board-mandated
-                      chapters have no controls at all, matching the API's own
-                      is_custom guardrail rather than showing buttons that
-                      would just 403. Mainly for renaming the "Chapter 1"/
-                      "Chapter 2" placeholders the "how many chapters"
-                      bootstrap flow creates. */}
-                  {ch.is_custom && !readOnly && !isRenaming && (
+                  {/* Rename/Delete — every chapter, board-mandated or
+                      custom. Only ever edits this school's own copy, never
+                      the shared master catalog, so teachers get full
+                      control over their own school's syllabus. */}
+                  {!readOnly && !isRenaming && (
                     <button
                       onClick={() => { setRenamingChapterId(ch.school_chapter_id ?? null); setRenameChapterName(ch.chapter_name) }}
                       data-testid={`syllabus-rename-chapter-${chIdx}`}
@@ -1681,7 +1930,7 @@ export function SyllabusTracking({
                       <Pencil size={14} />
                     </button>
                   )}
-                  {ch.is_custom && !readOnly && !isRenaming && (
+                  {!readOnly && !isRenaming && (
                     <button
                       onClick={() => deleteCustomChapter(ch)}
                       disabled={deletingChapter === ch.chapter_name}
@@ -1711,53 +1960,93 @@ export function SyllabusTracking({
                     {ch.topics.map((topic, tIdx) => {
                       const isCovered = topic.status === 'covered'
                       const isMarking = markingId === topic.id
+                      const isRenamingTopic = renamingTopicId === topic.id
 
                       return (
                         <div key={topic.id} className="w-full px-5 py-3 flex items-center gap-3" style={{ borderColor: SURFACE }}>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs font-bold text-gray-300">{tIdx + 1}.</span>
-                              <span className="text-sm" style={{ color: isCovered ? '#9ca3af' : INK, fontWeight: isCovered ? 400 : 500, textDecoration: isCovered ? 'line-through' : undefined }}>
-                                {topic.topic_name}
-                              </span>
-                              {/* Mark Complete — the one action this row needs; quiz count,
-                                  AI homework suggestion, and View Material were dropped here
-                                  to keep syllabus tracking about completion status only. */}
+                          {isRenamingTopic ? (
+                            <div className="flex-1 flex items-center gap-2 min-w-0">
+                              <span className="text-xs font-bold text-gray-300 flex-shrink-0">{tIdx + 1}.</span>
+                              <input
+                                autoFocus
+                                value={renameTopicName}
+                                onChange={e => setRenameTopicName(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && saveTopicRename(topic)}
+                                data-testid={`syllabus-rename-topic-input-${topic.id}`}
+                                className="flex-1 min-w-0 border rounded-lg px-2.5 py-1 text-sm focus:outline-none focus:ring-2"
+                                style={{ borderColor: BORDER, color: INK }}
+                              />
                               <button
-                                onClick={() => markCovered(topic)}
-                                disabled={isMarking || readOnly}
-                                title={readOnly ? 'Read-only — viewing a past academic year' : isCovered ? 'Mark as pending' : 'Mark as complete'}
-                                data-testid={`syllabus-mark-taught-${topic.id}`}
-                                className="text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1"
-                                style={{
-                                  color: isCovered ? GREEN : 'white',
-                                  background: isCovered ? '#E8F8EF' : GREEN,
-                                  border: `1px solid ${GREEN}`,
-                                  opacity: (isMarking || readOnly) ? 0.5 : 1,
-                                }}>
-                                {isCovered ? <><Check size={11} /> Completed</> : 'Mark Complete'}
+                                onClick={() => saveTopicRename(topic)}
+                                disabled={savingTopicRename || !renameTopicName.trim()}
+                                data-testid={`syllabus-rename-topic-save-${topic.id}`}
+                                className="text-xs font-semibold px-2.5 py-1 rounded-lg text-white disabled:opacity-50 flex-shrink-0"
+                                style={{ background: GOLD }}>
+                                {savingTopicRename ? 'Saving…' : 'Save'}
+                              </button>
+                              <button
+                                onClick={() => setRenamingTopicId(null)}
+                                className="text-xs text-gray-400 hover:text-gray-600 px-1.5 flex-shrink-0">
+                                Cancel
                               </button>
                             </div>
-                            {isCovered && topic.covered_date && (
-                              <p className="text-[10px] mt-0.5 ml-5" style={{ color: GREEN }}>
-                                Taught {topic.covered_date}{topic.covered_by_name ? ` · ${topic.covered_by_name}` : ''}
-                              </p>
-                            )}
-                          </div>
-                          {isMarking && (
-                            <Loader2 size={14} className="animate-spin flex-shrink-0" style={{ color: GOLD }} />
-                          )}
-                          {/* Delete — custom topics only, same is_custom
-                              guardrail as the chapter-level delete button. */}
-                          {topic.is_custom && !readOnly && (
-                            <button
-                              onClick={() => deleteCustomTopic(topic)}
-                              disabled={deletingTopicId === topic.id}
-                              data-testid={`syllabus-delete-topic-${topic.id}`}
-                              title="Delete topic"
-                              className="p-1 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors flex-shrink-0 disabled:opacity-50">
-                              <Trash2 size={13} />
-                            </button>
+                          ) : (
+                            <>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-xs font-bold text-gray-300">{tIdx + 1}.</span>
+                                  <span className="text-sm" style={{ color: isCovered ? '#9ca3af' : INK, fontWeight: isCovered ? 400 : 500, textDecoration: isCovered ? 'line-through' : undefined }}>
+                                    {topic.topic_name}
+                                  </span>
+                                  {/* Mark Complete — the one action this row needs; quiz count,
+                                      AI homework suggestion, and View Material were dropped here
+                                      to keep syllabus tracking about completion status only. */}
+                                  <button
+                                    onClick={() => markCovered(topic)}
+                                    disabled={isMarking || readOnly}
+                                    title={readOnly ? 'Read-only — viewing a past academic year' : isCovered ? 'Mark as pending' : 'Mark as complete'}
+                                    data-testid={`syllabus-mark-taught-${topic.id}`}
+                                    className="text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1"
+                                    style={{
+                                      color: isCovered ? GREEN : 'white',
+                                      background: isCovered ? '#E8F8EF' : GREEN,
+                                      border: `1px solid ${GREEN}`,
+                                      opacity: (isMarking || readOnly) ? 0.5 : 1,
+                                    }}>
+                                    {isCovered ? <><Check size={11} /> Completed</> : 'Mark Complete'}
+                                  </button>
+                                </div>
+                                {isCovered && topic.covered_date && (
+                                  <p className="text-[10px] mt-0.5 ml-5" style={{ color: GREEN }}>
+                                    Taught {topic.covered_date}{topic.covered_by_name ? ` · ${topic.covered_by_name}` : ''}
+                                  </p>
+                                )}
+                              </div>
+                              {isMarking && (
+                                <Loader2 size={14} className="animate-spin flex-shrink-0" style={{ color: GOLD }} />
+                              )}
+                              {/* Rename/Delete — every topic, board-mandated or
+                                  custom. Only ever edits this school's own copy. */}
+                              {!readOnly && (
+                                <button
+                                  onClick={() => { setRenamingTopicId(topic.id); setRenameTopicName(topic.topic_name) }}
+                                  data-testid={`syllabus-rename-topic-${topic.id}`}
+                                  title="Rename topic"
+                                  className="p-1 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors flex-shrink-0">
+                                  <Pencil size={13} />
+                                </button>
+                              )}
+                              {!readOnly && (
+                                <button
+                                  onClick={() => deleteCustomTopic(topic)}
+                                  disabled={deletingTopicId === topic.id}
+                                  data-testid={`syllabus-delete-topic-${topic.id}`}
+                                  title="Delete topic"
+                                  className="p-1 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors flex-shrink-0 disabled:opacity-50">
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       )
