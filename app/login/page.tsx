@@ -74,14 +74,14 @@ function LoginForm() {
           autoComplete="current-password"
         />
         <div className="flex justify-end">
-          <Link href="/forgot-password" className="text-sm text-white/40 hover:text-white/70 transition">
+          <Link href="/forgot-password" className="text-sm text-stone-400 hover:text-stone-600 transition">
             Forgot password?
           </Link>
         </div>
         <AuthButton loading={loading} label={`Sign In`} gradient={theme.btnGradient} />
       </form>
-      <div className="mt-5 pt-5 border-t border-white/8 text-center">
-        <Link href="/" className="text-sm text-white/30 hover:text-white/50 transition">← Back to portal selection</Link>
+      <div className="mt-5 pt-5 border-t border-stone-200 text-center">
+        <Link href="/" className="text-sm text-stone-400 hover:text-stone-600 transition">← Back to portal selection</Link>
       </div>
     </AuthShell>
   )
@@ -89,7 +89,7 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-[#0a0f1e] flex items-center justify-center"><div className="text-white/40">Loading...</div></div>}>
+    <Suspense fallback={<div className="min-h-screen bg-[#faf6ef] flex items-center justify-center"><div className="text-stone-400">Loading...</div></div>}>
       <LoginForm />
     </Suspense>
   )

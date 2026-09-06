@@ -58,7 +58,7 @@ export default function ParentLoginPage() {
 
       <form onSubmit={handleSubmit} data-testid="parent-login-form" className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-white/70 mb-1.5">Email Address</label>
+          <label className="block text-sm font-medium text-stone-700 mb-1.5">Email Address</label>
           <input
             type="email"
             value={email}
@@ -67,9 +67,9 @@ export default function ParentLoginPage() {
             required
             autoComplete="email"
             data-testid="parent-email-input"
-            className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent transition backdrop-blur-sm`}
+            className={`w-full bg-white border border-stone-300 rounded-xl px-4 py-3 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent transition`}
           />
-          <p className="text-xs text-white/30 mt-1.5">Use the email address your school has on record</p>
+          <p className="text-xs text-stone-400 mt-1.5">Use the email address your school has on record</p>
         </div>
 
         <PasswordField
@@ -82,7 +82,7 @@ export default function ParentLoginPage() {
         />
 
         <div className="flex justify-end">
-          <Link href="/parent/forgot-password" className="text-sm text-white/40 hover:text-white/70 font-medium transition">
+          <Link href="/parent/forgot-password" className="text-sm text-stone-400 hover:text-stone-600 font-medium transition">
             Forgot password?
           </Link>
         </div>
@@ -99,9 +99,9 @@ export default function ParentLoginPage() {
         </button>
       </form>
 
-      <div className="mt-5 pt-5 border-t border-white/8 text-center">
-        <p className="text-xs text-white/30">Account created automatically when your child was enrolled. Check your welcome email for credentials.</p>
-        <Link href="/" className="text-sm text-gray-400 hover:text-gray-600 transition mt-2 inline-block">← Back to portal selection</Link>
+      <div className="mt-5 pt-5 border-t border-stone-200 text-center">
+        <p className="text-xs text-stone-400">Account created automatically when your child was enrolled. Check your welcome email for credentials.</p>
+        <Link href="/" className="text-sm text-stone-400 hover:text-stone-600 transition mt-2 inline-block">← Back to portal selection</Link>
       </div>
     </AuthShell>
   )
