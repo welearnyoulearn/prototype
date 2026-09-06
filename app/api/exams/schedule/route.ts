@@ -75,8 +75,20 @@ export async function POST(req: NextRequest) {
         // list applied to every selected class regardless of grade" gap: a
         // Grade 6 class gets Grade 6's real subjects, a Grade 9 class gets
         // Grade 9's, in the same batch submission.
+        //
+        // Each subject's teacher is copied straight from class_subjects
+        // (the school's already-assigned subject teacher for this class) —
+        // there is no separate "class teacher assigns subject teachers"
+        // step, since that information already exists and re-entering it
+        // would just be duplicate manual work. A subject with no assigned
+        // teacher yet (class_subjects.teacher_id IS NULL) is created
+        // unassigned, and the class teacher can fill that one gap in later
+        // via the exam's subject list — not a wholesale reassignment screen.
         const { rows: subjects } = await client.query(
-          `SELECT id, subject_name FROM class_subjects WHERE class_id = $1 ORDER BY subject_name`,
+          `SELECT cs.id, cs.subject_name, cs.teacher_id, t.name AS teacher_name
+           FROM class_subjects cs
+           LEFT JOIN teachers t ON t.id = cs.teacher_id
+           WHERE cs.class_id = $1 ORDER BY cs.subject_name`,
           [cls.id]
         )
 
@@ -90,9 +102,9 @@ export async function POST(req: NextRequest) {
 
         for (const subj of subjects) {
           await client.query(`
-            INSERT INTO exam_subjects (exam_id, school_id, class_subject_id, subject_name, max_marks, status)
-            VALUES ($1, $2, $3, $4, 100, 'pending')
-          `, [exam.id, actor.schoolId, subj.id, subj.subject_name])
+            INSERT INTO exam_subjects (exam_id, school_id, class_subject_id, subject_name, teacher_id, teacher_name, max_marks, status)
+            VALUES ($1, $2, $3, $4, $5, $6, 100, 'pending')
+          `, [exam.id, actor.schoolId, subj.id, subj.subject_name, subj.teacher_id, subj.teacher_name])
           subjectsAssigned++
         }
 

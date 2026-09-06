@@ -45,15 +45,17 @@ async function run(req: NextRequest) {
 
     let notified = 0
     for (const exam of opened) {
-      // Notify subject teachers assigned once the class teacher assigns
-      // them; at open time, no exam_subjects.teacher_id is set yet (subject
-      // teacher assignment is the class teacher's own next action), so the
-      // notification goes to the class teacher only.
+      // Subject teachers are already assigned at exam-creation time (copied
+      // straight from class_subjects — see POST /api/exams/schedule), so
+      // every subject teacher can be notified directly the moment entry
+      // opens, no separate "assign subject teachers" step in between.
       try {
         const { rows: [cls] } = await pool.query(
           `SELECT class_teacher_id, grade, section FROM classes WHERE id = $1`,
           [exam.class_id]
         )
+        const label = `Grade ${cls?.grade}-${cls?.section}`
+
         if (cls?.class_teacher_id) {
           await pool.query(`
             INSERT INTO notifications (school_id, recipient_teacher_id, type, title, message, data)
@@ -61,10 +63,30 @@ async function run(req: NextRequest) {
           `, [
             exam.school_id, cls.class_teacher_id,
             `Marks entry open — ${exam.exam_name}`,
-            `Marks entry is now open for ${exam.exam_name} (Grade ${cls.grade}-${cls.section}). Assign subject teachers to start collecting marks.`,
+            `Marks entry is now open for ${exam.exam_name} (${label}). Subject teachers have been notified — you can track submissions from this exam's page.`,
             JSON.stringify({ exam_id: exam.id, class_id: exam.class_id }),
           ])
           notified++
+        }
+
+        const { rows: subjectTeachers } = await pool.query(
+          `SELECT DISTINCT teacher_id, subject_name FROM exam_subjects WHERE exam_id = $1 AND teacher_id IS NOT NULL`,
+          [exam.id]
+        )
+        for (const st of subjectTeachers) {
+          if (st.teacher_id === cls?.class_teacher_id) continue // already notified above
+          try {
+            await pool.query(`
+              INSERT INTO notifications (school_id, recipient_teacher_id, type, title, message, data)
+              VALUES ($1, $2, 'exam_entry_open', $3, $4, $5)
+            `, [
+              exam.school_id, st.teacher_id,
+              `Enter marks — ${exam.exam_name}`,
+              `Marks entry is now open for ${st.subject_name} in ${exam.exam_name} (${label}).`,
+              JSON.stringify({ exam_id: exam.id, class_id: exam.class_id }),
+            ])
+            notified++
+          } catch { /* non-critical */ }
         }
       } catch { /* non-critical */ }
     }

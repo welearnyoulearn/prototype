@@ -13,7 +13,6 @@ type Exam = {
 type ExamSubject = { id: number; subject_name: string; teacher_id: number | null; teacher_name: string | null; max_marks: number; status: string; submitted_at: string | null }
 type Student = { id: number; name: string; roll_number: string }
 type MarkEntry = { marks: string; absent: boolean }
-type ClassStaff = { id: number; name: string; subject: string }
 
 const EXAM_TYPES = [
   { key: 'unit_test', label: 'Unit Test' },
@@ -57,17 +56,13 @@ type SubjectStat = { exam_subject_id: number; subject_name: string; max_marks: n
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function ExamMarks({ classId, schoolId, grade, section, teacher, isClassTeacher, openExamId }: Props) {
-  const [view, setView] = useState<'list' | 'detail' | 'assign' | 'enter' | 'review'>('list')
+  const [view, setView] = useState<'list' | 'detail' | 'enter' | 'review'>('list')
   const [exams, setExams] = useState<Exam[]>([])
   const [selectedExam, setSelectedExam] = useState<(Exam & { subjects: ExamSubject[] }) | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
   const [errMsg, setErrMsg] = useState('')
-
-  // Assign-subject-teachers state
-  const [classStaff, setClassStaff] = useState<ClassStaff[]>([])
-  const [assignments, setAssignments] = useState<Record<number, number | ''>>({})
 
   // Marks entry state
   const [students, setStudents] = useState<Student[]>([])
@@ -107,36 +102,20 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
     setView('detail')
   }
 
-  // Open the assign-subject-teachers screen. Loads the class's teaching
-  // staff (from class_subjects) so the class teacher picks from real
-  // options, never a free-typed name.
-  async function openAssign(exam: typeof selectedExam) {
-    if (!exam) return
-    const data = await fetch(`/api/classes/${classId}?school_id=${schoolId}`).then(r => r.json()).catch(() => null)
-    const staffMap = new Map<number, ClassStaff>()
-    ;(data?.subjects ?? []).forEach((s: { teacher_id: number | null; teacher_name: string | null; subject_name: string }) => {
-      if (s.teacher_id) staffMap.set(s.teacher_id, { id: s.teacher_id, name: s.teacher_name ?? 'Unknown', subject: s.subject_name })
-    })
-    setClassStaff(Array.from(staffMap.values()))
-    const init: Record<number, number | ''> = {}
-    exam.subjects.forEach(s => { init[s.id] = s.teacher_id ?? '' })
-    setAssignments(init)
-    setView('assign')
-  }
-
-  async function saveAssignments() {
+  // A subject with no teacher_id (class_subjects never had one assigned)
+  // can only be self-assigned by the class teacher — a single-subject fix,
+  // not a wholesale reassignment screen, since every other subject already
+  // has its real teacher copied in at exam-creation time.
+  async function assignSelfToSubject(examSubjectId: number) {
     if (!selectedExam) return
     setSaving(true); setErrMsg('')
     try {
-      const payload = Object.entries(assignments).map(([exam_subject_id, teacher_id]) => ({
-        exam_subject_id: Number(exam_subject_id), teacher_id: teacher_id === '' ? null : Number(teacher_id),
-      }))
       const res = await fetch(`/api/exams/${selectedExam.id}/subjects`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, assignments: payload }),
+        body: JSON.stringify({ school_id: schoolId, assignments: [{ exam_subject_id: examSubjectId, teacher_id: teacher.id }] }),
       }).then(r => r.json())
       if (res.error) { setErrMsg(res.error); setSaving(false); return }
-      setMsg(`${res.assigned} subject(s) assigned.`)
+      if (res.assigned === 0) { setErrMsg('You are not listed as a teacher for this subject in Class Management.'); setSaving(false); return }
       await loadExamDetail(selectedExam.id)
     } finally { setSaving(false) }
   }
@@ -399,7 +378,7 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
                           <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${statusInfo.color}`}>{statusInfo.label}</span>
                           {myPending && <span className="text-[10px] bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold">ENTER YOUR MARKS</span>}
                           {isClassTeacher && exam.status === 'collecting' && exam.assigned_subjects < exam.total_subjects && (
-                            <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-bold">ASSIGN TEACHERS</span>
+                            <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-bold" title="One or more subjects have no teacher in Class Management">NEEDS A TEACHER</span>
                           )}
                         </div>
                         <p className="text-xs text-gray-400 mt-1">
@@ -422,43 +401,6 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
               })}
             </div>
           )}
-        </div>
-      )}
-
-      {/* ── ASSIGN SUBJECT TEACHERS VIEW ── */}
-      {view === 'assign' && selectedExam && (
-        <div className="space-y-4">
-          <button onClick={() => setView('detail')} className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
-            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-            Back
-          </button>
-          <div className="bg-white rounded-xl border border-gray-200 p-5">
-            <h3 className="font-semibold text-gray-800 mb-1">Assign subject teachers — {selectedExam.exam_name}</h3>
-            <p className="text-xs text-gray-400 mb-4">Pick who enters marks for each subject. Leave blank to enter it yourself later.</p>
-            <div className="space-y-2">
-              {selectedExam.subjects.map(sub => (
-                <div key={sub.id} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 bg-gray-50/40">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-800">{sub.subject_name}</p>
-                    <p className="text-xs text-gray-400">/{sub.max_marks} marks</p>
-                  </div>
-                  <select value={assignments[sub.id] ?? ''} data-testid={`assign-subject-${sub.id}`}
-                    onChange={e => setAssignments(prev => ({ ...prev, [sub.id]: e.target.value === '' ? '' : Number(e.target.value) }))}
-                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm min-w-[180px] focus:outline-none focus:ring-2 focus:ring-orange-300">
-                    <option value="">— Not assigned —</option>
-                    <option value={teacher.id}>{teacher.name} (You)</option>
-                    {classStaff.filter(s => s.id !== teacher.id).map(s => (
-                      <option key={s.id} value={s.id}>{s.name} ({s.subject})</option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-            </div>
-            <button onClick={saveAssignments} disabled={saving} data-testid="save-assignments"
-              className="mt-4 w-full bg-orange-500 text-white font-semibold py-3 rounded-xl hover:bg-orange-600 disabled:opacity-50 transition-colors">
-              {saving ? 'Saving…' : 'Save Assignments & Notify'}
-            </button>
-          </div>
         </div>
       )}
 
@@ -490,12 +432,6 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                {isClassTeacher && selectedExam.status === 'collecting' && (
-                  <button onClick={() => openAssign(selectedExam)} data-testid="open-assign-teachers"
-                    className="bg-gray-700 text-white text-sm px-4 py-2 rounded-xl hover:bg-gray-800 transition-colors font-medium">
-                    Assign Subject Teachers
-                  </button>
-                )}
                 {isClassTeacher && selectedExam.status === 'collecting' && (
                   <button onClick={() => openMarksEntry(selectedExam)} data-testid="open-enter-marks"
                     className="bg-blue-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-blue-700 transition-colors font-medium">
@@ -549,12 +485,16 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
                     <p className="text-sm font-semibold text-gray-800 leading-tight">{sub.subject_name}</p>
                     <span className={`text-[10px] font-bold ${submitted ? 'text-green-600' : 'text-gray-400'}`}>{submitted ? '✓' : '⏳'}</span>
                   </div>
-                  <p className="text-xs text-gray-400 truncate">{sub.teacher_name || 'Unassigned'}</p>
+                  <p className="text-xs text-gray-400 truncate">{sub.teacher_name || 'No teacher in Class Management'}</p>
                   {isMySubject && <p className="text-[10px] text-blue-500 font-medium mt-0.5">You</p>}
                   <p className="text-xs text-gray-500 mt-1">/{sub.max_marks} marks</p>
                   {isClassTeacher && submitted && selectedExam.status === 'collecting' && (
                     <button onClick={() => reopenSubject(sub.id)} data-testid={`reopen-subject-${sub.id}`}
                       className="mt-2 text-[10px] text-amber-600 hover:text-amber-800 font-semibold underline">Reopen to fix</button>
+                  )}
+                  {isClassTeacher && !sub.teacher_id && selectedExam.status === 'collecting' && (
+                    <button onClick={() => assignSelfToSubject(sub.id)} disabled={saving} data-testid={`assign-self-${sub.id}`}
+                      className="mt-2 text-[10px] text-blue-600 hover:text-blue-800 font-semibold underline disabled:opacity-50">I&rsquo;ll enter this one</button>
                   )}
                 </div>
               )

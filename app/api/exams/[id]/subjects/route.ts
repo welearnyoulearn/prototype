@@ -2,15 +2,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsTeacher, isClassTeacherOf } from '@/lib/examsAuth'
 
-// POST /api/exams/[id]/subjects — the class teacher assigns a subject
-// teacher to each of the exam's existing subject slots.
+// POST /api/exams/[id]/subjects — reassigns the teacher for one or more of
+// an exam's existing subject slots.
 //
-// v2 change: exam_subjects rows already exist by the time this is called —
-// they were created from the class's own class_subjects at exam-creation
-// time (POST /api/exams/schedule). This route only ever UPDATEs teacher_id/
-// teacher_name on existing rows; it never creates or deletes a subject slot,
-// since the subject list itself is meant to exactly match what the class
-// teaches, not something a class teacher curates per exam.
+// Every subject's teacher is normally already set at exam-creation time,
+// copied straight from class_subjects (POST /api/exams/schedule) — there is
+// no separate "class teacher assigns subject teachers" step in the normal
+// flow. This route exists for the two narrower cases that still need a
+// manual fix: a subject that had no teacher in class_subjects at all (the
+// class teacher can self-assign it), or genuinely reassigning who enters a
+// subject after the fact. It only ever UPDATEs teacher_id/teacher_name on
+// existing exam_subjects rows; it never creates or deletes a subject slot,
+// since the subject list itself must exactly match what the class teaches.
 //
 // Body: { school_id, assignments: [{ exam_subject_id, teacher_id }] }
 export async function POST(

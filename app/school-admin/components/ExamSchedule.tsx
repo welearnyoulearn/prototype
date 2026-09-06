@@ -356,7 +356,7 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
             <p className="text-xs font-bold text-blue-800 mb-2">What happens next:</p>
             <ul className="space-y-1 text-xs text-blue-700">
               <li>✓ Every student and their parent(s) in these classes are notified now</li>
-              <li>✓ Each class teacher is notified — they&rsquo;ll assign subject teachers once entry opens</li>
+              <li>✓ Each class teacher and subject teacher is notified once marks entry opens — subjects are already matched to their real teacher from Class Management</li>
               <li>✓ Marks entry opens automatically the day after {form.exam_date ? new Date(form.exam_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : 'the exam date'}</li>
               <li>✓ Results reach students/parents only after the class teacher reviews and you release them</li>
             </ul>
