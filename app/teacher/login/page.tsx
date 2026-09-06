@@ -47,7 +47,7 @@ export default function TeacherLoginPage() {
 
       <form onSubmit={handleSubmit} data-testid="teacher-login-form" className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-white/70 mb-1.5">Email Address</label>
+          <label className="block text-sm font-medium text-stone-700 mb-1.5">Email Address</label>
           <input
             type="email"
             value={email}
@@ -56,7 +56,7 @@ export default function TeacherLoginPage() {
             required
             autoComplete="email"
             data-testid="teacher-email-input"
-            className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent transition backdrop-blur-sm`}
+            className={`w-full bg-white border border-stone-300 rounded-xl px-4 py-3 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent transition`}
           />
         </div>
 
@@ -70,7 +70,7 @@ export default function TeacherLoginPage() {
         />
 
         <div className="flex justify-end">
-          <Link href="/teacher/forgot-password" className="text-sm text-white/40 hover:text-white/70 font-medium transition">
+          <Link href="/teacher/forgot-password" className="text-sm text-stone-400 hover:text-stone-600 font-medium transition">
             Forgot password?
           </Link>
         </div>
@@ -87,9 +87,9 @@ export default function TeacherLoginPage() {
         </button>
       </form>
 
-      <div className="mt-5 pt-5 border-t border-white/8 flex items-center justify-between text-sm">
-        <span className="text-white/30">Not a teacher??</span>
-        <Link href="/" className="text-white/30 hover:text-white/50 font-medium transition">← Back to portal selection</Link>
+      <div className="mt-5 pt-5 border-t border-stone-200 flex items-center justify-between text-sm">
+        <span className="text-stone-400">Not a teacher?</span>
+        <Link href="/" className="text-stone-400 hover:text-stone-600 font-medium transition">← Back to portal selection</Link>
       </div>
     </AuthShell>
   )
