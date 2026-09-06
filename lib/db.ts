@@ -70,7 +70,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 13
+const SCHEMA_VERSION = 14
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2761,6 +2761,44 @@ async function runIncrementalMigrations() {
   // case of the same table, not a special path.
   await pool.query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS recipient_parent_id INTEGER REFERENCES parents(id) ON DELETE CASCADE`).catch(() => {})
   await pool.query(`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_recipient_parent ON notifications(recipient_parent_id, is_read)`).catch(() => {})
+
+  // ── Combined 'exam-marks' feature flag — replaces exam-schedule + results ──
+  // The exam/marks feature used to be gated by two separate flags
+  // (exam-schedule for school-admin's screen + parent's exam calendar,
+  // results for student/parent's marks views) — a school could end up with
+  // admin able to schedule exams while students/parents couldn't see
+  // results, or the reverse. Consolidated into one 'exam-marks' flag
+  // covering all four portals. Seeded from exam-schedule's existing
+  // per-tier values (both flags had identical basic/standard/premium
+  // settings in practice) so no existing school's access changes; a
+  // brand-new database with neither old key configured falls through to
+  // the same basic=off/standard+premium=on default every other
+  // student/parent-portal feature uses.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    SELECT 'exam-marks', tier, enabled FROM plan_features WHERE feature_key = 'exam-schedule'
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES ('exam-marks', 'basic', false), ('exam-marks', 'standard', true), ('exam-marks', 'premium', true)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+  // Carry over any per-school override that existed on either old key —
+  // whichever value was set wins if both happened to be overridden
+  // differently (shouldn't occur in practice, but ON CONFLICT DO NOTHING
+  // keeps the first one written rather than erroring).
+  await pool.query(`
+    INSERT INTO school_feature_overrides (school_id, feature_key, enabled)
+    SELECT school_id, 'exam-marks', enabled FROM school_feature_overrides
+    WHERE feature_key IN ('exam-schedule', 'results')
+    ON CONFLICT (school_id, feature_key) DO NOTHING
+  `).catch(() => {})
+  // The old keys are removed from ALL_FEATURES (lib/features.ts) so they no
+  // longer appear in the platform-admin matrix or gate anything — their
+  // plan_features/school_feature_overrides rows are left in place rather
+  // than deleted (harmless dead data, and safer than a destructive DELETE
+  // in a migration that runs unattended on every school's database).
 
   // ── One-time backfill: class_subjects gaps for already-subscribed grades ──
   // Before this session, a subject subscribed via Syllabus Customizer was

@@ -403,7 +403,7 @@ function SchoolAdmin() {
 
   const enabledNavItems = NAV_ITEMS.filter(item =>
     tier !== 'none' &&
-    enabledFeatures.has(item.key === 'syllabus-tracking' ? 'curriculum' : item.key) &&
+    enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[item.key] ?? item.key) &&
     isSchoolAdminScoped(item.key) &&
     !(isStaffAccount && item.key === 'settings')
   )
@@ -595,10 +595,10 @@ function SchoolAdmin() {
                   })()}
 
                   {/* Locked features */}
-                  {NAV_ITEMS.filter(item => isSchoolAdminScoped(item.key) && !enabledFeatures.has(item.key)).length > 0 && (
+                  {NAV_ITEMS.filter(item => isSchoolAdminScoped(item.key) && !enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[item.key] ?? item.key)).length > 0 && (
                     <div className="mt-3 pt-3 border-t border-slate-800">
                       <p className="px-4 pb-1.5 text-[9px] font-bold text-slate-600 uppercase tracking-[0.15em]">Upgrade to Unlock</p>
-                      {NAV_ITEMS.filter(item => isSchoolAdminScoped(item.key) && !enabledFeatures.has(item.key)).map(item => (
+                      {NAV_ITEMS.filter(item => isSchoolAdminScoped(item.key) && !enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[item.key] ?? item.key)).map(item => (
                         <div key={item.key} className="flex items-center gap-3 px-4 py-1.5 text-sm text-slate-600 cursor-not-allowed select-none">
                           <svg className="w-4 h-4 flex-shrink-0 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />

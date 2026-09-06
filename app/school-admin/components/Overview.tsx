@@ -54,7 +54,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
   const hasLeave          = useFeature('leave-requests')
   const hasCover          = useFeature('emergency-cover')
   const hasTimetable      = useFeature('timetable')
-  const hasExams          = useFeature('exam-schedule')
+  const hasExams          = useFeature('exam-marks')
   const hasFeeManagement  = useFeature('fee-management')
 
   const [stats, setStats]                     = useState<Stats>({ teachers: 0, students: 0, classes: 0, pendingLeaves: 0 })

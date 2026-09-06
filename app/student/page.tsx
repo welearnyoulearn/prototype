@@ -80,7 +80,7 @@ const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
 // against enabledFeatures — everything else (dashboard, profile) has always
 // been unconditionally available and stays that way. 'syllabus'/'timetable'/
 // 'my-marks'/'tasks' resolve through PORTAL_NAV_KEY_ALIASES to their real
-// ALL_FEATURES keys ('curriculum'/'timetable'/'results'/'homework').
+// ALL_FEATURES keys ('curriculum'/'timetable'/'exam-marks'/'homework').
 const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'timetable', 'my-marks', 'tasks', 'doubts'])
 
 const BOTTOM_NAV = [
