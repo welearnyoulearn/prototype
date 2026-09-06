@@ -348,7 +348,7 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
               ))}
             </div>
             {classesWithNoSubjects.length > 0 && (
-              <p className="text-xs text-amber-600 mt-2">⚠ {classesWithNoSubjects.map(classLabel).join(', ')} have no subjects assigned — they'll be created but can't collect marks until Class Management assigns subjects.</p>
+              <p className="text-xs text-amber-600 mt-2">⚠ {classesWithNoSubjects.map(classLabel).join(', ')} have no subjects assigned — they&rsquo;ll be created but can&rsquo;t collect marks until Class Management assigns subjects.</p>
             )}
           </div>
 
@@ -356,7 +356,7 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
             <p className="text-xs font-bold text-blue-800 mb-2">What happens next:</p>
             <ul className="space-y-1 text-xs text-blue-700">
               <li>✓ Every student and their parent(s) in these classes are notified now</li>
-              <li>✓ Each class teacher is notified — they'll assign subject teachers once entry opens</li>
+              <li>✓ Each class teacher is notified — they&rsquo;ll assign subject teachers once entry opens</li>
               <li>✓ Marks entry opens automatically the day after {form.exam_date ? new Date(form.exam_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : 'the exam date'}</li>
               <li>✓ Results reach students/parents only after the class teacher reviews and you release them</li>
             </ul>
@@ -517,8 +517,6 @@ function AckTracker({ examId, schoolId }: { examId: number; schoolId: number }) 
   const [loading, setLoading] = useState(true)
   const [nudging, setNudging] = useState<number | null>(null)
 
-  useEffect(() => { load() }, [examId]) // eslint-disable-line react-hooks/exhaustive-deps
-
   async function load() {
     setLoading(true)
     try {
@@ -526,6 +524,8 @@ function AckTracker({ examId, schoolId }: { examId: number; schoolId: number }) 
       if (d.students) setData(d)
     } finally { setLoading(false) }
   }
+
+  useEffect(() => { load() }, [examId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function nudge(studentId: number) {
     setNudging(studentId)

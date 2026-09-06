@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { calcGrade } from '@/lib/examGrading'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -52,14 +53,12 @@ const EXAM_TYPE_LABELS: Record<string, string> = {
   quarterly: 'Quarterly', half_yearly: 'Half-Yearly', annual: 'Annual',
 }
 
-function gradeLabel(pct: number, passingPct: number): string {
-  if (pct >= 90) return 'A+'
-  if (pct >= 80) return 'A'
-  if (pct >= 70) return 'B+'
-  if (pct >= 60) return 'B'
-  if (pct >= 50) return 'C'
-  if (pct >= passingPct) return 'D'
-  return 'F'
+// Uses the same grading ladder as every other exam screen (lib/examGrading.ts)
+// — this file previously had its own third, different A+/A/B/C/D/F ladder,
+// so the same score could show a different grade letter here than on the
+// Results & Analysis tab or the student/parent portals.
+function gradeLabel(pct: number): string {
+  return calcGrade(pct)
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────
@@ -107,7 +106,7 @@ export default function ExportCenter({ schoolId }: { schoolId: number }) {
         if (cr.ok) { const d = await cr.json(); setClasses(d) }
         if (er.ok) {
           const d: ExamRow[] = await er.json()
-          setExams(d.filter((e: ExamRow) => e.status === 'published'))
+          setExams(d.filter((e: ExamRow) => e.status === 'released'))
         }
         if (sr.ok) { const d = await sr.json(); setSchoolName(d.name) }
       } finally {
@@ -169,26 +168,52 @@ export default function ExportCenter({ schoolId }: { schoolId: number }) {
       const exam = exams.find(e => String(e.id) === rcExam)
       if (!exam) return
 
-      // Build MarksData from the existing marks API shape
+      // GET /api/exams/[id]/marks nests exam fields under raw.exam and
+      // returns the per-student rows under raw.students (not
+      // raw.student_results) — this mismatch previously meant
+      // passing_pct/exam_name always fell back to stale exam-list data and
+      // student_results was always empty, silently rendering zero students
+      // in the report card preview.
+      const passingPct = raw.exam?.passing_pct ?? 35
       const data: MarksData = {
         exam: {
-          exam_name:   raw.exam_name ?? exam.exam_name,
+          exam_name:   raw.exam?.exam_name ?? exam.exam_name,
           exam_type:   exam.exam_type,
           exam_date:   exam.exam_date ?? '',
-          passing_pct: raw.passing_pct ?? 35,
+          passing_pct: passingPct,
           grade:       exam.grade,
           section:     exam.section,
         },
-        subject_stats:   raw.subject_stats   ?? [],
-        student_results: (raw.student_results ?? []).map((s: StudentResult & { total_max?: number; total_obtained?: number }) => {
-          const pct = s.total_max > 0 ? Math.round((s.total_obtained / s.total_max) * 100) : 0
+        subject_stats: (raw.subject_stats ?? []).map((s: { subject_name: string; teacher_name: string | null; max_marks: number; avg_marks: number | null; pass_count: number; fail_count: number; absent_count: number }) => ({
+          subject_name: s.subject_name,
+          teacher_name: s.teacher_name ?? '—',
+          max_marks: s.max_marks,
+          avg_marks: s.avg_marks,
+          pass_count: s.pass_count,
+          fail_count: s.fail_count,
+          absent_count: s.absent_count,
+        })),
+        student_results: (raw.students ?? []).map((s: {
+          student_id: number; name: string; roll_number: string
+          subjects: Record<string, { marks_obtained: number | null; is_absent: boolean }>
+          total_obtained: number | null; total_max: number; percentage: number | null; any_absent?: boolean
+        }) => {
+          const pct = s.percentage ?? 0
+          const subjectsArr = Object.entries(s.subjects).map(([subject_name, m]) => {
+            const subStat = (raw.subject_stats ?? []).find((ss: { subject_name: string }) => ss.subject_name === subject_name)
+            return { subject_name, marks_obtained: m.marks_obtained, is_absent: m.is_absent, max_marks: subStat?.max_marks ?? 0 }
+          })
           return {
-            ...s,
-            percentage:  pct,
-            grade_label: gradeLabel(pct, raw.passing_pct ?? 35),
-            result:      s.subjects?.every((sub: { is_absent: boolean }) => sub.is_absent) ? 'ABSENT'
-                         : pct >= (raw.passing_pct ?? 35) ? 'PASS' : 'FAIL',
-          }
+            student_id: s.student_id,
+            name: s.name,
+            roll_number: s.roll_number,
+            subjects: subjectsArr,
+            total_obtained: s.total_obtained ?? 0,
+            total_max: s.total_max,
+            percentage: pct,
+            grade_label: s.percentage !== null ? gradeLabel(pct) : '—',
+            result: s.any_absent ? 'ABSENT' : pct >= passingPct ? 'PASS' : 'FAIL',
+          } satisfies StudentResult
         }),
       }
       setRcData(data)
@@ -439,7 +464,7 @@ export default function ExportCenter({ schoolId }: { schoolId: number }) {
                         {student.subjects.map(sub => {
                           const pct = sub.max_marks > 0 && !sub.is_absent && sub.marks_obtained != null
                             ? Math.round((sub.marks_obtained / sub.max_marks) * 100) : null
-                          const gl = pct != null ? gradeLabel(pct, rcData.exam.passing_pct) : '—'
+                          const gl = pct != null ? gradeLabel(pct) : '—'
                           return (
                             <tr key={sub.subject_name} className="border-b border-gray-100">
                               <td className="py-2.5 font-medium text-gray-800">{sub.subject_name}</td>
