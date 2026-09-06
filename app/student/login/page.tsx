@@ -54,7 +54,7 @@ export default function StudentLoginPage() {
 
       <form onSubmit={handleSubmit} data-testid="student-login-form" className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-white/70 mb-1.5">Roll Number</label>
+          <label className="block text-sm font-medium text-stone-700 mb-1.5">Roll Number</label>
           <input
             type="text"
             value={rollNumber}
@@ -63,9 +63,9 @@ export default function StudentLoginPage() {
             required
             autoComplete="username"
             data-testid="student-roll-input"
-            className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent transition backdrop-blur-sm font-mono`}
+            className={`w-full bg-white border border-stone-300 rounded-xl px-4 py-3 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent transition font-mono`}
           />
-          <p className="text-xs text-white/30 mt-1.5">Your roll number was shared in your welcome email</p>
+          <p className="text-xs text-stone-400 mt-1.5">Your roll number was shared in your welcome email</p>
         </div>
 
         <PasswordField
@@ -78,7 +78,7 @@ export default function StudentLoginPage() {
         />
 
         <div className="flex justify-end">
-          <Link href="/student/forgot-password" className="text-sm text-white/40 hover:text-white/70 font-medium transition">
+          <Link href="/student/forgot-password" className="text-sm text-stone-400 hover:text-stone-600 font-medium transition">
             Forgot password?
           </Link>
         </div>
@@ -95,8 +95,8 @@ export default function StudentLoginPage() {
         </button>
       </form>
 
-      <div className="mt-5 pt-5 border-t border-white/8 text-center">
-        <Link href="/" className="text-sm text-white/30 hover:text-white/50 transition">← Back to portal selection</Link>
+      <div className="mt-5 pt-5 border-t border-stone-200 text-center">
+        <Link href="/" className="text-sm text-stone-400 hover:text-stone-600 transition">← Back to portal selection</Link>
       </div>
     </AuthShell>
   )
