@@ -16,9 +16,10 @@ type Notification = {
 type NavPayload = { examId?: number; classId?: number; tab?: string; subjectName?: string }
 
 type Props =
-  | { teacherId: number; schoolId?: never; studentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
-  | { schoolId: number; teacherId?: never; studentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
-  | { studentId: number; teacherId?: never; schoolId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
+  | { teacherId: number; schoolId?: never; studentId?: never; parentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
+  | { schoolId: number; teacherId?: never; studentId?: never; parentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
+  | { studentId: number; teacherId?: never; schoolId?: never; parentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
+  | { parentId: number; teacherId?: never; schoolId?: never; studentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
 
 const TYPE_ICONS: Record<string, string> = {
   leave_request: '📋',
@@ -40,6 +41,11 @@ const TYPE_ICONS: Record<string, string> = {
   marks_submitted: '✅',
   marks_published: '📊',
   exam_scheduled: '📅',
+  exam_entry_open: '📝',
+  exam_reviewed: '👀',
+  marks_released: '📊',
+  ack_nudge: '🔔',
+  ack_completed: '✅',
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -62,6 +68,11 @@ const TYPE_COLORS: Record<string, string> = {
   marks_submitted: 'text-green-700 bg-green-50',
   marks_published: 'text-blue-700 bg-blue-50',
   exam_scheduled: 'text-indigo-700 bg-indigo-50',
+  exam_entry_open: 'text-orange-700 bg-orange-50',
+  exam_reviewed: 'text-purple-700 bg-purple-50',
+  marks_released: 'text-blue-700 bg-blue-50',
+  ack_nudge: 'text-amber-700 bg-amber-50',
+  ack_completed: 'text-green-700 bg-green-50',
 }
 
 const TYPE_NAV: Record<string, string> = {
@@ -81,6 +92,11 @@ const TYPE_NAV: Record<string, string> = {
   marks_submitted: 'class-view',        // class teacher: see marks submission
   marks_published: 'my-marks',          // student: go to marks page
   exam_scheduled: 'weekly-test',        // student: go to test calendar
+  exam_entry_open: 'class-view',        // subject teacher: marks entry now open
+  exam_reviewed: 'exam-schedule',       // school admin: exam awaiting release
+  marks_released: 'my-marks',           // student: results are visible
+  ack_nudge: 'results',                 // parent: acknowledge a result
+  ack_completed: 'class-view',          // class teacher: a parent signed off
 }
 
 function timeAgo(dateStr: string) {
@@ -93,16 +109,22 @@ function timeAgo(dateStr: string) {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
-export default function NotificationBell({ teacherId, schoolId, studentId, onNavigate }: Props) {
+export default function NotificationBell({ teacherId, schoolId, studentId, parentId, onNavigate }: Props) {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
+  // These query params are not actually consulted server-side — GET
+  // /api/notifications derives the recipient purely from the session cookie
+  // (see that route's own comment). Kept here only so the URL documents
+  // intent per-portal; the value has no effect on which rows come back.
   const apiUrl = teacherId
     ? `/api/notifications?teacher_id=${teacherId}`
     : studentId
       ? `/api/notifications?student_id=${studentId}`
-      : `/api/notifications?recipient_school_id=${schoolId}`
+      : parentId
+        ? `/api/notifications?parent_id=${parentId}`
+        : `/api/notifications?recipient_school_id=${schoolId}`
 
   async function fetchNotifications() {
     try {
@@ -116,7 +138,7 @@ export default function NotificationBell({ teacherId, schoolId, studentId, onNav
     fetchNotifications()
     const timer = setInterval(fetchNotifications, 30000)
     return () => clearInterval(timer)
-  }, [teacherId, schoolId, studentId])
+  }, [teacherId, schoolId, studentId, parentId])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -135,6 +157,7 @@ export default function NotificationBell({ teacherId, schoolId, studentId, onNav
         body: JSON.stringify(
           teacherId ? { teacher_id: teacherId }
           : studentId ? { student_id: studentId }
+          : parentId ? { parent_id: parentId }
           : { school_id: schoolId }
         ),
       })
