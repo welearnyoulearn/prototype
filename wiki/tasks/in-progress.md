@@ -6,6 +6,26 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 
 <!-- Add new entries at the top -->
 
+### Feedback Management — public form + admin dashboard (#TBD)
+**Type:** Feature
+**Portal:** School Admin (public-facing entry point outside all portals) / Platform Admin (feature toggle)
+**Assigned to:** Kowsik
+**Branch:** feature/feedback-management — ⚠️ needs renaming once an issue number exists
+**Started:** 2026-09-07
+**Summary:** No-login, QR-code-driven feedback form (role → category → emoji rating → follow-up/voice note) at `/feedback/[code]`, resolved by a code dedicated to this feature (not the admin login `school_code`). School-admin gets a "Feedback Management" tab: dashboard KPIs, submissions list, an issue pipeline auto-flagged from low ratings (department + priority + status), category CRUD, and a Settings/QR poster page. Gated by a new `feedback-management` entry in `lib/features.ts` — the platform-admin `/platform-admin/features` toggle needed no other plumbing since that screen is fully data-driven.
+**Progress:**
+- [x] Schema: `feedback_settings`, `feedback_categories`, `feedback_submissions`, `feedback_submission_ratings` + backfill for existing schools
+- [x] Public API: resolve-by-code, submit (rate-limited, anonymity enforced server-side), voice presigned upload (R2)
+- [x] Public wizard UI at `app/feedback/[code]/`
+- [x] Admin API: submissions, issues, stats, categories CRUD, settings, QR (session-gated, tenant-checked via `requireFeeAccess`)
+- [x] Admin UI: `FeedbackManagement.tsx` (Dashboard/Submissions/Issue Pipeline/Categories/Settings & QR tabs)
+- [x] Nav + feature-flag wiring in `lib/features.ts` and `app/school-admin/page.tsx`
+- [x] Playwright e2e spec written (`e2e/workflow-feedback-management.spec.ts`) — not yet run against a live DB
+- [x] DB migrations verified live against the Supabase dev DB (found + fixed a real backfill SQL bug this way)
+- [x] `/code-review medium` run and all correctness/security findings fixed (missing active-state checks on public routes, no rate limit on voice upload, no dedup/cap on submitted ratings, unused `cn` dependency, missing `res.ok` checks in 3 admin tabs)
+- [ ] Full user-flow smoke test (blocked locally — no local Postgres available in this environment, and no test school was created against the shared Supabase dev DB)
+- [ ] Open a GitHub issue and rename the branch to `feature/{issue-number}-feedback-management`
+
 ### Performance & security audit — login latency, tenant isolation, pagination (#TBD)
 **Type:** Bug Fix / Enhancement
 **Portal:** All (School Admin, Teacher, Student, Parent, Platform Admin)

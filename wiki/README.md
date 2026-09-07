@@ -9,7 +9,7 @@
 
 | Portal | Doc | Features |
 |--------|-----|----------|
-| [School Admin](features/school-admin.md) | Portal overview, all modules | 22 built, 3 partial, 4 planned |
+| [School Admin](features/school-admin.md) | Portal overview, all modules | 23 built, 3 partial, 4 planned |
 | [Teacher](features/teacher.md) | Portal overview, all modules | 12 built, 1 partial |
 | [Student](features/student.md) | Portal overview, all modules | 8 built, 1 partial |
 | [Parent](features/parent.md) | Portal overview, all modules | 5 built, 2 partial |
