@@ -5,12 +5,19 @@
 // starting set. Matches the SchoolPulse prototype's role→category mapping.
 export type FeedbackRole = 'parent' | 'student' | 'teacher' | 'visitor' | 'other'
 
+// The 'other' role's card reads "Advanced Forms" in the wizard and skips
+// the emoji-rating flow entirely in favor of structured request forms
+// (Meeting/Event/Exam/Academic — see ADVANCED_FORM_TYPES below) — matches
+// the reference prototype's "Others" card, which was already internally
+// labeled ADVANCED. The role key itself stays 'other' (unchanged in the DB
+// and in feedback_submissions.role) since it's still "not one of the named
+// roles"; only its wizard-facing label/icon and downstream flow differ.
 export const FEEDBACK_ROLES: { key: FeedbackRole; label: string; icon: string }[] = [
-  { key: 'parent',  label: 'Parent',  icon: '👨‍👩‍👧' },
-  { key: 'student', label: 'Student', icon: '🧑‍🎓' },
-  { key: 'teacher', label: 'Teacher', icon: '👩‍🏫' },
-  { key: 'visitor', label: 'Visitor', icon: '👋' },
-  { key: 'other',   label: 'Other',   icon: '👨‍💼' },
+  { key: 'parent',  label: 'Parent',         icon: '👨‍👩‍👧' },
+  { key: 'student', label: 'Student',        icon: '🧑‍🎓' },
+  { key: 'teacher', label: 'Teacher',        icon: '👩‍🏫' },
+  { key: 'visitor', label: 'Visitor',        icon: '👋' },
+  { key: 'other',   label: 'Advanced Forms', icon: '🗂️' },
 ]
 
 // Derived tuple for zod's z.enum(), which needs a literal string tuple, not
@@ -18,6 +25,21 @@ export const FEEDBACK_ROLES: { key: FeedbackRole; label: string; icon: string }[
 // truth for the role list, imported everywhere a role list, dropdown, or
 // enum previously would have re-typed its own copy.
 export const FEEDBACK_ROLE_KEYS = FEEDBACK_ROLES.map(r => r.key) as [FeedbackRole, ...FeedbackRole[]]
+
+// The four structured request forms reachable from the "Advanced Forms"
+// role — these skip category emoji-ratings entirely and collect real
+// structured fields instead (see ADVANCED_FORM_FIELDS in
+// app/feedback/[code]/types.ts for the per-type field definitions).
+export type AdvancedFormType = 'meeting' | 'event' | 'exam' | 'academic'
+
+export const ADVANCED_FORM_TYPES: { key: AdvancedFormType; icon: string; label: string; description: string }[] = [
+  { key: 'meeting',  icon: '🗓️', label: 'Meeting',  description: 'Request a meeting with a teacher or the office' },
+  { key: 'event',    icon: '🎉', label: 'Event',    description: 'Share feedback about a school event' },
+  { key: 'exam',     icon: '📝', label: 'Exam',     description: 'Raise a concern about an exam' },
+  { key: 'academic', icon: '📚', label: 'Academic', description: 'Share an academic concern or suggestion' },
+]
+
+export const ADVANCED_FORM_TYPE_KEYS = ADVANCED_FORM_TYPES.map(t => t.key) as [AdvancedFormType, ...AdvancedFormType[]]
 
 export interface DefaultFeedbackCategory {
   role: FeedbackRole

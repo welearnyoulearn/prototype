@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { FEEDBACK_ROLES } from '@/lib/feedback-defaults'
+import { ADVANCED_FORM_TYPES, FEEDBACK_ROLES } from '@/lib/feedback-defaults'
+import { ADVANCED_FORM_FIELDS, AdvancedFormType } from '@/app/feedback/[code]/types'
 import { useFeedbackFetch } from './useFeedbackFetch'
 
 interface Rating { category_key: string; category_label: string; rating: number; priority: string | null; status: string }
@@ -19,6 +20,8 @@ interface Submission {
   has_voice: boolean
   created_at: string
   ratings: Rating[]
+  advanced_form_type: AdvancedFormType | null
+  advanced_form_data: Record<string, string> | null
 }
 interface SubmissionsResponse { data: Submission[]; total: number }
 
@@ -69,13 +72,21 @@ export default function FeedbackSubmissionsTab({ schoolId }: { schoolId: number 
                   <span>· {new Date(sub.created_at).toLocaleString()}</span>
                   {sub.has_voice && <span>🎙️</span>}
                 </div>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {sub.ratings.map(r => (
-                    <span key={r.category_key} className="rounded-md bg-violet-50 px-1.5 py-0.5 text-xs text-gray-700">
-                      {RATING_EMOJI[r.rating]} {r.category_label}
+                {sub.advanced_form_type ? (
+                  <div className="mt-1 flex items-center gap-1.5">
+                    <span className="rounded-md bg-violet-100 px-1.5 py-0.5 text-xs font-semibold text-violet-700">
+                      {ADVANCED_FORM_TYPES.find(t => t.key === sub.advanced_form_type)?.icon} {ADVANCED_FORM_TYPES.find(t => t.key === sub.advanced_form_type)?.label} form
                     </span>
-                  ))}
-                </div>
+                  </div>
+                ) : (
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    {sub.ratings.map(r => (
+                      <span key={r.category_key} className="rounded-md bg-violet-50 px-1.5 py-0.5 text-xs text-gray-700">
+                        {RATING_EMOJI[r.rating]} {r.category_label}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {sub.free_text && <p className="mt-1 line-clamp-1 text-xs text-gray-500">{sub.free_text}</p>}
               </div>
             </button>
@@ -93,17 +104,35 @@ export default function FeedbackSubmissionsTab({ schoolId }: { schoolId: number 
               <p className="-mt-2 text-xs text-gray-400">{selected.role} · {new Date(selected.created_at).toLocaleString()}</p>
               {!selected.is_anonymous && selected.submitter_phone && <p className="text-xs text-gray-500">📞 {selected.submitter_phone}</p>}
 
-              <div className="space-y-1.5">
-                {selected.ratings.map(r => (
-                  <div key={r.category_key} className="flex items-center justify-between text-sm">
-                    <span className="text-gray-700">{r.category_label}</span>
-                    <span className="flex items-center gap-2">
-                      <span>{RATING_EMOJI[r.rating]}</span>
-                      {r.priority && <Badge variant={r.priority === 'high' ? 'destructive' : 'secondary'}>{r.priority}</Badge>}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              {selected.advanced_form_type ? (
+                <div className="space-y-2">
+                  <Badge variant="secondary">
+                    {ADVANCED_FORM_TYPES.find(t => t.key === selected.advanced_form_type)?.icon} {ADVANCED_FORM_TYPES.find(t => t.key === selected.advanced_form_type)?.label} form
+                  </Badge>
+                  {ADVANCED_FORM_FIELDS[selected.advanced_form_type].map(field => {
+                    const value = selected.advanced_form_data?.[field.key]
+                    if (!value) return null
+                    return (
+                      <div key={field.key} className="text-sm">
+                        <div className="text-xs font-semibold text-gray-400">{field.label}</div>
+                        <div className="text-gray-700">{value}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {selected.ratings.map(r => (
+                    <div key={r.category_key} className="flex items-center justify-between text-sm">
+                      <span className="text-gray-700">{r.category_label}</span>
+                      <span className="flex items-center gap-2">
+                        <span>{RATING_EMOJI[r.rating]}</span>
+                        {r.priority && <Badge variant={r.priority === 'high' ? 'destructive' : 'secondary'}>{r.priority}</Badge>}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {selected.quick_pick_tags && (
                 <div className="flex flex-wrap gap-1.5">

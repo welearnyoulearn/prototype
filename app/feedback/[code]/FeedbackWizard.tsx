@@ -5,11 +5,20 @@ import WelcomeStep from './steps/WelcomeStep'
 import IdentityStep from './steps/IdentityStep'
 import CategoryPickerStep from './steps/CategoryPickerStep'
 import RatingStep from './steps/RatingStep'
+import AdvancedFormTypeStep from './steps/AdvancedFormTypeStep'
+import AdvancedFormStep from './steps/AdvancedFormStep'
 import FollowupStep from './steps/FollowupStep'
 import ThankYouStep from './steps/ThankYouStep'
-import { FeedbackCategory, FeedbackRole, WizardStep } from './types'
+import { AdvancedFormType, FeedbackCategory, FeedbackRole, WizardStep } from './types'
 
 const PROGRESS_STEPS: WizardStep[] = ['welcome', 'identity', 'categories', 'rating', 'followup']
+// advancedType/advancedForm occupy the same visual progress slots as
+// categories/rating — the two flows are mutually exclusive branches of the
+// same "pick what to submit, then fill it in" shape, so they share a
+// position rather than needing their own progress-bar entries.
+const PROGRESS_INDEX: Partial<Record<WizardStep, number>> = {
+  welcome: 0, identity: 1, categories: 2, advancedType: 2, rating: 3, advancedForm: 3, followup: 4,
+}
 
 function initialState() {
   return {
@@ -21,6 +30,8 @@ function initialState() {
     selectedKeys: [] as string[],
     ratingIndex: 0,
     ratings: {} as Record<string, number>,
+    advancedFormType: null as AdvancedFormType | null,
+    advancedFormData: {} as Record<string, string>,
     quickPicks: [] as string[],
     freeText: '',
     voiceKey: null as string | null,
@@ -60,23 +71,13 @@ export default function FeedbackWizard({ code }: { code: string }) {
   const givenRatings = selectedCategories.map(c => s.ratings[c.key]).filter((r): r is number => r !== undefined)
   const overallRating = givenRatings.length > 0 ? givenRatings.reduce((sum, r) => sum + r, 0) / givenRatings.length : 3
 
-  async function handleSubmit() {
+  async function submit(body: Record<string, unknown>) {
     setS(prev => ({ ...prev, submitting: true, submitError: null }))
     try {
       const res = await fetch('/api/feedback/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          code,
-          role: s.role,
-          is_anonymous: s.isAnonymous,
-          name: s.isAnonymous ? undefined : s.name || undefined,
-          phone: s.isAnonymous ? undefined : s.phone || undefined,
-          ratings: selectedCategories.map(c => ({ category_key: c.key, rating: s.ratings[c.key] })),
-          quick_picks: s.quickPicks,
-          free_text: s.freeText || undefined,
-          voice_key: s.voiceKey || undefined,
-        }),
+        body: JSON.stringify(body),
       })
       if (res.status === 429) throw new Error('Too many submissions from this device — please try again later.')
       if (!res.ok) throw new Error('Something went wrong — please try again.')
@@ -86,7 +87,33 @@ export default function FeedbackWizard({ code }: { code: string }) {
     }
   }
 
-  const progressIndex = PROGRESS_STEPS.indexOf(s.step)
+  function handleSubmit() {
+    submit({
+      code,
+      role: s.role,
+      is_anonymous: s.isAnonymous,
+      name: s.isAnonymous ? undefined : s.name || undefined,
+      phone: s.isAnonymous ? undefined : s.phone || undefined,
+      ratings: selectedCategories.map(c => ({ category_key: c.key, rating: s.ratings[c.key] })),
+      quick_picks: s.quickPicks,
+      free_text: s.freeText || undefined,
+      voice_key: s.voiceKey || undefined,
+    })
+  }
+
+  function handleAdvancedSubmit() {
+    submit({
+      code,
+      role: s.role,
+      is_anonymous: s.isAnonymous,
+      name: s.isAnonymous ? undefined : s.name || undefined,
+      phone: s.isAnonymous ? undefined : s.phone || undefined,
+      advanced_form_type: s.advancedFormType,
+      advanced_form_data: s.advancedFormData,
+    })
+  }
+
+  const progressIndex = PROGRESS_INDEX[s.step] ?? -1
 
   return (
     <div className="flex min-h-screen items-start justify-center bg-gradient-to-br from-violet-500 to-fuchsia-400 p-6">
@@ -134,7 +161,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
                 onPhoneChange={v => setS(prev => ({ ...prev, phone: v }))}
                 onAnonymousChange={v => setS(prev => ({ ...prev, isAnonymous: v }))}
                 onBack={() => setS(prev => ({ ...prev, step: 'welcome' }))}
-                onContinue={() => setS(prev => ({ ...prev, step: 'categories' }))}
+                onContinue={() => setS(prev => ({ ...prev, step: prev.role === 'other' ? 'advancedType' : 'categories' }))}
               />
             )}
 
@@ -171,6 +198,25 @@ export default function FeedbackWizard({ code }: { code: string }) {
                     ? { ...prev, step: 'followup' }
                     : { ...prev, ratingIndex: prev.ratingIndex + 1 }
                 ))}
+              />
+            )}
+
+            {s.step === 'advancedType' && (
+              <AdvancedFormTypeStep
+                onSelect={type => setS(prev => ({ ...prev, advancedFormType: type, advancedFormData: {}, step: 'advancedForm' }))}
+                onBack={() => setS(prev => ({ ...prev, step: 'identity' }))}
+              />
+            )}
+
+            {s.step === 'advancedForm' && s.advancedFormType && (
+              <AdvancedFormStep
+                type={s.advancedFormType}
+                values={s.advancedFormData}
+                onChange={(key, value) => setS(prev => ({ ...prev, advancedFormData: { ...prev.advancedFormData, [key]: value } }))}
+                onBack={() => setS(prev => ({ ...prev, step: 'advancedType' }))}
+                onSubmit={handleAdvancedSubmit}
+                submitting={s.submitting}
+                error={s.submitError}
               />
             )}
 

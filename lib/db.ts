@@ -71,7 +71,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 17
+const SCHEMA_VERSION = 18
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2949,6 +2949,15 @@ async function runIncrementalMigrations() {
     )
   `).catch(() => {})
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_voice_upload_log_rate_limit ON feedback_voice_upload_log(school_id, ip_hash, created_at)`).catch(() => {})
+
+  // Advanced Forms (Meeting/Event/Exam/Academic) — a structured-fields
+  // alternative to category emoji-ratings, reached from the "Advanced
+  // Forms" role card. advanced_form_data is an opaque JSON blob of
+  // whatever fields that form type defines (see ADVANCED_FORM_FIELDS in
+  // app/feedback/[code]/types.ts) — no per-field columns, so adding a
+  // field to a form type needs no migration.
+  await pool.query(`ALTER TABLE feedback_submissions ADD COLUMN IF NOT EXISTS advanced_form_type VARCHAR(20)`).catch(() => {})
+  await pool.query(`ALTER TABLE feedback_submissions ADD COLUMN IF NOT EXISTS advanced_form_data JSONB`).catch(() => {})
 
   // One-time backfill: seed default categories for schools that existed
   // before this feature shipped, in a single set-based query. New schools

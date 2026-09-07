@@ -10,7 +10,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const { id } = await params
     const { rows: [submission] } = await pool.query(
       `SELECT id, school_id, role, is_anonymous, submitter_name, submitter_phone,
-              quick_pick_tags, free_text, (voice_object_key IS NOT NULL) AS has_voice, created_at
+              quick_pick_tags, free_text, (voice_object_key IS NOT NULL) AS has_voice, created_at,
+              advanced_form_type, advanced_form_data
        FROM feedback_submissions WHERE id = $1`,
       [id]
     )

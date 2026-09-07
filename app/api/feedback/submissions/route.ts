@@ -42,6 +42,7 @@ export async function GET(req: NextRequest) {
       pool.query(`
         SELECT s.id, s.role, s.is_anonymous, s.submitter_name, s.submitter_phone,
                s.quick_pick_tags, s.free_text, (s.voice_object_key IS NOT NULL) AS has_voice, s.created_at,
+               s.advanced_form_type, s.advanced_form_data,
                COALESCE(
                  json_agg(
                    json_build_object('category_key', r.category_key, 'category_label', r.category_label,

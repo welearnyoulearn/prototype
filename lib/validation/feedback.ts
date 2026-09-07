@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { FEEDBACK_ROLE_KEYS } from '../feedback-defaults'
+import { FEEDBACK_ROLE_KEYS, ADVANCED_FORM_TYPE_KEYS } from '../feedback-defaults'
 
 export const feedbackRatingSchema = z.object({
   category_key: z.string().min(1).max(50),
@@ -10,16 +10,25 @@ export const feedbackRatingSchema = z.object({
 // is_anonymous is true — the route itself is the enforcement point that
 // drops them server-side regardless of what the client sent, so this schema
 // only checks shape, not the anonymity rule.
+//
+// ratings is optional here (unlike the original "at least one rating"
+// requirement) because the Advanced Forms flow (advanced_form_type set)
+// skips category ratings entirely in favor of a structured form — the
+// route itself enforces "ratings OR advanced_form_type, not neither",
+// since that cross-field rule reads more clearly as a plain `if` than as
+// a zod union/refine.
 export const feedbackSubmitSchema = z.object({
   code: z.string().min(1).max(20),
   role: z.enum(FEEDBACK_ROLE_KEYS),
   is_anonymous: z.boolean(),
   name: z.string().trim().max(150).optional(),
   phone: z.string().trim().max(50).optional(),
-  ratings: z.array(feedbackRatingSchema).min(1, 'At least one category rating is required').max(20, 'Too many ratings in one submission'),
+  ratings: z.array(feedbackRatingSchema).max(20, 'Too many ratings in one submission').optional(),
   quick_picks: z.array(z.string().max(100)).max(20).optional(),
   free_text: z.string().trim().max(2000).optional(),
   voice_key: z.string().max(255).optional(),
+  advanced_form_type: z.enum(ADVANCED_FORM_TYPE_KEYS).optional(),
+  advanced_form_data: z.record(z.string().max(50), z.string().trim().max(2000)).optional(),
 })
 
 export const feedbackVoiceUploadUrlSchema = z.object({
