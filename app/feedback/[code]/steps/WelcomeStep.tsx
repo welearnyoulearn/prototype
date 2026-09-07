@@ -9,7 +9,7 @@ import { ROLE_VISUAL } from '../roleVisuals'
 export default function WelcomeStep({ schoolName, onSelectRole }: { schoolName: string; onSelectRole: (role: FeedbackRole) => void }) {
   return (
     <div>
-      <span className="mb-3 inline-block rounded-full px-3 py-1 text-[11px] font-semibold tracking-wide" style={{ background: '#FBF7EF', color: TEAL }}>
+      <span className="mb-3 inline-block rounded-full px-3 py-1 text-[11px] font-semibold tracking-wide" style={{ background: `${TEAL}14`, color: TEAL }}>
         We&apos;d love to hear from you
       </span>
       <h1 className="text-2xl font-bold leading-snug mb-1" style={{ color: INK }}>{schoolName}</h1>
