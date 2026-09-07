@@ -1,5 +1,7 @@
 'use client'
 
+import MascotHeader from './MascotHeader'
+
 export default function IdentityStep({
   name, phone, isAnonymous, onNameChange, onPhoneChange, onAnonymousChange, onBack, onContinue,
 }: {
@@ -14,7 +16,7 @@ export default function IdentityStep({
 }) {
   return (
     <div>
-      <div className="text-center text-5xl mb-2">🔒</div>
+      <MascotHeader emoji="🔒" />
       <h1 className="text-center text-xl font-bold text-slate-900 mb-1">How should we follow up?</h1>
       <p className="text-center text-sm text-slate-500 mb-5">You can share contact details for follow-up, or stay anonymous.</p>
 

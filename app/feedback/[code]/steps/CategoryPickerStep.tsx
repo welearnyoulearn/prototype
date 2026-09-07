@@ -1,6 +1,8 @@
 'use client'
 
+import { FEEDBACK_ROLES } from '@/lib/feedback-defaults'
 import { FeedbackCategory } from '../types'
+import MascotHeader from './MascotHeader'
 
 const ROLE_INTRO: Record<string, [string, string]> = {
   parent:  ['Parent Feedback', 'How has your experience been?'],
@@ -21,9 +23,11 @@ export default function CategoryPickerStep({
   onContinue: () => void
 }) {
   const [title, subtitle] = ROLE_INTRO[role] ?? ['Feedback', 'Pick what you’d like to rate.']
+  const roleIcon = FEEDBACK_ROLES.find(r => r.key === role)?.icon ?? '💬'
 
   return (
     <div>
+      <MascotHeader emoji={roleIcon} />
       <h1 className="text-center text-xl font-bold text-slate-900 mb-1">{title}</h1>
       <p className="text-center text-sm text-slate-500 mb-4">{subtitle}</p>
 

@@ -2,10 +2,11 @@
 
 import VoiceRecorder from './VoiceRecorder'
 import { QUICK_PICKS } from '../types'
+import MascotHeader, { moodForRating } from './MascotHeader'
 
 export default function FollowupStep({
   code, quickPicks, onToggleQuickPick, freeText, onFreeTextChange,
-  onVoiceKeyChange, isAnonymous, onAnonymousChange, onBack, onSubmit, submitting, error,
+  onVoiceKeyChange, isAnonymous, onAnonymousChange, onBack, onSubmit, submitting, error, overallRating,
 }: {
   code: string
   quickPicks: string[]
@@ -19,9 +20,13 @@ export default function FollowupStep({
   onSubmit: () => void
   submitting: boolean
   error: string | null
+  overallRating: number
 }) {
+  const mascot = moodForRating(Math.round(overallRating))
+
   return (
     <div>
+      <MascotHeader emoji={mascot.emoji} mood={mascot.mood} />
       <h1 className="text-xl font-bold text-slate-900 mb-1">Anything else you’d like to share?</h1>
       <p className="text-sm text-slate-500 mb-4">Pick everything that applies — all optional</p>
 

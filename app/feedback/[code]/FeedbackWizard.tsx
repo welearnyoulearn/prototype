@@ -57,6 +57,8 @@ export default function FeedbackWizard({ code }: { code: string }) {
 
   const roleCategories = s.role ? categories.filter(c => c.role === s.role) : []
   const selectedCategories = roleCategories.filter(c => s.selectedKeys.includes(c.key))
+  const givenRatings = selectedCategories.map(c => s.ratings[c.key]).filter((r): r is number => r !== undefined)
+  const overallRating = givenRatings.length > 0 ? givenRatings.reduce((sum, r) => sum + r, 0) / givenRatings.length : 3
 
   async function handleSubmit() {
     setS(prev => ({ ...prev, submitting: true, submitError: null }))
@@ -189,6 +191,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
                 onSubmit={handleSubmit}
                 submitting={s.submitting}
                 error={s.submitError}
+                overallRating={overallRating}
               />
             )}
 

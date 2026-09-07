@@ -2,11 +2,12 @@
 
 import { FEEDBACK_ROLES } from '@/lib/feedback-defaults'
 import { FeedbackRole } from '../types'
+import MascotHeader from './MascotHeader'
 
 export default function WelcomeStep({ schoolName, onSelectRole }: { schoolName: string; onSelectRole: (role: FeedbackRole) => void }) {
   return (
     <div>
-      <div className="text-center text-5xl mb-2 anim-feedback-mascot-bob">👋</div>
+      <MascotHeader emoji="👋" />
       <h1 className="text-center text-xl font-bold text-slate-900 mb-1">Welcome to {schoolName} 💬</h1>
       <p className="text-center text-sm text-slate-500 mb-5">Your voice helps us create a better school experience!</p>
       <p className="text-center text-sm font-bold text-slate-900 mb-3">How would you like to share feedback?</p>

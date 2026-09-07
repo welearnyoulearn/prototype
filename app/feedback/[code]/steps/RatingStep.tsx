@@ -1,6 +1,7 @@
 'use client'
 
 import { FeedbackCategory } from '../types'
+import MascotHeader, { moodForRating } from './MascotHeader'
 
 const FACES: { value: number; emoji: string; label: string }[] = [
   { value: 1, emoji: '😭', label: 'Terrible' },
@@ -29,8 +30,11 @@ export default function RatingStep({
   index: number
   total: number
 }) {
+  const mascot = value ? moodForRating(value) : { emoji: '😊', mood: 'bob' as const }
+
   return (
     <div>
+      <MascotHeader emoji={mascot.emoji} mood={mascot.mood} />
       <div className="mb-3 inline-flex items-center gap-1.5 rounded-lg bg-violet-50 px-3 py-1.5 text-sm font-bold text-slate-900">
         <span>{category.icon}</span>
         <span>{category.label}</span>

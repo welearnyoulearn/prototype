@@ -223,6 +223,19 @@ input, select, textarea {
   80%       { transform: rotate(6deg); }
 }
 
+/* Feedback wizard: mascot excited jump (5-star / amazing mood) */
+@keyframes feedbackMascotJump {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50%       { transform: translateY(-13px) scale(1.08); }
+}
+
+/* Feedback wizard: mascot sad sway (1-2 star mood) */
+@keyframes feedbackMascotSway {
+  0%, 50%, 100% { transform: rotate(0); }
+  25%            { transform: rotate(-6deg); }
+  75%            { transform: rotate(6deg); }
+}
+
 /* ─────────────────────────────────────────────────
    ANIMATION UTILITY CLASSES
 ───────────────────────────────────────────────── */
@@ -265,6 +278,12 @@ input, select, textarea {
 }
 .anim-feedback-emoji-shake {
   animation: feedbackEmojiShake 0.55s ease-in-out infinite;
+}
+.anim-feedback-mascot-jump {
+  animation: feedbackMascotJump 0.5s ease-in-out infinite;
+}
+.anim-feedback-mascot-sway {
+  animation: feedbackMascotSway 2s ease-in-out infinite;
 }
 
 /* Emoji wobble on hover */
