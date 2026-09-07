@@ -1,6 +1,9 @@
 'use client'
 
-const CONFETTI_COLORS = ['#7C6EF5', '#B47CF7', '#37c98a', '#ffb703', '#f76a6a']
+import { INK, TEAL, GOLD, CORAL, GREEN } from '@/app/components/ulearn/theme'
+import { PrimaryButton } from './WizardButtons'
+
+const CONFETTI_COLORS = [TEAL, CORAL, GREEN, GOLD]
 
 export default function ThankYouStep({ onRestart }: { onRestart: () => void }) {
   const pieces = Array.from({ length: 24 }, (_, i) => ({
@@ -21,20 +24,15 @@ export default function ThankYouStep({ onRestart }: { onRestart: () => void }) {
         ))}
       </div>
       <div className="text-center text-6xl mb-1">🎉</div>
-      <h1 className="text-center text-xl font-bold text-slate-900 mb-1" data-testid="feedback-thankyou-heading">Thank you!</h1>
-      <p className="text-center text-sm text-slate-500 mb-1">Your feedback is helping our school grow 🌱</p>
+      <h1 className="text-center text-xl font-bold mb-1" style={{ color: INK }} data-testid="feedback-thankyou-heading">Thank you!</h1>
+      <p className="text-center text-sm mb-1" style={{ color: '#6B7280' }}>Your feedback is helping our school grow 🌱</p>
       <div className="mt-3 text-center text-2xl tracking-[6px]">🌱 → 🌿 → 🌳 → ⭐</div>
       <div className="mt-6">
-        <button
-          type="button"
-          data-testid="feedback-give-more-btn"
-          onClick={onRestart}
-          className="w-full rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-400 py-3 text-sm font-bold text-white"
-        >
+        <PrimaryButton data-testid="feedback-give-more-btn" onClick={onRestart} className="w-full">
           Give more feedback
-        </button>
+        </PrimaryButton>
       </div>
-      <p className="mt-4 text-center text-xs text-slate-300">🏅 Feedback Champion badge earned</p>
+      <p className="mt-4 text-center text-xs" style={{ color: '#C7CDD6' }}>🏅 Feedback Champion badge earned</p>
     </div>
   )
 }

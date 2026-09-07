@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { Mic, Square } from 'lucide-react'
+import { INK, TEAL, BORDER, SURFACE } from '@/app/components/ulearn/theme'
 
 const MAX_RECORD_SECONDS = 60
 
@@ -96,27 +98,29 @@ export default function VoiceRecorder({
           type="button"
           data-testid="feedback-voice-record-btn"
           onClick={state === 'recording' ? stopRecording : startRecording}
-          className={`flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed py-3.5 text-sm font-bold transition ${
-            state === 'recording' ? 'border-rose-400 text-rose-500' : 'border-violet-200 bg-violet-50 text-slate-900 hover:bg-violet-100'
-          }`}
+          className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed py-3.5 text-sm font-bold transition"
+          style={state === 'recording'
+            ? { borderColor: '#D2603A', color: '#D2603A' }
+            : { borderColor: BORDER, background: SURFACE, color: INK }}
         >
-          🎙️ {state === 'recording' ? 'Recording… tap to stop' : 'Tap & speak instead'}
+          {state === 'recording' ? <Square size={16} /> : <Mic size={16} style={{ color: TEAL }} />}
+          {state === 'recording' ? 'Recording… tap to stop' : 'Tap & speak instead'}
         </button>
       )}
 
       {state === 'uploading' && (
-        <div className="flex items-center justify-center gap-2 rounded-2xl bg-violet-50 py-3.5 text-sm font-bold text-slate-500">
+        <div className="flex items-center justify-center gap-2 rounded-2xl py-3.5 text-sm font-bold" style={{ background: SURFACE, color: '#6B7280' }}>
           Uploading voice note…
         </div>
       )}
 
       {state === 'ready' && (
-        <div className="rounded-2xl border border-violet-100 bg-violet-50/60 p-2.5">
-          <div className="mb-2 flex items-center justify-between text-xs font-bold text-emerald-600">
+        <div className="rounded-2xl border p-2.5" style={{ borderColor: BORDER, background: SURFACE }}>
+          <div className="mb-2 flex items-center justify-between text-xs font-bold" style={{ color: '#3E8E5A' }}>
             <span>✓ Voice note attached</span>
             <div className="flex gap-2">
-              <button type="button" data-testid="feedback-voice-rerecord-btn" onClick={() => { reset(); void startRecording() }} className="text-slate-500 underline">Record again</button>
-              <button type="button" data-testid="feedback-voice-delete-btn" onClick={reset} className="text-rose-500 underline">Delete</button>
+              <button type="button" data-testid="feedback-voice-rerecord-btn" onClick={() => { reset(); void startRecording() }} className="underline" style={{ color: '#6B7280' }}>Record again</button>
+              <button type="button" data-testid="feedback-voice-delete-btn" onClick={reset} className="underline" style={{ color: '#D2603A' }}>Delete</button>
             </div>
           </div>
           {audioUrl && <audio data-testid="feedback-voice-audio" controls src={audioUrl} className="h-9 w-full" />}

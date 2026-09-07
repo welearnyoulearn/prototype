@@ -10,6 +10,7 @@ import AdvancedFormStep from './steps/AdvancedFormStep'
 import FollowupStep from './steps/FollowupStep'
 import ThankYouStep from './steps/ThankYouStep'
 import { AdvancedFormType, FeedbackCategory, FeedbackRole, WizardStep } from './types'
+import { TEAL, INK, CREAM, BORDER } from '@/app/components/ulearn/theme'
 
 const PROGRESS_STEPS: WizardStep[] = ['welcome', 'identity', 'categories', 'rating', 'followup']
 // advancedType/advancedForm occupy the same visual progress slots as
@@ -116,17 +117,21 @@ export default function FeedbackWizard({ code }: { code: string }) {
   const progressIndex = PROGRESS_INDEX[s.step] ?? -1
 
   return (
-    <div className="flex min-h-screen items-start justify-center bg-gradient-to-br from-violet-500 to-fuchsia-400 p-6">
-      <div className="mt-8 w-full max-w-[390px] rounded-[32px] bg-white p-6 pb-5 shadow-2xl">
+    <div className="relative flex min-h-screen items-start justify-center overflow-hidden p-6" style={{ background: CREAM }}>
+      {/* Soft decorative shapes instead of a full-bleed gradient — quieter, less "generated hero" */}
+      <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full opacity-[0.07]" style={{ background: TEAL }} />
+      <div className="pointer-events-none absolute -bottom-28 -left-20 h-64 w-64 rounded-full opacity-[0.06]" style={{ background: '#D2603A' }} />
+
+      <div className="relative mt-8 w-full max-w-[390px] rounded-3xl border bg-white p-6 pb-5 shadow-sm" style={{ borderColor: BORDER }}>
         {loading && (
-          <div className="py-24 text-center text-sm text-slate-400">Loading…</div>
+          <div className="py-24 text-center text-sm" style={{ color: '#9CA3AF' }}>Loading…</div>
         )}
 
         {!loading && notFound && (
           <div className="py-16 text-center" data-testid="feedback-not-found">
             <div className="mb-3 text-5xl">🙈</div>
-            <h1 className="mb-1 text-lg font-bold text-slate-900">Feedback form not available</h1>
-            <p className="text-sm text-slate-500">This link may be inactive or incorrect. Please check with the school office.</p>
+            <h1 className="mb-1 text-lg font-bold" style={{ color: INK }}>Feedback form not available</h1>
+            <p className="text-sm" style={{ color: '#9CA3AF' }}>This link may be inactive or incorrect. Please check with the school office.</p>
           </div>
         )}
 
@@ -135,10 +140,10 @@ export default function FeedbackWizard({ code }: { code: string }) {
             {progressIndex >= 0 && (
               <div className="mb-5 flex gap-1.5">
                 {PROGRESS_STEPS.map((step, i) => (
-                  <span key={step} className="h-[5px] flex-1 overflow-hidden rounded bg-violet-100">
+                  <span key={step} className="h-[5px] flex-1 overflow-hidden rounded" style={{ background: BORDER }}>
                     <span
-                      className="block h-full rounded bg-gradient-to-r from-violet-500 to-fuchsia-400 transition-all duration-300"
-                      style={{ width: i <= progressIndex ? '100%' : '0%' }}
+                      className="block h-full rounded transition-all duration-300"
+                      style={{ width: i <= progressIndex ? '100%' : '0%', background: TEAL }}
                     />
                   </span>
                 ))}

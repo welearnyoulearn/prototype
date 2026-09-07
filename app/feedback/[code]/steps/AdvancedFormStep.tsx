@@ -1,8 +1,10 @@
 'use client'
 
+import { INK, BORDER } from '@/app/components/ulearn/theme'
 import { ADVANCED_FORM_TYPES } from '@/lib/feedback-defaults'
 import { ADVANCED_FORM_FIELDS, AdvancedFormType } from '../types'
-import MascotHeader from './MascotHeader'
+import { ADVANCED_TYPE_VISUAL } from '../advancedFormVisuals'
+import { PrimaryButton, SecondaryButton } from './WizardButtons'
 
 export default function AdvancedFormStep({
   type, values, onChange, onBack, onSubmit, submitting, error,
@@ -16,19 +18,24 @@ export default function AdvancedFormStep({
   error: string | null
 }) {
   const meta = ADVANCED_FORM_TYPES.find(t => t.key === type)!
+  const { Icon, color } = ADVANCED_TYPE_VISUAL[type]
   const fields = ADVANCED_FORM_FIELDS[type]
   const missingRequired = fields.some(f => f.required && !values[f.key]?.trim())
 
   return (
     <div>
-      <MascotHeader emoji={meta.icon} />
-      <h1 className="text-center text-xl font-bold text-slate-900 mb-1">{meta.label} Form</h1>
-      <p className="text-center text-sm text-slate-500 mb-4">{meta.description}</p>
+      <div className="mb-3 flex justify-center">
+        <span className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: `${color}1A` }}>
+          <Icon size={26} style={{ color }} strokeWidth={2} />
+        </span>
+      </div>
+      <h1 className="text-center text-xl font-bold mb-1" style={{ color: INK }}>{meta.label} Form</h1>
+      <p className="text-center text-sm mb-4" style={{ color: '#6B7280' }}>{meta.description}</p>
 
       <div className="space-y-3">
         {fields.map(field => (
           <div key={field.key}>
-            <label className="mb-1 block text-[11px] font-extrabold text-slate-500" htmlFor={`adv-${field.key}`}>
+            <label className="mb-1 block text-[11px] font-extrabold" style={{ color: '#6B7280' }} htmlFor={`adv-${field.key}`}>
               {field.label}{field.required && ' *'}
             </label>
             {field.type === 'textarea' ? (
@@ -39,7 +46,8 @@ export default function AdvancedFormStep({
                 value={values[field.key] ?? ''}
                 onChange={e => onChange(field.key, e.target.value)}
                 placeholder={field.placeholder}
-                className="w-full resize-none rounded-2xl border-2 border-violet-100 p-3 text-sm text-slate-900 focus:border-violet-400 focus:outline-none"
+                className="w-full resize-none rounded-2xl border p-3 text-sm focus:outline-none"
+                style={{ borderColor: BORDER, color: INK }}
               />
             ) : field.type === 'select' ? (
               <select
@@ -47,7 +55,8 @@ export default function AdvancedFormStep({
                 data-testid={`feedback-advanced-field-${field.key}`}
                 value={values[field.key] ?? ''}
                 onChange={e => onChange(field.key, e.target.value)}
-                className="w-full rounded-xl border-2 border-violet-100 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-400 focus:outline-none"
+                className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm focus:outline-none"
+                style={{ borderColor: BORDER, color: INK }}
               >
                 <option value="">Select…</option>
                 {field.options?.map(o => <option key={o} value={o}>{o}</option>)}
@@ -60,27 +69,21 @@ export default function AdvancedFormStep({
                 value={values[field.key] ?? ''}
                 onChange={e => onChange(field.key, e.target.value)}
                 placeholder={field.placeholder}
-                className="w-full rounded-xl border-2 border-violet-100 bg-white px-3 py-2.5 text-sm text-slate-900 focus:border-violet-400 focus:outline-none"
+                className="w-full rounded-xl border bg-white px-3 py-2.5 text-sm focus:outline-none"
+                style={{ borderColor: BORDER, color: INK }}
               />
             )}
           </div>
         ))}
       </div>
 
-      {error && <p className="mt-3 text-center text-xs font-semibold text-rose-500">{error}</p>}
+      {error && <p className="mt-3 text-center text-xs font-semibold" style={{ color: '#D2603A' }}>{error}</p>}
 
       <div className="mt-5 flex gap-2.5">
-        <button type="button" data-testid="feedback-advanced-form-back-btn" onClick={onBack} disabled={submitting}
-          className="w-[84px] shrink-0 rounded-xl bg-violet-50 py-3 text-sm font-bold text-slate-900 disabled:opacity-40">Back</button>
-        <button
-          type="button"
-          data-testid="feedback-advanced-form-submit-btn"
-          onClick={onSubmit}
-          disabled={submitting || missingRequired}
-          className="flex-1 rounded-xl bg-gradient-to-r from-violet-500 to-fuchsia-400 py-3 text-sm font-bold text-white disabled:opacity-40"
-        >
+        <SecondaryButton data-testid="feedback-advanced-form-back-btn" onClick={onBack} disabled={submitting} className="w-[84px] shrink-0">Back</SecondaryButton>
+        <PrimaryButton data-testid="feedback-advanced-form-submit-btn" onClick={onSubmit} disabled={submitting || missingRequired} className="flex-1">
           {submitting ? 'Submitting…' : 'Submit'}
-        </button>
+        </PrimaryButton>
       </div>
     </div>
   )
