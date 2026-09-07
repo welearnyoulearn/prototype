@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { BounceLoader, ClipLoader, GridLoader, PulseLoader, SquareLoader } from 'react-spinners'
 import { PORTAL_THEME, type Portal } from './types'
 
@@ -46,6 +47,13 @@ export default function FullPageLoader({ portal, message, sub = 'Please wait…'
   const resolvedMessage = message ?? DEFAULT_MESSAGE[portal]
   const { Component: Spinner, size } = PORTAL_SPINNER[portal]
 
+  // react-spinners randomizes each dot's animation-delay/duration internally
+  // (Math.random()), which can never match between server and client render —
+  // mount the real spinner only once hydrated, and show a static placeholder
+  // in its place for the SSR/first-paint frame.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => { setMounted(true) }, [])
+
   return (
     <div
       role="status"
@@ -55,7 +63,9 @@ export default function FullPageLoader({ portal, message, sub = 'Please wait…'
       style={{ ['--accent' as string]: `var(${theme.accentVar})` }}
     >
       <div className="w-20 h-20 flex items-center justify-center">
-        <Spinner color={`var(${theme.accentVar})`} size={size} loading />
+        {mounted
+          ? <Spinner color={`var(${theme.accentVar})`} size={size} loading />
+          : <div className="w-4 h-4 rounded-full" style={{ backgroundColor: `var(${theme.accentVar})`, opacity: 0.4 }} />}
       </div>
 
       <div className="text-center space-y-1.5">
