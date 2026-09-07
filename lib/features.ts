@@ -17,7 +17,6 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'student-portal',     label: 'Student Portal Access',           category: 'Core', portals: ['school-admin'] },
   { key: 'parent-portal',      label: 'Parent Portal Access',            category: 'Core', portals: ['school-admin'] },
   { key: 'library',            label: 'WLYL Digital Library',            category: 'Core', portals: ['school-admin', 'student', 'parent'] },
-  { key: 'results',            label: 'Exam Results',                    category: 'Core', portals: ['school-admin', 'student', 'parent'] },
   { key: 'homework',           label: 'Homework / Tasks',                category: 'Core', portals: ['school-admin', 'student'] },
   { key: 'doubts',             label: 'Ask a Doubt',                     category: 'Core', portals: ['school-admin', 'student'] },
 
@@ -31,7 +30,14 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   // Timetable tab and generation/editing UI based on it — see ClassManagement.tsx.
   { key: 'timetable',          label: 'Timetable Management',            category: 'Scheduling', portals: ['school-admin', 'student', 'parent'] },
   { key: 'curriculum',         label: 'Syllabus Customizer',             category: 'Scheduling', portals: ['school-admin', 'student', 'parent'] },
-  { key: 'exam-schedule',      label: 'Exam Schedule',                   category: 'Scheduling', portals: ['school-admin', 'parent'] },
+  // Combined switch for the entire exam/marks feature — school admin's
+  // create-and-release screen, teacher's marks entry/review, and the
+  // student/parent results + acknowledgement views. One flag rather than
+  // the old exam-schedule/results split so a school is never left in the
+  // inconsistent state of admin being able to schedule exams while
+  // students/parents can't see results (or vice versa) — see
+  // lib/db.ts's migration for how existing schools were carried over.
+  { key: 'exam-marks',         label: 'Exam Schedule & Marks',           category: 'Scheduling', portals: ['school-admin', 'student', 'parent'] },
 
   // ── Analytics & Intelligence ─────────────────────────────────────────────────
   { key: 'briefing',           label: 'Daily Briefing',                  category: 'Analytics', portals: ['school-admin'] },
@@ -71,9 +77,12 @@ export const OVERRIDABLE_FEATURE_KEYS = ['student-portal', 'parent-portal', 'api
 // endpoint both resolve through it, so a rename never needs to happen twice.
 export const PORTAL_NAV_KEY_ALIASES: Record<string, string> = {
   'syllabus-tracking': 'curriculum',  // school-admin's own alias, pre-existing
+  'exam-schedule': 'exam-marks',      // school-admin's nav key for the combined exam/marks feature
   'syllabus': 'curriculum',           // student/parent portals' nav key for the same capability
   'today': 'timetable',               // parent portal's "Today's Schedule" nav key
-  'my-marks': 'results',              // student portal's results nav key
+  'my-marks': 'exam-marks',           // student portal's results nav key
+  'results': 'exam-marks',            // parent portal's results nav key
+  'exams': 'exam-marks',              // parent portal's exam-calendar nav key
   'tasks': 'homework',                // student portal's homework/tasks nav key
   'fees': 'fee-management',           // parent portal's fees nav key for the same capability
 }

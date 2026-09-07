@@ -2156,10 +2156,12 @@ export function SyllabusTracking({
 export default function ClassView({ classId, grade, section, schoolId, teacherName, teacherId, isClassTeacher, teacher, onBack, initialTab, openExamId, academicYear, readOnly }: Props) {
   const hasTimetableFeature = useFeature('timetable')
   const hasAttendanceFeature = useFeature('attendance')
+  const hasExamMarksFeature = useFeature('exam-marks')
   const allTabs = isClassTeacher ? CLASS_TEACHER_TABS : SUBJECT_TEACHER_TABS
   const tabs = allTabs.filter(t =>
     (t !== 'Timetable' || hasTimetableFeature) &&
-    (t !== 'Attendance' || hasAttendanceFeature)
+    (t !== 'Attendance' || hasAttendanceFeature) &&
+    (t !== 'Marks & Results' || hasExamMarksFeature)
   )
   const [classDetail, setClassDetail] = useState<ClassDetail | null>(null)
   const [students, setStudents] = useState<Student[]>([])

@@ -607,7 +607,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     { key: 'danger',         label: 'Danger Zone',      icon: '⚠️' },
   ]
 
-  const hasExamSchedule = useFeature('exam-schedule')
+  const hasExamSchedule = useFeature('exam-marks')
 
   if (loading) return <div className="text-center py-12 text-gray-400 text-sm">Loading settings…</div>
 

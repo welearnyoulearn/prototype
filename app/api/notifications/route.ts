@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getSession, getTeacherSession, getStudentSession } from '@/lib/auth'
+import { getSession, getTeacherSession, getStudentSession, getParentSession } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
   try {
@@ -8,10 +8,11 @@ export async function GET(req: NextRequest) {
     // Previously the session was only checked for existence and the caller-supplied
     // teacher_id/student_id/recipient_school_id was trusted, so any logged-in user
     // could read anybody else's notifications just by changing the id in the URL.
-    // Precedence matches getAnySession(): teacher, then student, then school staff.
+    // Precedence matches getAnySession(): teacher, then student, then parent, then school staff.
     const teacher = await getTeacherSession()
     const student = teacher ? null : await getStudentSession()
-    const admin   = teacher || student ? null : await getSession()
+    const parent  = teacher || student ? null : await getParentSession()
+    const admin   = teacher || student || parent ? null : await getSession()
 
     let recipientColumn: string
     let recipientId: number
@@ -22,11 +23,13 @@ export async function GET(req: NextRequest) {
     } else if (student) {
       recipientColumn = 'n.recipient_student_id'
       recipientId = student.studentId
+    } else if (parent) {
+      recipientColumn = 'n.recipient_parent_id'
+      recipientId = parent.parentId
     } else if (admin?.schoolId) {
       recipientColumn = 'n.recipient_school_id'
       recipientId = admin.schoolId
     } else {
-      // Includes parent sessions — no notification stream exists for them today.
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
@@ -56,18 +59,18 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { school_id, recipient_teacher_id, recipient_school_id, sender_teacher_id, type, title, message, data } = await req.json()
+    const { school_id, recipient_teacher_id, recipient_student_id, recipient_parent_id, recipient_school_id, sender_teacher_id, type, title, message, data } = await req.json()
     if (!school_id || !type) {
       return NextResponse.json({ error: 'school_id and type required' }, { status: 400 })
     }
-    if (!recipient_teacher_id && !recipient_school_id) {
-      return NextResponse.json({ error: 'recipient_teacher_id or recipient_school_id required' }, { status: 400 })
+    if (!recipient_teacher_id && !recipient_student_id && !recipient_parent_id && !recipient_school_id) {
+      return NextResponse.json({ error: 'a recipient_* id is required' }, { status: 400 })
     }
     const result = await pool.query(
-      `INSERT INTO notifications (school_id, recipient_teacher_id, recipient_school_id, sender_teacher_id, type, title, message, data)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [school_id, recipient_teacher_id || null, recipient_school_id || null,
-       sender_teacher_id || null, type, title || null, message || null,
+      `INSERT INTO notifications (school_id, recipient_teacher_id, recipient_student_id, recipient_parent_id, recipient_school_id, sender_teacher_id, type, title, message, data)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [school_id, recipient_teacher_id || null, recipient_student_id || null, recipient_parent_id || null,
+       recipient_school_id || null, sender_teacher_id || null, type, title || null, message || null,
        data ? JSON.stringify(data) : null]
     )
     return NextResponse.json(result.rows[0], { status: 201 })
@@ -79,13 +82,15 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const { teacher_id, school_id, student_id, notification_id } = await req.json()
+    const { teacher_id, school_id, student_id, parent_id, notification_id } = await req.json()
     if (notification_id) {
       await pool.query('UPDATE notifications SET is_read = TRUE WHERE id = $1', [notification_id])
     } else if (teacher_id) {
       await pool.query('UPDATE notifications SET is_read = TRUE WHERE recipient_teacher_id = $1', [teacher_id])
     } else if (student_id) {
       await pool.query('UPDATE notifications SET is_read = TRUE WHERE recipient_student_id = $1', [student_id])
+    } else if (parent_id) {
+      await pool.query('UPDATE notifications SET is_read = TRUE WHERE recipient_parent_id = $1', [parent_id])
     } else if (school_id) {
       await pool.query('UPDATE notifications SET is_read = TRUE WHERE recipient_school_id = $1', [school_id])
     }

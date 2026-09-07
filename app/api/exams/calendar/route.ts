@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool, { ensureDB } from '@/lib/db'
+import pool from '@/lib/db'
+import { requireExamsAccess } from '@/lib/examsAuth'
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,9 +12,14 @@ export async function GET(req: NextRequest) {
     const student_id = searchParams.get('student_id')
     const from = searchParams.get('from')
     const to = searchParams.get('to')
-    const include_draft = searchParams.get('include_draft') === 'true'
+    // 'draft' no longer exists as a status (see the v2 lifecycle in
+    // lib/examsAuth.ts's header comment) — kept as a param name for backward
+    // compatibility with any existing caller, but now means "include a
+    // not-yet-open ('scheduled') exam", which is the closest v2 equivalent.
+    const includeUnopened = searchParams.get('include_draft') === 'true'
 
-    if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    const actor = await requireExamsAccess(school_id)
+    if (!actor) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const currentYear = new Date().getFullYear()
     const dateFrom = from || `${currentYear}-01-01`
@@ -21,7 +27,7 @@ export async function GET(req: NextRequest) {
 
     try {
       let whereClause = ''
-      const vals: (string | number)[] = [parseInt(school_id), dateFrom, dateTo]
+      const vals: (string | number)[] = [actor.schoolId, dateFrom, dateTo]
 
       if (class_id) {
         vals.push(parseInt(class_id))
@@ -30,12 +36,12 @@ export async function GET(req: NextRequest) {
         vals.push(parseInt(teacher_id))
         whereClause = `e.school_id = $1 AND (
           EXISTS (SELECT 1 FROM exam_subjects es WHERE es.exam_id = e.id AND es.teacher_id = $${vals.length})
-          OR e.created_by = $${vals.length}
+          OR c.class_teacher_id = $${vals.length}
         )`
       } else if (student_id) {
         const { rows: [student] } = await pool.query(
           `SELECT s.grade, s.section FROM students s WHERE s.id = $1 AND s.school_id = $2`,
-          [parseInt(student_id), parseInt(school_id)]
+          [parseInt(student_id), actor.schoolId]
         )
         if (!student) return NextResponse.json({ error: 'Student not found' }, { status: 404 })
         vals.push(student.grade, student.section)
@@ -44,8 +50,8 @@ export async function GET(req: NextRequest) {
         whereClause = `e.school_id = $1`
       }
 
-      if (!include_draft) {
-        whereClause += ` AND e.status != 'draft'`
+      if (!includeUnopened) {
+        whereClause += ` AND e.status != 'scheduled'`
       }
 
       const { rows } = await pool.query(`
@@ -58,7 +64,6 @@ export async function GET(req: NextRequest) {
           e.class_id,
           c.grade,
           c.section,
-          e.created_by,
           COUNT(DISTINCT es.id)::int AS total_subjects,
           COUNT(DISTINCT CASE WHEN es.status = 'submitted' THEN es.id END)::int AS submitted_subjects,
           COALESCE(

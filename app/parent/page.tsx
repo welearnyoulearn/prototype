@@ -12,6 +12,7 @@ import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
+import NotificationBell from '../components/NotificationBell'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Child = { id: number; name: string; grade: string; section: string; roll_number: string; school_id: number }
@@ -27,7 +28,7 @@ type Summary = {
     id: number; exam_name: string; exam_type: string; exam_date: string
     subjects: string[]; total_subjects: number
   }>
-  published_results: Array<{
+  released_results: Array<{
     id: number; exam_name: string; exam_type: string; exam_date: string
     passing_pct: number; total_obtained: number | null; total_max: number | null
     parent_acknowledged: boolean
@@ -183,7 +184,6 @@ export default function ParentDashboard() {
 
 
   const [ackingId, setAckingId] = useState<number | null>(null)
-  const [ackName, setAckName]   = useState('')
   const [ackSaving, setAckSaving] = useState(false)
   const [ackError, setAckError]   = useState('')
 
@@ -346,18 +346,25 @@ export default function ParentDashboard() {
     router.push('/parent/login')
   }
 
+  // Acknowledgement is now identity-verified server-side against the
+  // logged-in parent's own account (student_parents) — no name is typed
+  // here anymore. This closed a real gap where a student could sign on a
+  // parent's behalf just by knowing their name.
   async function acknowledgeMarks(examId: number) {
-    if (!student || !ackName.trim()) { setAckError('Parent name required'); return }
+    if (!student) return
     setAckSaving(true); setAckError('')
     try {
-      await fetch(`/api/exams/${examId}/acknowledge`, {
+      const res = await fetch(`/api/exams/${examId}/acknowledge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ student_id: student.id, school_id: student.school_id, parent_name: ackName.trim(), parent_phone: student.parent_phone }),
+        body: JSON.stringify({ student_id: student.id, school_id: student.school_id }),
       })
-      setAckingId(null); setAckName('')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to save')
       if (student) loadSummary(student)
-    } catch { setAckError('Failed to save') }
+    } catch (e: unknown) {
+      setAckError(e instanceof Error ? e.message : 'Failed to save')
+    }
     setAckSaving(false)
   }
 
@@ -503,7 +510,7 @@ export default function ParentDashboard() {
   if (!student) return null
 
   // ── Portal ────────────────────────────────────────────────────────────────────
-  const latestResult = summary?.published_results[0]
+  const latestResult = summary?.released_results[0]
   const latestPct = latestResult?.total_obtained !== null && latestResult?.total_max
     ? Math.round((latestResult.total_obtained! / latestResult.total_max!) * 100) : null
 
@@ -544,6 +551,7 @@ export default function ParentDashboard() {
               {T.feeOverdue(feeSummary!.overdue_count)}
             </button>
           )}
+          {parentInfo?.id && <NotificationBell parentId={parentInfo.id} onNavigate={key => navigateTo(key)} />}
           <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
             {(['en', 'te'] as Lang[]).map(l => (
               <button key={l} onClick={() => changeLang(l)}
@@ -699,7 +707,7 @@ export default function ParentDashboard() {
             )}
 
             {/* Sign-off alerts */}
-            {isNavItemVisible('results') && summary?.published_results.filter(r => !r.parent_acknowledged).map(r => {
+            {isNavItemVisible('results') && summary?.released_results.filter(r => !r.parent_acknowledged).map(r => {
               const p = r.total_obtained !== null && r.total_max ? Math.round((r.total_obtained / r.total_max) * 100) : null
               return (
                 <div key={r.id} className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start justify-between gap-3">
@@ -1457,11 +1465,11 @@ export default function ParentDashboard() {
           {visited.has('results') && (
           <div hidden={activeNav !== 'results'} className="max-w-2xl space-y-4">
             <h2 className="text-base font-bold text-gray-800">{T.nav.results} & {T.parentSignoff}</h2>
-            {(!summary?.published_results || summary.published_results.length === 0) ? (
+            {(!summary?.released_results || summary.released_results.length === 0) ? (
               <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
                 <p className="text-gray-400 text-sm">{T.noResults}</p>
               </div>
-            ) : summary.published_results.map(r => {
+            ) : summary.released_results.map(r => {
               const p = r.total_obtained !== null && r.total_max ? Math.round((r.total_obtained / r.total_max) * 100) : null
               const pass = p !== null ? p >= r.passing_pct : null
               return (
@@ -1490,16 +1498,13 @@ export default function ParentDashboard() {
                       </div>
                     ) : ackingId === r.id ? (
                       <div className="space-y-2">
-                        <input type="text" placeholder={`${T.yourName} *`} value={ackName}
-                          onChange={e => setAckName(e.target.value)}
-                          className="w-full border border-blue-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
                         {ackError && <p className="text-xs text-red-600">{ackError}</p>}
                         <div className="flex gap-2">
                           <button onClick={() => acknowledgeMarks(r.id)} disabled={ackSaving}
                             className="flex-1 bg-blue-600 text-white text-sm rounded-lg py-2 font-semibold disabled:opacity-50">
                             {ackSaving ? T.saving : T.confirm}
                           </button>
-                          <button onClick={() => { setAckingId(null); setAckName(''); setAckError('') }}
+                          <button onClick={() => { setAckingId(null); setAckError('') }}
                             className="px-4 text-sm text-gray-500 border border-gray-200 rounded-lg">{T.cancel}</button>
                         </div>
                       </div>

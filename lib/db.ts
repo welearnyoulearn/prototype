@@ -70,7 +70,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 12
+const SCHEMA_VERSION = 14
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -619,24 +619,52 @@ export async function initDB() {
 
 
     // ── Exam Marks System ────────────────────────────────────────────────────
+    // Status lifecycle (v2, see EXAM-MARKS-FEATURE-README.md):
+    //   scheduled -> collecting -> teacher_reviewed -> released
+    // 'scheduled': exam created, marks entry not yet open (before exam_date).
+    // 'collecting': exam_date has passed (or admin force-opened it), subject
+    //   teachers can enter/submit marks.
+    // 'teacher_reviewed': every subject submitted and the class teacher has
+    //   reviewed and forwarded to school admin — marks are frozen from here on,
+    //   NOT yet visible to students/parents.
+    // 'released': school admin's final release — this is what actually makes
+    //   results visible to students and parents. Terminal; no un-release.
+    // created_by is nullable because exams are now admin-created; created_by
+    // is who technically owns the row for legacy/audit purposes only — the
+    // real "who can act on this" check is role-based (see lib/examsAuth.ts),
+    // not an identity match against this column.
     `CREATE TABLE IF NOT EXISTS exam_records (
       id SERIAL PRIMARY KEY,
       school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
       class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
-      created_by INTEGER NOT NULL REFERENCES teachers(id),
+      created_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      created_by_admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      exam_group_id UUID,
       exam_name VARCHAR(200) NOT NULL,
       exam_type VARCHAR(50) NOT NULL DEFAULT 'unit_test',
       exam_date DATE,
       passing_pct INTEGER NOT NULL DEFAULT 35,
-      status VARCHAR(20) NOT NULL DEFAULT 'draft',
+      status VARCHAR(20) NOT NULL DEFAULT 'scheduled',
+      entry_opened_at TIMESTAMPTZ,
+      teacher_reviewed_at TIMESTAMPTZ,
+      teacher_reviewed_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      released_at TIMESTAMPTZ,
+      released_by_admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
       published_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
+    // class_subject_id links a subject slot back to the real class_subjects
+    // catalog entry, closing the old "subject_name is a free string with no
+    // FK" gap — an exam can now only be assigned a subject a class actually
+    // teaches. subject_name stays as a denormalized display copy (so the row
+    // still reads correctly even if the subject is later renamed/removed from
+    // class_subjects) but is no longer the join key for new code.
     `CREATE TABLE IF NOT EXISTS exam_subjects (
       id SERIAL PRIMARY KEY,
       exam_id INTEGER NOT NULL REFERENCES exam_records(id) ON DELETE CASCADE,
       school_id INTEGER NOT NULL,
+      class_subject_id INTEGER REFERENCES class_subjects(id) ON DELETE SET NULL,
       subject_name VARCHAR(100) NOT NULL,
       teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
       teacher_name VARCHAR(100),
@@ -644,6 +672,8 @@ export async function initDB() {
       status VARCHAR(20) NOT NULL DEFAULT 'pending',
       submitted_at TIMESTAMPTZ,
       submitted_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      reopened_at TIMESTAMPTZ,
+      reopened_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
       UNIQUE(exam_id, subject_name)
     )`,
     `CREATE TABLE IF NOT EXISTS exam_marks (
@@ -658,18 +688,36 @@ export async function initDB() {
       entered_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(exam_id, student_id, subject_name)
     )`,
+    // parent_id links an acknowledgement to a real, authenticated parent
+    // account (student_parents) rather than a typed name — closes the gap
+    // where a student could sign off on behalf of a parent who never saw it.
+    // parent_name/parent_phone are kept as a display snapshot (a parent's
+    // name at ack time), not the identity check.
     `CREATE TABLE IF NOT EXISTS parent_mark_acks (
       id SERIAL PRIMARY KEY,
       exam_id INTEGER NOT NULL REFERENCES exam_records(id) ON DELETE CASCADE,
       student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      parent_id INTEGER REFERENCES parents(id) ON DELETE SET NULL,
       school_id INTEGER NOT NULL,
       parent_name VARCHAR(100),
       parent_phone VARCHAR(20),
       acknowledged_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(exam_id, student_id)
     )`,
+    // Nudge log for "remind unacknowledged parent" — lets the class teacher's
+    // UI show "nudged 2 days ago" instead of firing a fresh notification on
+    // every click with no memory of the last one.
+    `CREATE TABLE IF NOT EXISTS parent_mark_ack_nudges (
+      id SERIAL PRIMARY KEY,
+      exam_id INTEGER NOT NULL REFERENCES exam_records(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      nudged_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      nudged_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_exam_records_class ON exam_records(class_id, school_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_exam_records_group ON exam_records(exam_group_id)`,
     `CREATE INDEX IF NOT EXISTS idx_exam_marks_student ON exam_marks(student_id, exam_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_parent_mark_ack_nudges_exam_student ON parent_mark_ack_nudges(exam_id, student_id)`,
 
     // ── Timetable generation tracking ────────────────────────────────────────
     // Tracks when each class's timetable was generated (enables one-time lock in UI)
@@ -2641,6 +2689,116 @@ async function runIncrementalMigrations() {
     )
   `).catch(() => {})
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_syllabus_coverage_snapshots_lookup ON syllabus_coverage_snapshots(school_id, class_id, academic_year)`).catch(() => {})
+
+  // ── Exam Marks System v2 — admin-created exams, teacher review, real ──────
+  // parent identity, class_subjects FK. See EXAM-MARKS-FEATURE-README.md.
+  // created_by was NOT NULL REFERENCES teachers(id) — admin-created exams
+  // have no teacher creator, so this must become nullable before any admin
+  // exam can be inserted at all.
+  await pool.query(`ALTER TABLE exam_records ALTER COLUMN created_by DROP NOT NULL`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS created_by_admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS exam_group_id UUID`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS entry_opened_at TIMESTAMPTZ`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS teacher_reviewed_at TIMESTAMPTZ`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS teacher_reviewed_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS released_at TIMESTAMPTZ`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS released_by_admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL`).catch(() => {})
+  // Existing rows default to 'draft'/'collecting'/'published' under the old
+  // 3-state model — map them onto the new 4-state lifecycle once so old data
+  // reads correctly under the new status checks (draft has no v2 equivalent
+  // short of 'scheduled'; a draft exam had no subjects yet either way).
+  await pool.query(`UPDATE exam_records SET status = 'scheduled' WHERE status = 'draft'`).catch(() => {})
+  await pool.query(`UPDATE exam_records SET status = 'released', released_at = published_at WHERE status = 'published'`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_records_group ON exam_records(exam_group_id)`).catch(() => {})
+
+  await pool.query(`ALTER TABLE exam_subjects ADD COLUMN IF NOT EXISTS class_subject_id INTEGER REFERENCES class_subjects(id) ON DELETE SET NULL`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_subjects ADD COLUMN IF NOT EXISTS reopened_at TIMESTAMPTZ`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_subjects ADD COLUMN IF NOT EXISTS reopened_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL`).catch(() => {})
+  // Best-effort backfill of the new FK for existing rows — matched by
+  // (class_id via exam_records, subject_name). Left NULL where ambiguous or
+  // no longer present in class_subjects; exam_subjects.subject_name remains
+  // the display fallback either way, so this never breaks an existing row.
+  await pool.query(`
+    UPDATE exam_subjects es
+    SET class_subject_id = cs.id
+    FROM exam_records er, class_subjects cs
+    WHERE es.exam_id = er.id
+      AND cs.class_id = er.class_id
+      AND lower(cs.subject_name) = lower(es.subject_name)
+      AND es.class_subject_id IS NULL
+  `).catch(() => {})
+
+  await pool.query(`ALTER TABLE parent_mark_acks ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES parents(id) ON DELETE SET NULL`).catch(() => {})
+  // Best-effort backfill: link existing typed-name acks to a real parent
+  // account where the student has exactly one linked parent (the common
+  // case) — ambiguous multi-parent students are left NULL rather than guessed.
+  await pool.query(`
+    UPDATE parent_mark_acks pma
+    SET parent_id = sp.parent_id
+    FROM (
+      SELECT student_id, MIN(parent_id) AS parent_id, COUNT(*) AS cnt
+      FROM student_parents GROUP BY student_id
+    ) sp
+    WHERE pma.student_id = sp.student_id AND sp.cnt = 1 AND pma.parent_id IS NULL
+  `).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS parent_mark_ack_nudges (
+      id SERIAL PRIMARY KEY,
+      exam_id INTEGER NOT NULL REFERENCES exam_records(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      nudged_by INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      nudged_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_parent_mark_ack_nudges_exam_student ON parent_mark_ack_nudges(exam_id, student_id)`).catch(() => {})
+
+  // Parent notifications did not exist before this feature — notifications
+  // only ever had teacher/student/school recipient columns (confirmed absent
+  // by the exams/marks investigation; GET /api/notifications explicitly
+  // 401'd every parent session). Adding a real recipient column makes parent
+  // notifications (exam scheduled, marks released, ack nudges) a first-class
+  // case of the same table, not a special path.
+  await pool.query(`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS recipient_parent_id INTEGER REFERENCES parents(id) ON DELETE CASCADE`).catch(() => {})
+  await pool.query(`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_notifications_recipient_parent ON notifications(recipient_parent_id, is_read)`).catch(() => {})
+
+  // ── Combined 'exam-marks' feature flag — replaces exam-schedule + results ──
+  // The exam/marks feature used to be gated by two separate flags
+  // (exam-schedule for school-admin's screen + parent's exam calendar,
+  // results for student/parent's marks views) — a school could end up with
+  // admin able to schedule exams while students/parents couldn't see
+  // results, or the reverse. Consolidated into one 'exam-marks' flag
+  // covering all four portals. Seeded from exam-schedule's existing
+  // per-tier values (both flags had identical basic/standard/premium
+  // settings in practice) so no existing school's access changes; a
+  // brand-new database with neither old key configured falls through to
+  // the same basic=off/standard+premium=on default every other
+  // student/parent-portal feature uses.
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    SELECT 'exam-marks', tier, enabled FROM plan_features WHERE feature_key = 'exam-schedule'
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+  await pool.query(`
+    INSERT INTO plan_features (feature_key, tier, enabled)
+    VALUES ('exam-marks', 'basic', false), ('exam-marks', 'standard', true), ('exam-marks', 'premium', true)
+    ON CONFLICT (feature_key, tier) DO NOTHING
+  `).catch(() => {})
+  // Carry over any per-school override that existed on either old key —
+  // whichever value was set wins if both happened to be overridden
+  // differently (shouldn't occur in practice, but ON CONFLICT DO NOTHING
+  // keeps the first one written rather than erroring).
+  await pool.query(`
+    INSERT INTO school_feature_overrides (school_id, feature_key, enabled)
+    SELECT school_id, 'exam-marks', enabled FROM school_feature_overrides
+    WHERE feature_key IN ('exam-schedule', 'results')
+    ON CONFLICT (school_id, feature_key) DO NOTHING
+  `).catch(() => {})
+  // The old keys are removed from ALL_FEATURES (lib/features.ts) so they no
+  // longer appear in the platform-admin matrix or gate anything — their
+  // plan_features/school_feature_overrides rows are left in place rather
+  // than deleted (harmless dead data, and safer than a destructive DELETE
+  // in a migration that runs unattended on every school's database).
 
   // ── One-time backfill: class_subjects gaps for already-subscribed grades ──
   // Before this session, a subject subscribed via Syllabus Customizer was
