@@ -303,7 +303,7 @@ function DashboardView({ schoolId, refreshKey }: { schoolId: number; refreshKey:
               <h3 className="text-sm font-semibold text-gray-700">Recent Expenses</h3>
             </div>
             {metrics.recent.length === 0 ? (
-              <div className="text-center py-8 text-gray-400 text-sm">No expenses yet</div>
+              <div className="text-center py-8 text-gray-400 text-sm">No expenses logged for this period</div>
             ) : (
               <div className="divide-y divide-gray-50">
                 {metrics.recent.map(e => (
