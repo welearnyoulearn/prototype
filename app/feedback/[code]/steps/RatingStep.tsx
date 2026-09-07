@@ -35,12 +35,14 @@ export default function RatingStep({
   return (
     <div>
       <MascotHeader emoji={mascot.emoji} mood={mascot.mood} />
-      <div className="mb-3 inline-flex items-center gap-1.5 rounded-lg bg-violet-50 px-3 py-1.5 text-sm font-bold text-slate-900">
-        <span>{category.icon}</span>
-        <span>{category.label}</span>
+      <div className="mb-3 flex justify-center">
+        <div className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-400 px-4 py-2 text-base font-bold text-white shadow-sm">
+          <span className="text-lg">{category.icon}</span>
+          <span>{category.label}</span>
+        </div>
       </div>
-      <h1 className="text-xl font-bold text-slate-900 mb-1">How was this?</h1>
-      <p className="text-sm text-slate-500 mb-4">Tap the face that matches how you feel</p>
+      <h1 className="text-xl font-bold text-slate-900 mb-1 text-center">How was this?</h1>
+      <p className="text-sm text-slate-500 mb-4 text-center">Tap the face that matches how you feel</p>
 
       <div className="flex justify-between gap-1.5">
         {FACES.map(f => (
