@@ -46,9 +46,9 @@ export async function GET(req: NextRequest) {
         pool.query(
           `SELECT e.id, e.title, e.amount, e.expense_date, e.payee_name, ec.name AS category_name
            FROM expenses e JOIN expense_categories ec ON ec.id = e.category_id
-           WHERE e.school_id = $1 AND e.is_deleted = FALSE
+           WHERE e.school_id = $1 AND e.is_deleted = FALSE AND e.expense_date BETWEEN $2 AND $3
            ORDER BY e.expense_date DESC, e.id DESC LIMIT 8`,
-          [school_id]
+          [school_id, from, to]
         ),
       ])
 
