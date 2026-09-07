@@ -13,6 +13,12 @@ export const FEEDBACK_ROLES: { key: FeedbackRole; label: string; icon: string }[
   { key: 'other',   label: 'Other',   icon: '👨‍💼' },
 ]
 
+// Derived tuple for zod's z.enum(), which needs a literal string tuple, not
+// a general string[] — this and FEEDBACK_ROLES are the single source of
+// truth for the role list, imported everywhere a role list, dropdown, or
+// enum previously would have re-typed its own copy.
+export const FEEDBACK_ROLE_KEYS = FEEDBACK_ROLES.map(r => r.key) as [FeedbackRole, ...FeedbackRole[]]
+
 export interface DefaultFeedbackCategory {
   role: FeedbackRole
   key: string

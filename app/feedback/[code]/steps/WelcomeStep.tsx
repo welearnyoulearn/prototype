@@ -1,14 +1,7 @@
 'use client'
 
+import { FEEDBACK_ROLES } from '@/lib/feedback-defaults'
 import { FeedbackRole } from '../types'
-
-const ROLE_CARDS: { role: FeedbackRole; icon: string; label: string }[] = [
-  { role: 'parent',  icon: '👨‍👩‍👧', label: 'Parent' },
-  { role: 'student', icon: '🧑‍🎓', label: 'Student' },
-  { role: 'teacher', icon: '👩‍🏫', label: 'Teacher' },
-  { role: 'visitor', icon: '👋',   label: 'Visitor' },
-  { role: 'other',   icon: '👨‍💼', label: 'Other' },
-]
 
 export default function WelcomeStep({ schoolName, onSelectRole }: { schoolName: string; onSelectRole: (role: FeedbackRole) => void }) {
   return (
@@ -18,12 +11,12 @@ export default function WelcomeStep({ schoolName, onSelectRole }: { schoolName: 
       <p className="text-center text-sm text-slate-500 mb-5">Your voice helps us create a better school experience!</p>
       <p className="text-center text-sm font-bold text-slate-900 mb-3">How would you like to share feedback?</p>
       <div className="grid grid-cols-2 gap-3">
-        {ROLE_CARDS.map(r => (
+        {FEEDBACK_ROLES.map(r => (
           <button
-            key={r.role}
+            key={r.key}
             type="button"
-            data-testid={`feedback-role-${r.role}-btn`}
-            onClick={() => onSelectRole(r.role)}
+            data-testid={`feedback-role-${r.key}-btn`}
+            onClick={() => onSelectRole(r.key)}
             className="flex flex-col items-center gap-1.5 rounded-2xl border-2 border-transparent bg-violet-50 p-4 text-center transition hover:-translate-y-1 hover:border-violet-400"
           >
             <span className="text-3xl">{r.icon}</span>

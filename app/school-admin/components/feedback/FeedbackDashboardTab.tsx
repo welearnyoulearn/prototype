@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useFeedbackFetch } from './useFeedbackFetch'
 
 interface Stats {
   pulse_score: number
@@ -20,35 +20,15 @@ const MOOD_LABEL: Record<number, string> = { 1: '😭 Terrible', 2: '😞 Bad', 
 const MOOD_COLOR: Record<number, string> = { 1: '#f76a6a', 2: '#f79a4a', 3: '#ffb703', 4: '#7C6EF5', 5: '#37c98a' }
 
 export default function FeedbackDashboardTab({ schoolId }: { schoolId: number }) {
-  const [stats, setStats] = useState<Stats | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-
-  async function load() {
-    setLoading(true)
-    try {
-      const res = await fetch(`/api/feedback/stats?school_id=${schoolId}`)
-      if (!res.ok) throw new Error()
-      setStats(await res.json())
-    } catch {
-      setError('Failed to load stats')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Standard fetch-on-mount/on-dependency-change — load() genuinely reaches
-  // out to an external system, it isn't derivable from props/state, so the
-  // react-compiler set-state-in-effect heuristic's "cascading render" concern
-  // doesn't apply here.
-  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
-  useEffect(() => { load() }, [schoolId])
+  const { data: stats, loading, error, reload } = useFeedbackFetch<Stats>(
+    `/api/feedback/stats?school_id=${schoolId}`, [schoolId], 'Failed to load stats'
+  )
 
   if (loading) return <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
   if (error || !stats) return (
     <div className="py-16 text-center text-sm text-red-500">
       {error || 'No data'}
-      <button type="button" onClick={() => load()} className="mt-2 block w-full font-semibold underline">Retry</button>
+      <button type="button" onClick={reload} className="mt-2 block w-full font-semibold underline">Retry</button>
     </div>
   )
 

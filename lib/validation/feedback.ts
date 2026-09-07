@@ -1,6 +1,5 @@
 import { z } from 'zod'
-
-export const FEEDBACK_ROLE_VALUES = ['parent', 'student', 'teacher', 'visitor', 'other'] as const
+import { FEEDBACK_ROLE_KEYS } from '../feedback-defaults'
 
 export const feedbackRatingSchema = z.object({
   category_key: z.string().min(1).max(50),
@@ -13,7 +12,7 @@ export const feedbackRatingSchema = z.object({
 // only checks shape, not the anonymity rule.
 export const feedbackSubmitSchema = z.object({
   code: z.string().min(1).max(20),
-  role: z.enum(FEEDBACK_ROLE_VALUES),
+  role: z.enum(FEEDBACK_ROLE_KEYS),
   is_anonymous: z.boolean(),
   name: z.string().trim().max(150).optional(),
   phone: z.string().trim().max(50).optional(),
@@ -29,7 +28,7 @@ export const feedbackVoiceUploadUrlSchema = z.object({
 
 export const feedbackCategoryCreateSchema = z.object({
   school_id: z.number().int().positive(),
-  role: z.enum(FEEDBACK_ROLE_VALUES),
+  role: z.enum(FEEDBACK_ROLE_KEYS),
   key: z.string().trim().min(1).max(50).regex(/^[a-z0-9-]+$/, 'key must be lowercase-kebab'),
   label: z.string().trim().min(1).max(100),
   icon: z.string().trim().max(10).optional(),

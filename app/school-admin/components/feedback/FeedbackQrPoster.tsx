@@ -1,34 +1,22 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
+import { useFeedbackFetch } from './useFeedbackFetch'
 
 interface Settings { public_code: string; is_active: boolean; feedback_url: string }
 
 export default function FeedbackQrPoster({ schoolId }: { schoolId: number }) {
-  const [settings, setSettings] = useState<Settings | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: settings, loading, error: loadError, reload } = useFeedbackFetch<Settings>(
+    `/api/feedback/settings?school_id=${schoolId}`, [schoolId], 'Failed to load settings'
+  )
   const [busy, setBusy] = useState(false)
   const [pdfLoading, setPdfLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [actionError, setActionError] = useState('')
   const posterRef = useRef<HTMLDivElement>(null)
-
-  function load() {
-    setLoading(true)
-    fetch(`/api/feedback/settings?school_id=${schoolId}`)
-      .then(res => { if (!res.ok) throw new Error(); return res.json() })
-      .then(data => { setSettings(data); setError('') })
-      .catch(() => setError('Failed to load settings'))
-      .finally(() => setLoading(false))
-  }
-
-  // Standard fetch-on-mount — see FeedbackDashboardTab.tsx for why
-  // set-state-in-effect is suppressed here.
-  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
-  useEffect(() => { load() }, [schoolId])
 
   async function toggleActive() {
     if (!settings) return
-    setBusy(true)
+    setBusy(true); setActionError('')
     try {
       const res = await fetch('/api/feedback/settings', {
         method: 'PATCH',
@@ -36,9 +24,9 @@ export default function FeedbackQrPoster({ schoolId }: { schoolId: number }) {
         body: JSON.stringify({ school_id: schoolId, is_active: !settings.is_active }),
       })
       if (!res.ok) throw new Error()
-      setSettings(await res.json())
+      reload()
     } catch {
-      setError('Failed to update — please try again')
+      setActionError('Failed to update — please try again')
     } finally {
       setBusy(false)
     }
@@ -46,7 +34,7 @@ export default function FeedbackQrPoster({ schoolId }: { schoolId: number }) {
 
   async function regenerateCode() {
     if (!confirm('This invalidates the current QR poster — anyone scanning the old poster will get a "not available" message. Continue?')) return
-    setBusy(true)
+    setBusy(true); setActionError('')
     try {
       const res = await fetch('/api/feedback/settings/regenerate-code', {
         method: 'POST',
@@ -54,9 +42,9 @@ export default function FeedbackQrPoster({ schoolId }: { schoolId: number }) {
         body: JSON.stringify({ school_id: schoolId }),
       })
       if (!res.ok) throw new Error()
-      setSettings(await res.json())
+      reload()
     } catch {
-      setError('Failed to regenerate code — please try again')
+      setActionError('Failed to regenerate code — please try again')
     } finally {
       setBusy(false)
     }
@@ -84,11 +72,11 @@ export default function FeedbackQrPoster({ schoolId }: { schoolId: number }) {
   }
 
   if (loading) return <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
-  if (!settings) return <div className="py-16 text-center text-sm text-red-500">{error || 'Failed to load settings'}</div>
+  if (!settings) return <div className="py-16 text-center text-sm text-red-500">{loadError || 'Failed to load settings'}</div>
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2" data-testid="feedback-settings-qr">
-      {error && <div className="col-span-full rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{error}</div>}
+      {actionError && <div className="col-span-full rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{actionError}</div>}
       <div className="rounded-xl border border-gray-200 bg-white p-5">
         <h3 className="mb-3 text-sm font-bold text-gray-900">Public Form</h3>
 
@@ -128,7 +116,16 @@ export default function FeedbackQrPoster({ schoolId }: { schoolId: number }) {
           <p className="mb-1 text-sm font-extrabold text-slate-900">We&apos;d love your feedback! 💬</p>
           <p className="mb-3 text-xs text-slate-500">Scan the code below</p>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img data-testid="feedback-qr-image" src={`/api/feedback/qr?school_id=${schoolId}`} alt="Feedback QR code" className="mx-auto h-[180px] w-[180px]" />
+          <img
+            data-testid="feedback-qr-image"
+            // public_code in the query string busts the browser cache when
+            // regenerate-code changes it — the route itself now sets a 5min
+            // Cache-Control, so without this the poster would keep showing
+            // the old QR image after a regeneration.
+            src={`/api/feedback/qr?school_id=${schoolId}&code=${settings.public_code}`}
+            alt="Feedback QR code"
+            className="mx-auto h-[180px] w-[180px]"
+          />
           <p className="mt-3 break-all text-[10px] text-slate-400">{settings.feedback_url}</p>
         </div>
         <button

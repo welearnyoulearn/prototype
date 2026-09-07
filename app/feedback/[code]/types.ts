@@ -1,4 +1,5 @@
-export type FeedbackRole = 'parent' | 'student' | 'teacher' | 'visitor' | 'other'
+export type { FeedbackRole } from '@/lib/feedback-defaults'
+import type { FeedbackRole } from '@/lib/feedback-defaults'
 
 export interface FeedbackCategory {
   id: number

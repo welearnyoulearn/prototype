@@ -1,7 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { FEEDBACK_ROLES } from '@/lib/feedback-defaults'
+import { useFeedbackFetch } from './useFeedbackFetch'
 
 interface Category {
   id: number
@@ -14,44 +16,25 @@ interface Category {
   sort_order: number
 }
 
-const ROLES = [
-  { value: 'parent', label: 'Parent' },
-  { value: 'student', label: 'Student' },
-  { value: 'teacher', label: 'Teacher' },
-  { value: 'visitor', label: 'Visitor' },
-  { value: 'other', label: 'Other' },
-]
-
 function slugify(label: string): string {
   return label.trim().toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-')
 }
 
 export default function FeedbackCategoryEditor({ schoolId }: { schoolId: number }) {
   const [role, setRole] = useState('parent')
-  const [categories, setCategories] = useState<Category[]>([])
-  const [loading, setLoading] = useState(true)
   const [newLabel, setNewLabel] = useState('')
   const [newDepartment, setNewDepartment] = useState('')
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
+  const [formError, setFormError] = useState('')
 
-  function load() {
-    setLoading(true)
-    fetch(`/api/feedback/categories?school_id=${schoolId}&role=${role}`)
-      .then(res => { if (!res.ok) throw new Error(); return res.json() })
-      .then(data => { setCategories(data); setError('') })
-      .catch(() => setError('Failed to load categories'))
-      .finally(() => setLoading(false))
-  }
-
-  // Standard fetch-on-mount/on-role-change — see FeedbackDashboardTab.tsx for why
-  // set-state-in-effect is suppressed here.
-  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
-  useEffect(() => { load() }, [schoolId, role])
+  const { data: categories, loading, error: loadError, reload } = useFeedbackFetch<Category[]>(
+    `/api/feedback/categories?school_id=${schoolId}&role=${role}`, [schoolId, role], 'Failed to load categories'
+  )
+  const rows = categories ?? []
 
   async function addCategory() {
     if (!newLabel.trim()) return
-    setSaving(true); setError('')
+    setSaving(true); setFormError('')
     try {
       const res = await fetch('/api/feedback/categories', {
         method: 'POST',
@@ -60,9 +43,9 @@ export default function FeedbackCategoryEditor({ schoolId }: { schoolId: number 
       })
       if (!res.ok) { const body = await res.json(); throw new Error(body.error || 'Failed to add category') }
       setNewLabel(''); setNewDepartment('')
-      load()
+      reload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to add category')
+      setFormError(err instanceof Error ? err.message : 'Failed to add category')
     } finally {
       setSaving(false)
     }
@@ -74,7 +57,7 @@ export default function FeedbackCategoryEditor({ schoolId }: { schoolId: number 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_active: !cat.is_active }),
     })
-    load()
+    reload()
   }
 
   return (
@@ -83,18 +66,18 @@ export default function FeedbackCategoryEditor({ schoolId }: { schoolId: number 
         <Select value={role} onValueChange={setRole}>
           <SelectTrigger className="w-44" data-testid="feedback-categories-role-select"><SelectValue /></SelectTrigger>
           <SelectContent>
-            {ROLES.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+            {FEEDBACK_ROLES.map(r => <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
 
       {loading ? (
         <div className="py-10 text-center text-sm text-gray-400">Loading…</div>
-      ) : error && categories.length === 0 ? (
-        <div className="py-10 text-center text-sm text-red-500">{error}</div>
+      ) : loadError ? (
+        <div className="py-10 text-center text-sm text-red-500">{loadError}</div>
       ) : (
         <div className="mb-4 divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
-          {categories.map(cat => (
+          {rows.map(cat => (
             <div key={cat.id} className="flex items-center gap-3 px-4 py-2.5" data-testid={`feedback-category-row-${cat.key}`}>
               <span className="text-lg">{cat.icon}</span>
               <span className={`flex-1 text-sm font-medium ${cat.is_active ? 'text-gray-800' : 'text-gray-400 line-through'}`}>{cat.label}</span>
@@ -109,7 +92,7 @@ export default function FeedbackCategoryEditor({ schoolId }: { schoolId: number 
               </button>
             </div>
           ))}
-          {categories.length === 0 && <p className="px-4 py-6 text-center text-sm text-gray-400">No categories for this role yet.</p>}
+          {rows.length === 0 && <p className="px-4 py-6 text-center text-sm text-gray-400">No categories for this role yet.</p>}
         </div>
       )}
 
@@ -140,7 +123,7 @@ export default function FeedbackCategoryEditor({ schoolId }: { schoolId: number 
             Add
           </button>
         </div>
-        {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
+        {formError && <p className="mt-2 text-xs text-red-500">{formError}</p>}
       </div>
     </div>
   )
