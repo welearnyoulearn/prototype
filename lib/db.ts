@@ -1,5 +1,6 @@
 import { Pool, types } from 'pg'
 import { matchTeacher } from './matchTeacher'
+import { buildFeedbackCategoryBackfillAllQuery } from './feedback-defaults'
 
 // Return DATE columns as plain "YYYY-MM-DD" strings instead of JS Date objects.
 // Without this, pg serialises dates as UTC midnight which JSON-stringifies to
@@ -70,7 +71,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 14
+const SCHEMA_VERSION = 18
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2860,5 +2861,114 @@ async function runIncrementalMigrations() {
     }
   } catch (e: unknown) {
     console.error('[db] class_subjects backfill failed', e)
+  }
+
+  // ── Feedback Management ────────────────────────────────────────────────
+  // public_code is deliberately separate from schools.school_code (the
+  // admin/teacher login identifier) — this one gets printed on a QR poster
+  // that anyone can scan/photograph, and must be freely rotatable without
+  // ever affecting login.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feedback_settings (
+      school_id    INTEGER PRIMARY KEY REFERENCES schools(id) ON DELETE CASCADE,
+      public_code  VARCHAR(20) NOT NULL UNIQUE,
+      is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feedback_categories (
+      id          SERIAL PRIMARY KEY,
+      school_id   INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      role        VARCHAR(20) NOT NULL,
+      key         VARCHAR(50) NOT NULL,
+      label       VARCHAR(100) NOT NULL,
+      icon        VARCHAR(10),
+      department  VARCHAR(100),
+      is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(school_id, role, key)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_categories_school_role ON feedback_categories(school_id, role)`).catch(() => {})
+
+  // Submission identity/context only — ratings live in feedback_submission_ratings
+  // (a submission can rate several categories at once; the issue pipeline
+  // operates on individual ratings, not whole submissions).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feedback_submissions (
+      id               SERIAL PRIMARY KEY,
+      school_id        INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      role             VARCHAR(20) NOT NULL,
+      is_anonymous     BOOLEAN NOT NULL DEFAULT FALSE,
+      submitter_name   VARCHAR(150),
+      submitter_phone  VARCHAR(50),
+      quick_pick_tags  TEXT,
+      free_text        TEXT,
+      voice_object_key VARCHAR(255),
+      ip_hash          VARCHAR(64) NOT NULL,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_submissions_school_created ON feedback_submissions(school_id, created_at DESC)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_submissions_rate_limit ON feedback_submissions(school_id, ip_hash, created_at)`).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feedback_submission_ratings (
+      id             SERIAL PRIMARY KEY,
+      submission_id  INTEGER NOT NULL REFERENCES feedback_submissions(id) ON DELETE CASCADE,
+      school_id      INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      category_id    INTEGER REFERENCES feedback_categories(id) ON DELETE SET NULL,
+      category_key   VARCHAR(50) NOT NULL,
+      category_label VARCHAR(100) NOT NULL,
+      department     VARCHAR(100),
+      rating         SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+      priority       VARCHAR(10),
+      status         VARCHAR(20) NOT NULL DEFAULT 'open',
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_ratings_submission ON feedback_submission_ratings(submission_id)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_ratings_school_category ON feedback_submission_ratings(school_id, category_key)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_ratings_issues ON feedback_submission_ratings(school_id, priority, status) WHERE priority IS NOT NULL`).catch(() => {})
+
+  // Rate-limit log for the public, unauthenticated voice-upload-url route —
+  // separate from feedback_submissions' own ip_hash column because a voice
+  // upload attempt doesn't necessarily result in a submission (an attacker
+  // could otherwise mint unlimited presigned R2 PUT URLs for free).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feedback_voice_upload_log (
+      id         SERIAL PRIMARY KEY,
+      school_id  INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      ip_hash    VARCHAR(64) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_voice_upload_log_rate_limit ON feedback_voice_upload_log(school_id, ip_hash, created_at)`).catch(() => {})
+
+  // Advanced Forms (Meeting/Event/Exam/Academic) — a structured-fields
+  // alternative to category emoji-ratings, reached from the "Advanced
+  // Forms" role card. advanced_form_data is an opaque JSON blob of
+  // whatever fields that form type defines (see ADVANCED_FORM_FIELDS in
+  // app/feedback/[code]/types.ts) — no per-field columns, so adding a
+  // field to a form type needs no migration.
+  await pool.query(`ALTER TABLE feedback_submissions ADD COLUMN IF NOT EXISTS advanced_form_type VARCHAR(20)`).catch(() => {})
+  await pool.query(`ALTER TABLE feedback_submissions ADD COLUMN IF NOT EXISTS advanced_form_data JSONB`).catch(() => {})
+
+  // One-time backfill: seed default categories for schools that existed
+  // before this feature shipped, in a single set-based query. New schools
+  // get the same defaults synchronously in POST /api/schools — both read
+  // DEFAULT_FEEDBACK_CATEGORIES from lib/feedback-defaults.ts so the list is
+  // defined exactly once. ON CONFLICT DO NOTHING makes this safe to re-run
+  // on every startup.
+  try {
+    const { sql, params } = buildFeedbackCategoryBackfillAllQuery()
+    await pool.query(sql, params)
+  } catch (e: unknown) {
+    console.error('[db] feedback_categories backfill failed', e)
   }
 }

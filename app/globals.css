@@ -195,6 +195,47 @@ input, select, textarea {
   100% { transform: scale(1);    opacity: 1; }
 }
 
+/* Feedback wizard: welcome-screen mascot idle bob */
+@keyframes feedbackMascotBob {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  50%       { transform: translateY(-7px) rotate(-4deg); }
+}
+
+/* Feedback wizard: thank-you confetti piece falling */
+@keyframes feedbackConfettiFall {
+  0%   { opacity: 1; transform: translateY(0) rotate(0); }
+  100% { opacity: 0; transform: translateY(560px) rotate(360deg); }
+}
+
+/* Feedback wizard: rating emoji picked pop */
+@keyframes feedbackEmojiPop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.32); }
+  100% { transform: scale(1.1); }
+}
+
+/* Feedback wizard: low-rating emoji shake (matches the 😭/😞 mood) */
+@keyframes feedbackEmojiShake {
+  0%, 100% { transform: rotate(0) scale(1); }
+  20%       { transform: rotate(-9deg) scale(1.08); }
+  40%       { transform: rotate(9deg) scale(1.08); }
+  60%       { transform: rotate(-6deg); }
+  80%       { transform: rotate(6deg); }
+}
+
+/* Feedback wizard: mascot excited jump (5-star / amazing mood) */
+@keyframes feedbackMascotJump {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50%       { transform: translateY(-13px) scale(1.08); }
+}
+
+/* Feedback wizard: mascot sad sway (1-2 star mood) */
+@keyframes feedbackMascotSway {
+  0%, 50%, 100% { transform: rotate(0); }
+  25%            { transform: rotate(-6deg); }
+  75%            { transform: rotate(6deg); }
+}
+
 /* ─────────────────────────────────────────────────
    ANIMATION UTILITY CLASSES
 ───────────────────────────────────────────────── */
@@ -225,6 +266,24 @@ input, select, textarea {
 }
 .anim-num-pop {
   animation: numPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+.anim-feedback-mascot-bob {
+  animation: feedbackMascotBob 2.4s ease-in-out infinite;
+}
+.anim-feedback-confetti-fall {
+  animation: feedbackConfettiFall 1.8s ease-in forwards;
+}
+.anim-feedback-emoji-pop {
+  animation: feedbackEmojiPop 0.4s ease both;
+}
+.anim-feedback-emoji-shake {
+  animation: feedbackEmojiShake 0.55s ease-in-out infinite;
+}
+.anim-feedback-mascot-jump {
+  animation: feedbackMascotJump 0.5s ease-in-out infinite;
+}
+.anim-feedback-mascot-sway {
+  animation: feedbackMascotSway 2s ease-in-out infinite;
 }
 
 /* Emoji wobble on hover */

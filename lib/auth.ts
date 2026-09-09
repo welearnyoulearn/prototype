@@ -73,6 +73,17 @@ export function generateResetToken(): string {
   return out
 }
 
+// Public feedback-form entry code — deliberately unrelated to school_code
+// (the admin/teacher login identifier). This one gets printed on a QR
+// poster anyone can scan or photograph, and must be freely rotatable
+// without ever weakening or touching login.
+export function generateFeedbackCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  let out = ''
+  for (let i = 0; i < 10; i++) out += chars[randomInt(chars.length)]
+  return out
+}
+
 export function generateSchoolCode(schoolName: string, schoolId: number): string {
   const slug = schoolName
     .toLowerCase()

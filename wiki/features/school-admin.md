@@ -1,7 +1,7 @@
 # School Admin Portal
 
-**Status:** 22 Built | 3 Partial | 4 Planned
-**Last updated:** 2026-06-18
+**Status:** 23 Built | 3 Partial | 4 Planned
+**Last updated:** 2026-09-07
 
 ---
 
@@ -59,6 +59,7 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 | Notification Center | Built | Full notification history for the school |
 | Student Leaderboard | Built | Points-based ranking with badges, streaks, gamification |
 | Parent Engagement | Built | Metrics on parent portal usage |
+| Feedback Management | Built | No-login QR-code feedback form (parent/student/teacher/visitor/other) with a school-admin dashboard, issue pipeline, category CRUD, and QR poster generation. `feedback-management` in `lib/features.ts`. See `wiki/features/feedback-management.md` |
 | Anonymous Class Pulse | Planned | Anonymous student feedback. Defined in `lib/features.ts` as `class-pulse` but not implemented |
 
 ### Management

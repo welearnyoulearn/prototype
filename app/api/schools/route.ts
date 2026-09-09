@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { hashPassword, generateTempPassword, generateSchoolCode, requirePlatformAdmin } from '@/lib/auth'
 import { sendOnboardingEmail } from '@/lib/email'
+import { buildFeedbackCategorySeedQuery } from '@/lib/feedback-defaults'
 
 export async function GET(req: NextRequest) {
   const session = await requirePlatformAdmin()
@@ -112,6 +113,11 @@ export async function POST(req: NextRequest) {
        ON CONFLICT DO NOTHING`,
       [school.id, yearLabel, `${yearStart}-04-01`, `${yearStart + 1}-03-31`]
     )
+
+    // Seed default Feedback Management categories for this school — the
+    // same list existing schools were backfilled with in lib/db.ts.
+    const feedbackSeed = buildFeedbackCategorySeedQuery(school.id)
+    await client.query(feedbackSeed.sql, feedbackSeed.params)
 
     await client.query('COMMIT')
 

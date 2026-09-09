@@ -46,6 +46,7 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
 
   // ── Communication ────────────────────────────────────────────────────────────
   { key: 'announcements',      label: 'Announcement Board',              category: 'Communication', portals: ['school-admin'] },
+  { key: 'feedback-management', label: 'Feedback Management',            category: 'Communication', portals: ['school-admin'] },
   { key: 'notifications',      label: 'Notification Center',             category: 'Communication', portals: ['school-admin'] },
   { key: 'parent-engagement',  label: 'Parent Engagement',               category: 'Communication', portals: ['school-admin'] },
 
