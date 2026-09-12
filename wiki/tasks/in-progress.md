@@ -6,6 +6,21 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 
 <!-- Add new entries at the top -->
 
+### Teacher Syllabus — add chapters in Telugu & Hindi without an extension (#116)
+**Type:** Feature + Bug Fix
+**Portal:** Teacher
+**Branch:** feature/116-syllabus-indic-translate
+**Started:** 2026-09-12
+**Summary:** A sparkle **Translate** button beside the Add Chapter, Add Subtopic and rename inputs converts what a teacher types in English letters ("amma prema") into Telugu or Hindi script (అమ్మ ప్రేమ), with alternative spellings as chips. Also fixes Enter submitting half-typed text while Google Input Tools / Gboard is composing, and the empty-subject "Or add chapters one at a time" link that showed nothing.
+**Progress:**
+- [x] `GET /api/transliterate` (staff-only, Zod-validated, proxies Google Input Tools)
+- [x] Translate control on add chapter / add subtopic / rename chapter / rename topic
+- [x] Enter ignored while an input method is composing (same four inputs)
+- [x] Add Chapter input shown for empty subjects
+- [x] Playwright spec `e2e/workflow-syllabus-translate.spec.ts`
+- [ ] PR review and merge
+- [ ] Swap to an official keyed service (Azure Translator Transliterate) before production — see KNOWN_ISSUES
+
 ### Feedback Management — public form + admin dashboard (#TBD)
 **Type:** Feature
 **Portal:** School Admin (public-facing entry point outside all portals) / Platform Admin (feature toggle)
