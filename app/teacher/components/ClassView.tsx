@@ -520,6 +520,14 @@ export function SyllabusTracking({
   const [markingId, setMarkingId] = useState<number | null>(null)
   const { toast, flash, copyPrompt } = useToast()
 
+  // Custom-subject AI Hub PDF upload — subject-wide (not per chapter/topic),
+  // shown only for subjects with no board (currentSubject.board == null),
+  // i.e. genuinely custom subjects with no platform-catalog content already
+  // flowing through the standard AI Hub pipeline.
+  const [customPdfUploading, setCustomPdfUploading] = useState(false)
+  const [customPdfProgress, setCustomPdfProgress] = useState(0)
+  const customPdfInputRef = useRef<HTMLInputElement>(null)
+
   // Add-custom-topic form — one open at a time, keyed by chapter name so a
   // teacher can add topics to a chapter before or after marking others taught,
   // same as school-admin's per-chapter "+ Custom Topic" in the Syllabus
@@ -832,6 +840,64 @@ export function SyllabusTracking({
       flash(err instanceof Error ? err.message : 'Failed to add chapter')
     } finally {
       setCreatingChapter(false)
+    }
+  }
+
+  // Custom-subject AI Hub PDF upload — one PDF per subject (not per chapter),
+  // presign-then-PUT-directly-to-R2, same shape as platform-admin's material
+  // uploads. The register call returns immediately; text extraction runs
+  // async server-side (see lib/ai/custom-content.ts), so a re-upload's
+  // result won't be reflected until that finishes in the background.
+  async function handleUploadCustomSubjectPdf(file: File) {
+    if (!file || !selectedSubject) return
+    setCustomPdfUploading(true)
+    setCustomPdfProgress(0)
+    try {
+      const signRes = await fetch('/api/school/custom-subject-upload-sign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId, class_id: classId, subject: selectedSubject,
+          filename: file.name, content_type: file.type || 'application/pdf',
+        }),
+      })
+      const signData = await signRes.json()
+      if (!signRes.ok) throw new Error(signData?.error || 'Failed to get upload URL')
+      const { uploadUrl, key, school_subject_id } = signData
+
+      const xhr = new XMLHttpRequest()
+      xhr.open('PUT', uploadUrl)
+      xhr.setRequestHeader('Content-Type', file.type || 'application/pdf')
+      xhr.upload.onprogress = (ev) => {
+        if (ev.lengthComputable) setCustomPdfProgress(Math.round((ev.loaded / ev.total) * 100))
+      }
+      await new Promise<void>((resolve, reject) => {
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) resolve()
+          else reject(new Error(`Upload failed (HTTP ${xhr.status})`))
+        }
+        xhr.onerror = () => reject(new Error('Network error during upload'))
+        xhr.send(file)
+      })
+
+      const registerRes = await fetch('/api/school/custom-subject-materials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId, school_subject_id, file_key: key,
+          title: file.name.replace(/\.pdf$/i, ''),
+        }),
+      })
+      const registerData = await registerRes.json()
+      if (!registerRes.ok) throw new Error(registerData?.error || 'Failed to register upload')
+
+      flash(`Uploaded — processing "${file.name}" for the AI Doubt Assistant in the background`)
+    } catch (err: unknown) {
+      flash(err instanceof Error ? err.message : 'Failed to upload PDF')
+    } finally {
+      setCustomPdfUploading(false)
+      setCustomPdfProgress(0)
+      if (customPdfInputRef.current) customPdfInputRef.current.value = ''
     }
   }
 
@@ -1721,6 +1787,31 @@ export function SyllabusTracking({
                   className="text-xs font-semibold px-2.5 py-1 rounded-lg border" style={{ borderColor: BORDER, color: PURPLE }}>
                   Edit Syllabus Setup
                 </button>
+              )}
+              {/* Custom subject (no board link) — subject-wide PDF upload for
+                  the AI Doubt Assistant's custom-content pipeline. Not shown
+                  for board-linked subjects, which already get AI Hub content
+                  via the standard pipeline. */}
+              {!currentSubject.board && !readOnly && (
+                <>
+                  <input
+                    ref={customPdfInputRef}
+                    type="file"
+                    accept="application/pdf"
+                    hidden
+                    data-testid="custom-subject-pdf-input"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUploadCustomSubjectPdf(f) }}
+                  />
+                  <button
+                    onClick={() => customPdfInputRef.current?.click()}
+                    disabled={customPdfUploading}
+                    data-testid="custom-subject-pdf-upload-btn"
+                    className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg border disabled:opacity-50"
+                    style={{ borderColor: BORDER, color: PURPLE }}>
+                    <Upload size={12} />
+                    {customPdfUploading ? `Uploading… ${customPdfProgress}%` : 'Upload Subject PDF for AI Assistant'}
+                  </button>
+                </>
               )}
             </div>
           </div>

@@ -1,11 +1,11 @@
 allowBuilds:
   core-js: true
+  esbuild: true
+  onnxruntime-node: true
+  protobufjs: true
   sharp: true
+  tesseract.js: true
   unrs-resolver: true
-onlyBuiltDependencies:
-  - core-js
-  - sharp
-  - unrs-resolver
 overrides:
   brace-expansion@1: ^1.1.18
   brace-expansion@2: ^2.1.4

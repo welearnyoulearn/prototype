@@ -1,4 +1,4 @@
-import { S3Client } from '@aws-sdk/client-s3'
+import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 
 // Cloudflare R2 is S3-compatible. One shared client + bucket for backup/restore.
 // Env (set in Vercel project settings):
@@ -29,4 +29,19 @@ export function r2Config(): { client: S3Client; bucket: string } {
   })
 
   return { client, bucket }
+}
+
+// Downloads an object fully into memory. Used by the AI Hub ingestion paths
+// (standard syllabus PDFs and custom-subject PDFs) — those files are
+// processed once and discarded, so there's no need for a persistent local
+// copy or a streaming pipeline.
+export async function downloadR2Object(key: string): Promise<Buffer> {
+  const { client, bucket } = r2Config()
+  const res = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+  const chunks: Buffer[] = []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for await (const chunk of res.Body as any) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  }
+  return Buffer.concat(chunks)
 }

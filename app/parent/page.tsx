@@ -6,6 +6,7 @@ import { FullPageLoader } from '@/components/loaders'
 import Link from 'next/link'
 import { TRANSLATIONS, type Lang } from './translations'
 import ParentSyllabus from './components/ParentSyllabus'
+import ParentAiTutor from './components/ParentAiTutor'
 import DigitalLibrary from '../components/library/DigitalLibrary'
 import ParentProfile from './components/ParentProfile'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
@@ -14,11 +15,12 @@ import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Child = { id: number; name: string; grade: string; section: string; roll_number: string; school_id: number }
+type Child = { id: number; name: string; grade: string; section: string; roll_number: string; school_id: number; ai_hub_enabled?: boolean }
 type Student = {
   id: number; name: string; grade: string; section: string
   roll_number: string; school_id: number; class_id: number
   parent_name: string | null; parent_phone: string | null
+  ai_hub_enabled?: boolean
 }
 type ParentInfo = { id: number; name: string; email: string; school_id: number; school_name: string; children: Child[] }
 
@@ -99,6 +101,7 @@ const NAV = [
   { key: 'exams',      label: 'Exam Calendar',      icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
   { key: 'results',    label: 'Results',            icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
   { key: 'syllabus',   label: 'Syllabus',           icon: 'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253' },
+  { key: 'ai-tutor',   label: 'AI Tutor',           icon: 'M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.427 0-4.817-.178-7.155-.521-1.717-.293-2.3-2.379-1.067-3.61L5 14.5' },
   { key: 'library',    label: 'Digital Library',    icon: 'M12 6.253C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253m0-13v13' },
   { key: 'profile',    label: 'Profile',            icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
 ]
@@ -137,6 +140,11 @@ export default function ParentDashboard() {
   // enabled for this portal — null (still loading) means "show everything"
   // so the sidebar doesn't flash empty before the fetch resolves.
   function isNavItemVisible(key: string) {
+    // AI Tutor has its own, separate gate (school_ai_subscriptions.active,
+    // via the selected child's ai_hub_enabled from /api/parent/auth/me) —
+    // unrelated to the plan_features system below. Same rule as the
+    // student portal's AI Hub nav item: hidden until confirmed enabled.
+    if (key === 'ai-tutor') return !!student?.ai_hub_enabled
     if (!RESTRICTABLE_NAV_KEYS.has(key)) return true
     if (enabledFeatures === null) return true
     return enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
@@ -814,6 +822,13 @@ export default function ParentDashboard() {
               grade={student.grade}
               section={student.section}
             />
+          </div>
+          )}
+
+          {/* ── AI TUTOR ───────────────────────────────────────────────────── */}
+          {visited.has('ai-tutor') && (
+          <div hidden={activeNav !== 'ai-tutor'}>
+            <ParentAiTutor studentId={student.id} studentName={student.name} />
           </div>
           )}
 

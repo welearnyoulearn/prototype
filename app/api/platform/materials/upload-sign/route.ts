@@ -9,8 +9,18 @@ function sanitizeSegment(seg: string): string {
   return seg.replace(/[^a-zA-Z0-9-]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '') || 'UNKNOWN'
 }
 
+// Folder-level classification for the R2 key, e.g. materials/.../textbooks/.
+// Deliberately broader than master_subject_materials.material_type (which
+// only has 'textbook'/'handbook' in the DB) so a workbook upload gets its
+// own R2 folder even though it's still filed as a handbook in the DB.
+const MATERIAL_TYPE_FOLDERS: Record<string, string> = {
+  textbook: 'textbooks',
+  workbook: 'workbooks',
+  handbook: 'handbooks',
+}
+
 // POST /api/platform/materials/upload-sign
-// body: { filename: string, content_type?: string, subject_id?: number }
+// body: { filename: string, content_type?: string, subject_id?: number, material_type?: string }
 //
 // Textbook/handbook PDFs regularly exceed Cloudinary's free-tier 10MB cap
 // (some of these scanned textbooks run 50-80MB), so subject materials go to
@@ -22,7 +32,7 @@ function sanitizeSegment(seg: string): string {
 export async function POST(req: NextRequest) {
   if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   try {
-    const { filename, content_type, subject_id } = await req.json()
+    const { filename, content_type, subject_id, material_type } = await req.json()
     if (typeof filename !== 'string' || !filename.trim()) {
       return NextResponse.json({ error: 'filename is required' }, { status: 400 })
     }
@@ -44,6 +54,8 @@ export async function POST(req: NextRequest) {
         folderPrefix = `materials/${sanitizeSegment(board)}/grade-${sanitizeSegment(grade)}/${sanitizeSegment(subject_name)}/`
       }
     }
+    const typeFolder = typeof material_type === 'string' ? MATERIAL_TYPE_FOLDERS[material_type] : undefined
+    if (typeFolder) folderPrefix += `${typeFolder}/`
 
     const r2 = r2Config()
     const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, '_')

@@ -11,7 +11,11 @@ export async function GET() {
       `SELECT s.id, s.name, s.email, s.phone, s.grade, s.section, s.roll_number,
               s.school_id, s.parent_name, s.parent_phone, s.parent_email,
               s.password_changed,
-              sc.name AS school_name, sc.city AS school_city
+              sc.name AS school_name, sc.city AS school_city,
+              EXISTS(
+                SELECT 1 FROM school_ai_subscriptions sas
+                WHERE sas.school_id = s.school_id AND sas.active = TRUE
+              ) AS ai_hub_enabled
        FROM students s
        JOIN schools sc ON sc.id = s.school_id
        WHERE s.id = $1 AND s.status = 'active'`,

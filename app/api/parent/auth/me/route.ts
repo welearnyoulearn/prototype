@@ -22,7 +22,11 @@ export async function GET() {
 
     // Get linked students
     const studentsResult = await pool.query(
-      `SELECT st.id, st.name, st.grade, st.section, st.roll_number, st.school_id
+      `SELECT st.id, st.name, st.grade, st.section, st.roll_number, st.school_id,
+              EXISTS(
+                SELECT 1 FROM school_ai_subscriptions sas
+                WHERE sas.school_id = st.school_id AND sas.active = TRUE
+              ) AS ai_hub_enabled
        FROM student_parents sp
        JOIN students st ON st.id = sp.student_id
        WHERE sp.parent_id = $1 AND st.status = 'active'

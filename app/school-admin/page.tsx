@@ -45,6 +45,7 @@ const StudentsManagement    = dynamic(() => import('./components/StudentsManagem
 const AnnouncementBoard     = dynamic(() => import('./components/AnnouncementBoard'),      { loading: () => <ModuleSkeleton /> })
 const ExportCenter          = dynamic(() => import('./components/ExportCenter'),           { loading: () => <ModuleSkeleton /> })
 const SchoolSettings        = dynamic(() => import('./components/SchoolSettings'),         { loading: () => <ModuleSkeleton /> })
+const AiHubPlans            = dynamic(() => import('./components/AiHubPlans'),              { loading: () => <ModuleSkeleton /> })
 const FeeManagement         = dynamic(() => import('./components/FeeManagement'),          { loading: () => <ModuleSkeleton /> })
 const ExpenseManagement     = dynamic(() => import('./components/ExpenseManagement'),      { loading: () => <ModuleSkeleton /> })
 const YearRollover          = dynamic(() => import('./components/YearRollover'),           { loading: () => <ModuleSkeleton /> })
@@ -594,6 +595,27 @@ function SchoolAdmin() {
                     )
                   })()}
 
+                  {/* AI Hub — a self-serve add-on with its own activation
+                      flow (school_ai_subscriptions), deliberately NOT gated
+                      by the plan_features/enabledFeatures system above so
+                      every school can always discover and activate it. */}
+                  <div className="mb-1">
+                    <p className="px-4 pt-4 pb-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-[0.15em]">AI HUB</p>
+                    <button
+                      onClick={() => navigateTo('ai-hub-plans')}
+                      data-testid="school-admin-ai-hub-nav"
+                      className={`w-full flex items-center gap-3 px-3 mx-1 py-2 text-sm transition-all text-left rounded-lg ${
+                        activeNav === 'ai-hub-plans'
+                          ? 'bg-indigo-600 text-white font-semibold shadow-md'
+                          : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                      }`}
+                      style={{ width: 'calc(100% - 8px)' }}
+                    >
+                      <span className={`flex-shrink-0 ${activeNav === 'ai-hub-plans' ? 'text-white' : 'text-slate-400'}`}>🤖</span>
+                      <span className="truncate">AI Doubt Assistant</span>
+                    </button>
+                  </div>
+
                   {/* Locked features */}
                   {NAV_ITEMS.filter(item => isSchoolAdminScoped(item.key) && !enabledFeatures.has(item.key)).length > 0 && (
                     <div className="mt-3 pt-3 border-t border-slate-800">
@@ -708,6 +730,7 @@ function SchoolAdmin() {
                 {visited.has('announcements')    && <div hidden={activeNav !== 'announcements'}><AnnouncementBoard schoolId={selectedSchool.id} /></div>}
                 {visited.has('export')           && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}
                 {visited.has('settings')         && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} /></div>}
+                {visited.has('ai-hub-plans')      && <div hidden={activeNav !== 'ai-hub-plans'}><AiHubPlans /></div>}
                 {visited.has('profile')          && <div hidden={activeNav !== 'profile'}><StaffProfile /></div>}
                 {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} schoolName={selectedSchool.name} schoolLogoUrl={selectedSchool.logo_url ?? null} schoolLogoAlign={selectedSchool.logo_align ?? 'center'} schoolHeaderBlocks={selectedSchool.receipt_header_blocks ?? []} /></div>}
                 {visited.has('expenses')         && <div hidden={activeNav !== 'expenses'}><ExpenseManagement schoolId={selectedSchool.id} /></div>}

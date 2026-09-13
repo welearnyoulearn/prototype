@@ -33,11 +33,13 @@ const StudentMarks     = dynamic(() => import('./components/StudentMarks'),     
 const StudentTimetable = dynamic(() => import('./components/StudentTimetable'), { loading: () => <ModuleSkeleton /> })
 const StudentSyllabus  = dynamic(() => import('./components/StudentSyllabus'),  { loading: () => <ModuleSkeleton /> })
 const DigitalLibrary    = dynamic(() => import('../components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
+const AiHub             = dynamic(() => import('./components/AiHub'),           { loading: () => <ModuleSkeleton /> })
 
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
   email: string | null; phone: string | null; parent_name: string | null; parent_phone: string | null
   school_id: number; school_name: string
+  ai_hub_enabled?: boolean
 }
 
 type NavItem    = { key: string; label: string; icon: string; comingSoon?: boolean }
@@ -56,6 +58,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'LEARNING',
     items: [
+      { key: 'ai-hub', label: 'AI Hub',      icon: '🤖' },
       { key: 'tasks',  label: 'Homework',    icon: '📝' },
       { key: 'doubts', label: 'Ask a Doubt', icon: '💬' },
     ],
@@ -107,6 +110,12 @@ export default function StudentPortal() {
   // enabled for this portal — null (still loading) means "show everything"
   // so the sidebar doesn't flash empty before the fetch resolves.
   function isNavItemVisible(key: string) {
+    // AI Hub has its own, separate gate (school_ai_subscriptions.active, via
+    // student.ai_hub_enabled from /api/student/auth/me) — unrelated to the
+    // plan_features/RESTRICTABLE_NAV_KEYS system below. Hidden by default
+    // (not "show while loading") since this gates access to a real feature,
+    // not just a sidebar item.
+    if (key === 'ai-hub') return !!student?.ai_hub_enabled
     if (!RESTRICTABLE_NAV_KEYS.has(key)) return true
     if (enabledFeatures === null) return true
     return enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
@@ -313,6 +322,7 @@ export default function StudentPortal() {
             {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={student.school_id} classId={classId} /></div>}
             {visitedNav.has('timetable')   && <div hidden={activeNav !== 'timetable'}><StudentTimetable classId={classId} schoolId={student.school_id} grade={student.grade} section={student.section} /></div>}
             {visitedNav.has('syllabus') && isNavItemVisible('syllabus') && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={student.school_id} classId={classId} grade={student.grade} /></div>}
+            {visitedNav.has('ai-hub') && <div hidden={activeNav !== 'ai-hub'}><AiHub schoolId={student.school_id} classId={classId} grade={student.grade} studentId={student.id} studentName={student.name} /></div>}
             {visitedNav.has('library') && isNavItemVisible('library') && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}`} /></div>}
             {visitedNav.has('profile')     && <div hidden={activeNav !== 'profile'}><StudentProfile student={student} /></div>}
           </div>

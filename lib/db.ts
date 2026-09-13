@@ -36,7 +36,11 @@ const poolConfig = (process.env.PGHOST)
       connectionString: dbUrl,
       max: isVercel ? 1 : 10,
       idleTimeoutMillis: isVercel ? 10000 : 30000,
-      connectionTimeoutMillis: isVercel ? 10000 : 5000,
+      // Bumped from 5000 — observed real connection latency to Supabase
+      // spiking to 3-4s+ during local dev sessions with heavy script churn
+      // (e.g. repeated AI Hub ingestion runs), occasionally exceeding the
+      // old timeout outright. Vercel's own timeout is untouched.
+      connectionTimeoutMillis: isVercel ? 10000 : 15000,
       ssl: isLocalDb ? false : { rejectUnauthorized: false },
     }
 
@@ -70,7 +74,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 12
+const SCHEMA_VERSION = 22
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2703,4 +2707,230 @@ async function runIncrementalMigrations() {
   } catch (e: unknown) {
     console.error('[db] class_subjects backfill failed', e)
   }
+
+  // ── AI Hub (doubt-clearing chatbot) — all new, `ai_hub_`-prefixed tables.
+  // Purely additive: no existing table is altered. Board is resolved at query
+  // time via schools.board (students has no board column — see lib/curricula.ts),
+  // so no FK/column changes to students/schools were needed either.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_hub_syllabus_chunks (
+      id SERIAL PRIMARY KEY,
+      board VARCHAR(50) NOT NULL,
+      grade VARCHAR(20) NOT NULL,
+      subject VARCHAR(100) NOT NULL,
+      chapter VARCHAR(200),
+      topic VARCHAR(200),
+      content TEXT NOT NULL,
+      embedding_vector JSONB,
+      chroma_id VARCHAR(255),
+      academic_year VARCHAR(20) DEFAULT '2025-26',
+      r2_key VARCHAR(512),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_ai_hub_syllabus_chunks_lookup ON ai_hub_syllabus_chunks(board, grade, subject)`)
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_hub_chat_logs (
+      id SERIAL PRIMARY KEY,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      board VARCHAR(50),
+      grade VARCHAR(20),
+      subject VARCHAR(100),
+      chapter VARCHAR(200),
+      question TEXT NOT NULL,
+      answer TEXT NOT NULL,
+      flagged BOOLEAN DEFAULT FALSE,
+      flagged_reason VARCHAR(100),
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_ai_hub_chat_logs_student ON ai_hub_chat_logs(student_id, created_at)`)
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_hub_screen_time_limits (
+      grade VARCHAR(20) PRIMARY KEY,
+      daily_limit_minutes INTEGER NOT NULL DEFAULT 30,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`
+    INSERT INTO ai_hub_screen_time_limits (grade, daily_limit_minutes) VALUES
+      ('1', 15), ('2', 15), ('3', 20), ('4', 20), ('5', 20),
+      ('6', 30), ('7', 30), ('8', 30), ('9', 40), ('10', 40)
+    ON CONFLICT (grade) DO NOTHING
+  `)
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_hub_screen_time_sessions (
+      id SERIAL PRIMARY KEY,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      session_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      session_end TIMESTAMPTZ,
+      duration_minutes INTEGER DEFAULT 0,
+      date DATE NOT NULL DEFAULT CURRENT_DATE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_ai_hub_screen_time_sessions_student_date ON ai_hub_screen_time_sessions(student_id, date)`)
+
+  // R2 ingestion tracking for the Stage 2 syllabus ingestion script — lets a
+  // re-run skip unchanged PDFs (matched by r2_key + etag) instead of reprocessing.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_hub_ingested_files (
+      id SERIAL PRIMARY KEY,
+      r2_key VARCHAR(512) UNIQUE NOT NULL,
+      board VARCHAR(50),
+      grade VARCHAR(20),
+      subject VARCHAR(100),
+      chapter VARCHAR(200),
+      etag VARCHAR(255),
+      last_modified TIMESTAMPTZ,
+      status VARCHAR(20) DEFAULT 'pending',
+      chunk_count INTEGER DEFAULT 0,
+      error_message TEXT,
+      processed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+
+  // ── AI Hub — custom subject content (Patch Stage A) ─────────────────────
+  // Deliberately separate from ai_hub_syllabus_chunks/Chroma: a school's
+  // custom subject is small (~10-15 chapters) and fits directly in an LLM's
+  // context window, so it's stored as plain extracted text and injected
+  // straight into the prompt at query time — no chunking, no embedding, no
+  // vector DB. custom_subject_id references school_subjects(id) (there is no
+  // separate "custom subject" table in this schema — a custom subject is a
+  // school_subjects row, whether or not it links to a master_subjects entry).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS custom_subject_chapters (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      custom_subject_id INTEGER NOT NULL REFERENCES school_subjects(id) ON DELETE CASCADE,
+      chapter VARCHAR(200) NOT NULL,
+      topic VARCHAR(200),
+      content_text TEXT NOT NULL,
+      academic_year VARCHAR(20) DEFAULT '2025-26',
+      source_file_key VARCHAR(512),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(custom_subject_id, chapter)
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_custom_subject_chapters_school ON custom_subject_chapters(school_id)`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_custom_subject_chapters_subject ON custom_subject_chapters(custom_subject_id)`)
+
+  // Platform-wide AI Hub config — singleton row (id is pinned to 1). Stage A
+  // only needs the custom-content size threshold; Patch Stage C adds the
+  // billing/model-provider fields to this SAME table later.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS platform_ai_config (
+      id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      custom_content_context_size_threshold INTEGER NOT NULL DEFAULT 50000,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`INSERT INTO platform_ai_config (id) VALUES (1) ON CONFLICT (id) DO NOTHING`)
+
+  // ── AI Hub — billing/subscription foundation (Patch Stage C) ────────────
+  // Schema + enforcement-ready structure only — no real payment integration
+  // yet (free-tier/prototype phase). Extends platform_ai_config (created
+  // above) with the same ALTER ... ADD COLUMN IF NOT EXISTS idempotent
+  // pattern used throughout this file.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_plans (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100) NOT NULL UNIQUE,
+      students_included INTEGER NOT NULL,
+      queries_per_student_per_day INTEGER NOT NULL,
+      price NUMERIC(10,2) NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS school_ai_subscriptions (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE UNIQUE,
+      ai_plan_id INTEGER REFERENCES ai_plans(id) ON DELETE SET NULL,
+      active BOOLEAN DEFAULT TRUE,
+      students_licensed INTEGER,
+      start_date DATE DEFAULT CURRENT_DATE,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS student_subscriptions (
+      id SERIAL PRIMARY KEY,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE UNIQUE,
+      tier VARCHAR(10) NOT NULL DEFAULT 'free' CHECK (tier IN ('free','paid')),
+      plan_id INTEGER REFERENCES ai_plans(id) ON DELETE SET NULL,
+      active BOOLEAN DEFAULT TRUE,
+      started_at TIMESTAMPTZ DEFAULT NOW(),
+      daily_query_limit_override INTEGER
+    )
+  `)
+
+  await pool.query(`ALTER TABLE platform_ai_config ADD COLUMN IF NOT EXISTS default_free_tier_daily_limit INTEGER NOT NULL DEFAULT 3`)
+  await pool.query(`ALTER TABLE platform_ai_config ADD COLUMN IF NOT EXISTS max_active_free_tier_students INTEGER`)
+  await pool.query(`ALTER TABLE platform_ai_config ADD COLUMN IF NOT EXISTS free_tier_model_provider VARCHAR(50) DEFAULT 'gemini'`)
+  await pool.query(`ALTER TABLE platform_ai_config ADD COLUMN IF NOT EXISTS paid_tier_model_provider VARCHAR(50) DEFAULT 'gemini'`)
+
+  // One default plan so Stage D has something to point a pilot school at.
+  await pool.query(`
+    INSERT INTO ai_plans (name, students_included, queries_per_student_per_day, price)
+    VALUES ('Starter', 100, 10, 0)
+    ON CONFLICT (name) DO NOTHING
+  `)
+
+  // ── AI Hub — /ask endpoint logging (Patch Stage D) ──────────────────────
+  // subject_type/tier on the existing chat_logs table (Stage 1) lets the
+  // parent digest and any future admin view distinguish standard-vs-custom
+  // answers and which billing tier served them. ai_hub_usage_events is a
+  // separate, lightweight per-request metering stream (including blocked/
+  // over-limit attempts) for billing/analytics — deliberately not mixed into
+  // chat_logs, which is the actual Q&A content log.
+  await pool.query(`ALTER TABLE ai_hub_chat_logs ADD COLUMN IF NOT EXISTS subject_type VARCHAR(10)`)
+  await pool.query(`ALTER TABLE ai_hub_chat_logs ADD COLUMN IF NOT EXISTS tier VARCHAR(10)`)
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_hub_usage_events (
+      id SERIAL PRIMARY KEY,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      subject_type VARCHAR(10),
+      tier VARCHAR(10),
+      blocked BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_ai_hub_usage_events_student_date ON ai_hub_usage_events(student_id, created_at)`)
+
+  // ── AI Hub — subscription selection UI (Patch Stage G) ──────────────────
+  // ai_plans (Stage C) only ever needed one shape until now: a school-wide
+  // bulk plan (students_included makes sense there). Parent-side per-student
+  // upgrade plans (Boost/Pro/Exam Ready) don't have a school-wide seat count,
+  // so `scope` distinguishes the two audiences within the SAME table rather
+  // than adding a parallel one — school_ai_subscriptions.ai_plan_id only
+  // ever points at scope='school' rows, student_subscriptions.plan_id only
+  // at scope='student' rows.
+  await pool.query(`ALTER TABLE ai_plans ADD COLUMN IF NOT EXISTS scope VARCHAR(10) NOT NULL DEFAULT 'school' CHECK (scope IN ('school','student'))`)
+
+  // Prices below are illustrative placeholders — no real payment processing
+  // exists yet (see the TODOs in the activation routes); ON CONFLICT keeps
+  // this safe to re-run without duplicating or clobbering an admin's edits.
+  await pool.query(`
+    INSERT INTO ai_plans (name, scope, students_included, queries_per_student_per_day, price) VALUES
+      ('Basic',    'school', 50,   5,  999),
+      ('Standard', 'school', 200,  10, 2999),
+      ('Premium',  'school', 1000, 20, 6999)
+    ON CONFLICT (name) DO NOTHING
+  `)
+  await pool.query(`
+    INSERT INTO ai_plans (name, scope, students_included, queries_per_student_per_day, price) VALUES
+      ('Boost',      'student', 1, 15, 99),
+      ('Pro',        'student', 1, 30, 199),
+      ('Exam Ready', 'student', 1, 50, 299)
+    ON CONFLICT (name) DO NOTHING
+  `)
 }

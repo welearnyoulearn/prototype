@@ -47,3 +47,6 @@ dump.sql
 
 # Database backups
 backup_*.sql
+
+# Local Chroma vector DB storage (AI Hub) — runtime data, not source
+/chroma-data/
