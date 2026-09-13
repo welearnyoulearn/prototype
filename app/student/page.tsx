@@ -33,6 +33,7 @@ const StudentMarks     = dynamic(() => import('./components/StudentMarks'),     
 const StudentTimetable = dynamic(() => import('./components/StudentTimetable'), { loading: () => <ModuleSkeleton /> })
 const StudentSyllabus  = dynamic(() => import('./components/StudentSyllabus'),  { loading: () => <ModuleSkeleton /> })
 const DigitalLibrary    = dynamic(() => import('../components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
+const StudentAiHub      = dynamic(() => import('./components/StudentAiHub'),     { loading: () => <ModuleSkeleton /> })
 
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
@@ -72,6 +73,14 @@ const NAV_SECTIONS: NavSection[] = [
       { key: 'profile', label: 'My Profile', icon: '👤' },
     ],
   },
+  {
+    // Hidden entirely unless the school has been assigned AI Basic/AI Pro —
+    // see isNavItemVisible('ai-hub') and the empty-section filter below.
+    label: 'AI HUB',
+    items: [
+      { key: 'ai-hub', label: 'AI Hub', icon: '🤖' },
+    ],
+  },
 ]
 
 const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
@@ -101,12 +110,17 @@ export default function StudentPortal() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [loading,     setLoading]     = useState(true)
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
+  const [aiAccessTier, setAiAccessTier] = useState<'ai_basic' | 'ai_pro' | 'none' | null>(null)
   const logoutInFlight = useRef(false)
 
   // Filters out nav items gated by a plan feature the school doesn't have
   // enabled for this portal — null (still loading) means "show everything"
-  // so the sidebar doesn't flash empty before the fetch resolves.
+  // so the sidebar doesn't flash empty before the fetch resolves. AI Hub is
+  // the opposite: unlike plan features (which default open), an unset AI
+  // Access tier means the school never opted in, so it stays hidden while
+  // loading and only appears once confirmed as ai_basic/ai_pro.
   function isNavItemVisible(key: string) {
+    if (key === 'ai-hub') return aiAccessTier === 'ai_basic' || aiAccessTier === 'ai_pro'
     if (!RESTRICTABLE_NAV_KEYS.has(key)) return true
     if (enabledFeatures === null) return true
     return enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
@@ -131,6 +145,10 @@ export default function StudentPortal() {
           .then(r => r.ok ? r.json() : null)
           .then(d => { if (d?.enabled) setEnabledFeatures(new Set<string>(d.enabled)) })
           .catch(() => {})
+        fetch(`/api/schools/${data.school_id}/ai-access`)
+          .then(r => r.ok ? r.json() : null)
+          .then(d => setAiAccessTier((d?.tier as 'ai_basic' | 'ai_pro' | 'none') ?? 'none'))
+          .catch(() => setAiAccessTier('none'))
         const classRes = await fetch(`/api/classes?school_id=${data.school_id}`)
         if (classRes.ok) {
           const classes = await classRes.json()
@@ -261,12 +279,15 @@ export default function StudentPortal() {
 
           {/* Nav */}
           <nav className="flex-1 px-3 py-3 overflow-y-auto">
-            {NAV_SECTIONS.map(section => (
+            {NAV_SECTIONS.map(section => {
+              const visibleItems = section.items.filter(item => isNavItemVisible(item.key))
+              if (visibleItems.length === 0) return null
+              return (
               <div key={section.label} className="mb-1">
                 <p className="px-3 pt-4 pb-1 text-[9px] font-bold text-slate-600 uppercase tracking-[0.15em]">
                   {section.label}
                 </p>
-                {section.items.filter(item => isNavItemVisible(item.key)).map(item => (
+                {visibleItems.map(item => (
                   <button
                     key={item.key}
                     onClick={() => { if (!item.comingSoon) navigateTo(item.key) }}
@@ -289,7 +310,8 @@ export default function StudentPortal() {
                   </button>
                 ))}
               </div>
-            ))}
+              )
+            })}
           </nav>
 
           {/* Footer */}
@@ -315,6 +337,7 @@ export default function StudentPortal() {
             {visitedNav.has('syllabus') && isNavItemVisible('syllabus') && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={student.school_id} classId={classId} grade={student.grade} /></div>}
             {visitedNav.has('library') && isNavItemVisible('library') && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}`} /></div>}
             {visitedNav.has('profile')     && <div hidden={activeNav !== 'profile'}><StudentProfile student={student} /></div>}
+            {visitedNav.has('ai-hub') && isNavItemVisible('ai-hub') && <div hidden={activeNav !== 'ai-hub'}><StudentAiHub tier={aiAccessTier} /></div>}
           </div>
         </main>
       </div>

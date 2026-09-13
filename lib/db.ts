@@ -71,7 +71,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 18
+const SCHEMA_VERSION = 23
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2971,4 +2971,20 @@ async function runIncrementalMigrations() {
   } catch (e: unknown) {
     console.error('[db] feedback_categories backfill failed', e)
   }
+
+  // ── AI Access (Platform Admin) ──────────────────────────────────────────
+  // Separate concept from school_subscriptions.tier (basic/standard/premium
+  // feature plan) and from the AI Hub RAG chatbot's own school_ai_subscriptions
+  // schema (built on a different branch, not present here). This table only
+  // tracks which AI Access tier a platform admin has assigned to a school —
+  // 'ai_pro' is accepted for forward-compatibility but has no working
+  // chatbot behind it yet (UI shows "coming soon" until that lands).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS school_ai_access (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE UNIQUE,
+      tier VARCHAR(20) NOT NULL DEFAULT 'none' CHECK (tier IN ('none', 'ai_basic', 'ai_pro')),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
 }
