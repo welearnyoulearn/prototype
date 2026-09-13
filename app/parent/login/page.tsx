@@ -1,19 +1,20 @@
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import AuthShell, { THEMES, AuthError, PasswordField } from '@/app/components/AuthShell'
 import { setUsageSessionId } from '@/lib/usageSession'
 
-export default function ParentLoginPage() {
+function ParentLoginForm() {
   const router = useRouter()
   const theme = THEMES.parent
+  const params = useSearchParams()
 
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState('')
+  const [error, setError]       = useState(params.get('notice') || '')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -104,5 +105,13 @@ export default function ParentLoginPage() {
         <Link href="/" className="text-sm text-stone-400 hover:text-stone-600 transition mt-2 inline-block">← Back to portal selection</Link>
       </div>
     </AuthShell>
+  )
+}
+
+export default function ParentLoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#faf6ef] flex items-center justify-center"><div className="text-stone-400">Loading...</div></div>}>
+      <ParentLoginForm />
+    </Suspense>
   )
 }

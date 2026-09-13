@@ -121,10 +121,19 @@ export default function StudentPortal() {
     trackOpen(key)
   }
 
+  // Shared by the initial load and by the periodic revocation poll below —
+  // both need identical "kicked out" behavior when the session is no longer
+  // valid (either never was, or the school just disabled portal access).
+  async function redirectToLogin(r: Response) {
+    const data = await r.json().catch(() => null)
+    const notice = data?.error === 'access_revoked' ? data.message : null
+    router.push(notice ? `/student/login?notice=${encodeURIComponent(notice)}` : '/student/login')
+  }
+
   useEffect(() => {
     fetch('/api/student/auth/me')
       .then(async r => {
-        if (r.status === 401) { router.push('/student/login'); return }
+        if (r.status === 401) { await redirectToLogin(r); return }
         const data = await r.json()
         setStudent(data)
         fetch(`/api/school/enabled-features?school_id=${data.school_id}&portal=student`)
@@ -148,6 +157,18 @@ export default function StudentPortal() {
       .catch(() => router.push('/student/login'))
       .finally(() => setLoading(false))
   }, [router])
+
+  // Catches a Student Portal Access toggle flipped off by the school while
+  // this tab is already open and idle — otherwise the student wouldn't be
+  // signed out until their next full page load. 60s matches the existing
+  // usage heartbeat cadence; only runs once we actually have a student.
+  useEffect(() => {
+    if (!student) return
+    const interval = setInterval(() => {
+      fetch('/api/student/auth/me').then(r => { if (r.status === 401) redirectToLogin(r) }).catch(() => {})
+    }, 60_000)
+    return () => clearInterval(interval)
+  }, [student]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useUsageHeartbeat()
 

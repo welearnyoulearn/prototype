@@ -108,8 +108,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!parent.school_id || !(await schoolHasFeature(parent.school_id, 'parent-portal'))) {
+    if (!parent.school_id) {
       return NextResponse.json({ error: 'Invalid email/phone or password' }, { status: 401 })
+    }
+
+    // Password is already verified at this point, so it's safe to name the
+    // real reason instead of the generic invalid-credentials message.
+    if (!(await schoolHasFeature(parent.school_id, 'parent-portal'))) {
+      return NextResponse.json({ error: "You don't have access. Please contact your school admin." }, { status: 403 })
     }
 
     const schoolResult = await pool.query('SELECT name FROM schools WHERE id = $1', [parent.school_id])
