@@ -44,6 +44,18 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         [id, school_id]
       )
       if (!entry) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      // Block deletes on a closed academic year — PATCH on this same route
+      // already enforces this; DELETE didn't, letting a pending bill in a
+      // closed year be permanently removed (no audit trail) without
+      // reopening the year first.
+      const { rows: [locked] } = await pool.query(
+        `SELECT 1 FROM fee_year_close
+         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
+        [school_id, entry.academic_year]
+      )
+      if (locked) {
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to delete entries.' }, { status: 409 })
+      }
       if (entry.status === 'paid' || entry.status === 'waived')
         return NextResponse.json({ error: `Cannot delete a ${entry.status} entry` }, { status: 400 })
       if (Number(entry.amount_paid) > 0)

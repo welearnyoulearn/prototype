@@ -140,6 +140,19 @@ export async function POST(req: NextRequest) {
 
       await client.query('BEGIN')
 
+      // Block assignment changes on a closed year — every other mutating fee
+      // route already has this guard; this one writes amount_due directly
+      // onto the ledger (below) just like structures/amend, so it needs it too.
+      const { rows: [closedYear] } = await client.query(
+        `SELECT 1 FROM fee_year_close
+         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
+        [school_id, academic_year]
+      )
+      if (closedYear) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to change variable-fee assignments.' }, { status: 409 })
+      }
+
       // Snapshot existing amounts BEFORE wiping (for audit trail)
       const { rows: existing } = await client.query(
         `SELECT student_id, fee_category_id, amount

@@ -295,6 +295,14 @@ async function handleDELETE(req: NextRequest) {
         return NextResponse.json({ error: 'Waiver not found or already revoked' }, { status: 404 })
       }
 
+      // Lock the ledger row before re-deriving amounts from it — unlike every
+      // other ledger-mutating handler in this file (waivers POST, PATCH), this
+      // one writes amount_paid/waiver_amount back as absolute values computed
+      // from fresh SUMs below. Without a lock, a concurrent payment or waiver
+      // committed between those SUMs and this handler's own UPDATE would be
+      // silently overwritten by the stale absolute values computed here.
+      await client.query(`SELECT 1 FROM student_fee_ledger WHERE id = $1 FOR UPDATE`, [waiver.ledger_id])
+
       // Reverse waiver from ledger — recalculate status correctly
       // Sum actual confirmed payments (real cash only, not waivers)
       const { rows: [actualPaid] } = await client.query(
