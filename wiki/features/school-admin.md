@@ -66,7 +66,7 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Fee Management | Built | Fee categories, structures by grade, ledger, payments (cash/cheque/DD/online/UPI), waivers, collection stats |
+| Fee Management | Built | Fee categories, structures by grade, ledger, payments (cash/cheque/DD/online/UPI), waivers, collection stats, past-records archive. See `wiki/features/fee-management.md` |
 | Year Rollover | Built | Preview promotion, execute rollover, archive history, set new academic year |
 
 ### Tools

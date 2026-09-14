@@ -6,6 +6,24 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 
 <!-- Add new entries at the top -->
 
+### Fee Management v2 rebuild — consolidated rollover, past-records archive (#119)
+**Type:** Feature
+**Portal:** School Admin
+**Assigned to:** Kowsik
+**Branch:** feature/119-fee-management-v2
+**Started:** 2026-09-14
+**Summary:** In-place rebuild of the fee system toward a modern, single tool covering structure setup, collection, year rollover, and past records — mirroring the Exam Schedule/Marks v2 rebuild (#104): same nav entry and feature flag, rewritten in place across sequential commits rather than a parallel build. Full detail: `wiki/features/fee-management.md`.
+**Progress:**
+- [x] Consolidated duplicated year-end/year-rollover logic into `lib/feeRollover.ts` (get-or-create system category, close-out-a-bill, carry-forward-a-bill, race-safe year-close claim, remaining-open-balance aggregate)
+- [x] Fixed a real concurrency gap: year-end's apply action had no claim lock (unlike year-rollover), so concurrent double-submits could double-apply carry-forward/write-off — now serialized per `(school_id, academic_year)` via `pg_advisory_xact_lock`
+- [x] New read-only `/api/fees/archive` endpoint — every academic year's headline + close status, reusing existing `student_fee_ledger`/`fee_year_close` data (no new tables)
+- [x] New "Past Records" tab in `FeeManagement.tsx` browsing archived years, linking into the existing Reports/Ledger tabs scoped to a chosen year
+- [x] `tsc --noEmit` clean; `eslint` shows no new problem categories vs. the pre-existing baseline
+- [ ] Full split of `FeeManagement.tsx` (6,500+ lines, 8 tabs, real cross-tab state coupling) into per-tab components + a Zustand store — deferred to an incremental follow-up, one tab at a time with testing between each, rather than one large unverified diff
+- [ ] Run `e2e/workflow-fee-management.spec.ts` (109 cases) — blocked locally on missing `E2E_PLATFORM_ADMIN_EMAIL`/`PASSWORD` for a platform admin that already exists in the shared dev DB
+- [ ] Extend the e2e spec with cases for the archive endpoint and the year-end race fix
+- [ ] Open PR linked to #119
+
 ### Feedback Management — public form + admin dashboard (#TBD)
 **Type:** Feature
 **Portal:** School Admin (public-facing entry point outside all portals) / Platform Admin (feature toggle)
