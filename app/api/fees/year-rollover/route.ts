@@ -45,6 +45,15 @@ export async function POST(req: NextRequest) {
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     const done_by = access.actor
 
+    // academic_years.label has no server-side format validation elsewhere in the app,
+    // but this route computes the *next* label from it and uses that to build a real
+    // DATE literal below — a non-"YYYY-YY" label would otherwise fail deep inside the
+    // transaction (or worse, silently produce a wrong-but-parseable target year for a
+    // bare numeric label like "2025").
+    if (!/^\d{4}-\d{2}$/.test(from_year)) {
+      return NextResponse.json({ error: `Academic year label "${from_year}" is not in "YYYY-YY" format — cannot compute the next year.` }, { status: 400 })
+    }
+
     const to_year = nextAcademicYearLabel(from_year)
     const toStartYear = parseInt(to_year.split('-')[0])
 
@@ -85,6 +94,15 @@ export async function POST(req: NextRequest) {
 
       await client.query('BEGIN')
 
+      // Serialize against year-end's apply/close actions for this same (school_id,
+      // academic_year) — same advisory lock key as year-end/route.ts. Without this,
+      // year-end apply (which takes this lock) and this route (which only relied on
+      // the row-claim below) could both be mid-flight on the same year at once: the
+      // row-claim only stops two rollovers from racing each other, not a rollover
+      // racing a concurrent year-end apply, since neither writes to fee_year_close
+      // until after they've already started mutating ledger rows.
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`fee-year-close:${school_id}:${from_year}`])
+
       // Claim the close immediately, inside the transaction, before any carry-forward
       // work happens — the "already rolled over?" check above ran before BEGIN with no
       // lock, so two concurrent rollover requests (double-click, two tabs) could both
@@ -120,9 +138,9 @@ export async function POST(req: NextRequest) {
       const { rows: unpaidStudents } = await client.query(
         `SELECT l.student_id,
                 SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)) AS balance,
-                array_agg(l.id) AS ledger_ids,
-                array_agg(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)) AS balances,
-                array_agg(l.amount_paid) AS amounts_paid,
+                array_agg(l.id ORDER BY l.id) AS ledger_ids,
+                array_agg(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) ORDER BY l.id) AS balances,
+                array_agg(l.amount_paid ORDER BY l.id) AS amounts_paid,
                 string_agg(fc.name || ' - ' || l.period_label, ', ' ORDER BY l.id) AS breakdown
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id

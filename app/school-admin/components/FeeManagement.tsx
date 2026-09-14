@@ -623,7 +623,7 @@ export default function FeeManagement({
     end_date: string
     is_current: boolean
     student_count: number
-    summary: { total_billed: number; total_collected: number; total_waived: number; total_unpaid: number }
+    summary: { total_billed: number; total_collected: number; total_waived: number; discretionary_waived: number; total_unpaid: number }
     close_status: {
       closed_at: string; closed_by: string; is_reopened: boolean
       carried: { count: number; total: number }
@@ -5645,7 +5645,7 @@ export default function FeeManagement({
                       {[
                         { l: 'Billed',    v: y.summary.total_billed,    c: 'text-gray-900' },
                         { l: 'Collected', v: y.summary.total_collected, c: 'text-green-700' },
-                        { l: 'Waived',    v: y.summary.total_waived,    c: 'text-purple-700' },
+                        { l: 'Waived',    v: y.summary.discretionary_waived ?? y.summary.total_waived, c: 'text-purple-700' },
                         { l: 'Unpaid',    v: y.summary.total_unpaid,    c: 'text-red-600' },
                       ].map(s => (
                         <div key={s.l} className="bg-gray-50 rounded-lg px-2.5 py-2 text-center">

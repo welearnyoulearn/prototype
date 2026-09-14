@@ -20,12 +20,25 @@ export async function GET(req: NextRequest) {
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const { rows } = await pool.query(
-      `SELECT
+      `WITH discretionary_waivers AS (
+         -- Excludes 'carry_forward' bookkeeping waivers (the zeroing entries written
+         -- when a bill is carried/passed-out) — same exclusion Reports and Year-End
+         -- apply, so "Waived" means the same thing on every tab for the same year.
+         SELECT l.academic_year, COALESCE(SUM(w.waiver_amount), 0) AS total
+         FROM fee_waivers w
+         JOIN student_fee_ledger l ON l.id = w.ledger_id
+         WHERE w.school_id = $1
+           AND COALESCE(w.is_revoked, FALSE) = FALSE
+           AND w.waiver_type != 'carry_forward'
+         GROUP BY l.academic_year
+       )
+       SELECT
          ay.label                          AS academic_year,
          ay.start_date, ay.end_date, ay.is_current,
          COALESCE(SUM(l.amount_due), 0)                                                             AS total_billed,
          COALESCE(SUM(l.amount_paid), 0)                                                             AS total_collected,
          COALESCE(SUM(COALESCE(l.waiver_amount, 0)), 0)                                              AS total_waived,
+         COALESCE(dw.total, 0)                                                                       AS discretionary_waived,
          COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)), 0)   AS total_unpaid,
          COUNT(DISTINCT l.student_id)                                                                AS student_count,
          fyc.closed_at, fyc.closed_by, fyc.is_reopened,
@@ -34,8 +47,9 @@ export async function GET(req: NextRequest) {
        FROM academic_years ay
        LEFT JOIN student_fee_ledger l ON l.school_id = ay.school_id AND l.academic_year = ay.label
        LEFT JOIN fee_year_close fyc ON fyc.school_id = ay.school_id AND fyc.academic_year = ay.label
+       LEFT JOIN discretionary_waivers dw ON dw.academic_year = ay.label
        WHERE ay.school_id = $1
-       GROUP BY ay.id, ay.label, ay.start_date, ay.end_date, ay.is_current,
+       GROUP BY ay.id, ay.label, ay.start_date, ay.end_date, ay.is_current, dw.total,
                 fyc.closed_at, fyc.closed_by, fyc.is_reopened,
                 fyc.carried_count, fyc.carried_total, fyc.writeoff_count, fyc.writeoff_total,
                 fyc.open_count, fyc.open_total
@@ -53,6 +67,7 @@ export async function GET(req: NextRequest) {
         total_billed: parseFloat(r.total_billed),
         total_collected: parseFloat(r.total_collected),
         total_waived: parseFloat(r.total_waived),
+        discretionary_waived: parseFloat(r.discretionary_waived),
         total_unpaid: parseFloat(r.total_unpaid),
       },
       close_status: r.closed_at ? {
