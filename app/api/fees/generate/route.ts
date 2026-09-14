@@ -26,6 +26,18 @@ export async function POST(req: NextRequest) {
       }
       const dueDate: string = yearRow.end_date
 
+      // Block generating/re-syncing bills on a closed year — both the new-ledger
+      // INSERT and the grade-resync UPDATE below write amount_due onto student
+      // ledgers, same as every other mutating fee route.
+      const { rows: [closedYear] } = await pool.query(
+        `SELECT 1 FROM fee_year_close
+         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
+        [school_id, academic_year]
+      )
+      if (closedYear) {
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to generate bills.' }, { status: 409 })
+      }
+
       // Get fee structures (fixed categories only — variable handled via assignments)
       const { rows: structures } = await pool.query(
         `SELECT fs.*, fc.name AS category_name, fc.frequency,

@@ -108,8 +108,12 @@ async function handlePOST(req: NextRequest) {
         }
         const value = Number.isFinite(numericValue) ? numericValue : 0
         if (waiver_type === 'percentage') {
-          // BUG 7 fix: apply percentage to remaining balance, not full amount_due
-          waiver_amount = Math.round(remaining * value) / 100
+          // BUG 7 fix: apply percentage to remaining balance, not full amount_due.
+          // Capped at remaining, same as fixed_amount below — a value over 100
+          // (e.g. 150 typed instead of 15) would otherwise waive more than the
+          // bill's remaining balance, the exact "impossible state" the
+          // structures/amend overpay guard exists to prevent elsewhere.
+          waiver_amount = Math.min(Math.round(remaining * value) / 100, remaining)
         } else if (waiver_type === 'fixed_amount') {
           // BUG 8 fix: cap fixed waiver at remaining balance
           waiver_amount = Math.min(value, remaining)

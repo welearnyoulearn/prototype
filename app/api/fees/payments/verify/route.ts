@@ -88,6 +88,21 @@ async function handlePOST(req: NextRequest) {
       }
 
       if (action === 'approve') {
+        // Block crediting a closed year's ledger — reject doesn't touch the
+        // ledger at all (only flips payment_status), so it stays allowed
+        // regardless of year-close state; approve does, so it needs the same
+        // guard every other ledger-mutating fee route has.
+        const { rows: [closedYear] } = await client.query(
+          `SELECT 1 FROM fee_year_close fyc
+           JOIN student_fee_ledger l ON l.academic_year = fyc.academic_year AND l.school_id = fyc.school_id
+           WHERE l.id = $1 AND fyc.school_id = $2 AND fyc.is_reopened = FALSE`,
+          [payment.ledger_id, pmtRow.school_id]
+        )
+        if (closedYear) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'This academic year is closed. Reopen it to approve this payment.' }, { status: 409 })
+        }
+
         // Mark payment as completed
         await client.query(
           `UPDATE fee_payments
