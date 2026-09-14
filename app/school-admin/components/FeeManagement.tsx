@@ -10,6 +10,7 @@ import type {
 } from './fee-management/types'
 import { escapeHtml, printDualCopyReceipt, writeAndPrint, renderHeaderBlocks } from './fee-management/receipts'
 import FeeArchiveTab from './fee-management/FeeArchiveTab'
+import FeeLeaversTab, { type RemovedStudent } from './fee-management/FeeLeaversTab'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -551,38 +552,10 @@ export default function FeeManagement({
 
   // ── Leavers & Dues: students removed from the school (status != 'active', not
   // in the passout ledger) who still carry an unresolved balance from a prior year ──
-  type RemovedStudent = {
-    student_id: number
-    student_name: string
-    roll_number: string
-    grade: string | null
-    section: string | null
-    student_status: string
-    passout_year: string | null
-    total_billed: number
-    total_collected: number
-    outstanding: number
-    academic_years: string[]
-  }
-  const [removedData, setRemovedData] = useState<{
-    summary: { student_count: number; total_outstanding: number }
-    students: RemovedStudent[]
-  } | null>(null)
-  const [removedLoading, setRemovedLoading] = useState(false)
-  const loadRemovedStudents = useCallback(async () => {
-    setRemovedLoading(true)
-    try {
-      const res = await fetch(`/api/fees/removed-students?school_id=${schoolId}`)
-      if (res.ok) { clearLoadError('removed'); setRemovedData(await res.json()) }
-      else setLoadError('removed', 'Could not load removed-student dues — try refreshing')
-    } catch { setLoadError('removed', 'Network error — could not load removed-student dues') }
-    finally { setRemovedLoading(false) }
-  }, [schoolId])
-  useEffect(() => { if (activeTab === 'leavers') loadRemovedStudents() }, [activeTab, loadRemovedStudents])
-
-  const [removedCollectLoading, setRemovedCollectLoading] = useState<number | null>(null)
+  // Leavers tab is extracted (fee-management/FeeLeaversTab.tsx); this function
+  // stays here because it primes several pieces of Collect-tab state that this
+  // component owns — the tab itself just calls it via a prop.
   async function collectRemovedStudent(s: RemovedStudent) {
-    setRemovedCollectLoading(s.student_id)
     try {
       const allEntries: LedgerEntry[] = []
       for (const yr of s.academic_years) {
@@ -590,7 +563,7 @@ export default function FeeManagement({
         if (res.ok) allEntries.push(...(await res.json() as LedgerEntry[]))
       }
       const open = allEntries.filter(e => ['pending', 'partial', 'overdue'].includes(e.status))
-      if (open.length === 0) { setPayError('No outstanding dues found for this student'); setRemovedCollectLoading(null); return }
+      if (open.length === 0) { setPayError('No outstanding dues found for this student'); return }
       const row: StudentRow = {
         student_id: s.student_id, student_name: s.student_name, roll_number: s.roll_number,
         school_roll_number: null, grade: s.grade ?? '—', section: s.section ?? '',
@@ -614,7 +587,6 @@ export default function FeeManagement({
       // students — openStudent falls back to this when the id isn't in studentRows.
       setPassoutOpenStudent(row)
     } catch { setPayError('Network error — could not load this student\'s dues') }
-    setRemovedCollectLoading(null)
   }
 
   // ── Past Records (Archive tab, extracted into fees/FeeArchiveTab.tsx) ──
@@ -623,6 +595,8 @@ export default function FeeManagement({
   // switching away and back, instead of refetching from an empty state every time.
   const [archiveVisited, setArchiveVisited] = useState(false)
   useEffect(() => { if (activeTab === 'archive') setArchiveVisited(true) }, [activeTab])
+  const [leaversVisited, setLeaversVisited] = useState(false)
+  useEffect(() => { if (activeTab === 'leavers') setLeaversVisited(true) }, [activeTab])
 
   // Jump from an archived year's card into the existing Reports/Ledger tabs, scoped
   // to that year — reuses those tabs' own data-fetching rather than duplicating a
@@ -5591,81 +5565,9 @@ export default function FeeManagement({
       )}
 
       {/* ══ LEAVERS & DUES ════════════════════════════════════════════════════════ */}
-      {activeTab === 'leavers' && (
-        <div className="space-y-5">
-          <LoadErrorBanner sectionKey="removed" onRetry={loadRemovedStudents} />
-
-          <div>
-            <h2 className="text-base font-semibold text-gray-800">Leavers & Dues</h2>
-            <p className="text-sm text-gray-500 mt-0.5">
-              Every student no longer on the active roster — graduated/passout or otherwise removed —
-              who still has unresolved dues. Nothing here is deleted, so amounts owed stay visible and collectible.
-            </p>
-          </div>
-
-          {removedLoading && !removedData ? (
-            <div className="bg-white rounded-xl border border-gray-100 p-10 text-center text-gray-400 text-sm">Loading…</div>
-          ) : removedData && removedData.students.length === 0 ? (
-            <div className="bg-white rounded-xl border border-dashed border-gray-200 p-10 text-center">
-              <p className="text-gray-500 text-sm">No removed students with outstanding dues.</p>
-            </div>
-          ) : removedData && (
-            <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-gray-50">
-                <p className="text-sm font-semibold text-gray-700">
-                  {removedData.summary.student_count} student{removedData.summary.student_count === 1 ? '' : 's'} · {fmt(removedData.summary.total_outstanding)} outstanding
-                </p>
-                <button onClick={loadRemovedStudents} disabled={removedLoading}
-                  className="text-xs text-gray-500 hover:text-gray-700">
-                  {removedLoading ? '…' : '↻ Refresh'}
-                </button>
-              </div>
-              <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr className="text-xs text-gray-500 border-b border-gray-100">
-                    <th className="text-left px-4 py-2 font-semibold">Student</th>
-                    <th className="text-left px-4 py-2 font-semibold">Status</th>
-                    <th className="text-left px-4 py-2 font-semibold">Years</th>
-                    <th className="text-right px-4 py-2 font-semibold">Billed</th>
-                    <th className="text-right px-4 py-2 font-semibold">Collected</th>
-                    <th className="text-right px-4 py-2 font-semibold">Outstanding</th>
-                    <th className="text-right px-4 py-2 font-semibold">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50">
-                  {removedData.students.map(s => (
-                    <tr key={s.student_id} className="hover:bg-gray-50/60">
-                      <td className="px-4 py-2.5">
-                        <p className="font-medium text-gray-800">{s.student_name}</p>
-                        <p className="text-xs text-gray-400">
-                          {s.roll_number}{s.grade ? ` · Gr.${s.grade}${s.section || ''}` : ''}
-                        </p>
-                      </td>
-                      <td className="px-4 py-2.5 text-xs text-gray-500 capitalize">
-                        {s.student_status}
-                        {s.passout_year && <span className="block text-[10px] text-gray-400 normal-case">passed out {s.passout_year}</span>}
-                      </td>
-                      <td className="px-4 py-2.5 text-xs text-gray-500">{s.academic_years.filter(y => y !== 'passout').join(', ') || '—'}</td>
-                      <td className="px-4 py-2.5 text-right text-gray-700">{fmt(s.total_billed)}</td>
-                      <td className="px-4 py-2.5 text-right text-green-600">{fmt(s.total_collected)}</td>
-                      <td className="px-4 py-2.5 text-right font-bold text-red-600">{fmt(s.outstanding)}</td>
-                      <td className="px-4 py-2.5 text-right">
-                        <button
-                          data-testid={`btn-leaver-collect-${s.student_id}`}
-                          onClick={() => collectRemovedStudent(s)}
-                          disabled={removedCollectLoading === s.student_id}
-                          className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50">
-                          {removedCollectLoading === s.student_id ? '…' : 'Collect'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              </div>
-            </div>
-          )}
+      {leaversVisited && (
+        <div hidden={activeTab !== 'leavers'}>
+          <FeeLeaversTab schoolId={schoolId} onCollect={collectRemovedStudent} />
         </div>
       )}
 
