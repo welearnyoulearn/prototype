@@ -7,6 +7,8 @@ import { FullPageLoader } from '@/components/loaders'
 import NotificationBell from '../components/NotificationBell'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { useNavHistory } from '@/lib/useNavHistory'
+import NavBackForward from '../components/NavBackForward'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 
@@ -105,7 +107,8 @@ export default function StudentPortal() {
   const [student,     setStudent]     = useState<Student | null>(null)
   const [classId,     setClassId]     = useState(0)
   const [academicYear, setAcademicYear] = useState('')
-  const [activeNav,   setActiveNav]   = useState('dashboard')
+  // In-app Back/Forward for the sidebar nav — see NavBackForward in the topbar below.
+  const { current: activeNav, navigate: setActiveNav, goBack: navGoBack, goForward: navGoForward, canGoBack: navCanGoBack, canGoForward: navCanGoForward } = useNavHistory<string>('dashboard')
   const [visitedNav,  setVisitedNav]  = useState<Set<string>>(new Set(['dashboard']))
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [loading,     setLoading]     = useState(true)
@@ -241,6 +244,7 @@ export default function StudentPortal() {
         </div>
 
         <div className="flex items-center gap-2">
+          <NavBackForward canGoBack={navCanGoBack} canGoForward={navCanGoForward} onBack={navGoBack} onForward={navGoForward} />
           {academicYear && (
             <span
               data-testid="academic-year-badge"
