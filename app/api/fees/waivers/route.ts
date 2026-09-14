@@ -193,13 +193,25 @@ async function handlePATCH(req: NextRequest) {
 
       // Validate: new waiver + existing payments must not exceed amount_due
       const { rows: [lgCheck] } = await client.query(
-        `SELECT amount_due, amount_paid FROM student_fee_ledger WHERE id = $1 FOR UPDATE`, [w0.ledger_id]
+        `SELECT amount_due, amount_paid, academic_year FROM student_fee_ledger WHERE id = $1 FOR UPDATE`, [w0.ledger_id]
       )
       if (parseFloat(lgCheck.amount_paid) + newAmt > parseFloat(lgCheck.amount_due) + 0.01) {
         await client.query('ROLLBACK')
         return NextResponse.json({
           error: `Waiver ₹${newAmt} + already paid ₹${lgCheck.amount_paid} exceeds bill ₹${lgCheck.amount_due}`
         }, { status: 400 })
+      }
+
+      // Block correcting a waiver on a closed year — same guard as every other
+      // mutating fee route.
+      const { rows: [closedYear] } = await client.query(
+        `SELECT 1 FROM fee_year_close
+         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
+        [w0.school_id, lgCheck.academic_year]
+      )
+      if (closedYear) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to correct waivers.' }, { status: 409 })
       }
 
       // Soft-revoke old waiver
@@ -264,7 +276,12 @@ async function handleDELETE(req: NextRequest) {
 
     const client = await pool.connect()
     try {
-      const { rows: [w0] } = await client.query(`SELECT school_id, waiver_type FROM fee_waivers WHERE id = $1`, [id])
+      const { rows: [w0] } = await client.query(
+        `SELECT w.school_id, w.waiver_type, w.ledger_id, l.academic_year
+         FROM fee_waivers w JOIN student_fee_ledger l ON l.id = w.ledger_id
+         WHERE w.id = $1`,
+        [id]
+      )
       if (!w0) return NextResponse.json({ error: 'Waiver not found' }, { status: 404 })
       const access = await requireFeeAccess(w0.school_id)
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -278,6 +295,19 @@ async function handleDELETE(req: NextRequest) {
         return NextResponse.json({
           error: 'This waiver was created automatically during year-end closure and cannot be revoked here. Reopen the academic year to undo the closure instead.',
         }, { status: 409 })
+      }
+
+      // Block revoking a waiver on a closed year — same guard as every other
+      // mutating fee route (payments, waivers POST, structures/amend, etc.).
+      // Missing here previously let a closed year's ledger balance be silently
+      // rewritten (waiver reversed, status recalculated) with no reopen step.
+      const { rows: [closedYear] } = await client.query(
+        `SELECT 1 FROM fee_year_close
+         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
+        [w0.school_id, w0.academic_year]
+      )
+      if (closedYear) {
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to revoke waivers.' }, { status: 409 })
       }
 
       await client.query('BEGIN')
