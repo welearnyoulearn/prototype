@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { gradeOrderSql, FINAL_GRADE, isFinalOrBeyondGrade } from '@/lib/grades'
-import { closeOutBill, getOrCreateSystemFeeCategory, getRemainingOpenSummary, nextAcademicYearLabel, upsertCarryForwardBill } from '@/lib/feeRollover'
+import { closeOutBill, getOrCreateSystemFeeCategory, getRemainingOpenSummary, lockYearClose, nextAcademicYearLabel, upsertCarryForwardBill } from '@/lib/feeRollover'
 
 // ── GET: student-grouped year-end review ────────────────────────────────────────
 // /api/fees/year-end?school_id=X&academic_year=Y
@@ -166,11 +166,9 @@ export async function POST(req: NextRequest) {
       // Serialize all apply/close calls for this (school_id, from_year) — without this,
       // two concurrent requests (double-click, two tabs) could both pass the "not closed"
       // guard below and both mutate the same students' bills before either's fee_year_close
-      // write lands. Advisory lock (not a row lock) because fee_year_close may not have a
-      // row yet on a school's first-ever apply call for a year — same fix as year-rollover's
-      // claim, generalized here to also cover apply, which (unlike rollover) is resumable
-      // across multiple calls before the year is actually closed.
-      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`fee-year-close:${school_id}:${from_year}`])
+      // write lands. Also serializes against year-rollover for the same key — see
+      // lockYearClose's own comment for why this must be the one shared implementation.
+      await lockYearClose(client, school_id, from_year)
 
       // Guard: cannot apply / close a year that is already closed
       const { rows: [existing] } = await client.query(

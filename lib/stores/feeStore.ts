@@ -25,17 +25,18 @@ import type { PendingPayment, StudentRow } from '@/app/school-admin/components/f
 //    synthesized, not-in-Collect's-own-ledger) student's collect form, it can't
 //    reach into Collect's internal state directly anymore, so it hands off the
 //    student row here and Collect's own effect picks it up and clears it.
+// Only versions with a real subscriber exist here — Overview (stats) and Passbook
+// aren't extracted yet and still go through direct callback props, so there's no
+// statsVersion/passbookVersion. Add them when those tabs are extracted and it's
+// clear a store-based signal (vs. a callback prop, like Year-End's onStatsChanged)
+// is actually the right shape for what they need — don't guess ahead of time.
 type FeeStoreState = {
-  statsVersion: number
   reportsVersion: number
   yearEndVersion: number
   ledgerVersion: number
-  passbookVersion: number
-  bumpStats: () => void
   bumpReports: () => void
   bumpYearEnd: () => void
   bumpLedger: () => void
-  bumpPassbook: () => void
 
   pendingPayments: PendingPayment[]
   setPendingPayments: (payments: PendingPayment[]) => void
@@ -54,16 +55,12 @@ type FeeStoreState = {
 }
 
 export const useFeeStore = create<FeeStoreState>((set) => ({
-  statsVersion: 0,
   reportsVersion: 0,
   yearEndVersion: 0,
   ledgerVersion: 0,
-  passbookVersion: 0,
-  bumpStats: () => set(s => ({ statsVersion: s.statsVersion + 1 })),
   bumpReports: () => set(s => ({ reportsVersion: s.reportsVersion + 1 })),
   bumpYearEnd: () => set(s => ({ yearEndVersion: s.yearEndVersion + 1 })),
   bumpLedger: () => set(s => ({ ledgerVersion: s.ledgerVersion + 1 })),
-  bumpPassbook: () => set(s => ({ passbookVersion: s.passbookVersion + 1 })),
 
   pendingPayments: [],
   setPendingPayments: (pendingPayments) => set({ pendingPayments }),

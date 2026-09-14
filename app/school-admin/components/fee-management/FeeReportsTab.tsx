@@ -219,8 +219,8 @@ export default function FeeReportsTab({
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-xs font-medium text-gray-600">Scope:</span>
           <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
-            <button onClick={() => setArScope('school')} className={`px-3 py-1.5 ${arScope === 'school' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>Whole School</button>
-            <button onClick={() => setArScope('class')} className={`px-3 py-1.5 border-l border-gray-200 ${arScope === 'class' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>One Class</button>
+            <button data-testid="btn-audit-scope-school" onClick={() => setArScope('school')} className={`px-3 py-1.5 ${arScope === 'school' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>Whole School</button>
+            <button data-testid="btn-audit-scope-class" onClick={() => setArScope('class')} className={`px-3 py-1.5 border-l border-gray-200 ${arScope === 'class' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>One Class</button>
           </div>
           {arScope === 'class' && (
             <>

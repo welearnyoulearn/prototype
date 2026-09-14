@@ -105,6 +105,21 @@ export async function claimYearClose(
   return !!rowCount
 }
 
+// Takes the advisory lock that serializes year-end's apply/close and year-rollover
+// against each other for the same (school_id, academic_year) — both routes must
+// use this exact same key to mutually exclude each other; a hand-typed copy in one
+// route that drifts from the other silently reopens the cross-route double-apply
+// race this exists to close. Must run inside an open transaction; released on
+// COMMIT/ROLLBACK. Session-level advisory lock, not a row lock, because
+// fee_year_close may not have a row yet on a school's first apply/rollover for a year.
+export async function lockYearClose(
+  client: PoolClient,
+  schoolId: number | string,
+  academicYear: string
+): Promise<void> {
+  await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`fee-year-close:${schoolId}:${academicYear}`])
+}
+
 // Remaining pending/overdue/partial balance for a year, across all students — used
 // both to decide whether a year-end apply auto-closes the year, and to snapshot
 // totals when explicitly closing.

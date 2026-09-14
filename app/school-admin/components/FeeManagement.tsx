@@ -3348,7 +3348,7 @@ export default function FeeManagement({
         <div hidden={activeTab !== 'collect'}>
           <FeeCollectTab
             schoolId={schoolId} academicYear={academicYear} adminName={adminName} branding={branding}
-            hasOnlinePayments={hasOnlinePayments}
+            hasOnlinePayments={hasOnlinePayments} isActive={activeTab === 'collect'}
             onStatsChanged={loadStats} onPassoutChanged={loadPassout}
             onOpenPassbook={(studentId) => { loadPassbook(studentId); setShowPassbookModal(true); setPbSection('payments') }}
             cancelCorrect={{

@@ -87,6 +87,7 @@ export default function FeeCollectTab({
   adminName,
   branding,
   hasOnlinePayments,
+  isActive,
   onStatsChanged,
   onPassoutChanged,
   onOpenPassbook,
@@ -97,6 +98,11 @@ export default function FeeCollectTab({
   adminName?: string
   branding: { school_name: string; logo_url: string | null; logo_align: 'left' | 'center' | 'right'; receipt_header_blocks: ReceiptHeaderBlock[] }
   hasOnlinePayments: boolean
+  // Whether this tab is the one currently visible (vs. mounted-but-hidden) — used
+  // only to re-poll pendingPayments on every revisit, since online payments arrive
+  // from parents independent of any admin action here and so have no store bump
+  // to hang a refresh on, unlike ledger/reports/year-end.
+  isActive: boolean
   onStatsChanged: () => void
   onPassoutChanged: () => void
   onOpenPassbook: (studentId: number) => void
@@ -214,7 +220,9 @@ export default function FeeCollectTab({
     setPendingLoading(false)
   }, [schoolId, setPendingPayments])
 
-  useEffect(() => { loadPending() }, [loadPending])
+  // Re-poll on every tab revisit, not just mount — a parent's online payment can
+  // arrive at any time with no admin-side action to bump a store version for.
+  useEffect(() => { if (isActive) loadPending() }, [isActive, loadPending])
 
   async function verifyPayment(paymentId: number, action: 'approve' | 'reject') {
     setVerifyingId(paymentId); setVerifyMsg('')
@@ -500,7 +508,7 @@ export default function FeeCollectTab({
 
       {/* Online payments alert banner — only when feature enabled */}
       {hasOnlinePayments && pendingPayments.length > 0 && collectionView !== 'online' && (
-        <button onClick={() => setCollectionView('online')}
+        <button data-testid="btn-online-payments-alert" onClick={() => setCollectionView('online')}
           className="w-full flex items-center justify-between bg-red-50 border border-red-200 rounded-xl px-4 py-3 hover:bg-red-100 transition-colors">
           <span className="flex items-center gap-2 text-sm font-medium text-red-700">
             <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
@@ -518,7 +526,7 @@ export default function FeeCollectTab({
           { key: 'defaulters', label: 'Pending Payments', show: true },
           { key: 'dayclose',   label: 'Day Close',     show: true },
         ] as const).filter(v => v.show).map(v => (
-          <button key={v.key} onClick={() => setCollectionView(v.key)}
+          <button key={v.key} data-testid={`tab-collect-${v.key}`} onClick={() => setCollectionView(v.key)}
             className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
               collectionView === v.key ? 'bg-white text-blue-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
             }`}>

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { FINAL_GRADE } from '@/lib/grades'
-import { claimYearClose, closeOutBill, getOrCreateSystemFeeCategory, nextAcademicYearLabel, upsertCarryForwardBill } from '@/lib/feeRollover'
+import { claimYearClose, closeOutBill, getOrCreateSystemFeeCategory, lockYearClose, nextAcademicYearLabel, upsertCarryForwardBill } from '@/lib/feeRollover'
 
 // GET /api/fees/year-rollover?school_id=X
 // Returns list of closed academic years for this school.
@@ -95,13 +95,13 @@ export async function POST(req: NextRequest) {
       await client.query('BEGIN')
 
       // Serialize against year-end's apply/close actions for this same (school_id,
-      // academic_year) — same advisory lock key as year-end/route.ts. Without this,
-      // year-end apply (which takes this lock) and this route (which only relied on
-      // the row-claim below) could both be mid-flight on the same year at once: the
-      // row-claim only stops two rollovers from racing each other, not a rollover
-      // racing a concurrent year-end apply, since neither writes to fee_year_close
-      // until after they've already started mutating ledger rows.
-      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`fee-year-close:${school_id}:${from_year}`])
+      // academic_year) — without this, year-end apply (which takes this lock) and
+      // this route (which only relied on the row-claim below) could both be
+      // mid-flight on the same year at once: the row-claim only stops two rollovers
+      // from racing each other, not a rollover racing a concurrent year-end apply,
+      // since neither writes to fee_year_close until after they've already started
+      // mutating ledger rows.
+      await lockYearClose(client, school_id, from_year)
 
       // Claim the close immediately, inside the transaction, before any carry-forward
       // work happens — the "already rolled over?" check above ran before BEGIN with no

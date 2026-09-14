@@ -58,6 +58,7 @@ export default function FeeYearEndTab({
   onPassoutChanged: () => void
 }) {
   const yearEndVersion = useFeeStore(s => s.yearEndVersion)
+  const bumpReports = useFeeStore(s => s.bumpReports)
 
   const [yearEnd, setYearEnd]               = useState<YearEndState | null>(null)
   const [yearEndLoading, setYearEndLoading] = useState(false)
@@ -146,7 +147,7 @@ export default function FeeYearEndTab({
       const passoutPart = d.passout?.count > 0 ? `, ${d.passout.count} to passout ledger (${fmt(d.passout.total)})` : ''
       const closedPart = d.closed ? ` — ${academicYear} is now fully resolved and closed.` : ''
       setYeMsg(`✓ Applied — ${d.carried.count} carried (${fmt(d.carried.total)}), ${d.writeoff.count} written off (${fmt(d.writeoff.total)})${passoutPart}${closedPart}`)
-      loadYearEnd(); onStatsChanged(); onLedgerChanged()
+      loadYearEnd(); onStatsChanged(); onLedgerChanged(); bumpReports()
       if (d.closed) onAcademicYearsChanged()
       if (d.passout?.count > 0) onPassoutChanged()
     } else {
@@ -184,7 +185,7 @@ export default function FeeYearEndTab({
       // No pending dues — rolled over immediately
       setRolloverDone(true)
       setRolloverMsg(`✓ Rolled over to ${d.to_year} — ${d.dues_carried} student${d.dues_carried !== 1 ? 's' : ''} carried (${fmt(d.dues_amount)})`)
-      loadYearEnd(); onStatsChanged(); onAcademicYearsChanged(); onLedgerChanged()
+      loadYearEnd(); onStatsChanged(); onAcademicYearsChanged(); onLedgerChanged(); bumpReports()
     } else {
       setRolloverMsg(d.error || 'Rollover failed')
     }
@@ -202,7 +203,7 @@ export default function FeeYearEndTab({
       setRolloverDone(true)
       setRolloverPreview(null)
       setRolloverMsg(`✓ Rolled over to ${d.to_year} — ${d.dues_carried} student${d.dues_carried !== 1 ? 's' : ''} carried (${fmt(d.dues_amount)})`)
-      loadYearEnd(); onStatsChanged(); onAcademicYearsChanged(); onLedgerChanged()
+      loadYearEnd(); onStatsChanged(); onAcademicYearsChanged(); onLedgerChanged(); bumpReports()
     } else {
       setRolloverMsg(d.error || 'Rollover failed')
     }
