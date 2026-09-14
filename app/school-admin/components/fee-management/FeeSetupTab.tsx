@@ -74,6 +74,7 @@ function blockNonNumericKeys(e: ReactKeyboardEvent<HTMLInputElement>) {
 type VarGridStudent = { id: number; name: string; roll_number: string; section: string }
 type VarGridCategory = { id: number; name: string; frequency: string }
 type StructureHistoryRow = { id: number; grade: string; old_amount: number | null; new_amount: number; old_due_day: number | null; new_due_day: number; change_type: string; changed_by: string; changed_at: string }
+type CategoryChangeRow = { id: number; field_changed: string; old_value: string | null; new_value: string | null; changed_by: string; changed_at: string }
 
 // Fee heads, per-grade/per-student amounts, plan lock, and the combined
 // variable-fee grid. categories/structures/structureLock/amendments/
@@ -185,6 +186,16 @@ export default function FeeSetupTab({
   const [structHistories, setStructHistories]   = useState<Record<number, StructureHistoryRow[]>>({})
   const [structHistLoading, setStructHistLoading] = useState(false)
   const [structHistError, setStructHistError]   = useState('')
+  // Variable fees have no per-grade amount to track structurally (amounts are
+  // set per-student via applicability/the variable-fee grid) — structure-history
+  // genuinely doesn't apply to them, unlike fixed fees. category-changelog (category-
+  // level field changes: type switches, active toggles, name/description edits)
+  // is the closest real equivalent, so a variable fee's History button reads from
+  // this instead of always showing an empty structure-history result.
+  const [catChangelogId, setCatChangelogId]     = useState<number | null>(null)
+  const [catChangelogs, setCatChangelogs]       = useState<Record<number, CategoryChangeRow[]>>({})
+  const [catChangelogLoading, setCatChangelogLoading] = useState(false)
+  const [catChangelogError, setCatChangelogError] = useState('')
 
   // Load the school's UPI ID once, the first time Fee Plan opens — this
   // component only mounts starting from that first visit (lazy-mount-once,
@@ -555,6 +566,19 @@ export default function FeeSetupTab({
       } catch { setStructHistError('Network error') }
     }
     setStructHistLoading(false)
+  }
+
+  async function loadCatChangelog(catId: number) {
+    if (catChangelogId === catId) { setCatChangelogId(null); return }
+    setCatChangelogId(catId); setCatChangelogLoading(true); setCatChangelogError('')
+    if (!catChangelogs[catId]) {
+      try {
+        const r = await fetch(`/api/fees/category-changelog?school_id=${schoolId}&category_id=${catId}`)
+        if (r.ok) { const rows = await r.json(); setCatChangelogs(p => ({ ...p, [catId]: rows })) }
+        else setCatChangelogError('Could not load change history')
+      } catch { setCatChangelogError('Network error') }
+    }
+    setCatChangelogLoading(false)
   }
 
   return (
@@ -1023,7 +1047,9 @@ export default function FeeSetupTab({
                           {planManageCatId === cat.id ? 'Close' : 'Manage →'}
                         </button>
                       )}
-                      <button onClick={() => loadStructHistory(cat.id)}
+                      <button
+                        data-testid={`btn-fee-history-${cat.id}`}
+                        onClick={() => cat.category_type === 'variable' ? loadCatChangelog(cat.id) : loadStructHistory(cat.id)}
                         className="text-xs border border-gray-200 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-50">
                         History
                       </button>
@@ -1035,7 +1061,7 @@ export default function FeeSetupTab({
                       )}
                     </div>
 
-                    {/* Structure history inline */}
+                    {/* Structure history inline — fixed fees only (per-grade amounts) */}
                     {structHistCatId === cat.id && (
                       <div className="mt-3 bg-indigo-50 rounded-lg p-2 text-[10px] max-h-40 overflow-y-auto">
                         <p className="font-semibold text-indigo-700 mb-1 uppercase tracking-wide">Amount Change History</p>
@@ -1048,6 +1074,32 @@ export default function FeeSetupTab({
                                 <span className="font-semibold text-indigo-600">Gr.{h.grade}</span>
                                 {h.old_amount !== null && <><span className="line-through text-gray-400">₹{h.old_amount}</span><span className="text-gray-300">→</span></>}
                                 <span className="font-bold text-indigo-800">₹{h.new_amount}</span>
+                                <span className="text-gray-400">· {h.changed_by}</span>
+                                <span className="text-gray-400">· {new Date(h.changed_at).toLocaleDateString('en-IN', { day:'2-digit', month:'short' })}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Category changelog inline — variable fees (no per-grade amount to
+                        track; this shows category-level changes like type/active/name
+                        instead). Per-student amount changes live on each student's own
+                        Passbook, not here — there's no single "history" for a category
+                        whose amounts are set per student. */}
+                    {catChangelogId === cat.id && (
+                      <div className="mt-3 bg-indigo-50 rounded-lg p-2 text-[10px] max-h-40 overflow-y-auto">
+                        <p className="font-semibold text-indigo-700 mb-1 uppercase tracking-wide">Change History</p>
+                        {catChangelogLoading ? <p className="text-indigo-400">Loading…</p> :
+                          catChangelogError ? <p className="text-red-500 text-[10px]">{catChangelogError}</p> :
+                          !(catChangelogs[cat.id]?.length) ? <p className="text-gray-400 italic">No changes recorded yet.</p> : (
+                          <div className="space-y-1">
+                            {catChangelogs[cat.id].map(h => (
+                              <div key={h.id} className="bg-white rounded px-2 py-1 border border-indigo-100 flex items-center gap-2 flex-wrap">
+                                <span className="font-semibold text-indigo-600 capitalize">{h.field_changed.replace(/_/g, ' ')}</span>
+                                {h.old_value !== null && <><span className="line-through text-gray-400">{h.old_value}</span><span className="text-gray-300">→</span></>}
+                                <span className="font-bold text-indigo-800">{h.new_value}</span>
                                 <span className="text-gray-400">· {h.changed_by}</span>
                                 <span className="text-gray-400">· {new Date(h.changed_at).toLocaleDateString('en-IN', { day:'2-digit', month:'short' })}</span>
                               </div>
