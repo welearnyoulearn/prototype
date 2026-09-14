@@ -19,7 +19,8 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 - [x] New read-only `/api/fees/archive` endpoint — every academic year's headline + close status, reusing existing `student_fee_ledger`/`fee_year_close` data (no new tables)
 - [x] New "Past Records" tab in `FeeManagement.tsx` browsing archived years, linking into the existing Reports/Ledger tabs scoped to a chosen year
 - [x] `tsc --noEmit` clean; `eslint` shows no new problem categories vs. the pre-existing baseline
-- [ ] Full split of `FeeManagement.tsx` (6,500+ lines, 8 tabs, real cross-tab state coupling) into per-tab components + a Zustand store — deferred to an incremental follow-up, one tab at a time with testing between each, rather than one large unverified diff
+- [x] Split `FeeManagement.tsx` (6,478 lines, 8 tabs, real cross-tab state coupling) into per-tab components under `app/school-admin/components/fee-management/`, one tab at a time with `tsc`/`eslint` verification between each: Archive, Leavers, Reports, Year-End, Collect done — parent down to 3,778 lines. First real use of Zustand in this repo (`lib/stores/feeStore.ts`) for cross-tab refresh signaling and one-shot request handoffs (e.g. Leavers/Overview handing a synthesized student row to Collect's payment form).
+- [ ] Remaining 3 tabs: Overview, Setup (+Applicability), Student Passbook — Passbook needs the same `cancelCorrect`-bundle wiring Collect got, since payment cancel/correct and waiver revoke/correct are shared between them
 - [ ] Run `e2e/workflow-fee-management.spec.ts` (109 cases) — blocked locally on missing `E2E_PLATFORM_ADMIN_EMAIL`/`PASSWORD` for a platform admin that already exists in the shared dev DB
 - [ ] Extend the e2e spec with cases for the archive endpoint and the year-end race fix
 - [ ] Open PR linked to #119
