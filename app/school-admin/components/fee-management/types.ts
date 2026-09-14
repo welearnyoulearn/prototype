@@ -198,6 +198,35 @@ export type StudentRow = {
   has_overdue: boolean; never_paid: boolean
 }
 
+export type RecentPayment = {
+  id: number; student_name: string; grade: string; section: string
+  roll_number: string; category_name: string; period_label: string
+  amount: number; payment_mode: string; receipt_number: string; paid_date: string
+}
+
+export type GradeStat = {
+  grade: string; section?: string; students: number
+  total_due: number; total_collected: number; total_waived?: number; outstanding: number
+  fully_paid_students?: number; defaulter_students?: number
+}
+
+export type PassoutStudent = {
+  student_id: number; student_name: string; roll_number: string
+  grade: string; section: string; passout_year: string
+  outstanding: number; total_collected: number
+}
+export type PassoutData = {
+  summary: {
+    passout_students: number; total_billed: number
+    total_collected: number; total_waived: number; total_outstanding: number
+  }
+  students: PassoutStudent[]
+  recent_collections: Array<{
+    id: number; student_name: string; amount: number; payment_mode: string
+    paid_date: string; receipt_number: string; period_label: string
+  }>
+}
+
 export type ReceiptCardData = {
   school_name: string
   logo_url: string | null
