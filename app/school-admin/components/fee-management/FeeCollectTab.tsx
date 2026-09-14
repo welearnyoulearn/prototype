@@ -792,6 +792,7 @@ export default function FeeCollectTab({
                                       Collect All ({fmt(row.outstanding)})
                                     </button>
                                     <button
+                                      data-testid="btn-grant-waiver"
                                       onClick={() => { setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
                                       className="px-3 py-2 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium">
                                       Grant Waiver
@@ -856,9 +857,9 @@ export default function FeeCollectTab({
                                           {cancelCorrect.pmtId === p.id && (
                                             <div className="mt-2 pt-2 border-t border-amber-100 bg-amber-50 -mx-3 -mb-2 px-3 py-2 rounded-b-lg space-y-2">
                                               <div className="flex gap-2">
-                                                <button onClick={() => cancelCorrect.setMode('cancel')}
+                                                <button data-testid={`btn-counter-payment-mode-cancel-${p.id}`} onClick={() => cancelCorrect.setMode('cancel')}
                                                   className={`text-xs px-3 py-1 rounded-lg font-medium ${cancelCorrect.mode === 'cancel' ? 'bg-red-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}>Cancel</button>
-                                                <button onClick={() => { cancelCorrect.setMode('correct'); cancelCorrect.setAmount(String(p.amount)) }}
+                                                <button data-testid={`btn-counter-payment-mode-correct-${p.id}`} onClick={() => { cancelCorrect.setMode('correct'); cancelCorrect.setAmount(String(p.amount)) }}
                                                   className={`text-xs px-3 py-1 rounded-lg font-medium ${cancelCorrect.mode === 'correct' ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}>Correct Amount</button>
                                               </div>
                                               <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
@@ -878,16 +879,16 @@ export default function FeeCollectTab({
                                                   )}
                                                 </div>
                                               )}
-                                              <input type="text" placeholder="Reason (required — recorded in audit log)"
+                                              <input data-testid={`input-counter-payment-reason-${p.id}`} type="text" placeholder="Reason (required — recorded in audit log)"
                                                 value={cancelCorrect.reason} onChange={e => cancelCorrect.setReason(e.target.value)}
                                                 className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
                                               {cancelCorrect.msg && <p className={`text-xs ${cancelCorrect.msg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{cancelCorrect.msg}</p>}
                                               <div className="flex gap-2">
-                                                <button onClick={() => cancelCorrect.submit('counter')} disabled={cancelCorrect.busy || !cancelCorrect.reason.trim()}
+                                                <button data-testid={`btn-counter-payment-confirm-${p.id}`} onClick={() => cancelCorrect.submit('counter')} disabled={cancelCorrect.busy || !cancelCorrect.reason.trim()}
                                                   className={`text-xs text-white px-4 py-1.5 rounded-lg font-medium disabled:opacity-50 ${cancelCorrect.mode === 'cancel' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
                                                   {cancelCorrect.busy ? 'Working…' : cancelCorrect.mode === 'cancel' ? `Confirm Cancel (${fmt(p.amount)})` : 'Confirm Correction'}
                                                 </button>
-                                                <button onClick={() => cancelCorrect.setPmtId(null)} className="text-xs text-gray-500 px-3 py-1.5">Close</button>
+                                                <button data-testid={`btn-counter-payment-close-${p.id}`} onClick={() => cancelCorrect.setPmtId(null)} className="text-xs text-gray-500 px-3 py-1.5">Close</button>
                                               </div>
                                             </div>
                                           )}

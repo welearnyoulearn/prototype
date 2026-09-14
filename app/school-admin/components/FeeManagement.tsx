@@ -1191,8 +1191,8 @@ export default function FeeManagement({
                                   {!isCancelled && p.payment_status === 'completed' && (
                                     <div className="flex gap-2 flex-shrink-0">
                                       {cancelPmtId === p.id
-                                        ? <button onClick={() => setCancelPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600 px-2">Close</button>
-                                        : <button onClick={() => {
+                                        ? <button data-testid={`btn-modal-payment-close-${p.id}`} onClick={() => setCancelPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600 px-2">Close</button>
+                                        : <button data-testid={`btn-modal-payment-cancel-correct-${p.id}`} onClick={() => {
                                             const le = pbData?.ledger.find(e => e.id === p.ledger_id)
                                             openCancel(p.id, Number(p.amount), le ? Number(le.balance) : 0)
                                           }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
@@ -1205,9 +1205,9 @@ export default function FeeManagement({
                                 {cancelPmtId === p.id && (
                                   <div className="mt-3 pt-3 border-t border-amber-100 bg-amber-50 -mx-4 -mb-3 px-4 pb-3 rounded-b-xl space-y-2">
                                     <div className="flex gap-2">
-                                      <button onClick={() => setCancelMode('cancel')}
+                                      <button data-testid={`btn-modal-payment-mode-cancel-${p.id}`} onClick={() => setCancelMode('cancel')}
                                         className={`flex-1 text-xs py-1.5 rounded-lg border transition-colors font-medium ${cancelMode === 'cancel' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200'}`}>Cancel Payment</button>
-                                      <button onClick={() => setCancelMode('correct')}
+                                      <button data-testid={`btn-modal-payment-mode-correct-${p.id}`} onClick={() => setCancelMode('correct')}
                                         className={`flex-1 text-xs py-1.5 rounded-lg border transition-colors font-medium ${cancelMode === 'correct' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>Correct Amount</button>
                                     </div>
                                     <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
@@ -1216,19 +1216,19 @@ export default function FeeManagement({
                                         : <>⚠ Cancels {p.receipt_number} and records a new payment with the corrected amount.</>}
                                     </div>
                                     {cancelMode === 'correct' && (
-                                      <input type="number" min="0" value={correctAmount} onChange={e => setCorrectAmount(e.target.value)}
+                                      <input data-testid={`input-modal-payment-correct-amount-${p.id}`} type="number" min="0" value={correctAmount} onChange={e => setCorrectAmount(e.target.value)}
                                         placeholder="Corrected amount (₹)"
                                         className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
                                     )}
-                                    <input type="text" value={cancelReason} onChange={e => setCancelReason(e.target.value)}
+                                    <input data-testid={`input-modal-payment-reason-${p.id}`} type="text" value={cancelReason} onChange={e => setCancelReason(e.target.value)}
                                       placeholder="Reason (required)" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
                                     {cancelMsg && <p className={`text-xs font-medium ${cancelMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{cancelMsg}</p>}
                                     <div className="flex gap-2">
-                                      <button onClick={() => submitCancelCorrect('passbook')} disabled={cancelBusy || !cancelReason.trim()}
+                                      <button data-testid={`btn-modal-payment-confirm-${p.id}`} onClick={() => submitCancelCorrect('passbook')} disabled={cancelBusy || !cancelReason.trim()}
                                         className={`text-sm text-white px-4 py-1.5 rounded-lg font-medium disabled:opacity-50 ${cancelMode === 'cancel' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
                                         {cancelBusy ? 'Working…' : cancelMode === 'cancel' ? `Confirm Cancel` : 'Confirm Correction'}
                                       </button>
-                                      <button onClick={() => setCancelPmtId(null)} className="text-sm text-gray-500 px-3 py-1.5">Close</button>
+                                      <button data-testid={`btn-modal-payment-close-form-${p.id}`} onClick={() => setCancelPmtId(null)} className="text-sm text-gray-500 px-3 py-1.5">Close</button>
                                     </div>
                                   </div>
                                 )}
@@ -1309,8 +1309,8 @@ export default function FeeManagement({
                                   <div className="flex items-center gap-3">
                                     <p className={`text-sm font-bold ${w.is_revoked ? 'text-gray-300 line-through' : 'text-purple-700'}`}>{fmt((w as { waiver_amount?: number }).waiver_amount || 0)}</p>
                                     {!w.is_revoked && (cancelWaiverId === w.id
-                                      ? <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
-                                      : <button onClick={() => {
+                                      ? <button data-testid={`btn-modal-waiver-close-${w.id}`} onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
+                                      : <button data-testid={`btn-modal-waiver-revoke-correct-${w.id}`} onClick={() => {
                                           const ww = w as { id: number; ledger_id?: number; waiver_amount?: number }
                                           openWaiverCorrect({ id: ww.id, ledger_id: ww.ledger_id ?? -1, waiver_amount: ww.waiver_amount ?? 0 })
                                         }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
@@ -1320,9 +1320,9 @@ export default function FeeManagement({
                                 {!w.is_revoked && cancelWaiverId === w.id && (
                                   <div className="mt-3 pt-3 border-t border-amber-100 bg-amber-50 -mx-4 -mb-3 px-4 pb-3 rounded-b-xl space-y-2">
                                     <div className="flex gap-2">
-                                      <button onClick={() => setCancelWaiverMode('revoke')}
+                                      <button data-testid={`btn-modal-waiver-mode-revoke-${w.id}`} onClick={() => setCancelWaiverMode('revoke')}
                                         className={`flex-1 text-xs py-1.5 rounded-lg border font-medium ${cancelWaiverMode === 'revoke' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200'}`}>Revoke Waiver</button>
-                                      <button onClick={() => setCancelWaiverMode('correct')}
+                                      <button data-testid={`btn-modal-waiver-mode-correct-${w.id}`} onClick={() => setCancelWaiverMode('correct')}
                                         className={`flex-1 text-xs py-1.5 rounded-lg border font-medium ${cancelWaiverMode === 'correct' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>Correct Amount</button>
                                     </div>
                                     <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
@@ -1332,7 +1332,7 @@ export default function FeeManagement({
                                     </div>
                                     {cancelWaiverMode === 'correct' && (
                                       <div>
-                                        <input type="number" min="0" value={correctWaiverAmount} onChange={e => setCorrectWaiverAmount(e.target.value)}
+                                        <input data-testid={`input-modal-waiver-correct-amount-${w.id}`} type="number" min="0" value={correctWaiverAmount} onChange={e => setCorrectWaiverAmount(e.target.value)}
                                           placeholder={waiverMaxCorrect !== null ? `max ₹${waiverMaxCorrect.toFixed(2)}` : 'Corrected waiver amount (₹)'}
                                           className={`w-full border rounded-lg px-3 py-1.5 text-sm ${waiverMaxCorrect !== null && parseFloat(correctWaiverAmount) > waiverMaxCorrect + 0.01 ? 'border-red-400 bg-red-50' : 'border-gray-200'}`} />
                                         {waiverMaxCorrect !== null && parseFloat(correctWaiverAmount) > waiverMaxCorrect + 0.01 && (
@@ -1340,15 +1340,15 @@ export default function FeeManagement({
                                         )}
                                       </div>
                                     )}
-                                    <input type="text" value={cancelWaiverReason} onChange={e => setCancelWaiverReason(e.target.value)}
+                                    <input data-testid={`input-modal-waiver-reason-${w.id}`} type="text" value={cancelWaiverReason} onChange={e => setCancelWaiverReason(e.target.value)}
                                       placeholder="Reason (required)" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
                                     {cancelWaiverMsg && <p className={`text-xs font-medium ${cancelWaiverMsg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{cancelWaiverMsg}</p>}
                                     <div className="flex gap-2">
-                                      <button onClick={submitRevokeCorrectWaiver} disabled={cancelWaiverBusy || !cancelWaiverReason.trim()}
+                                      <button data-testid={`btn-modal-waiver-confirm-${w.id}`} onClick={submitRevokeCorrectWaiver} disabled={cancelWaiverBusy || !cancelWaiverReason.trim()}
                                         className={`text-sm text-white px-4 py-1.5 rounded-lg font-medium disabled:opacity-50 ${cancelWaiverMode === 'revoke' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
                                         {cancelWaiverBusy ? 'Working…' : cancelWaiverMode === 'revoke' ? 'Confirm Revoke' : 'Confirm Correction'}
                                       </button>
-                                      <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-sm text-gray-500 px-3 py-1.5">Close</button>
+                                      <button data-testid={`btn-modal-waiver-close-form-${w.id}`} onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-sm text-gray-500 px-3 py-1.5">Close</button>
                                     </div>
                                   </div>
                                 )}

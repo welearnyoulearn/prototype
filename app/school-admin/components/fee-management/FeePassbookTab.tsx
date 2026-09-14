@@ -373,9 +373,9 @@ export default function FeePassbookTab({
                                 {isCancelled ? (
                                   <span className="text-[10px] bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full font-medium">Cancelled</span>
                                 ) : cancelCorrect.pmtId === p.id ? (
-                                  <button onClick={() => cancelCorrect.setPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
+                                  <button data-testid={`btn-passbook-payment-close-${p.id}`} onClick={() => cancelCorrect.setPmtId(null)} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
                                 ) : (
-                                  <button onClick={() => {
+                                  <button data-testid={`btn-passbook-payment-cancel-correct-${p.id}`} onClick={() => {
                                     const le = pbData?.ledger.find(e => e.id === p.ledger_id)
                                     cancelCorrect.open(p.id, Number(p.amount), le ? Number(le.balance) : 0)
                                   }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Cancel / Correct</button>
@@ -388,9 +388,9 @@ export default function FeePassbookTab({
                               <td colSpan={6} className="px-4 py-3">
                                 <div className="space-y-3">
                                   <div className="flex gap-2">
-                                    <button onClick={() => cancelCorrect.setMode('cancel')}
+                                    <button data-testid={`btn-payment-mode-cancel-${p.id}`} onClick={() => cancelCorrect.setMode('cancel')}
                                       className={`text-xs px-3 py-1.5 rounded-lg font-medium ${cancelCorrect.mode === 'cancel' ? 'bg-red-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}>Cancel Payment</button>
-                                    <button onClick={() => { cancelCorrect.setMode('correct'); cancelCorrect.setAmount(String(p.amount)) }}
+                                    <button data-testid={`btn-payment-mode-correct-${p.id}`} onClick={() => { cancelCorrect.setMode('correct'); cancelCorrect.setAmount(String(p.amount)) }}
                                       className={`text-xs px-3 py-1.5 rounded-lg font-medium ${cancelCorrect.mode === 'correct' ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}`}>Correct Amount</button>
                                   </div>
 
@@ -408,7 +408,7 @@ export default function FeePassbookTab({
                                       <label className="text-xs font-medium text-gray-600">
                                         Corrected amount (₹){cancelCorrect.maxCorrect !== null && <span className="ml-1 text-gray-400 font-normal">— max ₹{cancelCorrect.maxCorrect.toFixed(2)}</span>}
                                       </label>
-                                      <input type="number" min="0" inputMode="decimal" value={cancelCorrect.amount}
+                                      <input data-testid={`input-payment-correct-amount-${p.id}`} type="number" min="0" inputMode="decimal" value={cancelCorrect.amount}
                                         onKeyDown={blockNonNumericKeys}
                                         onChange={e => cancelCorrect.setAmount(sanitizeMoney(e.target.value))}
                                         className={`mt-1 w-40 border rounded-lg px-3 py-1.5 text-sm ${cancelCorrect.maxCorrect !== null && parseFloat(cancelCorrect.amount) > cancelCorrect.maxCorrect + 0.01 ? 'border-red-400 bg-red-50' : 'border-gray-200'}`} />
@@ -419,17 +419,17 @@ export default function FeePassbookTab({
                                   )}
                                   <div>
                                     <label className="text-xs font-medium text-gray-600">Reason (required — recorded in audit log)</label>
-                                    <input type="text" placeholder="e.g. Wrong amount entered · Cheque bounced · Duplicate entry"
+                                    <input data-testid={`input-payment-reason-${p.id}`} type="text" placeholder="e.g. Wrong amount entered · Cheque bounced · Duplicate entry"
                                       value={cancelCorrect.reason} onChange={e => cancelCorrect.setReason(e.target.value)}
                                       className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
                                   </div>
                                   {cancelCorrect.msg && <p className={`text-xs ${cancelCorrect.msg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{cancelCorrect.msg}</p>}
                                   <div className="flex gap-2">
-                                    <button onClick={() => cancelCorrect.submit('passbook')} disabled={cancelCorrect.busy || !cancelCorrect.reason.trim()}
+                                    <button data-testid={`btn-payment-confirm-${p.id}`} onClick={() => cancelCorrect.submit('passbook')} disabled={cancelCorrect.busy || !cancelCorrect.reason.trim()}
                                       className={`text-sm text-white px-4 py-1.5 rounded-lg font-medium disabled:opacity-50 ${cancelCorrect.mode === 'cancel' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
                                       {cancelCorrect.busy ? 'Working…' : cancelCorrect.mode === 'cancel' ? `Confirm Cancel (${fmt(p.amount)})` : 'Confirm Correction'}
                                     </button>
-                                    <button onClick={() => cancelCorrect.setPmtId(null)} className="text-sm text-gray-500 px-3 py-1.5">Cancel</button>
+                                    <button data-testid={`btn-payment-cancel-form-${p.id}`} onClick={() => cancelCorrect.setPmtId(null)} className="text-sm text-gray-500 px-3 py-1.5">Cancel</button>
                                   </div>
                                 </div>
                               </td>
@@ -532,8 +532,8 @@ export default function FeePassbookTab({
                             <p className="text-[10px] text-purple-400 capitalize">{w.waiver_type.replace('_', ' ')}</p>
                           </div>
                           {!w.is_revoked && (waiverCorrect.waiverId === w.id
-                            ? <button onClick={() => { waiverCorrect.setWaiverId(null); waiverCorrect.setMsg('') }} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
-                            : <button onClick={() => waiverCorrect.open(w)}
+                            ? <button data-testid={`btn-waiver-close-${w.id}`} onClick={() => { waiverCorrect.setWaiverId(null); waiverCorrect.setMsg('') }} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
+                            : <button data-testid={`btn-waiver-revoke-correct-${w.id}`} onClick={() => waiverCorrect.open(w)}
                                 className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
                           )}
                         </div>
@@ -541,9 +541,9 @@ export default function FeePassbookTab({
                       {!w.is_revoked && waiverCorrect.waiverId === w.id && (
                         <div className="mt-3 pt-3 border-t border-amber-100 bg-amber-50 -mx-4 -mb-3 px-4 pb-3 rounded-b-xl space-y-2">
                           <div className="flex gap-2">
-                            <button onClick={() => waiverCorrect.setMode('revoke')}
+                            <button data-testid={`btn-waiver-mode-revoke-${w.id}`} onClick={() => waiverCorrect.setMode('revoke')}
                               className={`flex-1 text-xs py-1.5 rounded-lg border font-medium ${waiverCorrect.mode === 'revoke' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200'}`}>Revoke Waiver</button>
-                            <button onClick={() => waiverCorrect.setMode('correct')}
+                            <button data-testid={`btn-waiver-mode-correct-${w.id}`} onClick={() => waiverCorrect.setMode('correct')}
                               className={`flex-1 text-xs py-1.5 rounded-lg border font-medium ${waiverCorrect.mode === 'correct' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>Correct Amount</button>
                           </div>
                           <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
@@ -553,7 +553,7 @@ export default function FeePassbookTab({
                           </div>
                           {waiverCorrect.mode === 'correct' && (
                             <div>
-                              <input type="number" min="0" value={waiverCorrect.amount} onChange={e => waiverCorrect.setAmount(e.target.value)}
+                              <input data-testid={`input-waiver-correct-amount-${w.id}`} type="number" min="0" value={waiverCorrect.amount} onChange={e => waiverCorrect.setAmount(e.target.value)}
                                 placeholder={waiverCorrect.maxCorrect !== null ? `max ₹${waiverCorrect.maxCorrect.toFixed(2)}` : 'Corrected waiver amount (₹)'}
                                 className={`w-full border rounded-lg px-3 py-1.5 text-sm ${waiverCorrect.maxCorrect !== null && parseFloat(waiverCorrect.amount) > waiverCorrect.maxCorrect + 0.01 ? 'border-red-400 bg-red-50' : 'border-gray-200'}`} />
                               {waiverCorrect.maxCorrect !== null && parseFloat(waiverCorrect.amount) > waiverCorrect.maxCorrect + 0.01 && (
@@ -561,15 +561,15 @@ export default function FeePassbookTab({
                               )}
                             </div>
                           )}
-                          <input type="text" value={waiverCorrect.reason} onChange={e => waiverCorrect.setReason(e.target.value)}
+                          <input data-testid={`input-waiver-reason-${w.id}`} type="text" value={waiverCorrect.reason} onChange={e => waiverCorrect.setReason(e.target.value)}
                             placeholder="Reason (required)" className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm" />
                           {waiverCorrect.msg && <p className={`text-xs font-medium ${waiverCorrect.msg.startsWith('✓') ? 'text-green-600' : 'text-red-600'}`}>{waiverCorrect.msg}</p>}
                           <div className="flex gap-2">
-                            <button onClick={waiverCorrect.submit} disabled={waiverCorrect.busy || !waiverCorrect.reason.trim()}
+                            <button data-testid={`btn-waiver-confirm-${w.id}`} onClick={waiverCorrect.submit} disabled={waiverCorrect.busy || !waiverCorrect.reason.trim()}
                               className={`text-sm text-white px-4 py-1.5 rounded-lg font-medium disabled:opacity-50 ${waiverCorrect.mode === 'revoke' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
                               {waiverCorrect.busy ? 'Working…' : waiverCorrect.mode === 'revoke' ? 'Confirm Revoke' : 'Confirm Correction'}
                             </button>
-                            <button onClick={() => waiverCorrect.setWaiverId(null)} className="text-sm text-gray-500 px-3 py-1.5">Close</button>
+                            <button data-testid={`btn-waiver-close-form-${w.id}`} onClick={() => waiverCorrect.setWaiverId(null)} className="text-sm text-gray-500 px-3 py-1.5">Close</button>
                           </div>
                         </div>
                       )}
