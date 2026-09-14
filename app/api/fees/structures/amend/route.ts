@@ -25,6 +25,21 @@ export async function POST(req: NextRequest) {
 
       await client.query('BEGIN')
 
+      // Block amendments on a closed year — same guard as payments/waivers routes.
+      // Missing here previously let an admin amend amounts on a closed year without
+      // reopening it first, bypassing the "changes need an amendment" rule for the
+      // wrong reason: not because it wasn't tracked, but because the year shouldn't
+      // have been editable at all.
+      const { rows: [closedYear] } = await client.query(
+        `SELECT 1 FROM fee_year_close
+         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
+        [school_id, academic_year]
+      )
+      if (closedYear) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to amend fee structures.' }, { status: 409 })
+      }
+
       // Get current structure
       const { rows: [current] } = await client.query(
         `SELECT * FROM fee_structures
@@ -67,19 +82,25 @@ export async function POST(req: NextRequest) {
       // Fetch affected ledger entries before updating (for audit)
       // Includes partial entries — amount_due must reflect the new structure for all unpaid/partial students
       const { rows: affected } = await client.query(
-        `SELECT id, student_id, amount_due, amount_paid FROM student_fee_ledger
+        `SELECT id, student_id, amount_due, amount_paid, waiver_amount FROM student_fee_ledger
          WHERE fee_structure_id = $1 AND status IN ('pending', 'overdue', 'partial')`,
         [current.id]
       )
 
-      // Block a reduction that would leave any student's amount_paid exceeding the new
-      // amount_due — that's an impossible state (paid more than is owed) and needs a
-      // separate refund/credit decision, not a silent ledger overwrite.
-      const overpaidCount = affected.filter(r => parseFloat(r.amount_paid) > parseFloat(new_amount) + 0.01).length
+      // Block a reduction that would leave any student's amount_paid + waiver_amount
+      // exceeding the new amount_due — that's an impossible state (paid/waived more
+      // than is owed) and needs a separate refund/credit decision, not a silent
+      // ledger overwrite. Must include waiver_amount, not just amount_paid: a bill
+      // that's ₹200 waived + ₹750 paid against a ₹1000 due is already committed for
+      // ₹950 — reducing the amount to ₹800 is just as impossible as if that ₹200 had
+      // been cash.
+      const overpaidCount = affected.filter(r =>
+        parseFloat(r.amount_paid) + parseFloat(r.waiver_amount || '0') > parseFloat(new_amount) + 0.01
+      ).length
       if (overpaidCount > 0) {
         await client.query('ROLLBACK')
         return NextResponse.json({
-          error: `${overpaidCount} student(s) have already paid more than ₹${new_amount} toward this fee — reducing the amount this far isn't supported here. Use payment correction/refund for those students first.`,
+          error: `${overpaidCount} student(s) have already paid or been waived more than ₹${new_amount} toward this fee — reducing the amount this far isn't supported here. Use payment correction/refund or waiver correction for those students first.`,
         }, { status: 409 })
       }
 

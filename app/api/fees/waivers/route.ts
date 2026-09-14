@@ -91,17 +91,31 @@ async function handlePOST(req: NextRequest) {
 
       // Calculate waiver amount — always on remaining balance (after existing waiver), not full amount_due
       const remaining = parseFloat(ledger.amount_due) - parseFloat(ledger.waiver_amount || '0') - parseFloat(ledger.amount_paid)
+      // A non-numeric waiver_value (e.g. a UI bug sending "20%" instead of 20)
+      // must not reach the arithmetic below — `"20%" || 0` is truthy, and
+      // Math.round(remaining * NaN) silently produces NaN, which Postgres
+      // numeric accepts as the literal 'NaN' and poisons every downstream
+      // balance for this bill. Parse and validate before use, for both
+      // 'percentage' and 'fixed_amount' (waiver_value is unused for 'full').
       let waiver_amount = 0
       if (waiver_type === 'full') {
         waiver_amount = remaining
-      } else if (waiver_type === 'percentage') {
-        // BUG 7 fix: apply percentage to remaining balance, not full amount_due
-        waiver_amount = Math.round(remaining * (waiver_value || 0)) / 100
-      } else if (waiver_type === 'fixed_amount') {
-        // BUG 8 fix: cap fixed waiver at remaining balance
-        waiver_amount = Math.min(waiver_value || 0, remaining)
+      } else {
+        const numericValue = Number(waiver_value)
+        if (waiver_value !== undefined && waiver_value !== null && !Number.isFinite(numericValue)) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'waiver_value must be a number' }, { status: 400 })
+        }
+        const value = Number.isFinite(numericValue) ? numericValue : 0
+        if (waiver_type === 'percentage') {
+          // BUG 7 fix: apply percentage to remaining balance, not full amount_due
+          waiver_amount = Math.round(remaining * value) / 100
+        } else if (waiver_type === 'fixed_amount') {
+          // BUG 8 fix: cap fixed waiver at remaining balance
+          waiver_amount = Math.min(value, remaining)
+        }
       }
-      if (waiver_amount <= 0) {
+      if (!(waiver_amount > 0)) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'Nothing to waive — ledger entry is already fully paid' }, { status: 400 })
       }

@@ -1399,7 +1399,7 @@ export default function ParentDashboard() {
                     </div>
                     <div className="divide-y divide-gray-50">
                       {feePayments.map(pmt => (
-                        <div key={pmt.id} className={`px-4 py-3 ${pmt.payment_status === 'rejected' ? 'bg-red-50' : ''}`}>
+                        <div key={pmt.id} className={`px-4 py-3 ${pmt.payment_status === 'rejected' ? 'bg-red-50' : pmt.payment_status === 'cancelled' ? 'bg-gray-50' : ''}`}>
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium text-gray-800">{pmt.category_name} · {pmt.period_label}</p>
@@ -1407,18 +1407,23 @@ export default function ParentDashboard() {
                               {pmt.payment_status === 'rejected' && pmt.rejection_reason && (
                                 <p className="text-xs text-red-600 mt-1 font-medium">Rejected: {pmt.rejection_reason}</p>
                               )}
+                              {pmt.payment_status === 'cancelled' && (
+                                <p className="text-xs text-gray-500 mt-1 font-medium">This payment was cancelled by the school — it no longer counts toward your balance.</p>
+                              )}
                             </div>
                             <div className="text-right flex-shrink-0">
-                              <p className="text-sm font-bold text-green-700">{fmt(pmt.amount)}</p>
+                              <p className={`text-sm font-bold ${pmt.payment_status === 'cancelled' ? 'text-gray-400 line-through' : 'text-green-700'}`}>{fmt(pmt.amount)}</p>
                               <div className="flex items-center gap-1.5 justify-end mt-0.5">
                                 <span className="text-[10px] font-mono text-gray-400">{pmt.receipt_number}</span>
                                 <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                                   pmt.payment_status === 'completed'           ? 'bg-green-100 text-green-700' :
                                   pmt.payment_status === 'rejected'            ? 'bg-red-100 text-red-600' :
+                                  pmt.payment_status === 'cancelled'           ? 'bg-gray-200 text-gray-600' :
                                   'bg-yellow-100 text-yellow-700'
                                 }`}>
                                   {pmt.payment_status === 'pending_verification' ? T.pendingVerify :
-                                   pmt.payment_status === 'rejected' ? 'Rejected' : T.confirmed}
+                                   pmt.payment_status === 'rejected' ? 'Rejected' :
+                                   pmt.payment_status === 'cancelled' ? 'Cancelled' : T.confirmed}
                                 </span>
                               </div>
                               {pmt.payment_status === 'completed' && (

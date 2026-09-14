@@ -70,8 +70,16 @@ async function handlePOST(req: NextRequest) {
 
       await client.query('BEGIN')
 
+      // FOR UPDATE: without this, two concurrent verify calls on the same
+      // payment (double-click, or an approve racing a reject) can both pass
+      // this check before either commits — the second writer then blindly
+      // overwrites payment_status and, for approve, double-applies the
+      // ledger credit. Locking the row makes the second transaction wait for
+      // the first to commit, then re-evaluate this WHERE clause against the
+      // now-current row — so it correctly finds nothing and 404s instead of
+      // racing.
       const { rows: [payment] } = await client.query(
-        `SELECT * FROM fee_payments WHERE id = $1 AND payment_status = 'pending_verification'`,
+        `SELECT * FROM fee_payments WHERE id = $1 AND payment_status = 'pending_verification' FOR UPDATE`,
         [payment_id]
       )
       if (!payment) {

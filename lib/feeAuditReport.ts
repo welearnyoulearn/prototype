@@ -32,8 +32,15 @@ export type StudentReport = {
   waivers: { fee_type: string; period_label: string; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; is_revoked: boolean; revoked_by: string | null; revoked_at: string | null; revoke_reason: string | null }[]
 }
 
-function money(billed: number, waived: number, paid: number): Money {
-  return { billed, waived, net_demand: billed - waived, paid, balance: (billed - waived) - paid }
+// balance must be the SUM of each bill's own floored balance
+// (GREATEST(amount_due - waiver_amount - amount_paid, 0)), never derived here
+// as (billed - waived) - paid on already-summed totals — a single
+// over-committed bill (amount_paid + waiver_amount > amount_due, e.g. from a
+// structure amendment that reduced amount_due after payment) produces a
+// negative per-bill balance that would otherwise net against, and understate,
+// every other bill's real balance in the same rollup.
+function money(billed: number, waived: number, paid: number, balance: number): Money {
+  return { billed, waived, net_demand: billed - waived, paid, balance }
 }
 
 export async function buildFeeAuditReport(opts: {
@@ -88,50 +95,59 @@ export async function buildFeeAuditReport(opts: {
        ORDER BY w.created_at`, [student_id, school_id, academic_year]
     ).catch(() => ({ rows: [] }))
 
-    const billed = bills.reduce((s, b) => s + Number(b.billed), 0)
-    const waived = bills.reduce((s, b) => s + Number(b.waived), 0)
-    const paid   = bills.reduce((s, b) => s + Number(b.paid), 0)
+    const billed  = bills.reduce((s, b) => s + Number(b.billed), 0)
+    const waived  = bills.reduce((s, b) => s + Number(b.waived), 0)
+    const paid    = bills.reduce((s, b) => s + Number(b.paid), 0)
+    // bills.balance is already GREATEST(...)'d per row by the SQL above — sum
+    // those, don't re-derive from the (unfloored) billed/waived/paid totals.
+    const balance = bills.reduce((s, b) => s + Number(b.balance), 0)
 
     return {
       kind: 'student',
       meta: { school_name: schoolName, academic_year, generated_by: actor, generated_on: new Date().toISOString() },
       student,
-      balance: money(billed, waived, paid),
+      balance: money(billed, waived, paid, balance),
       bills: bills.map(b => ({ ...b, billed: Number(b.billed), waived: Number(b.waived), paid: Number(b.paid), balance: Number(b.balance) })),
       payments: payments.map(p => ({ ...p, amount: Number(p.amount) })),
       waivers: waivers.map((w: Record<string, unknown>) => ({ ...w, waiver_amount: Number(w.waiver_amount) })) as StudentReport['waivers'],
     }
   }
 
+  // Per-bill floor, summed — see the comment on money() for why this can't be
+  // derived from SUM(billed)-SUM(waived)-SUM(paid) instead.
+  const BALANCE_SUM = `COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)),0)`
+
   // ── BULK ──
   const { rows: [sm] } = await pool.query(
     `SELECT COALESCE(SUM(l.amount_due),0) AS billed,
             COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived,
             COALESCE(SUM(l.amount_paid),0) AS paid,
+            ${BALANCE_SUM} AS balance,
             COUNT(DISTINCT l.student_id) AS students
      FROM student_fee_ledger l JOIN students s ON s.id = l.student_id WHERE ${WHERE}`, vals
   )
-  const summary = { ...money(Number(sm.billed), Number(sm.waived), Number(sm.paid)), students: Number(sm.students) }
+  const summary = { ...money(Number(sm.billed), Number(sm.waived), Number(sm.paid), Number(sm.balance)), students: Number(sm.students) }
 
   const { rows: byType } = await pool.query(
     `SELECT fc.name AS fee_type, COALESCE(SUM(l.amount_due),0) AS billed,
-            COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived, COALESCE(SUM(l.amount_paid),0) AS paid
+            COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived, COALESCE(SUM(l.amount_paid),0) AS paid,
+            ${BALANCE_SUM} AS balance
      FROM student_fee_ledger l JOIN fee_categories fc ON fc.id = l.fee_category_id
      JOIN students s ON s.id = l.student_id WHERE ${WHERE} GROUP BY fc.name ORDER BY billed DESC`, vals
   )
-  const by_type = byType.map(r => ({ fee_type: r.fee_type, ...money(Number(r.billed), Number(r.waived), Number(r.paid)) }))
+  const by_type = byType.map(r => ({ fee_type: r.fee_type, ...money(Number(r.billed), Number(r.waived), Number(r.paid), Number(r.balance)) }))
 
   const { rows: byClass } = await pool.query(
     `SELECT s.grade, COALESCE(s.section,'') AS section, fc.name AS fee_type,
             COALESCE(SUM(l.amount_due),0) AS billed, COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived,
-            COALESCE(SUM(l.amount_paid),0) AS paid
+            COALESCE(SUM(l.amount_paid),0) AS paid, ${BALANCE_SUM} AS balance
      FROM student_fee_ledger l JOIN fee_categories fc ON fc.id = l.fee_category_id
      JOIN students s ON s.id = l.student_id WHERE ${WHERE}
      GROUP BY s.grade, s.section, fc.name ORDER BY ${gradeOrderSql('s.grade')}, s.section, fc.name`, vals
   )
   const by_class = byClass.map(r => ({
     class: r.section ? `${r.grade}-${r.section}` : `Grade ${r.grade}`, fee_type: r.fee_type,
-    ...money(Number(r.billed), Number(r.waived), Number(r.paid)),
+    ...money(Number(r.billed), Number(r.waived), Number(r.paid), Number(r.balance)),
   }))
 
   // Student-wise, broken down per fee type, with a subtotal row per student.
@@ -141,7 +157,7 @@ export async function buildFeeAuditReport(opts: {
             s.parent_name, s.parent_phone,
             fc.name AS fee_type,
             COALESCE(SUM(l.amount_due),0) AS billed, COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived,
-            COALESCE(SUM(l.amount_paid),0) AS paid
+            COALESCE(SUM(l.amount_paid),0) AS paid, ${BALANCE_SUM} AS balance
      FROM student_fee_ledger l
      JOIN students s ON s.id = l.student_id
      JOIN fee_categories fc ON fc.id = l.fee_category_id
@@ -151,12 +167,12 @@ export async function buildFeeAuditReport(opts: {
   )
   const by_student: BulkReport['by_student'] = []
   let curSid: number | null = null
-  let sub = { billed: 0, waived: 0, paid: 0, student: '', roll: '', cls: '', parent_name: null as string | null, parent_phone: null as string | null }
+  let sub = { billed: 0, waived: 0, paid: 0, balance: 0, student: '', roll: '', cls: '', parent_name: null as string | null, parent_phone: null as string | null }
   const flush = () => {
     if (curSid !== null) by_student.push({
       student: sub.student, roll_number: sub.roll, class: sub.cls, fee_type: '', is_subtotal: true,
       parent_name: sub.parent_name, parent_phone: sub.parent_phone,
-      ...money(sub.billed, sub.waived, sub.paid),
+      ...money(sub.billed, sub.waived, sub.paid, sub.balance),
     })
   }
   for (const r of byStudent) {
@@ -164,11 +180,11 @@ export async function buildFeeAuditReport(opts: {
     if (r.sid !== curSid) {
       flush()
       curSid = r.sid
-      sub = { billed: 0, waived: 0, paid: 0, student: r.student, roll: r.roll_number, cls, parent_name: r.parent_name || null, parent_phone: r.parent_phone || null }
+      sub = { billed: 0, waived: 0, paid: 0, balance: 0, student: r.student, roll: r.roll_number, cls, parent_name: r.parent_name || null, parent_phone: r.parent_phone || null }
     }
-    const b = Number(r.billed), w = Number(r.waived), pd = Number(r.paid)
-    by_student.push({ student: r.student, roll_number: r.roll_number, class: cls, fee_type: r.fee_type, is_subtotal: false, parent_name: r.parent_name || null, parent_phone: r.parent_phone || null, ...money(b, w, pd) })
-    sub.billed += b; sub.waived += w; sub.paid += pd
+    const b = Number(r.billed), w = Number(r.waived), pd = Number(r.paid), bal = Number(r.balance)
+    by_student.push({ student: r.student, roll_number: r.roll_number, class: cls, fee_type: r.fee_type, is_subtotal: false, parent_name: r.parent_name || null, parent_phone: r.parent_phone || null, ...money(b, w, pd, bal) })
+    sub.billed += b; sub.waived += w; sub.paid += pd; sub.balance += bal
   }
   flush()
 
