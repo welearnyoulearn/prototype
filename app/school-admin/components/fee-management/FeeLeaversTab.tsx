@@ -32,6 +32,9 @@ export default function FeeLeaversTab({
   onCollect,
 }: {
   schoolId: number
+  // Throws on failure (e.g. no outstanding dues found) so this tab can show the
+  // error next to the row that triggered it — the actual collect-form priming
+  // happens in the parent, via the shared fee store's pendingCollectRequest.
   onCollect: (student: RemovedStudent) => Promise<void>
 }) {
   const [removedData, setRemovedData] = useState<{
@@ -41,6 +44,7 @@ export default function FeeLeaversTab({
   const [removedLoading, setRemovedLoading] = useState(false)
   const [removedError, setRemovedError]     = useState('')
   const [collectingId, setCollectingId]     = useState<number | null>(null)
+  const [collectError, setCollectError]     = useState('')
 
   const loadRemovedStudents = useCallback(async () => {
     setRemovedLoading(true)
@@ -55,13 +59,18 @@ export default function FeeLeaversTab({
   useEffect(() => { loadRemovedStudents() }, [loadRemovedStudents])
 
   async function handleCollect(s: RemovedStudent) {
-    setCollectingId(s.student_id)
-    try { await onCollect(s) } finally { setCollectingId(null) }
+    setCollectingId(s.student_id); setCollectError('')
+    try { await onCollect(s) }
+    catch (e) { setCollectError(e instanceof Error ? e.message : 'Failed to open collection form') }
+    finally { setCollectingId(null) }
   }
 
   return (
     <div className="space-y-5">
       <LoadErrorBanner message={removedError} onRetry={loadRemovedStudents} />
+      {collectError && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-600">{collectError}</div>
+      )}
 
       <div>
         <h2 className="text-base font-semibold text-gray-800">Leavers & Dues</h2>

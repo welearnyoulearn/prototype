@@ -117,6 +117,23 @@ export type PaySuccess = {
   line_items?: { category_name: string; period_label: string; amount: number }[]
 }
 
+// One row per student in the Collect tab's ledger view — also the shape used to
+// hand off a synthesized "open this student's collect form" request from another
+// tab (Leavers, Overview's passout panel) via the shared fee store's
+// pendingCollectRequest, since those students aren't part of Collect's own
+// derived studentRows (they're graduated/removed, or on the passout ledger).
+export type StudentRow = {
+  student_id: number; student_name: string; roll_number: string; school_roll_number: number | null
+  grade: string; section: string
+  email: string | null; phone: string | null
+  parent_name: string | null; parent_phone: string | null; parent_email: string | null
+  student_status: string
+  total_billed: number; total_paid: number; outstanding: number
+  open_entries: LedgerEntry[]   // pending/partial/overdue
+  all_entries: LedgerEntry[]
+  has_overdue: boolean; never_paid: boolean
+}
+
 export type ReceiptCardData = {
   school_name: string
   logo_url: string | null
