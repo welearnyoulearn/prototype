@@ -733,21 +733,33 @@ export default function FeeManagement({
           <h1 className="text-xl font-bold text-gray-900">Fee Management</h1>
           <p className="text-sm text-gray-500 mt-0.5">Collect payments, manage structures, verify online payments</p>
         </div>
-        <select
-          value={academicYear}
-          onChange={e => {
-            setAcademicYear(e.target.value)
-            // Reset view state that is year-scoped
-            setPbData(null); setPbErr('')
-            // Collect resets its own year-scoped state (open student, collect form)
-            // via its own effect on the academicYear prop — see FeeCollectTab.
-          }}
-          className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          {academicYears.map(y => (
-            <option key={y} value={y}>{y}{closedYears.has(y) ? ' (Closed)' : ''}</option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <button
+            data-testid="btn-header-collect"
+            onClick={() => setActiveTab('collect' as Tab)}
+            className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-blue-700 flex items-center gap-1.5"
+          >
+            💰 Collect
+            {pendingPayments.length > 0 && (
+              <span className="text-[10px] bg-white/20 rounded-full px-1.5 py-0.5">{pendingPayments.length}</span>
+            )}
+          </button>
+          <select
+            value={academicYear}
+            onChange={e => {
+              setAcademicYear(e.target.value)
+              // Reset view state that is year-scoped
+              setPbData(null); setPbErr('')
+              // Collect resets its own year-scoped state (open student, collect form)
+              // via its own effect on the academicYear prop — see FeeCollectTab.
+            }}
+            className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {academicYears.map(y => (
+              <option key={y} value={y}>{y}{closedYears.has(y) ? ' (Closed)' : ''}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <LoadErrorBanner sectionKey="academicYears" onRetry={loadAcademicYears} />
