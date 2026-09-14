@@ -148,6 +148,11 @@ export default function FeeManagement({
   const pbWaivers   = pbData?.waivers.filter(w => w.bill_year === academicYear) ?? []
   const pbTimeline  = pbData?.timeline.filter(t => t.academic_year === academicYear) ?? []
   const pbYearOnly  = pbYearGroup ? [pbYearGroup] : []
+  // Revoked waivers — fetched lazily on first "Show Revoked" click, shared by the
+  // Modal here and FeePassbookTab (which keeps its own local copy since it also
+  // needs this outside the modal flow).
+  const [pbShowRevoked, setPbShowRevoked]       = useState(false)
+  const [pbRevokedWaivers, setPbRevokedWaivers] = useState<PassbookData['waivers']>([])
   // Payment cancel / correct
   const [cancelPmtId, setCancelPmtId]           = useState<number | null>(null)
   const [cancelMode, setCancelMode]             = useState<'cancel' | 'correct'>('cancel')
@@ -479,6 +484,7 @@ export default function FeeManagement({
   // ── Student Passbook helpers ────────────────────────────────────────────────
   async function loadPassbook(studentId: number) {
     setPbLoading(true); setPbErr('')
+    setPbShowRevoked(false); setPbRevokedWaivers([])
     try {
       // Pass academic_year as context (marks current year), not as a filter — passbook shows all years
       const r = await fetch(`/api/fees/passbook?school_id=${schoolId}&student_id=${studentId}&academic_year=${academicYear}`)
@@ -1140,6 +1146,27 @@ export default function FeeManagement({
                   {/* Payments */}
                   {pbSection === 'payments' && (
                     <div className="space-y-3">
+                      {(pbData?.pending_payments.length ?? 0) > 0 && (
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-xl overflow-hidden">
+                          <div className="px-4 py-2 border-b border-yellow-100"><p className="text-xs font-semibold text-yellow-700 uppercase">Pending / Rejected</p></div>
+                          <div className="divide-y divide-yellow-100">
+                            {pbData!.pending_payments.map(p => (
+                              <div key={p.id} className="px-4 py-2.5 flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm text-gray-700 font-mono">{p.receipt_number}</p>
+                                  <p className="text-xs text-gray-400">{p.paid_date} · {p.payment_mode.toUpperCase()}{p.rejection_reason ? ` · Rejected: ${p.rejection_reason}` : ''}</p>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-sm font-bold text-gray-700">{fmt(p.amount)}</p>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${p.payment_status === 'rejected' ? 'bg-red-100 text-red-600' : 'bg-yellow-100 text-yellow-700'}`}>
+                                    {p.payment_status === 'rejected' ? 'Rejected' : 'Pending'}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       {pbPayments.length === 0
                         ? <p className="text-sm text-gray-400 text-center py-8">No payments recorded for {academicYear}.</p>
                         : pbPayments.map(p => {
@@ -1242,28 +1269,55 @@ export default function FeeManagement({
                   {/* Waivers */}
                   {pbSection === 'waivers' && (
                     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                      {pbWaivers.length === 0
+                      <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
+                        <p className="text-sm font-semibold text-gray-700">Waivers — {academicYear}</p>
+                        <button
+                          data-testid="btn-modal-show-revoked-waivers"
+                          onClick={async () => {
+                          if (!pbShowRevoked && pbData && pbRevokedWaivers.length === 0) {
+                            const r = await fetch(`/api/fees/waivers?school_id=${schoolId}&student_id=${pbData.student.id}&show_revoked=1`)
+                            if (r.ok) setPbRevokedWaivers((await r.json()).filter((w: PassbookData['waivers'][0]) => w.is_revoked))
+                          }
+                          setPbShowRevoked(v => !v)
+                        }}
+                          className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-colors ${pbShowRevoked ? 'bg-red-50 text-red-600 border-red-200' : 'text-gray-400 border-gray-200 hover:bg-gray-50'}`}>
+                          {pbShowRevoked ? 'Hide Revoked' : 'Show Revoked'}
+                        </button>
+                      </div>
+                      {(pbShowRevoked
+                        ? [...pbWaivers, ...pbRevokedWaivers.filter(r => r.bill_year === academicYear)].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                        : pbWaivers
+                      ).length === 0
                         ? <p className="text-sm text-gray-400 p-8 text-center">No waivers granted for {academicYear}.</p>
                         : <div className="divide-y divide-gray-50">
-                            {pbWaivers.map(w => (
-                              <div key={w.id} className="px-4 py-3">
+                            {(pbShowRevoked
+                              ? [...pbWaivers, ...pbRevokedWaivers.filter(r => r.bill_year === academicYear)].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+                              : pbWaivers
+                            ).map(w => (
+                              <div key={w.id} className={`px-4 py-3 ${w.is_revoked ? 'opacity-50' : ''}`}>
                                 <div className="flex items-center justify-between">
                                   <div>
-                                    <p className="text-sm font-medium text-gray-800">{(w as { fee_head_name?: string }).fee_head_name || 'Fee'} · {(w as { period_label?: string }).period_label || ''}</p>
+                                    <div className="flex items-center gap-2">
+                                      <p className={`text-sm font-medium ${w.is_revoked ? 'line-through text-gray-400' : 'text-gray-800'}`}>{(w as { fee_head_name?: string }).fee_head_name || 'Fee'} · {(w as { period_label?: string }).period_label || ''}</p>
+                                      {w.is_revoked && <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded font-medium">Revoked</span>}
+                                    </div>
                                     <p className="text-xs text-gray-400">{(w as { reason?: string }).reason || '—'} · {(w as { granted_by_name?: string }).granted_by_name || ''}</p>
+                                    {w.is_revoked && w.revoke_reason && (
+                                      <p className="text-xs text-red-400 mt-0.5">Revoke reason: {w.revoke_reason}{w.revoked_by ? ` · by ${w.revoked_by}` : ''}</p>
+                                    )}
                                   </div>
                                   <div className="flex items-center gap-3">
-                                    <p className="text-sm font-bold text-purple-700">{fmt((w as { waiver_amount?: number }).waiver_amount || 0)}</p>
-                                    {cancelWaiverId === w.id
+                                    <p className={`text-sm font-bold ${w.is_revoked ? 'text-gray-300 line-through' : 'text-purple-700'}`}>{fmt((w as { waiver_amount?: number }).waiver_amount || 0)}</p>
+                                    {!w.is_revoked && (cancelWaiverId === w.id
                                       ? <button onClick={() => { setCancelWaiverId(null); setCancelWaiverMsg('') }} className="text-xs text-gray-400 hover:text-gray-600">Close</button>
                                       : <button onClick={() => {
                                           const ww = w as { id: number; ledger_id?: number; waiver_amount?: number }
                                           openWaiverCorrect({ id: ww.id, ledger_id: ww.ledger_id ?? -1, waiver_amount: ww.waiver_amount ?? 0 })
                                         }} className="text-xs border border-red-200 text-red-500 px-2.5 py-1 rounded-lg hover:bg-red-50">Revoke / Correct</button>
-                                    }
+                                    )}
                                   </div>
                                 </div>
-                                {cancelWaiverId === w.id && (
+                                {!w.is_revoked && cancelWaiverId === w.id && (
                                   <div className="mt-3 pt-3 border-t border-amber-100 bg-amber-50 -mx-4 -mb-3 px-4 pb-3 rounded-b-xl space-y-2">
                                     <div className="flex gap-2">
                                       <button onClick={() => setCancelWaiverMode('revoke')}
