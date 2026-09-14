@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, Fragment } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useFeature } from '@/lib/features-context'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type {
@@ -60,7 +61,33 @@ export default function FeeManagement({
   schoolHeaderBlocks?: ReceiptHeaderBlock[]
 }) {
   type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'students' | 'reports' | 'yearend' | 'leavers' | 'archive'
-  const [activeTab, setActiveTab] = useState<Tab>('overview')
+  const TAB_KEYS: Tab[] = ['overview', 'setup', 'collect', 'students', 'reports', 'yearend', 'archive', 'leavers']
+
+  // Sub-tab within Fee Management syncs to the URL (?ftab=) so the browser's own
+  // Back/Forward/Refresh buttons work between Overview/Collect/Setup/etc instead of
+  // only React state changing silently underneath them — this component stays
+  // mounted (hidden) across portal nav switches, so a stale in-memory tab would
+  // otherwise survive a refresh incorrectly, and Back/Forward had nothing to step
+  // through at all before this.
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const urlTab = searchParams.get('ftab')
+  const [activeTab, setActiveTabRaw] = useState<Tab>(
+    urlTab && TAB_KEYS.includes(urlTab as Tab) ? (urlTab as Tab) : 'overview'
+  )
+  const setActiveTab = useCallback((tab: Tab) => {
+    setActiveTabRaw(tab)
+    const params = new URLSearchParams(window.location.search)
+    params.set('ftab', tab)
+    router.push(`/school-admin?${params.toString()}`, { scroll: false })
+  }, [router])
+  // Browser Back/Forward changes the URL, which re-renders this with a new
+  // searchParams — mirror that into activeTab without pushing another history entry.
+  useEffect(() => {
+    const t = searchParams.get('ftab')
+    if (t && TAB_KEYS.includes(t as Tab) && t !== activeTab) setActiveTabRaw(t as Tab)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   const hasOnlinePayments = useFeature('online-payments')
 
