@@ -1207,7 +1207,7 @@ export default function FeeManagement({
                                     <div className="flex gap-2">
                                       <button data-testid={`btn-modal-payment-mode-cancel-${p.id}`} onClick={() => setCancelMode('cancel')}
                                         className={`flex-1 text-xs py-1.5 rounded-lg border transition-colors font-medium ${cancelMode === 'cancel' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-gray-600 border-gray-200'}`}>Cancel Payment</button>
-                                      <button data-testid={`btn-modal-payment-mode-correct-${p.id}`} onClick={() => setCancelMode('correct')}
+                                      <button data-testid={`btn-modal-payment-mode-correct-${p.id}`} onClick={() => { setCancelMode('correct'); setCorrectAmount(String(p.amount)) }}
                                         className={`flex-1 text-xs py-1.5 rounded-lg border transition-colors font-medium ${cancelMode === 'correct' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}>Correct Amount</button>
                                     </div>
                                     <div className="bg-white border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
