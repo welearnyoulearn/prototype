@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { FINAL_GRADE } from '@/lib/grades'
+import { claimYearClose, closeOutBill, getOrCreateSystemFeeCategory, nextAcademicYearLabel, upsertCarryForwardBill } from '@/lib/feeRollover'
 
 // GET /api/fees/year-rollover?school_id=X
 // Returns list of closed academic years for this school.
@@ -26,12 +27,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-function nextYearLabel(label: string): string {
-  const start = parseInt(label.split('-')[0])
-  const next = start + 1
-  return `${next}-${String((next + 1) % 100).padStart(2, '0')}`
-}
-
 // POST /api/fees/year-rollover
 // Body: { school_id, from_year, done_by? }
 // One-shot year rollover:
@@ -50,7 +45,7 @@ export async function POST(req: NextRequest) {
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     const done_by = access.actor
 
-    const to_year = nextYearLabel(from_year)
+    const to_year = nextAcademicYearLabel(from_year)
     const toStartYear = parseInt(to_year.split('-')[0])
 
     const client = await pool.connect()
@@ -96,34 +91,16 @@ export async function POST(req: NextRequest) {
       // pass it and both carry-forward/waive the same balances. The UNIQUE(school_id,
       // academic_year) constraint makes this insert race-safe: only one request can
       // succeed; the other gets 0 rows back and aborts before touching any ledger data.
-      const { rowCount: claimed } = await client.query(
-        `INSERT INTO fee_year_close (school_id, academic_year, closed_by)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (school_id, academic_year) DO NOTHING`,
-        [school_id, from_year, done_by]
-      )
+      const claimed = await claimYearClose(client, school_id, from_year, done_by)
       if (!claimed) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: `Year ${from_year} is already closed.` }, { status: 409 })
       }
 
       // ── STEP 1: Get or create "Previous Year Dues" fee head ──────────────────
-      let prevDuesCatId: number
-      const { rows: [pd] } = await client.query(
-        `SELECT id FROM fee_categories WHERE school_id = $1 AND name = 'Previous Year Dues'`, [school_id]
+      const prevDuesCatId = await getOrCreateSystemFeeCategory(
+        client, school_id, 'Previous Year Dues', 'Carried-forward unpaid balance from a previous year'
       )
-      if (pd) {
-        prevDuesCatId = pd.id
-        await client.query(`UPDATE fee_categories SET is_active = TRUE, is_system = TRUE WHERE id = $1`, [pd.id])
-      } else {
-        const { rows: [created] } = await client.query(
-          `INSERT INTO fee_categories (school_id, name, description, frequency, category_type, is_active, is_system)
-           VALUES ($1, 'Previous Year Dues', 'Carried-forward unpaid balance from previous year', 'one_time', 'fixed', TRUE, TRUE)
-           RETURNING id`,
-          [school_id]
-        )
-        prevDuesCatId = created.id
-      }
 
       // ── STEP 2: Create next academic year, set as current ────────────────────
       await client.query(
@@ -145,6 +122,7 @@ export async function POST(req: NextRequest) {
                 SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)) AS balance,
                 array_agg(l.id) AS ledger_ids,
                 array_agg(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)) AS balances,
+                array_agg(l.amount_paid) AS amounts_paid,
                 string_agg(fc.name || ' - ' || l.period_label, ', ' ORDER BY l.id) AS breakdown
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
@@ -167,43 +145,25 @@ export async function POST(req: NextRequest) {
         const periodLabel = `Previous Year Dues (${from_year})`
 
         // Insert/upsert a single carried-forward bill in the new year
-        await client.query(
-          `INSERT INTO student_fee_ledger
-             (school_id, student_id, fee_category_id, fee_structure_id, academic_year,
-              period_label, amount_due, due_date, status, notes, source_academic_year)
-           VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, 'pending', $8, $9)
-           ON CONFLICT (student_id, fee_category_id, academic_year, period_label)
-           DO UPDATE SET amount_due = EXCLUDED.amount_due, notes = EXCLUDED.notes,
-                         source_academic_year = EXCLUDED.source_academic_year`,
-          [school_id, row.student_id, prevDuesCatId, to_year, periodLabel,
-           balance, `${toStartYear + 1}-03-31`, `Carried from ${from_year}: ${row.breakdown}`, from_year]
-        )
+        await upsertCarryForwardBill(client, {
+          schoolId: school_id, studentId: row.student_id, categoryId: prevDuesCatId,
+          targetYear: to_year, periodLabel, amount: balance,
+          dueDate: `${toStartYear + 1}-03-31`, notes: `Carried from ${from_year}: ${row.breakdown}`,
+          sourceYear: from_year,
+        })
 
         // Mark original bills as settled/waived in old year.
         // 'settled' = some cash was already collected before the carry; 'waived' = nothing paid.
         const ids: number[] = row.ledger_ids
         const bals: number[] = row.balances.map(Number)
-        // Fetch amount_paid for each bill to determine correct status
-        const { rows: billPaid } = await client.query(
-          `SELECT id, amount_paid FROM student_fee_ledger WHERE id = ANY($1)`,
-          [ids]
-        )
-        const paidMap = new Map(billPaid.map((r: {id: number; amount_paid: string}) => [r.id, parseFloat(r.amount_paid)]))
+        const paid: number[] = row.amounts_paid.map(Number)
         for (let i = 0; i < ids.length; i++) {
           if (bals[i] <= 0) continue
-          const newStatus = (paidMap.get(ids[i]) ?? 0) > 0 ? 'settled' : 'waived'
-          await client.query(
-            `UPDATE student_fee_ledger
-             SET status = $1,
-                 waiver_amount = COALESCE(waiver_amount, 0) + $2
-             WHERE id = $3`,
-            [newStatus, bals[i], ids[i]]
-          )
-          await client.query(
-            `INSERT INTO fee_waivers (school_id, student_id, ledger_id, waiver_type, waiver_amount, reason, granted_by_name)
-             VALUES ($1, $2, $3, 'carry_forward', $4, $5, $6)`,
-            [school_id, row.student_id, ids[i], bals[i], `Carried forward to ${to_year}`, done_by]
-          )
+          await closeOutBill(client, {
+            schoolId: school_id, studentId: row.student_id, ledgerId: ids[i],
+            amountPaid: paid[i], balance: bals[i], waiverType: 'carry_forward',
+            reason: `Carried forward to ${to_year}`, doneBy: done_by,
+          })
         }
         carriedCount++
         carriedTotal += balance
