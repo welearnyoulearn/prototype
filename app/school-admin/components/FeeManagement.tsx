@@ -804,7 +804,7 @@ export default function FeeManagement({
       )}
 
       {/* ── 5-step setup wizard (shown when there are no bills yet) ── */}
-      {!setupWizardDismissed && academicYear && !closedYears.has(academicYear) && (
+      {!setupWizardDismissed && academicYear && !closedYears.has(academicYear) && !statsLoading && (
         (() => {
           const step1Done = true // year exists
           const step2Done = categories.filter(c => c.is_active !== false && !c.is_system).length > 0
