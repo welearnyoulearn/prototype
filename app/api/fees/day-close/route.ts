@@ -114,6 +114,9 @@ export async function POST(req: NextRequest) {
     if (!school_id || !date) {
       return NextResponse.json({ error: 'school_id, date required' }, { status: 400 })
     }
+    if (actual_cash != null && !Number.isFinite(parseFloat(actual_cash))) {
+      return NextResponse.json({ error: 'actual_cash must be a number' }, { status: 400 })
+    }
 
     // Get system totals for the day
     const { rows: byMode } = await pool.query(

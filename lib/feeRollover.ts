@@ -17,13 +17,27 @@ export async function getOrCreateSystemFeeCategory(
     await client.query(`UPDATE fee_categories SET is_active = TRUE, is_system = TRUE WHERE id = $1`, [existing.id])
     return existing.id
   }
+  // ON CONFLICT DO NOTHING + re-SELECT: two different years closing concurrently
+  // for the same school both take lockYearClose first, but that advisory-lock key
+  // includes academic_year, so they don't exclude each other here — both could
+  // reach this INSERT for the same 'Previous Year Dues'/'Passout Dues' name at
+  // once. Without this, the loser's plain INSERT hits the UNIQUE(school_id, name)
+  // constraint and the whole transaction rolls back instead of just picking up
+  // the winner's row.
   const { rows: [created] } = await client.query(
     `INSERT INTO fee_categories (school_id, name, description, frequency, category_type, is_active, is_system)
      VALUES ($1, $2, $3, 'one_time', 'fixed', TRUE, TRUE)
+     ON CONFLICT (school_id, name) DO NOTHING
      RETURNING id`,
     [schoolId, name, description]
   )
-  return created.id
+  if (created) return created.id
+  const { rows: [winner] } = await client.query(
+    `SELECT id FROM fee_categories WHERE school_id = $1 AND name = $2`,
+    [schoolId, name]
+  )
+  await client.query(`UPDATE fee_categories SET is_active = TRUE, is_system = TRUE WHERE id = $1`, [winner.id])
+  return winner.id
 }
 
 // Closes out one unpaid/partial bill — 'settled' if some cash was already collected
