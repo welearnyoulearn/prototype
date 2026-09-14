@@ -116,6 +116,21 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    // closeOutBill (lib/feeRollover.ts) leaves a carried-forward/passed-out bill's
+    // amount_due unchanged when closing it out — only waiver_amount grows — while
+    // upsertCarryForwardBill/the passout insert creates a NEW bill elsewhere for that
+    // same balance. Summing amount_due across all years would therefore count that
+    // balance twice. A waiver_type='carry_forward' row is the exact signal that a
+    // bill's balance moved rather than being genuinely billed twice — a real
+    // write-off uses waiver_type='full' and has no such new bill, so it's correctly
+    // left counted. Map ledger_id -> carried amount so both the per-year and overall
+    // totals can subtract just that portion.
+    const carriedByLedgerId = new Map<number, number>()
+    for (const w of waivers as Array<{ ledger_id: number; waiver_amount: string; waiver_type: string }>) {
+      if (w.waiver_type !== 'carry_forward') continue
+      carriedByLedgerId.set(w.ledger_id, (carriedByLedgerId.get(w.ledger_id) || 0) + parseFloat(w.waiver_amount))
+    }
+
     // 7. Group ledger by academic year for the bills view
     const yearMap = new Map<string, {
       academic_year: string
@@ -139,7 +154,7 @@ export async function GET(req: NextRequest) {
         })
       }
       const g = yearMap.get(yr)!
-      g.total_billed  += parseFloat(e.amount_due)
+      g.total_billed  += parseFloat(e.amount_due) - (carriedByLedgerId.get(e.id) || 0)
       g.total_paid    += parseFloat(e.amount_paid)
       g.total_waived  += parseFloat(e.waiver_amount)
       g.outstanding   += parseFloat(e.balance)
@@ -245,7 +260,8 @@ export async function GET(req: NextRequest) {
     })
 
     // 9. Overall summary (all years combined)
-    const totalBilled = ledger.reduce((s: number, l: {amount_due: string}) => s + parseFloat(l.amount_due), 0)
+    const totalBilled = ledger.reduce((s: number, l: {id: number; amount_due: string}) =>
+      s + parseFloat(l.amount_due) - (carriedByLedgerId.get(l.id) || 0), 0)
     const totalPaid   = (payments as Array<{amount: string; payment_status: string}>)
       .reduce((s, pay) => s + (pay.payment_status === 'completed' ? parseFloat(pay.amount) : 0), 0)
     const totalWaived = (waivers as Array<{waiver_amount: string}>)
