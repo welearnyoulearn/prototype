@@ -355,7 +355,7 @@ export default function FeeYearEndTab({
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => { setReopenReason(''); setShowReopenModal(true) }} disabled={yeClosing}
+                  <button data-testid="btn-yearend-reopen" onClick={() => { setReopenReason(''); setShowReopenModal(true) }} disabled={yeClosing}
                     className="text-xs bg-gray-600 text-white px-3 py-1.5 rounded-lg hover:bg-gray-500 disabled:opacity-50">
                     {yeClosing ? 'Working…' : 'Reopen'}
                   </button>
@@ -420,11 +420,11 @@ export default function FeeYearEndTab({
                 {!yearEnd.is_closed && (
                   <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-center gap-2 flex-wrap">
                     <span className="text-xs text-gray-400">Bulk set visible:</span>
-                    <button onClick={() => { const next = { ...yeDecisions }; visibleYeStudents.forEach(s => { if (!s.is_leaver) next[s.student_id] = 'carry' }); setYeDecisions(next) }}
+                    <button data-testid="btn-yearend-bulk-carry" onClick={() => { const next = { ...yeDecisions }; visibleYeStudents.forEach(s => { if (!s.is_leaver) next[s.student_id] = 'carry' }); setYeDecisions(next) }}
                       className="text-xs border border-blue-200 text-blue-600 px-2.5 py-1 rounded-lg hover:bg-blue-50">All → Carry Forward</button>
-                    <button onClick={() => { const next = { ...yeDecisions }; visibleYeStudents.forEach(s => { next[s.student_id] = 'writeoff' }); setYeDecisions(next) }}
+                    <button data-testid="btn-yearend-bulk-writeoff" onClick={() => { const next = { ...yeDecisions }; visibleYeStudents.forEach(s => { next[s.student_id] = 'writeoff' }); setYeDecisions(next) }}
                       className="text-xs border border-red-200 text-red-600 px-2.5 py-1 rounded-lg hover:bg-red-50">All → Write Off</button>
-                    <button onClick={() => { const next = { ...yeDecisions }; visibleYeStudents.forEach(s => { next[s.student_id] = 'open' }); setYeDecisions(next) }}
+                    <button data-testid="btn-yearend-bulk-open" onClick={() => { const next = { ...yeDecisions }; visibleYeStudents.forEach(s => { next[s.student_id] = 'open' }); setYeDecisions(next) }}
                       className="text-xs border border-gray-200 text-gray-500 px-2.5 py-1 rounded-lg hover:bg-gray-100">All → Leave Open</button>
                   </div>
                 )}
@@ -434,7 +434,7 @@ export default function FeeYearEndTab({
                     const decision = yeDecisions[s.student_id] || 'open'
                     return (
                       <div key={s.student_id} className="px-4 py-3">
-                        <div className="flex items-center justify-between gap-3">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
                               <p className="text-sm font-medium text-gray-800">{s.student_name}</p>
@@ -450,6 +450,7 @@ export default function FeeYearEndTab({
                             {!yearEnd.is_closed && (
                               <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
                                 <button
+                                  data-testid={`btn-yearend-decision-carry-${s.student_id}`}
                                   onClick={() => !s.is_leaver && setYeDecisions(p => ({ ...p, [s.student_id]: 'carry' }))}
                                   disabled={s.is_leaver}
                                   title={s.is_leaver ? 'Leavers cannot carry forward — use Passout instead' : ''}
@@ -458,6 +459,7 @@ export default function FeeYearEndTab({
                                 </button>
                                 {s.is_leaver && (
                                   <button
+                                    data-testid={`btn-yearend-decision-passout-${s.student_id}`}
                                     onClick={() => setYeDecisions(p => ({ ...p, [s.student_id]: 'passout' }))}
                                     title="Move unpaid dues to the always-open Passout Ledger"
                                     className={`px-2.5 py-1 border-l border-gray-200 transition-colors ${decision === 'passout' ? 'bg-indigo-600 text-white' : 'bg-white text-indigo-500 hover:bg-indigo-50'}`}>
@@ -465,11 +467,13 @@ export default function FeeYearEndTab({
                                   </button>
                                 )}
                                 <button
+                                  data-testid={`btn-yearend-decision-writeoff-${s.student_id}`}
                                   onClick={() => setYeDecisions(p => ({ ...p, [s.student_id]: 'writeoff' }))}
                                   className={`px-2.5 py-1 border-l border-gray-200 transition-colors ${decision === 'writeoff' ? 'bg-red-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
                                   Write Off
                                 </button>
                                 <button
+                                  data-testid={`btn-yearend-decision-open-${s.student_id}`}
                                   onClick={() => setYeDecisions(p => ({ ...p, [s.student_id]: 'open' }))}
                                   className={`px-2.5 py-1 border-l border-gray-200 transition-colors ${decision === 'open' ? 'bg-gray-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
                                   Leave Open

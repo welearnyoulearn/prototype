@@ -627,7 +627,7 @@ export default function FeeSetupTab({
                         <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${s.done ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-500'}`}>
                           {s.done ? '✓' : s.n}
                         </div>
-                        <span className={`text-xs font-medium ${s.done ? 'text-green-700' : 'text-gray-500'}`}>{s.label}</span>
+                        <span className={`text-xs font-medium hidden sm:inline ${s.done ? 'text-green-700' : 'text-gray-500'}`}>{s.label}</span>
                       </div>
                       {i < steps.length - 1 && <div className={`flex-1 h-0.5 ${s.done ? 'bg-green-300' : 'bg-gray-200'}`} />}
                     </Fragment>
