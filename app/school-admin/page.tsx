@@ -9,6 +9,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { useNavHistory } from '@/lib/useNavHistory'
+import NavBackForward from '../components/NavBackForward'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { ALL_FEATURES, PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 
@@ -284,7 +286,9 @@ function SchoolAdmin() {
   const [tier, setTier] = useState<Tier>('none')
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
   const initialTab = searchParams.get('tab') || 'overview'
-  const [activeNav, setActiveNav] = useState(initialTab)
+  // In-app Back/Forward for the sidebar nav — see NavBackForward beside the
+  // Home link in the topbar below.
+  const { current: activeNav, navigate: setActiveNav, goBack: navGoBack, goForward: navGoForward, canGoBack: navCanGoBack, canGoForward: navCanGoForward } = useNavHistory(initialTab)
   const [visited, setVisited] = useState<Set<string>>(new Set([initialTab]))
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -312,7 +316,7 @@ function SchoolAdmin() {
     params.set('tab', key)
     router.replace(`/school-admin?${params.toString()}`, { scroll: false })
     trackOpen(key)
-  }, [router, trackOpen])
+  }, [router, trackOpen, setActiveNav])
 
   useUsageHeartbeat()
 
@@ -430,6 +434,7 @@ function SchoolAdmin() {
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
           <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm hidden sm:inline">← Home</Link>
+          <NavBackForward canGoBack={navCanGoBack} canGoForward={navCanGoForward} onBack={navGoBack} onForward={navGoForward} />
           <span className="text-gray-200 hidden sm:inline">|</span>
 
           {/* School name */}
