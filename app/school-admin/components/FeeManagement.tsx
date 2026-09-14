@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState, useCallback, Fragment } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
 import { useFeature } from '@/lib/features-context'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type {
@@ -61,33 +60,30 @@ export default function FeeManagement({
   schoolHeaderBlocks?: ReceiptHeaderBlock[]
 }) {
   type Tab = 'overview' | 'setup' | 'applicability' | 'ledger' | 'collect' | 'students' | 'reports' | 'yearend' | 'leavers' | 'archive'
-  const TAB_KEYS: Tab[] = ['overview', 'setup', 'collect', 'students', 'reports', 'yearend', 'archive', 'leavers']
 
-  // Sub-tab within Fee Management syncs to the URL (?ftab=) so the browser's own
-  // Back/Forward/Refresh buttons work between Overview/Collect/Setup/etc instead of
-  // only React state changing silently underneath them — this component stays
-  // mounted (hidden) across portal nav switches, so a stale in-memory tab would
-  // otherwise survive a refresh incorrectly, and Back/Forward had nothing to step
-  // through at all before this.
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const urlTab = searchParams.get('ftab')
-  const [activeTab, setActiveTabRaw] = useState<Tab>(
-    urlTab && TAB_KEYS.includes(urlTab as Tab) ? (urlTab as Tab) : 'overview'
-  )
+  // In-app tab history (own Back/Forward buttons, not the browser's) — router-
+  // based URL sync (?ftab=) turned out unreliable in practice, so this tracks its
+  // own stack entirely in React state instead. activeTab is derived from
+  // nav.history[nav.index] so it can never drift out of sync with the stack;
+  // switching to a tab truncates any "forward" entries past the current point,
+  // same as normal browser history behavior.
+  const [nav, setNav] = useState<{ history: Tab[]; index: number }>({ history: ['overview'], index: 0 })
+  const activeTab = nav.history[nav.index]
   const setActiveTab = useCallback((tab: Tab) => {
-    setActiveTabRaw(tab)
-    const params = new URLSearchParams(window.location.search)
-    params.set('ftab', tab)
-    router.push(`/school-admin?${params.toString()}`, { scroll: false })
-  }, [router])
-  // Browser Back/Forward changes the URL, which re-renders this with a new
-  // searchParams — mirror that into activeTab without pushing another history entry.
-  useEffect(() => {
-    const t = searchParams.get('ftab')
-    if (t && TAB_KEYS.includes(t as Tab) && t !== activeTab) setActiveTabRaw(t as Tab)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams])
+    setNav(prev => {
+      if (prev.history[prev.index] === tab) return prev
+      const truncated = prev.history.slice(0, prev.index + 1)
+      return { history: [...truncated, tab], index: truncated.length }
+    })
+  }, [])
+  const goBack = useCallback(() => {
+    setNav(prev => prev.index > 0 ? { ...prev, index: prev.index - 1 } : prev)
+  }, [])
+  const goForward = useCallback(() => {
+    setNav(prev => prev.index < prev.history.length - 1 ? { ...prev, index: prev.index + 1 } : prev)
+  }, [])
+  const canGoBack = nav.index > 0
+  const canGoForward = nav.index < nav.history.length - 1
 
   const hasOnlinePayments = useFeature('online-payments')
 
@@ -761,6 +757,26 @@ export default function FeeManagement({
           <p className="text-sm text-gray-500 mt-0.5">Collect payments, manage structures, verify online payments</p>
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden mr-1">
+            <button
+              data-testid="btn-tab-back"
+              onClick={goBack}
+              disabled={!canGoBack}
+              title="Back"
+              className="px-2.5 py-1.5 text-gray-500 hover:bg-gray-50 hover:text-gray-700 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed border-r border-gray-200"
+            >
+              ←
+            </button>
+            <button
+              data-testid="btn-tab-forward"
+              onClick={goForward}
+              disabled={!canGoForward}
+              title="Forward"
+              className="px-2.5 py-1.5 text-gray-500 hover:bg-gray-50 hover:text-gray-700 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+            >
+              →
+            </button>
+          </div>
           <button
             data-testid="btn-header-collect"
             onClick={() => setActiveTab('collect' as Tab)}
