@@ -205,7 +205,7 @@ export default function FeeReportsTab({
           <h2 className="text-base font-semibold text-gray-800">Annual Financial Report — {academicYear}</h2>
           <p className="text-xs text-gray-400 mt-0.5">Complete collection analysis for the academic year</p>
         </div>
-        <button onClick={loadReports} className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Refresh</button>
+        <button data-testid="btn-reports-refresh" onClick={loadReports} className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Refresh</button>
       </div>
 
       {/* ── Fee Audit Report Export ── */}
@@ -240,13 +240,13 @@ export default function FeeReportsTab({
 
         {/* Format buttons */}
         <div className="flex items-center gap-2">
-          <button onClick={() => downloadAuditExcel()} disabled={arScope === 'class' && !arGrade}
+          <button data-testid="btn-audit-download-excel" onClick={() => downloadAuditExcel()} disabled={arScope === 'class' && !arGrade}
             className="text-sm bg-green-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-green-700 disabled:opacity-40">⬇ Excel (.xlsx)</button>
-          <button onClick={() => printAuditPdf()} disabled={arBusy || (arScope === 'class' && !arGrade)}
+          <button data-testid="btn-audit-print-pdf" onClick={() => printAuditPdf()} disabled={arBusy || (arScope === 'class' && !arGrade)}
             className="text-sm bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 disabled:opacity-40">{arBusy ? 'Building…' : '🖨 PDF (Print)'}</button>
           <span className="text-xs text-gray-400 ml-2">Old CSVs:</span>
-          <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download className="text-xs text-gray-500 underline">Ledger</a>
-          <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=payments`} download className="text-xs text-gray-500 underline">Payments</a>
+          <a data-testid="link-export-ledger-csv" href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger`} download className="text-xs text-gray-500 underline">Ledger</a>
+          <a data-testid="link-export-payments-csv" href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=payments`} download className="text-xs text-gray-500 underline">Payments</a>
         </div>
 
         {/* Individual student export */}
@@ -262,9 +262,9 @@ export default function FeeReportsTab({
                   <div key={s.id} className="px-3 py-2 hover:bg-gray-50 flex items-center justify-between gap-2 border-b border-gray-50 last:border-0">
                     <span className="text-sm text-gray-800">{s.name} <span className="text-xs text-gray-400">Gr.{s.grade}{s.section} · #{s.roll_number}</span></span>
                     <span className="flex gap-1.5 flex-shrink-0">
-                      <button onClick={() => { downloadAuditExcel({ student_id: String(s.id) }); setArStudentResults([]); setArStudentSearch('') }}
+                      <button data-testid={`btn-audit-student-excel-${s.id}`} onClick={() => { downloadAuditExcel({ student_id: String(s.id) }); setArStudentResults([]); setArStudentSearch('') }}
                         className="text-xs bg-green-600 text-white px-2 py-0.5 rounded hover:bg-green-700">Excel</button>
-                      <button onClick={() => { printAuditPdf({ student_id: String(s.id) }); setArStudentResults([]); setArStudentSearch('') }}
+                      <button data-testid={`btn-audit-student-pdf-${s.id}`} onClick={() => { printAuditPdf({ student_id: String(s.id) }); setArStudentResults([]); setArStudentSearch('') }}
                         className="text-xs bg-red-600 text-white px-2 py-0.5 rounded hover:bg-red-700">PDF</button>
                     </span>
                   </div>
@@ -470,16 +470,16 @@ export default function FeeReportsTab({
                 <p className="text-xs text-gray-400">Permanent record of all payments, waivers, edits and config changes. Cannot be deleted.</p>
               </div>
               <div className="flex items-center gap-2">
-                <a href={`/api/fees/audit-log?school_id=${schoolId}&academic_year=${academicYear}&format=csv&generated_by=${encodeURIComponent(adminName || 'Admin')}&limit=5000`} download
+                <a data-testid="link-export-audit-csv" href={`/api/fees/audit-log?school_id=${schoolId}&academic_year=${academicYear}&format=csv&generated_by=${encodeURIComponent(adminName || 'Admin')}&limit=5000`} download
                   className="text-sm border border-gray-800 text-gray-800 px-3 py-1.5 rounded-lg hover:bg-gray-100">⬇ Export Audit (CSV)</a>
                 {!showAuditLog ? (
-                  <button onClick={() => loadAuditLog()}
+                  <button data-testid="btn-view-audit-log" onClick={() => loadAuditLog()}
                     className="text-sm bg-gray-800 text-white px-4 py-1.5 rounded-lg hover:bg-gray-900">View Audit Log</button>
                 ) : (
                   <>
-                    <button onClick={() => loadAuditLog(true)}
+                    <button data-testid="btn-audit-log-refresh" onClick={() => loadAuditLog(true)}
                       className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Refresh</button>
-                    <button onClick={() => setShowAuditLog(false)}
+                    <button data-testid="btn-audit-log-hide" onClick={() => setShowAuditLog(false)}
                       className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Hide</button>
                   </>
                 )}
