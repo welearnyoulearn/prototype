@@ -2777,7 +2777,7 @@ export default function FeeManagement({
       {passbookVisited && (
         <div hidden={activeTab !== 'students'}>
           <FeePassbookTab
-            schoolId={schoolId} academicYear={academicYear}
+            schoolId={schoolId} academicYear={academicYear} isActive={activeTab === 'students'}
             passbook={{
               data: pbData, loading: pbLoading, err: pbErr, section: pbSection, setSection: setPbSection,
               summary: pbSummary, yearOnly: pbYearOnly, payments: pbPayments, receipts: pbReceipts,

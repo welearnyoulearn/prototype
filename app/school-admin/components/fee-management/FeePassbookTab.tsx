@@ -52,6 +52,7 @@ function blockNonNumericKeys(e: ReactKeyboardEvent<HTMLInputElement>) {
 export default function FeePassbookTab({
   schoolId,
   academicYear,
+  isActive,
   passbook,
   onLoad,
   onClose,
@@ -62,6 +63,7 @@ export default function FeePassbookTab({
 }: {
   schoolId: number
   academicYear: string
+  isActive: boolean
   passbook: {
     data: PassbookData | null
     loading: boolean
@@ -108,7 +110,11 @@ export default function FeePassbookTab({
     setPbAllLoading(false)
   }, [schoolId])
 
-  useEffect(() => { if (pbAllStudents.length === 0) loadPbAllStudents() }, [pbAllStudents.length, loadPbAllStudents])
+  // Retries on every tab revisit (not just mount) if the initial fetch left the
+  // directory empty — e.g. a silently-swallowed network failure.
+  useEffect(() => {
+    if (isActive && pbAllStudents.length === 0) loadPbAllStudents()
+  }, [isActive, pbAllStudents.length, loadPbAllStudents])
 
   // Revoked waivers — fetched lazily on first "Show Revoked" click, exclusive to this tab
   const [pbShowRevoked, setPbShowRevoked]       = useState(false)
