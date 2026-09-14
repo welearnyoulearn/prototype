@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
-import type { LedgerEntry, PaySuccess, ReceiptHeaderBlock, StudentRow } from './types'
+import type { CancelCorrectBundle, LedgerEntry, PaySuccess, PendingPayment, ReceiptHeaderBlock, StudentRow } from './types'
 import { printDualCopyReceipt } from './receipts'
 import { useFeeStore } from '@/lib/stores/feeStore'
 import { LoadErrorBanner } from './LoadErrorBanner'
@@ -40,30 +40,6 @@ function sanitizeMoney(raw: string): string {
 }
 function blockNonNumericKeys(e: ReactKeyboardEvent<HTMLInputElement>) {
   if (['e', 'E', '+', '-'].includes(e.key)) e.preventDefault()
-}
-
-type PendingPayment = {
-  id: number; student_id: number; student_name: string; roll_number: string
-  grade: string; section: string; category_name: string; period_label: string
-  amount: number; payment_mode: string; transaction_ref: string | null
-  receipt_number: string; paid_date: string; notes: string | null
-  ledger_id: number; amount_due: number; ledger_balance: number
-}
-
-export type CancelCorrectBundle = {
-  pmtId: number | null
-  mode: 'cancel' | 'correct'
-  reason: string
-  amount: string
-  busy: boolean
-  msg: string
-  maxCorrect: number | null
-  setMode: (m: 'cancel' | 'correct') => void
-  setReason: (r: string) => void
-  setAmount: (a: string) => void
-  setPmtId: (id: number | null) => void
-  open: (paymentId: number, pmtAmount: number, ledgerBalance: number) => void
-  submit: (origin: 'passbook' | 'counter') => void
 }
 
 // Fee collection: the Daily Counter (search/filter students, collect a payment,

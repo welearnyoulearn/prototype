@@ -117,6 +117,70 @@ export type PaySuccess = {
   line_items?: { category_name: string; period_label: string; amount: number }[]
 }
 
+// Shared payment cancel/correct UI state — owned by whichever component holds
+// the parent-level state (FeeManagement.tsx, since it's shared between Collect
+// and Passbook), passed down as one bundle rather than ~13 individual props.
+export type CancelCorrectBundle = {
+  pmtId: number | null
+  mode: 'cancel' | 'correct'
+  reason: string
+  amount: string
+  busy: boolean
+  msg: string
+  maxCorrect: number | null
+  setMode: (m: 'cancel' | 'correct') => void
+  setReason: (r: string) => void
+  setAmount: (a: string) => void
+  setPmtId: (id: number | null) => void
+  open: (paymentId: number, pmtAmount: number, ledgerBalance: number) => void
+  submit: (origin: 'passbook' | 'counter') => void
+}
+
+// Same shape as CancelCorrectBundle, for waiver revoke/correct — currently only
+// consumed by Passbook (the Passbook Modal Collect opens is not itself a tab, it
+// stays in the parent and reads this same parent-owned state directly).
+export type WaiverCorrectBundle = {
+  waiverId: number | null
+  mode: 'revoke' | 'correct'
+  reason: string
+  amount: string
+  busy: boolean
+  msg: string
+  maxCorrect: number | null
+  setMode: (m: 'revoke' | 'correct') => void
+  setReason: (r: string) => void
+  setAmount: (a: string) => void
+  setMsg: (m: string) => void
+  setWaiverId: (id: number | null) => void
+  open: (waiver: { id: number; ledger_id: number; waiver_amount: number }) => void
+  submit: () => void
+}
+
+export type PassbookTimeline = {
+  date: string; type: 'bill' | 'payment' | 'waiver' | 'amendment'
+  description: string; debit: number; credit: number; balance: number
+  by: string; reference: string | null; academic_year?: string
+}
+export type PassbookYearGroup = {
+  academic_year: string; is_current: boolean
+  total_billed: number; total_paid: number; total_waived: number; discretionary_waived?: number; outstanding: number
+  entries: LedgerEntry[]
+}
+export type PassbookData = {
+  student: { id: number; name: string; roll_number: string; grade: string; section: string; parent_name: string | null; parent_phone: string | null; parent_email: string | null }
+  current_year: string | null
+  summary: { total_billed: number; total_paid: number; total_waived: number; discretionary_waived?: number; outstanding: number }
+  timeline: PassbookTimeline[]
+  ledger: LedgerEntry[]
+  ledger_by_year: PassbookYearGroup[]
+  payments: PaymentRecord[]
+  pending_payments: PaymentRecord[]
+  waivers: Array<{ id: number; ledger_id: number; waiver_type: string; waiver_amount: number; reason: string; granted_by_name: string | null; created_at: string; fee_head_name: string; period_label: string; bill_year?: string; is_revoked?: boolean; revoked_by?: string | null; revoked_at?: string | null; revoke_reason?: string | null }>
+  prior_unresolved: PassbookYearGroup[]
+}
+export type PassbookSearchResult = { id: number; name: string; roll_number: string; grade: string; section: string; status: string }
+export type PassbookReceipt = { receipt_number: string; paid_date: string; total: number; cancelled: boolean; lineCount: number }
+
 // One row per student in the Collect tab's ledger view — also the shape used to
 // hand off a synthesized "open this student's collect form" request from another
 // tab (Leavers, Overview's passout panel) via the shared fee store's
