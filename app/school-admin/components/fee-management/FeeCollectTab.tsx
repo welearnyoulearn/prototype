@@ -101,6 +101,12 @@ export default function FeeCollectTab({
   const [ledgerGrade, setLedgerGrade] = useState('')
   const [ledgerStatus, setLedgerStatus] = useState('')
   const [ledgerSearch, setLedgerSearch] = useState('')
+  // Separate from ledgerSearch/ledgerGrade (Daily Counter) — Pending Payments is
+  // already implicitly filtered to outstanding > 0, so it gets its own filter
+  // state rather than sharing the Counter's, which also carries a status filter
+  // that doesn't apply here.
+  const [pendingSearch, setPendingSearch] = useState('')
+  const [pendingGrade, setPendingGrade] = useState('')
 
   const loadLedger = useCallback(async () => {
     if (!academicYear) return
@@ -987,12 +993,38 @@ export default function FeeCollectTab({
             <a href={`/api/fees/export?school_id=${schoolId}&academic_year=${academicYear}&type=ledger&outstanding=1`} download
               className="text-sm border border-red-200 text-red-600 px-3 py-1.5 rounded-lg hover:bg-red-50">Export Pending Payments</a>
           </div>
+          <div className="flex items-center gap-3">
+            <input data-testid="input-pending-search" type="text" placeholder="Search name, roll, grade, phone, parent…" value={pendingSearch}
+              onChange={e => setPendingSearch(e.target.value)}
+              className="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <select data-testid="select-pending-grade" value={pendingGrade} onChange={e => setPendingGrade(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white">
+              <option value="">All Grades</option>
+              {GRADES.map(g => <option key={g} value={g}>{gradeLabel(g)}</option>)}
+            </select>
+          </div>
           {(() => {
-            const defaulters = studentRows.filter(r => r.outstanding > 0).sort((a, b) => b.outstanding - a.outstanding)
+            const defaulters = studentRows.filter(r => {
+              if (r.outstanding <= 0) return false
+              if (pendingGrade && r.grade !== pendingGrade) return false
+              if (pendingSearch) {
+                const q = pendingSearch.trim().toLowerCase()
+                const matches = [
+                  r.student_name, r.roll_number,
+                  r.school_roll_number != null ? String(r.school_roll_number) : '',
+                  r.grade, r.section, r.email, r.phone,
+                  r.parent_name, r.parent_phone, r.parent_email,
+                ].some(v => (v || '').toLowerCase().includes(q))
+                if (!matches) return false
+              }
+              return true
+            }).sort((a, b) => b.outstanding - a.outstanding)
             if (ledgerLoading) return <div className="bg-white rounded-xl border border-gray-100 p-12 text-center text-sm text-gray-400">Loading…</div>
             if (defaulters.length === 0) return (
               <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-                <p className="text-green-700 font-medium">No pending payments — all dues cleared!</p>
+                <p className={(pendingSearch || pendingGrade) ? 'text-gray-400 font-medium' : 'text-green-700 font-medium'}>
+                  {(pendingSearch || pendingGrade) ? 'No students match this search/filter.' : 'No pending payments — all dues cleared!'}
+                </p>
               </div>
             )
             return (
