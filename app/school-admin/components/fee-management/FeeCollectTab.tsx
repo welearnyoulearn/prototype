@@ -720,17 +720,17 @@ export default function FeeCollectTab({
                             <div className="border-t border-gray-100 pt-3">
                               <div className="flex items-center justify-between mb-1.5">
                                 <span className="text-sm text-gray-500">Selected dues</span>
-                                <span className="text-sm font-medium text-gray-700">{fmt(checkedTotal)}</span>
+                                <span className="text-sm font-bold text-gray-900">{fmt(checkedTotal)}</span>
                               </div>
                               <label className="text-xs font-medium text-gray-600">Amount being collected now</label>
                               <div className="relative mt-1">
-                                <span className="absolute left-3 top-2.5 text-gray-400 text-sm">₹</span>
+                                <span className="absolute left-3 top-2.5 text-gray-500 text-sm">₹</span>
                                 <input
                                   data-testid="input-pay-amount"
                                   type="number" min="0" step="0.01" inputMode="decimal" value={payAmount}
                                   onKeyDown={blockNonNumericKeys}
                                   onChange={e => setPayAmount(sanitizeMoney(e.target.value))}
-                                  className="w-full pl-7 pr-3 py-2 border border-gray-200 rounded-lg text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  className="w-full pl-7 pr-3 py-2 border border-gray-200 rounded-lg text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 />
                               </div>
                               {(() => {
@@ -753,7 +753,7 @@ export default function FeeCollectTab({
                               <div>
                                 <label className="text-xs font-medium text-gray-600">Mode</label>
                                 <select value={payMode} onChange={e => setPayMode(e.target.value)}
-                                  className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm">
+                                  className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium text-gray-900">
                                   <option value="cash">Cash</option><option value="cheque">Cheque</option>
                                   <option value="dd">Demand Draft</option><option value="upi">UPI</option>
                                   <option value="online">Online Transfer</option>
@@ -762,7 +762,7 @@ export default function FeeCollectTab({
                               <div>
                                 <label className="text-xs font-medium text-gray-600">Date</label>
                                 <input data-testid="input-pay-date" type="date" value={payDate} max={todayLocal()} onChange={e => setPayDate(e.target.value)}
-                                  className={`w-full mt-1 border rounded-lg px-3 py-2 text-sm ${payDate > todayLocal() ? 'border-red-300' : 'border-gray-200'}`} />
+                                  className={`w-full mt-1 border rounded-lg px-3 py-2 text-sm font-medium text-gray-900 ${payDate > todayLocal() ? 'border-red-300' : 'border-gray-200'}`} />
                                 {payDate > todayLocal() && (
                                   <p className="text-xs text-red-600 mt-1">⚠ Future date — payments can&apos;t be backdated to the future.</p>
                                 )}
@@ -770,13 +770,15 @@ export default function FeeCollectTab({
                               <div>
                                 <label className="text-xs font-medium text-gray-600">Collected By <span className="text-red-500">*</span></label>
                                 <input data-testid="input-pay-collected-by" type="text" required value={payCollectedBy} onChange={e => setPayCollectedBy(e.target.value)}
-                                  className={`w-full mt-1 border rounded-lg px-3 py-2 text-sm ${!payCollectedBy.trim() ? 'border-red-200' : 'border-gray-200'}`} />
+                                  placeholder="Staff name"
+                                  className={`w-full mt-1 border rounded-lg px-3 py-2 text-sm font-medium text-gray-900 placeholder:text-gray-400 placeholder:font-normal ${!payCollectedBy.trim() ? 'border-red-200' : 'border-gray-200'}`} />
                               </div>
                               {['cheque','dd','upi','online'].includes(payMode) && (
                                 <div>
                                   <label className="text-xs font-medium text-gray-600">Reference / Cheque No</label>
                                   <input type="text" value={payRef} onChange={e => setPayRef(e.target.value)}
-                                    className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                                    placeholder="Transaction / cheque number"
+                                    className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium text-gray-900 placeholder:text-gray-400 placeholder:font-normal" />
                                 </div>
                               )}
                             </div>
@@ -784,7 +786,7 @@ export default function FeeCollectTab({
                               <label className="text-xs font-medium text-gray-600">Remarks (optional)</label>
                               <input type="text" value={payNotes} onChange={e => setPayNotes(e.target.value)}
                                 placeholder="e.g. Paid by elder brother · Late fee waived verbally · Cash short ₹10"
-                                className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                                className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium text-gray-900 placeholder:text-gray-400 placeholder:font-normal" />
                             </div>
                             {payError && (
                               <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2.5 flex items-start gap-2">
