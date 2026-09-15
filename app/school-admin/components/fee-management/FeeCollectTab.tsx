@@ -946,7 +946,7 @@ export default function FeeCollectTab({
               <h3 className="text-base font-semibold text-gray-800">Online Payments — Pending Verification</h3>
               <p className="text-xs text-gray-400 mt-0.5">Check your school&apos;s UPI/bank statement, then approve or reject. Parent is notified by email.</p>
             </div>
-            <button onClick={loadPending} className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Refresh</button>
+            <button data-testid="btn-pending-payments-refresh" onClick={loadPending} className="text-sm border border-gray-200 text-gray-600 px-3 py-1.5 rounded-lg hover:bg-gray-50">Refresh</button>
           </div>
 
           {verifyMsg && (
@@ -990,19 +990,19 @@ export default function FeeCollectTab({
                   </div>
                   {showRejectForm === pmt.id ? (
                     <div className="mt-3 flex items-center gap-2">
-                      <input type="text" placeholder="Reason for rejection…" value={rejectReason}
+                      <input data-testid={`input-online-payment-reject-reason-${pmt.id}`} type="text" placeholder="Reason for rejection…" value={rejectReason}
                         onChange={e => setRejectReason(e.target.value)}
                         className="flex-1 text-sm border border-red-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-red-400" />
-                      <button onClick={() => verifyPayment(pmt.id, 'reject')} disabled={verifyingId === pmt.id || !rejectReason.trim()}
+                      <button data-testid={`btn-online-payment-confirm-reject-${pmt.id}`} onClick={() => verifyPayment(pmt.id, 'reject')} disabled={verifyingId === pmt.id || !rejectReason.trim()}
                         className="text-sm bg-red-600 text-white px-4 py-1.5 rounded-lg hover:bg-red-700 disabled:opacity-50">Confirm Reject</button>
-                      <button onClick={() => { setShowRejectForm(null); setRejectReason('') }}
+                      <button data-testid={`btn-online-payment-cancel-reject-${pmt.id}`} onClick={() => { setShowRejectForm(null); setRejectReason('') }}
                         className="text-sm text-gray-400 px-3 py-1.5">Cancel</button>
                     </div>
                   ) : (
                     <div className="mt-3 flex gap-2">
-                      <button onClick={() => verifyPayment(pmt.id, 'approve')} disabled={verifyingId === pmt.id}
+                      <button data-testid={`btn-online-payment-approve-${pmt.id}`} onClick={() => verifyPayment(pmt.id, 'approve')} disabled={verifyingId === pmt.id}
                         className="text-sm bg-green-600 text-white px-4 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50">✓ Approve</button>
-                      <button onClick={() => setShowRejectForm(pmt.id)}
+                      <button data-testid={`btn-online-payment-reject-${pmt.id}`} onClick={() => setShowRejectForm(pmt.id)}
                         className="text-sm border border-red-200 text-red-600 px-4 py-1.5 rounded-lg hover:bg-red-50">✗ Reject</button>
                     </div>
                   )}

@@ -691,17 +691,17 @@ export default function FeeSetupTab({
                 <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 space-y-2">
                   <p className="text-xs font-medium text-amber-800">Enter your password to unlock this field</p>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <input type="password" value={upiUnlockPassword}
+                    <input data-testid="input-upi-unlock-password" type="password" value={upiUnlockPassword}
                       onChange={e => { setUpiUnlockPassword(e.target.value); setUpiUnlockError('') }}
                       onKeyDown={e => { if (e.key === 'Enter' && upiUnlockPassword) verifyUpiUnlock() }}
                       placeholder="Your account password"
                       autoFocus
                       className="flex-1 min-w-40 border border-amber-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
-                    <button onClick={verifyUpiUnlock} disabled={upiUnlocking || !upiUnlockPassword}
+                    <button data-testid="btn-upi-unlock-confirm" onClick={verifyUpiUnlock} disabled={upiUnlocking || !upiUnlockPassword}
                       className="text-sm bg-amber-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50">
                       {upiUnlocking ? 'Verifying…' : 'Unlock'}
                     </button>
-                    <button onClick={cancelUpiUnlock}
+                    <button data-testid="btn-upi-unlock-cancel" onClick={cancelUpiUnlock}
                       className="text-sm text-gray-500 px-3 py-2 rounded-lg hover:bg-gray-100">
                       Cancel
                     </button>
@@ -711,19 +711,19 @@ export default function FeeSetupTab({
               ) : (
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="relative flex-1 min-w-56">
-                    <input type="text" value={upiId}
+                    <input data-testid="input-upi-id" type="text" value={upiId}
                       onChange={e => { setUpiId(e.target.value); setUpiMsg('') }}
                       placeholder="e.g. school@okhdfcbank"
                       readOnly={upiLocked}
                       className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none ${upiLocked ? 'border-gray-200 bg-gray-50 text-gray-500 cursor-not-allowed' : 'border-gray-200 focus:ring-2 focus:ring-blue-500'}`} />
                   </div>
                   {upiLocked ? (
-                    <button onClick={() => setUpiShowUnlock(true)}
+                    <button data-testid="btn-upi-id-unlock-to-edit" onClick={() => setUpiShowUnlock(true)}
                       className="text-sm bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200">
                       Unlock to Edit
                     </button>
                   ) : (
-                    <button onClick={saveUpiId} disabled={upiSaving}
+                    <button data-testid="btn-upi-id-save" onClick={saveUpiId} disabled={upiSaving}
                       className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
                       {upiSaving ? 'Saving…' : 'Save UPI ID'}
                     </button>
