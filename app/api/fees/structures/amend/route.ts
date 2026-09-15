@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { todayIST } from '@/lib/istDate'
 
 // POST /api/fees/structures/amend — amend a locked fee structure amount
 // Updates fee_structures + creates amendment record + updates unpaid ledger entries
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
             old_amount, new_amount, effective_from, reason, changed_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [school_id, current.id, fee_category_id, grade, academic_year,
-         current.amount, new_amount, effective_from || new Date().toISOString().slice(0, 10),
+         current.amount, new_amount, effective_from || todayIST(),
          reason, changed_by]
       )
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { todayIST } from '@/lib/istDate'
 
 // GET /api/fees/audit-log?school_id=X&academic_year=Y&limit=200
 // Unifies every financial action into one chronological audit trail:
@@ -272,7 +273,7 @@ export async function GET(req: NextRequest) {
       ].join(','))
 
       const csv = [meta, '', header, ...dataRows].join('\n')
-      const filename = `fee_audit_${academic_year || 'all'}_${new Date().toISOString().slice(0, 10)}.csv`
+      const filename = `fee_audit_${academic_year || 'all'}_${todayIST()}.csv`
       return new NextResponse(csv, {
         headers: {
           'Content-Type': 'text/csv; charset=utf-8',

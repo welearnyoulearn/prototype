@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { todayIST } from '@/lib/istDate'
 
 const ENSURE = `
   CREATE TABLE IF NOT EXISTS fee_day_close (
@@ -30,7 +31,7 @@ const ENSURE = `
 export async function GET(req: NextRequest) {
   const p         = req.nextUrl.searchParams
   const school_id = p.get('school_id')
-  const date      = p.get('date') || new Date().toISOString().slice(0, 10)
+  const date      = p.get('date') || todayIST()
 
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
   if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
