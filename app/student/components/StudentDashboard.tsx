@@ -134,6 +134,9 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
   const [announcements,   setAnnouncements]   = useState<AnnouncementItem[]>([])
   const [annExpanded,     setAnnExpanded]     = useState<number | null>(null)
 
+  const hasHomework   = isNavItemVisible?.('tasks') ?? true
+  const hasAttendance = isNavItemVisible?.('attendance') ?? true
+
   useEffect(() => {
     Promise.all([
       fetch(`/api/tasks?school_id=${schoolId}&class_id=${classId}`).then(r => r.json()).catch(() => []),
@@ -147,6 +150,21 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
       const subs: Submission[] = Array.isArray(subData) ? subData : []
       setSubmissions(subs)
       setAnnouncements(Array.isArray(annData) ? annData : [])
+
+      // Engagement ring blends attendance % and task-completion %, so it
+      // must never use a signal the school hasn't enabled — a school with
+      // Homework off but Attendance on should see a ring based on
+      // attendance alone, not a score silently averaged with zero. With
+      // neither enabled there's nothing meaningful to show at all.
+      if (!hasAttendance && !hasHomework) return
+
+      const taskPct = published.length > 0
+        ? (subs.filter(s => s.submitted_at).length / published.length) * 100 : 0
+
+      if (!hasAttendance) {
+        setEngagementScore(Math.round(taskPct))
+        return
+      }
 
       const now   = new Date()
       const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -163,14 +181,11 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
           const totalAtt    = byDate.size
           const presentDays = Array.from(byDate.values()).filter(Boolean).length
           const attPct  = totalAtt > 0 ? (presentDays / totalAtt) * 100 : 0
-          const taskPct = published.length > 0
-            ? (subs.filter(s => s.submitted_at).length / published.length) * 100 : 0
-          const now2 = new Date()
-          const monthStart = `${now2.getFullYear()}-${String(now2.getMonth() + 1).padStart(2, '0')}-01`
-          setEngagementScore(Math.round(attPct * 0.5 + taskPct * 0.5))
+          const score = hasHomework ? attPct * 0.5 + taskPct * 0.5 : attPct
+          setEngagementScore(Math.round(score))
         }).catch(() => {})
     }).finally(() => setLoading(false))
-  }, [student.id, classId, schoolId])
+  }, [student.id, classId, schoolId, hasAttendance, hasHomework])
 
   const now       = new Date()
   const submitted = submissions.filter(s => s.submitted_at).length
@@ -246,132 +261,139 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
         </div>
       </div>
 
-      {/* ── Stats HUD (count-up + scale-in stagger) ──────────────── */}
-      <div className="grid grid-cols-4 gap-2">
-        <StatCard emoji="📚" val={tasks.length} label="Total"   color="text-blue-500"   delay={0}   onClick={() => onNavigate?.('tasks')} />
-        <StatCard emoji="✅" val={submitted}     label="Done"    color="text-green-500"  delay={60}  onClick={() => onNavigate?.('tasks')} />
-        <StatCard emoji="⏳" val={pending}       label="Pending" color="text-orange-500" delay={120} onClick={() => onNavigate?.('tasks')} />
-        <StatCard emoji="⭐" val={reviewed}      label="Graded"  color="text-purple-500" delay={180} onClick={() => onNavigate?.('tasks')} />
-      </div>
-
-
-      {/* ── Overdue Alert (pulse glow) ────────────────────────────── */}
-      {overdue.length > 0 && (
-        <button
-          onClick={() => onNavigate?.('tasks')}
-          className="w-full text-left bg-red-50 border border-red-200 rounded-2xl p-4 flex items-center gap-3
-                     card-lift anim-pulse-red anim-slide-up"
-          style={{ animationDelay: '0.3s' }}
-        >
-          <span className="text-2xl flex-shrink-0">🚨</span>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-black text-red-700">
-              {overdue.length} overdue task{overdue.length !== 1 ? 's' : ''}!
-            </p>
-            <p className="text-xs text-red-400 truncate mt-0.5">{overdue.map(t => t.title).join(', ')}</p>
+      {/* ── Everything below is homework/task data — hidden entirely when
+          the school hasn't enabled the Homework feature, same gate Quick
+          Actions already uses, so an unconfigured school never sees empty
+          "0 Total / 0 Done" tiles or an always-empty task list. ──────── */}
+      {(isNavItemVisible?.('tasks') ?? true) && (
+        <>
+          {/* ── Stats HUD (count-up + scale-in stagger) ──────────────── */}
+          <div className="grid grid-cols-4 gap-2">
+            <StatCard emoji="📚" val={tasks.length} label="Total"   color="text-blue-500"   delay={0}   onClick={() => onNavigate?.('tasks')} />
+            <StatCard emoji="✅" val={submitted}     label="Done"    color="text-green-500"  delay={60}  onClick={() => onNavigate?.('tasks')} />
+            <StatCard emoji="⏳" val={pending}       label="Pending" color="text-orange-500" delay={120} onClick={() => onNavigate?.('tasks')} />
+            <StatCard emoji="⭐" val={reviewed}      label="Graded"  color="text-purple-500" delay={180} onClick={() => onNavigate?.('tasks')} />
           </div>
-          <svg className="w-4 h-4 text-red-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-      )}
 
-      {/* ── Next Due ──────────────────────────────────────────────── */}
-      {nextDue && !overdue.find(t => t.id === nextDue.id) && (
-        <button
-          onClick={() => onNavigate?.('tasks')}
-          className="w-full text-left bg-white border border-gray-200 rounded-2xl p-4 flex items-center gap-3 card-lift anim-slide-up"
-          style={{ animationDelay: '0.35s' }}
-        >
-          <div className="w-11 h-11 rounded-xl bg-orange-50 flex items-center justify-center text-2xl flex-shrink-0 emoji-wobble">
-            {subjectEmoji(nextDue.subject)}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-black text-orange-500 uppercase tracking-wide">Next Due</p>
-            <p className="text-sm font-bold text-gray-800 truncate mt-0.5">{nextDue.title}</p>
-            <p className="text-xs text-gray-400">{nextDue.subject} · {nextDue.due_date}</p>
-          </div>
-          <svg className="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-      )}
+          {/* ── Overdue Alert (pulse glow) ────────────────────────────── */}
+          {overdue.length > 0 && (
+            <button
+              onClick={() => onNavigate?.('tasks')}
+              className="w-full text-left bg-red-50 border border-red-200 rounded-2xl p-4 flex items-center gap-3
+                         card-lift anim-pulse-red anim-slide-up"
+              style={{ animationDelay: '0.3s' }}
+            >
+              <span className="text-2xl flex-shrink-0">🚨</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-black text-red-700">
+                  {overdue.length} overdue task{overdue.length !== 1 ? 's' : ''}!
+                </p>
+                <p className="text-xs text-red-400 truncate mt-0.5">{overdue.map(t => t.title).join(', ')}</p>
+              </div>
+              <svg className="w-4 h-4 text-red-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          )}
 
-      {/* ── Today's Tasks (staggered rows) ───────────────────────── */}
-      <div
-        className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden anim-slide-up"
-        style={{ animationDelay: '0.4s' }}
-      >
-        <div className="px-5 py-4 flex items-center justify-between border-b border-gray-50">
-          <div className="flex items-center gap-2">
-            <span className="text-base emoji-wobble">📝</span>
-            <h3 className="text-sm font-black text-gray-900">Today&apos;s Tasks</h3>
-            {pending > 0 && (
-              <span className="text-[10px] font-black bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">
-                {pending} left
-              </span>
+          {/* ── Next Due ──────────────────────────────────────────────── */}
+          {nextDue && !overdue.find(t => t.id === nextDue.id) && (
+            <button
+              onClick={() => onNavigate?.('tasks')}
+              className="w-full text-left bg-white border border-gray-200 rounded-2xl p-4 flex items-center gap-3 card-lift anim-slide-up"
+              style={{ animationDelay: '0.35s' }}
+            >
+              <div className="w-11 h-11 rounded-xl bg-orange-50 flex items-center justify-center text-2xl flex-shrink-0 emoji-wobble">
+                {subjectEmoji(nextDue.subject)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-black text-orange-500 uppercase tracking-wide">Next Due</p>
+                <p className="text-sm font-bold text-gray-800 truncate mt-0.5">{nextDue.title}</p>
+                <p className="text-xs text-gray-400">{nextDue.subject} · {nextDue.due_date}</p>
+              </div>
+              <svg className="w-4 h-4 text-gray-300 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          )}
+
+          {/* ── Today's Tasks (staggered rows) ───────────────────────── */}
+          <div
+            className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden anim-slide-up"
+            style={{ animationDelay: '0.4s' }}
+          >
+            <div className="px-5 py-4 flex items-center justify-between border-b border-gray-50">
+              <div className="flex items-center gap-2">
+                <span className="text-base emoji-wobble">📝</span>
+                <h3 className="text-sm font-black text-gray-900">Today&apos;s Tasks</h3>
+                {pending > 0 && (
+                  <span className="text-[10px] font-black bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">
+                    {pending} left
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => onNavigate?.('tasks')}
+                className="text-xs font-black text-orange-500 hover:text-orange-600 transition-colors"
+              >
+                See all →
+              </button>
+            </div>
+
+            {tasks.length === 0 ? (
+              <div className="py-12 text-center anim-fade-in">
+                <p className="text-4xl mb-2 anim-float inline-block">🎉</p>
+                <p className="text-sm font-bold text-gray-500">No tasks assigned yet!</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-50">
+                {tasks.slice(0, 5).map((t, i) => {
+                  const sub       = submissions.find(s => s.task_id === t.id)
+                  const isOverdue = !sub?.submitted_at && t.due_date && new Date(t.due_date) < now
+                  const isDone    = !!sub?.submitted_at
+                  const isGraded  = sub?.submission_status === 'reviewed'
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => onNavigate?.('tasks')}
+                      className="w-full flex items-center gap-3 px-5 py-3.5 text-left group
+                                 transition-colors duration-150 hover:bg-orange-50/50 active:bg-gray-100"
+                      style={{
+                        animation: 'slideInLeft 0.35s cubic-bezier(0.16,1,0.3,1) both',
+                        animationDelay: `${0.45 + i * 0.07}s`,
+                      }}
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center text-xl flex-shrink-0 emoji-wobble
+                                      group-hover:bg-orange-100 transition-colors duration-200">
+                        {subjectEmoji(t.subject)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-bold truncate transition-colors duration-150
+                          ${isDone ? 'text-gray-400 line-through decoration-gray-300' : 'text-gray-800 group-hover:text-orange-700'}`}>
+                          {t.title}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {t.subject} · {t.max_marks} marks
+                          {t.due_date ? ` · ${t.due_date}` : ''}
+                        </p>
+                      </div>
+                      <span className={`text-[10px] font-black px-2.5 py-1 rounded-full flex-shrink-0 transition-transform duration-150 group-hover:scale-105 ${
+                        isGraded && sub.score !== null ? 'bg-green-100 text-green-700' :
+                        isDone   ? 'bg-blue-100 text-blue-700' :
+                        isOverdue ? 'bg-red-100 text-red-600' :
+                        'bg-orange-100 text-orange-600'
+                      }`}>
+                        {isGraded && sub.score !== null ? `${sub.score}/${t.max_marks}` :
+                         isDone ? 'Submitted' : isOverdue ? 'Overdue' : 'Pending'}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
             )}
           </div>
-          <button
-            onClick={() => onNavigate?.('tasks')}
-            className="text-xs font-black text-orange-500 hover:text-orange-600 transition-colors"
-          >
-            See all →
-          </button>
-        </div>
-
-        {tasks.length === 0 ? (
-          <div className="py-12 text-center anim-fade-in">
-            <p className="text-4xl mb-2 anim-float inline-block">🎉</p>
-            <p className="text-sm font-bold text-gray-500">No tasks assigned yet!</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            {tasks.slice(0, 5).map((t, i) => {
-              const sub       = submissions.find(s => s.task_id === t.id)
-              const isOverdue = !sub?.submitted_at && t.due_date && new Date(t.due_date) < now
-              const isDone    = !!sub?.submitted_at
-              const isGraded  = sub?.submission_status === 'reviewed'
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => onNavigate?.('tasks')}
-                  className="w-full flex items-center gap-3 px-5 py-3.5 text-left group
-                             transition-colors duration-150 hover:bg-orange-50/50 active:bg-gray-100"
-                  style={{
-                    animation: 'slideInLeft 0.35s cubic-bezier(0.16,1,0.3,1) both',
-                    animationDelay: `${0.45 + i * 0.07}s`,
-                  }}
-                >
-                  <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center text-xl flex-shrink-0 emoji-wobble
-                                  group-hover:bg-orange-100 transition-colors duration-200">
-                    {subjectEmoji(t.subject)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-bold truncate transition-colors duration-150
-                      ${isDone ? 'text-gray-400 line-through decoration-gray-300' : 'text-gray-800 group-hover:text-orange-700'}`}>
-                      {t.title}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {t.subject} · {t.max_marks} marks
-                      {t.due_date ? ` · ${t.due_date}` : ''}
-                    </p>
-                  </div>
-                  <span className={`text-[10px] font-black px-2.5 py-1 rounded-full flex-shrink-0 transition-transform duration-150 group-hover:scale-105 ${
-                    isGraded && sub.score !== null ? 'bg-green-100 text-green-700' :
-                    isDone   ? 'bg-blue-100 text-blue-700' :
-                    isOverdue ? 'bg-red-100 text-red-600' :
-                    'bg-orange-100 text-orange-600'
-                  }`}>
-                    {isGraded && sub.score !== null ? `${sub.score}/${t.max_marks}` :
-                     isDone ? 'Submitted' : isOverdue ? 'Overdue' : 'Pending'}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-        )}
-      </div>
+        </>
+      )}
 
       {/* ── Quick Actions ─────────────────────────────────────────── */}
       {(() => {
@@ -402,7 +424,7 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
       })()}
 
       {/* ── My Doubts ─────────────────────────────────────────────── */}
-      {doubts.length > 0 && (
+      {(isNavItemVisible?.('doubts') ?? true) && doubts.length > 0 && (
         <div
           className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden anim-slide-up"
           style={{ animationDelay: '0.6s' }}

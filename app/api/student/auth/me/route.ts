@@ -22,7 +22,7 @@ export async function GET() {
     const result = await pool.query(
       `SELECT s.id, s.name, s.email, s.phone, s.grade, s.section, s.roll_number,
               s.school_id, s.parent_name, s.parent_phone, s.parent_email,
-              s.password_changed,
+              s.password_changed, s.date_of_birth,
               sc.name AS school_name, sc.city AS school_city
        FROM students s
        JOIN schools sc ON sc.id = s.school_id

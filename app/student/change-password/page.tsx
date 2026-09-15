@@ -28,7 +28,7 @@ export default function StudentChangePasswordPage() {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Failed to change password'); return }
-      router.push('/student')
+      router.push('/student/add-birthday')
     } catch {
       setError('Connection error. Please try again.')
     } finally {

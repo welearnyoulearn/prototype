@@ -21,7 +21,7 @@ type Student = {
   roll_number: string; school_id: number; class_id: number
   parent_name: string | null; parent_phone: string | null
 }
-type ParentInfo = { id: number; name: string; email: string; school_id: number; school_name: string; children: Child[] }
+type ParentInfo = { id: number; name: string; email: string; school_id: number; school_name: string; children: Child[]; date_of_birth?: string | null }
 
 type Summary = {
   upcoming_exams: Array<{

@@ -1,7 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { motion, useMotionValue, useTransform, animate } from 'framer-motion'
 import { GRADE_COLORS, type ExamGrade } from '@/lib/examGrading'
+import { celebrate } from '@/app/components/gamification/confetti'
 
 type SubjectResult = {
   subject_name: string
@@ -35,6 +37,18 @@ type Props = {
   studentId: number
   schoolId: number
   classId: number
+}
+
+function CountUpPercent({ value }: { value: number }) {
+  const mv = useMotionValue(0)
+  const rounded = useTransform(mv, v => Math.round(v))
+  const [display, setDisplay] = useState(0)
+  useEffect(() => {
+    const controls = animate(mv, value, { duration: 0.9, ease: [0.16, 1, 0.3, 1] })
+    const unsub = rounded.on('change', v => setDisplay(v))
+    return () => { controls.stop(); unsub() }
+  }, [value]) // eslint-disable-line react-hooks/exhaustive-deps
+  return <>{display}</>
 }
 
 const EXAM_TYPE_LABELS: Record<string, string> = {
@@ -106,15 +120,22 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
   return (
     <div className="space-y-4">
       {latestExam.percentage !== null && (
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl p-4 text-white flex items-center justify-between">
-          <div>
-            <p className="text-blue-200 text-xs font-medium uppercase tracking-wide">Latest Result</p>
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+          className="relative overflow-hidden rounded-2xl p-4 text-white flex items-center justify-between"
+          style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #4338ca 50%, #3730a3 100%)' }}
+        >
+          <div className="absolute -top-8 -right-8 w-32 h-32 rounded-full bg-white/10 pointer-events-none" />
+          <div className="relative">
+            <p className="text-indigo-200 text-xs font-medium uppercase tracking-wide">Latest Result</p>
             <p className="text-white font-bold text-lg mt-0.5">{latestExam.exam_name}</p>
-            <p className="text-blue-200 text-sm">{EXAM_TYPE_LABELS[latestExam.exam_type] || latestExam.exam_type} · {latestExam.exam_date}</p>
+            <p className="text-indigo-200 text-sm">{EXAM_TYPE_LABELS[latestExam.exam_type] || latestExam.exam_type} · {latestExam.exam_date}</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="relative flex items-center gap-3">
             <div className="text-center">
-              <div className="text-3xl font-black">{latestExam.percentage}%</div>
+              <div className="text-3xl font-black"><CountUpPercent value={latestExam.percentage} />%</div>
               <div className={`inline-block px-2 py-0.5 rounded-full text-xs font-bold mt-1 ${latestExam.pass ? 'bg-green-400 text-green-900' : 'bg-red-400 text-red-900'}`}>
                 {latestExam.grade} · {latestExam.pass ? 'PASS' : 'FAIL'}
               </div>
@@ -124,11 +145,16 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
               View Score Card
             </button>
           </div>
-        </div>
+        </motion.div>
       )}
 
-      {exams.map((exam) => (
-        <div key={exam.exam_id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      {exams.map((exam, i) => (
+        <motion.div
+          key={exam.exam_id}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.08 + i * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+          className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <button className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
             onClick={() => setExpanded(expanded === exam.exam_id ? null : exam.exam_id)}>
             <div className="flex items-center gap-3 text-left">
@@ -225,7 +251,7 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
               </div>
             </div>
           )}
-        </div>
+        </motion.div>
       ))}
 
       {scoreCardExam && <ScoreCardModal exam={scoreCardExam} onClose={() => setScoreCardExam(null)} />}
@@ -238,9 +264,23 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
 // accordion above, since a released result is something a family shares/
 // prints, not just a dashboard number.
 function ScoreCardModal({ exam, onClose }: { exam: ExamResult; onClose: () => void }) {
+  const hasCelebrated = useRef(false)
+  useEffect(() => {
+    if (exam.pass && !hasCelebrated.current) {
+      hasCelebrated.current = true
+      celebrate()
+    }
+  }, [exam.pass])
+
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+      <motion.div
+        initial={{ opacity: 0, scale: 0.92, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 26 }}
+        onClick={e => e.stopPropagation()}
+        className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+      >
         <div className="bg-gradient-to-br from-indigo-600 to-blue-700 text-white px-6 py-6 rounded-t-2xl text-center relative">
           <button onClick={onClose} className="absolute top-3 right-3 text-white/70 hover:text-white">✕</button>
           <p className="text-indigo-200 text-xs font-semibold uppercase tracking-widest">Score Card</p>
@@ -296,7 +336,7 @@ function ScoreCardModal({ exam, onClose }: { exam: ExamResult; onClose: () => vo
             Print / Save as PDF
           </button>
         </div>
-      </div>
+      </motion.div>
     </div>
   )
 }

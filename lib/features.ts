@@ -6,7 +6,7 @@
 // one. Add a portal to a feature's list to make it gate that portal too — no
 // other plumbing needed, the enabled-features endpoint and each portal's nav
 // filter both read this array directly.
-export type Portal = 'school-admin' | 'student' | 'parent'
+export type Portal = 'school-admin' | 'student' | 'parent' | 'teacher'
 
 export const ALL_FEATURES: { key: string; label: string; category: string; portals: Portal[] }[] = [
   // ── Core ─────────────────────────────────────────────────────────────────────
@@ -16,20 +16,20 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'class-management',   label: 'Class Management',                category: 'Core', portals: ['school-admin'] },
   { key: 'student-portal',     label: 'Student Portal Access',           category: 'Core', portals: ['school-admin'] },
   { key: 'parent-portal',      label: 'Parent Portal Access',            category: 'Core', portals: ['school-admin'] },
-  { key: 'library',            label: 'WLYL Digital Library',            category: 'Core', portals: ['school-admin', 'student', 'parent'] },
+  { key: 'library',            label: 'WLYL Digital Library',            category: 'Core', portals: ['school-admin', 'student', 'parent', 'teacher'] },
   { key: 'homework',           label: 'Homework / Tasks',                category: 'Core', portals: ['school-admin', 'student'] },
   { key: 'doubts',             label: 'Ask a Doubt',                     category: 'Core', portals: ['school-admin', 'student'] },
 
   // ── Scheduling ───────────────────────────────────────────────────────────────
-  { key: 'attendance',         label: 'Attendance Tracking',             category: 'Scheduling', portals: ['school-admin', 'student', 'parent'] },
-  { key: 'leave-requests',     label: 'Leave Requests',                  category: 'Scheduling', portals: ['school-admin'] },
+  { key: 'attendance',         label: 'Attendance Tracking',             category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },
+  { key: 'leave-requests',     label: 'Leave Requests',                  category: 'Scheduling', portals: ['school-admin', 'teacher'] },
   { key: 'emergency-cover',    label: 'Emergency Cover',                 category: 'Scheduling', portals: ['school-admin'] },
   // Standalone, independently-sellable main feature (own tier row, and
   // per-school overridable the same as any other feature). Class Management
   // reads schoolHasFeature('timetable') directly and shows/hides its whole
   // Timetable tab and generation/editing UI based on it — see ClassManagement.tsx.
-  { key: 'timetable',          label: 'Timetable Management',            category: 'Scheduling', portals: ['school-admin', 'student', 'parent'] },
-  { key: 'curriculum',         label: 'Syllabus Customizer',             category: 'Scheduling', portals: ['school-admin', 'student', 'parent'] },
+  { key: 'timetable',          label: 'Timetable Management',            category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },
+  { key: 'curriculum',         label: 'Syllabus Customizer',             category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },
   // Combined switch for the entire exam/marks feature — school admin's
   // create-and-release screen, teacher's marks entry/review, and the
   // student/parent results + acknowledgement views. One flag rather than
@@ -37,7 +37,7 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   // inconsistent state of admin being able to schedule exams while
   // students/parents can't see results (or vice versa) — see
   // lib/db.ts's migration for how existing schools were carried over.
-  { key: 'exam-marks',         label: 'Exam Schedule & Marks',           category: 'Scheduling', portals: ['school-admin', 'student', 'parent'] },
+  { key: 'exam-marks',         label: 'Exam Schedule & Marks',           category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },
 
   // ── Analytics & Intelligence ─────────────────────────────────────────────────
   { key: 'briefing',           label: 'Daily Briefing',                  category: 'Analytics', portals: ['school-admin'] },

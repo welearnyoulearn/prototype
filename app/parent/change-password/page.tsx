@@ -27,7 +27,7 @@ export default function ParentChangePasswordPage() {
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Failed to change password'); return }
-      router.push('/parent')
+      router.push('/parent/add-birthday')
     } catch {
       setError('Connection error. Please try again.')
     } finally {

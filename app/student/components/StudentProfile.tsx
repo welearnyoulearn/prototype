@@ -1,6 +1,9 @@
 'use client'
 
+import { useState } from 'react'
+import { motion } from 'framer-motion'
 import ChangePasswordCard from '@/app/components/ChangePasswordCard'
+import BirthdayField from '@/app/components/BirthdayField'
 
 type Student = {
   id: number
@@ -13,19 +16,33 @@ type Student = {
   parent_phone: string | null
   phone: string | null
   school_id: number
+  date_of_birth?: string | null
 }
 
 type Props = { student: Student }
 
 export default function StudentProfile({ student }: Props) {
+  const [dob, setDob] = useState(student.date_of_birth ?? null)
+
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+      className="max-w-2xl mx-auto space-y-6"
+    >
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 px-6 py-8 text-white">
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center text-2xl font-bold">
+        <div className="relative bg-gradient-to-r from-indigo-500 to-purple-600 px-6 py-8 text-white overflow-hidden">
+          <div className="absolute -top-10 -right-6 w-36 h-36 rounded-full bg-white/10 pointer-events-none" />
+          <div className="relative flex items-center gap-4">
+            <motion.div
+              initial={{ scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.1, type: 'spring', stiffness: 260, damping: 18 }}
+              className="w-16 h-16 rounded-full bg-white/20 ring-4 ring-white/25 flex items-center justify-center text-2xl font-bold flex-shrink-0"
+            >
               {student.name.charAt(0).toUpperCase()}
-            </div>
+            </motion.div>
             <div>
               <h2 className="text-xl font-bold">{student.name}</h2>
               <p className="text-indigo-200 text-sm">
@@ -39,19 +56,28 @@ export default function StudentProfile({ student }: Props) {
         <div className="p-6 space-y-4">
           <h3 className="font-semibold text-gray-700">Personal Information</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <InfoRow label="Full Name" value={student.name} />
-            <InfoRow label="Grade & Section" value={`Grade ${student.grade} – ${student.section}`} />
-            <InfoRow label="Roll Number" value={student.roll_number || '—'} />
-            <InfoRow label="Email" value={student.email || '—'} />
-            <InfoRow label="Phone" value={student.phone || '—'} />
+            <InfoRow label="Full Name" value={student.name} delay={0.15} />
+            <InfoRow label="Grade & Section" value={`Grade ${student.grade} – ${student.section}`} delay={0.19} />
+            <InfoRow label="Roll Number" value={student.roll_number || '—'} delay={0.23} />
+            <InfoRow label="Email" value={student.email || '—'} delay={0.27} />
+            <InfoRow label="Phone" value={student.phone || '—'} delay={0.31} />
           </div>
+
+          <BirthdayField
+            value={dob}
+            endpoint="/api/student/auth/date-of-birth"
+            kind="student"
+            ring="focus:ring-indigo-300"
+            accentGradient="from-indigo-500 to-purple-600"
+            onSaved={setDob}
+          />
 
           {(student.parent_name || student.parent_phone) && (
             <>
               <h3 className="font-semibold text-gray-700 pt-2">Parent / Guardian</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <InfoRow label="Parent Name" value={student.parent_name || '—'} />
-                <InfoRow label="Parent Phone" value={student.parent_phone || '—'} />
+                <InfoRow label="Parent Name" value={student.parent_name || '—'} delay={0.35} />
+                <InfoRow label="Parent Phone" value={student.parent_phone || '—'} delay={0.39} />
               </div>
             </>
           )}
@@ -59,15 +85,20 @@ export default function StudentProfile({ student }: Props) {
       </div>
 
       <ChangePasswordCard endpoint="/api/student/auth/change-password" accentGradient="from-indigo-500 to-purple-600" />
-    </div>
+    </motion.div>
   )
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+function InfoRow({ label, value, delay }: { label: string; value: string; delay: number }) {
   return (
-    <div className="bg-gray-50 rounded-xl px-4 py-3">
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay, duration: 0.3 }}
+      className="bg-gray-50 rounded-xl px-4 py-3"
+    >
       <p className="text-xs text-gray-500 mb-0.5">{label}</p>
       <p className="text-sm font-medium text-gray-800">{value}</p>
-    </div>
+    </motion.div>
   )
 }
