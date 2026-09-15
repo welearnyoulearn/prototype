@@ -352,6 +352,13 @@ export default function FeeCollectTab({
 
   function toggleStudent(id: number) {
     if (openStudentId === id) {
+      // A just-recorded payment's success view (with the Print Receipt button)
+      // must only ever be dismissed by its own "Done" button — the row header
+      // covers a large click target, and an accidental second click landing on
+      // it right after the confirm dialog closes (e.g. a habitual double-click
+      // on "Confirm & Record") would otherwise toggle the row shut and hide the
+      // receipt before the admin ever saw or printed it.
+      if (paySuccess) return
       setOpenStudentId(null); setShowCollectForm(false); setShowCounterHistory(false); setPassoutOpenStudent(null)
       setTimeout(() => {
         document.getElementById(`student-row-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
