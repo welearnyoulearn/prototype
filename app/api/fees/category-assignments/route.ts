@@ -5,9 +5,10 @@ import { requireFeeAccess } from '@/lib/auth'
 // student_fee_category_assignments / student_fee_assignment_history table
 // creation lives in lib/db.ts's ensureDB() now (single source of truth); this
 // only carries the idempotent column/constraint backfills for databases that
-// created the tables before those existed.
+// created the tables before those existed. Callers must call ensureDB()
+// themselves BEFORE acquiring a pool client — see the POST handler below for
+// why it can't happen here when `client` is an already-checked-out connection.
 async function ensureSchema(client: { query: (sql: string, params?: unknown[]) => Promise<unknown> }) {
-  await ensureDB()
   // Add missing columns idempotently
   await client.query(`ALTER TABLE student_fee_category_assignments ADD COLUMN IF NOT EXISTS academic_year TEXT NOT NULL DEFAULT '2025-26'`)
   await client.query(`ALTER TABLE student_fee_category_assignments ADD COLUMN IF NOT EXISTS amount NUMERIC(10,2) NOT NULL DEFAULT 0`)
@@ -50,6 +51,7 @@ export async function GET(req: NextRequest) {
     }
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
+      await ensureDB()
       await ensureSchema(pool)
 
       const [studentsRes, categoriesRes, amountsRes] = await Promise.all([
@@ -93,6 +95,12 @@ export async function GET(req: NextRequest) {
 // Replaces all assignments for the given students+categories and syncs ledger
 export async function POST(req: NextRequest) {
   try {
+    // Must run before pool.connect() below, not after — on Vercel's max:1 pool,
+    // ensureDB()'s own pool.query() calls would otherwise block waiting for a
+    // connection that `client` is already holding, and `client` can't be
+    // released until this call returns: a deadlock resolved only by
+    // connectionTimeoutMillis expiring into an error.
+    await ensureDB()
     const client = await pool.connect()
     try {
       const { school_id, academic_year, assignments, changed_by: clientActor } = await req.json()

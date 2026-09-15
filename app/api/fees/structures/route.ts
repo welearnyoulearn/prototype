@@ -64,12 +64,16 @@ export async function POST(req: NextRequest) {
         }, { status: 409 })
       }
 
+      // Must run before pool.connect() below, not after — on Vercel's max:1 pool,
+      // ensureDB()'s own pool.query() calls would otherwise block waiting for a
+      // connection that `client` is already holding, and `client` can't be
+      // released until this call returns: a deadlock resolved only by
+      // connectionTimeoutMillis expiring into an error.
+      await ensureDB()
       const client = await pool.connect()
       const saved = []
       try {
         await client.query('BEGIN')
-
-        await ensureDB()
 
         for (const s of structures) {
           // Snapshot existing value before upsert

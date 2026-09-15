@@ -81,6 +81,12 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
+    // Must run before pool.connect() below, not after — on Vercel's max:1 pool,
+    // ensureDB()'s own pool.query() calls would otherwise block waiting for a
+    // connection that `client` is already holding, and `client` can't be
+    // released until this call returns: a deadlock resolved only by
+    // connectionTimeoutMillis expiring into an error.
+    await ensureDB()
     const client = await pool.connect()
     try {
       const { new_amount, reason, changed_by: clientActor, school_id } = await req.json()
@@ -94,8 +100,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (Number(new_amount) <= 0) {
         return NextResponse.json({ error: 'Amount must be greater than 0' }, { status: 400 })
       }
-
-      await ensureDB()
 
       await client.query('BEGIN')
 

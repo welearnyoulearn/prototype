@@ -148,6 +148,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'school_id, from_year required' }, { status: 400 })
     }
 
+    // Must run before pool.connect() below, not after — on Vercel's max:1 pool,
+    // ensureDB()'s own pool.query() calls would otherwise block waiting for a
+    // connection that `client` is already holding, and `client` can't be
+    // released until this call returns: a deadlock resolved only by
+    // connectionTimeoutMillis expiring into an error.
+    await ensureDB()
     const client = await pool.connect()
     try {
       // ── REOPEN ── (doesn't touch ledger data, no locking needed)
@@ -215,8 +221,6 @@ export async function POST(req: NextRequest) {
             client, school_id, 'Previous Year Dues', 'Carried-forward unpaid balance from a previous year'
           )
         }
-
-        await ensureDB()
 
         let carriedCount = 0, carriedTotal = 0
         let writeoffCount = 0, writeoffTotal = 0

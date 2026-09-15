@@ -57,11 +57,15 @@ export async function PUT(req: NextRequest) {
   try {
     const id = req.nextUrl.searchParams.get('id')
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+    // Must run before pool.connect() below, not after — on Vercel's max:1 pool,
+    // ensureDB()'s own pool.query() calls would otherwise block waiting for a
+    // connection that `client` is already holding, and `client` can't be
+    // released until this call returns: a deadlock resolved only by
+    // connectionTimeoutMillis expiring into an error.
+    await ensureDB()
     const client = await pool.connect()
     try {
       const { name, description, frequency, is_active, category_type, changed_by: clientActor } = await req.json()
-
-      await ensureDB()
 
       // Fetch current values before update
       const { rows: [current] } = await client.query(
