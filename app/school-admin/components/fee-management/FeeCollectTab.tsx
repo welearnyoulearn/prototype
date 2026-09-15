@@ -328,12 +328,19 @@ export default function FeeCollectTab({
       ].some(v => (v || '').toLowerCase().includes(q))
       if (!matches) return false
     }
+    // Never hide the row the admin currently has expanded, regardless of the
+    // status chip — collecting a full payment moves the student out of
+    // "Overdue"/"Partial"/"Never Paid" the instant the ledger refreshes, which
+    // otherwise yanked the row (and the Print Receipt success view inside it)
+    // out from under the admin mid-action, looking like the confirm silently
+    // failed even though the payment itself went through fine.
+    if (r.student_id === openStudentId) return true
     if (ledgerStatus === 'overdue') return r.has_overdue && r.outstanding > 0
     if (ledgerStatus === 'partial') return r.total_paid > 0 && r.outstanding > 0
     if (ledgerStatus === 'never') return r.never_paid && r.outstanding > 0
     if (ledgerStatus === 'clear') return r.outstanding <= 0
     return true
-  }), [studentRows, ledgerGrade, ledgerSearch, ledgerStatus])
+  }), [studentRows, ledgerGrade, ledgerSearch, ledgerStatus, openStudentId])
 
   const openStudent = collectionFiltered.find(r => r.student_id === openStudentId)
     || studentRows.find(r => r.student_id === openStudentId)
