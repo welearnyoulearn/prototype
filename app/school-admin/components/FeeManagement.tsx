@@ -873,12 +873,12 @@ export default function FeeManagement({
             key={t.key}
             data-testid={`tab-${t.key}`}
             onClick={() => setActiveTab(t.key as Tab)}
-            className={`px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors ${
+            className={`px-4 py-2.5 text-sm font-bold rounded-t-lg transition-colors ${
               activeTab === t.key
                 ? 'text-blue-700 bg-blue-50 border-b-2 border-blue-600'
                 : t.key === 'collect' && pendingPayments.length > 0
                   ? 'text-red-600 hover:bg-red-50'
-                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                  : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
             }`}
           >
             {t.label}
