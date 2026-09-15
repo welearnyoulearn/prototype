@@ -67,29 +67,48 @@ function buildAuditPdfHtml(rep: Record<string, unknown>): string {
 
   // bulk
   const sm = rep.summary as { billed: number; waived: number; net_demand: number; paid: number; balance: number; students: number }
+  const wvb = rep.waiver_breakdown as { discretionary: number; carried_forward: number; written_off: number; total: number }
   const byType = rep.by_type as Array<{ fee_type: string; billed: number; waived: number; net_demand: number; paid: number; balance: number }>
   const byClass = rep.by_class as Array<{ class: string; fee_type: string; billed: number; waived: number; net_demand: number; paid: number; balance: number }>
   const byStudent = rep.by_student as Array<{ student: string; roll_number: string; class: string; fee_type: string; is_subtotal: boolean; billed: number; waived: number; net_demand: number; paid: number; balance: number }>
   const log = rep.change_log as Array<{ at: string; type: string; detail: string; amount: number | null; user: string }>
   const mrow = (o: { billed: number; waived: number; net_demand: number; paid: number; balance: number }) =>
     `<td class="r">${RUPEE(o.billed)}</td><td class="r">${RUPEE(o.waived)}</td><td class="r">${RUPEE(o.net_demand)}</td><td class="r">${RUPEE(o.paid)}</td><td class="r">${RUPEE(o.balance)}</td>`
+  const totRow = (label: string, o: { billed: number; waived: number; net_demand: number; paid: number; balance: number }, span: number) =>
+    `<tr class="tot"><td colspan="${span}">${label}</td>${mrow(o)}</tr>`
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Fee Audit Report</title>${style}</head><body>${head}
     <h3>1. Fee Summary <span style="font-weight:normal;color:#888">(${sm.students} students)</span></h3>
     <table><thead>${moneyHead}</thead><tbody><tr class="tot">${mrow(sm)}</tr></tbody></table>
-    <h3>2. Fee Type Summary</h3>
+
+    <h3>2. Waiver Breakdown <span style="font-weight:normal;color:#888">("Waived" above is discretionary only — see below for the rest</span></h3>
+    <table><thead><tr><th>Type</th><th class="r">Amount</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>Discretionary Waivers (fee reductions actually granted to a student)</td><td class="r">${RUPEE(wvb.discretionary)}</td><td></td></tr>
+      <tr><td>Carried Forward (bill moved to a new year)</td><td class="r">${RUPEE(wvb.carried_forward)}</td><td style="color:#888">not forgiven — excluded from "Waived"</td></tr>
+      <tr><td>Written Off (admin gave up collecting)</td><td class="r">${RUPEE(wvb.written_off)}</td><td style="color:#888">not a concession — excluded from "Waived"</td></tr>
+      <tr class="tot"><td>Total reduction across all three types</td><td class="r">${RUPEE(wvb.total)}</td><td></td></tr>
+    </tbody></table>
+    <p style="font-size:10px;color:#888;line-height:1.5">
+      <b>How to read this report:</b> Billed = total due in scope. Net Demand = Billed − Waived (discretionary only).
+      Paid = completed payments only (cancelled/rejected are excluded from totals but listed in the Change Log).
+      Balance = outstanding, floored at zero per bill — it will never show negative even if a bill was paid or waived
+      beyond its own amount due, so Billed − Waived − Paid can differ slightly from the Balance total shown in that case.
+    </p>
+
+    <h3>3. Fee Type Summary</h3>
     <table><thead><tr><th>Fee Type</th><th class="r">Billed</th><th class="r">Waived</th><th class="r">Net Demand</th><th class="r">Paid</th><th class="r">Balance</th></tr></thead>
-    <tbody>${byType.map(t => `<tr><td>${t.fee_type}</td>${mrow(t)}</tr>`).join('')}</tbody></table>
-    <h3>3. Fee Change Log</h3>
+    <tbody>${byType.map(t => `<tr><td>${t.fee_type}</td>${mrow(t)}</tr>`).join('')}${totRow('GRAND TOTAL', sm, 1)}</tbody></table>
+    <h3>4. Fee Change Log</h3>
     <table><thead><tr><th>Date & Time</th><th>Action</th><th>Detail</th><th class="r">Amount</th><th>User</th></tr></thead>
     <tbody>${log.map(l => `<tr><td>${new Date(l.at).toLocaleString('en-IN')}</td><td>${l.type}</td><td>${l.detail}</td><td class="r">${l.amount != null ? RUPEE(l.amount) : ''}</td><td>${l.user || ''}</td></tr>`).join('') || '<tr><td colspan="5">No changes recorded</td></tr>'}</tbody></table>
-    <h3>4. Class-wise Fee Details</h3>
+    <h3>5. Class-wise Fee Details</h3>
     <table><thead><tr><th>Class</th><th>Fee Type</th><th class="r">Billed</th><th class="r">Waived</th><th class="r">Net Demand</th><th class="r">Paid</th><th class="r">Balance</th></tr></thead>
-    <tbody>${byClass.map(c => `<tr><td>${c.class}</td><td>${c.fee_type}</td>${mrow(c)}</tr>`).join('')}</tbody></table>
-    <h3>5. Student-wise Fee Details <span style="font-weight:normal;color:#888">(by fee type)</span></h3>
+    <tbody>${byClass.map(c => `<tr><td>${c.class}</td><td>${c.fee_type}</td>${mrow(c)}</tr>`).join('')}${totRow('GRAND TOTAL', sm, 2)}</tbody></table>
+    <h3>6. Student-wise Fee Details <span style="font-weight:normal;color:#888">(by fee type)</span></h3>
     <table><thead><tr><th>Student</th><th>School Roll</th><th>Class</th><th>Fee Type</th><th class="r">Billed</th><th class="r">Waived</th><th class="r">Net Demand</th><th class="r">Paid</th><th class="r">Balance</th></tr></thead>
     <tbody>${byStudent.map(s => s.is_subtotal
       ? `<tr class="tot"><td colspan="3">${s.student}</td><td>SUBTOTAL</td>${mrow(s)}</tr>`
-      : `<tr><td>${s.student}</td><td>${s.roll_number}</td><td>${s.class}</td><td>${s.fee_type}</td>${mrow(s)}</tr>`).join('')}</tbody></table>
+      : `<tr><td>${s.student}</td><td>${s.roll_number}</td><td>${s.class}</td><td>${s.fee_type}</td>${mrow(s)}</tr>`).join('')}${totRow('GRAND TOTAL', sm, 4)}</tbody></table>
     </body></html>`
 }
 

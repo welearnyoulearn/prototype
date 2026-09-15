@@ -10,10 +10,22 @@ import { gradeOrderSql } from '@/lib/grades'
 export type Money = { billed: number; waived: number; net_demand: number; paid: number; balance: number }
 export type Meta = { school_name: string; academic_year: string; generated_by: string; generated_on: string; scope?: string }
 
+// The three things that reduce a bill's amount owed, broken apart instead of
+// folded into one "Waived" figure: a discretionary waiver is a fee reduction
+// the school actually chose to grant a student (scholarship, hardship case,
+// etc.); carried_forward is a bill whose balance moved to a new bill in
+// another year (bookkeeping, not forgiven); written_off is an admin giving up
+// on collecting uncollectable debt (bookkeeping, not a concession granted to
+// the student). Every "Waived" figure elsewhere in this report is
+// discretionary only — this breakdown is what makes that legible to an
+// auditor instead of requiring them to take it on faith.
+export type WaiverBreakdown = { discretionary: number; carried_forward: number; written_off: number; total: number }
+
 export type BulkReport = {
   kind: 'bulk'
   meta: Meta
   summary: Money & { students: number }
+  waiver_breakdown: WaiverBreakdown
   by_type: (Money & { fee_type: string })[]
   by_class: (Money & { class: string; fee_type: string })[]
   // Per-fee-type rows, one per student per fee type, followed by a subtotal row per student.
@@ -153,6 +165,24 @@ export async function buildFeeAuditReport(opts: {
      FROM student_fee_ledger l JOIN students s ON s.id = l.student_id
      ${BOOKKEEPING_JOIN} WHERE ${WHERE}`, vals
   )
+
+  const { rows: waiverBuckets } = await pool.query(
+    `SELECT
+       CASE WHEN w.waiver_type IN ('carry_forward','writeoff') THEN w.waiver_type ELSE 'discretionary' END AS bucket,
+       COALESCE(SUM(w.waiver_amount),0) AS total
+     FROM fee_waivers w
+     JOIN student_fee_ledger l ON l.id = w.ledger_id
+     JOIN students s ON s.id = l.student_id
+     WHERE ${WHERE} AND COALESCE(w.is_revoked,FALSE) = FALSE
+     GROUP BY bucket`, vals
+  )
+  const bucketAmt = (key: string) => Number(waiverBuckets.find(b => b.bucket === key)?.total ?? 0)
+  const waiver_breakdown: WaiverBreakdown = {
+    discretionary: bucketAmt('discretionary'),
+    carried_forward: bucketAmt('carry_forward'),
+    written_off: bucketAmt('writeoff'),
+    total: waiverBuckets.reduce((s, b) => s + Number(b.total), 0),
+  }
   const summary = { ...money(Number(sm.billed), Number(sm.waived), Number(sm.paid), Number(sm.balance)), students: Number(sm.students) }
 
   const { rows: byType } = await pool.query(
@@ -291,6 +321,6 @@ export async function buildFeeAuditReport(opts: {
       school_name: schoolName, academic_year, generated_by: actor, generated_on: new Date().toISOString(),
       scope: grade ? (section && section !== 'all' ? `Class ${grade}-${section}` : `Grade ${grade}`) : 'Whole School',
     },
-    summary, by_type, by_class, by_student, change_log: log,
+    summary, waiver_breakdown, by_type, by_class, by_student, change_log: log,
   }
 }
