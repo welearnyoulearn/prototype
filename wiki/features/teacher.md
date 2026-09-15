@@ -35,7 +35,7 @@ The Teacher portal is the daily workspace for teachers at `/teacher`. It covers 
 |---------|--------|-------------|
 | Tasks | Built | Create tasks (homework/practice/test), set due date, publish. View submissions, grade with score + feedback, request resubmission, send reminders |
 | Doubt Center | Built | View open doubts. Live chat with students. Mark resolved. Toggle as class FAQ. View AI-generated initial answers |
-| Syllabus Tracker | Built | Chapter/topic list per subject per class. Mark topics as covered with date |
+| Syllabus Tracker | Built | Chapter/topic list per subject per class. Mark topics as covered with date. Add/rename chapters and subtopics; a sparkle **Translate** button converts English-letter typing into Telugu or Hindi script (#116) |
 | Test Calendar | Built | Upcoming tests/exams in calendar format |
 | Performance Analytics | Partial | Navigation item exists but flagged `comingSoon: true`. No component loaded |
 
@@ -59,4 +59,5 @@ The Teacher portal is the daily workspace for teachers at `/teacher`. It covers 
 | `GET/POST /api/doubts` | Doubt management |
 | `GET/POST /api/doubts/[id]/messages` | Doubt chat |
 | `GET/POST /api/syllabus` | Syllabus tracking |
+| `GET /api/transliterate` | Staff-only: English letters → Telugu/Hindi spellings for syllabus names (#116) |
 | `POST /api/leave-requests` | Submit leave |
