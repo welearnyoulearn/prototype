@@ -142,13 +142,32 @@ export async function GET(req: NextRequest) {
 //
 export async function POST(req: NextRequest) {
   try {
-    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const session = await getAnySession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const client = await pool.connect()
     try {
       const { school_id, student_id, ledger_id, ledger_ids, amount, total_amount, transaction_ref, upi_id } = await req.json()
       if (!school_id || !student_id) {
         return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
+      }
+      // getAnySession() only confirms SOME valid login exists — without these
+      // checks (already applied on GET above, but missing here), any logged-in
+      // parent/teacher/student could submit a fabricated payment against ANOTHER
+      // school's student/ledger by supplying its IDs directly, since every query
+      // below trusts school_id/student_id/ledger_id straight from the request body.
+      if (session.schoolId !== Number(school_id)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+      if (session.role === 'parent') {
+        const parent = await getParentSession()
+        const linkRes = await pool.query(
+          'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
+          [student_id, parent?.parentId]
+        )
+        if (linkRes.rowCount === 0) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        }
       }
       // Server-side plan gate — this is the actual write path that creates a
       // fee_payments row; the QR/upi-id endpoints are gated too, but a caller
