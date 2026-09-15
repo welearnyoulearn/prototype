@@ -37,7 +37,7 @@ export type LedgerEntry = {
   category_name: string; period_label: string
   amount_due: number; amount_paid: number; balance: number; waiver_amount: number
   due_date: string; status: 'pending' | 'paid' | 'partial' | 'overdue' | 'waived' | 'settled'
-  days_overdue: number; has_edits: boolean
+  days_overdue: number
   source_academic_year: string | null
   notes: string | null
 }
