@@ -149,7 +149,21 @@ export default function FeeCollectTab({
       const r = await fetch(`/api/fees/ledger?${params}`)
       if (r.ok) {
         const fresh: LedgerEntry[] = await r.json()
-        setLedger(prev => [...prev.filter(e => e.student_id !== studentId), ...fresh])
+        // Replace this student's entries IN PLACE (by id) rather than filtering
+        // them out and appending the fresh ones at the end — studentRows below
+        // derives its row order from first-appearance order in `ledger`, so
+        // appending moved this student's whole row to the bottom of the list the
+        // instant a payment/waiver refreshed it. The row itself never actually
+        // closed — paySuccess/openStudentId were untouched — it just relocated
+        // out of the scrolled viewport a moment after appearing, reading as the
+        // "Payment Recorded" view silently closing itself.
+        setLedger(prev => {
+          const freshById = new Map(fresh.map(e => [e.id, e]))
+          const merged = prev.map(e => (e.student_id === studentId ? (freshById.get(e.id) ?? e) : e))
+          const existingIds = new Set(prev.filter(e => e.student_id === studentId).map(e => e.id))
+          const newlyCreated = fresh.filter(e => !existingIds.has(e.id))
+          return [...merged, ...newlyCreated]
+        })
       }
       // A failed targeted refresh isn't fatal — the next ledgerVersion-driven
       // full reload (or a manual Refresh) will eventually show the true state.
