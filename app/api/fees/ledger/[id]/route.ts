@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 
 // Verify a ledger entry belongs to the caller's school. Returns the entry's school_id or null.
@@ -95,20 +95,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         return NextResponse.json({ error: 'Amount must be greater than 0' }, { status: 400 })
       }
 
-      // Ensure audit table exists (idempotent)
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS student_fee_ledger_edits (
-          id         SERIAL PRIMARY KEY,
-          ledger_id  INTEGER NOT NULL REFERENCES student_fee_ledger(id) ON DELETE CASCADE,
-          school_id  INTEGER NOT NULL,
-          student_id INTEGER NOT NULL,
-          old_amount NUMERIC(10,2) NOT NULL,
-          new_amount NUMERIC(10,2) NOT NULL,
-          reason     TEXT NOT NULL,
-          changed_by TEXT NOT NULL,
-          changed_at TIMESTAMPTZ DEFAULT NOW()
-        )
-      `)
+      await ensureDB()
 
       await client.query('BEGIN')
 

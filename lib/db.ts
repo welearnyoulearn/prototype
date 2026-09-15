@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 23
+const SCHEMA_VERSION = 24
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2998,6 +2998,82 @@ async function runIncrementalMigrations() {
       school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE UNIQUE,
       tier VARCHAR(20) NOT NULL DEFAULT 'none' CHECK (tier IN ('none', 'ai_basic', 'ai_pro')),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+
+  // ── Fee tables that were previously only self-healed inline in their own
+  // route files (categories/PUT, day-close, payments/cancel, structures/POST),
+  // each hit lazily via its own local `CREATE TABLE IF NOT EXISTS` with no
+  // shared source of truth. Promoted here so ensureDB() — already the single
+  // bootstrap path every other domain relies on — covers them too; the route
+  // files now call ensureDB() instead of carrying their own copy of the DDL,
+  // which closes off the drift risk of the two copies silently diverging.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_category_changelog (
+      id            SERIAL PRIMARY KEY,
+      school_id     INTEGER NOT NULL,
+      category_id   INTEGER NOT NULL,
+      field_changed TEXT    NOT NULL,
+      old_value     TEXT,
+      new_value     TEXT,
+      changed_by    TEXT    NOT NULL DEFAULT 'Admin',
+      changed_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_day_close (
+      id            SERIAL PRIMARY KEY,
+      school_id     INTEGER NOT NULL,
+      close_date    DATE    NOT NULL,
+      total_cash    NUMERIC(10,2) NOT NULL DEFAULT 0,
+      total_cheque  NUMERIC(10,2) NOT NULL DEFAULT 0,
+      total_upi     NUMERIC(10,2) NOT NULL DEFAULT 0,
+      total_online  NUMERIC(10,2) NOT NULL DEFAULT 0,
+      total_dd      NUMERIC(10,2) NOT NULL DEFAULT 0,
+      system_cash   NUMERIC(10,2) NOT NULL DEFAULT 0,
+      actual_cash   NUMERIC(10,2),
+      difference    NUMERIC(10,2),
+      receipt_from  TEXT,
+      receipt_to    TEXT,
+      txn_count     INTEGER NOT NULL DEFAULT 0,
+      submitted_by  TEXT NOT NULL,
+      submitted_at  TIMESTAMPTZ DEFAULT NOW(),
+      notes         TEXT,
+      UNIQUE(school_id, close_date)
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_payment_corrections (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL,
+      payment_id INTEGER NOT NULL,
+      ledger_id INTEGER NOT NULL,
+      student_id INTEGER NOT NULL,
+      action TEXT NOT NULL,                 -- cancel | correct
+      old_amount NUMERIC(10,2),
+      new_amount NUMERIC(10,2),
+      old_mode TEXT, new_mode TEXT,
+      reason TEXT NOT NULL,
+      done_by TEXT NOT NULL,
+      new_receipt_number TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_structure_history (
+      id               SERIAL PRIMARY KEY,
+      school_id        INTEGER NOT NULL,
+      fee_structure_id INTEGER,
+      fee_category_id  INTEGER NOT NULL,
+      grade            TEXT    NOT NULL,
+      academic_year    TEXT    NOT NULL,
+      old_amount       NUMERIC(10,2),
+      new_amount       NUMERIC(10,2) NOT NULL,
+      old_due_day      INTEGER,
+      new_due_day      INTEGER NOT NULL,
+      change_type      TEXT    NOT NULL DEFAULT 'updated',
+      changed_by       TEXT    NOT NULL DEFAULT 'Admin',
+      changed_at       TIMESTAMPTZ DEFAULT NOW()
     )
   `).catch(() => {})
 }

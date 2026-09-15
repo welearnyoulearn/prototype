@@ -1,37 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 
-const ENSURE_TABLE = `
-  CREATE TABLE IF NOT EXISTS student_fee_category_assignments (
-    id               SERIAL PRIMARY KEY,
-    school_id        INTEGER NOT NULL,
-    fee_category_id  INTEGER NOT NULL REFERENCES fee_categories(id) ON DELETE CASCADE,
-    student_id       INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-    academic_year    TEXT    NOT NULL DEFAULT '2025-26',
-    amount           NUMERIC(10,2) NOT NULL DEFAULT 0,
-    created_at       TIMESTAMPTZ DEFAULT NOW()
-  )
-`
-
-const ENSURE_HISTORY = `
-  CREATE TABLE IF NOT EXISTS student_fee_assignment_history (
-    id               SERIAL PRIMARY KEY,
-    school_id        INTEGER NOT NULL,
-    student_id       INTEGER NOT NULL,
-    fee_category_id  INTEGER NOT NULL,
-    academic_year    TEXT    NOT NULL,
-    old_amount       NUMERIC(10,2),
-    new_amount       NUMERIC(10,2),
-    change_type      TEXT    NOT NULL DEFAULT 'update',
-    changed_by       TEXT    NOT NULL DEFAULT 'Admin',
-    changed_at       TIMESTAMPTZ DEFAULT NOW()
-  )
-`
-
+// student_fee_category_assignments / student_fee_assignment_history table
+// creation lives in lib/db.ts's ensureDB() now (single source of truth); this
+// only carries the idempotent column/constraint backfills for databases that
+// created the tables before those existed.
 async function ensureSchema(client: { query: (sql: string, params?: unknown[]) => Promise<unknown> }) {
-  await client.query(ENSURE_TABLE)
-  await client.query(ENSURE_HISTORY)
+  await ensureDB()
   // Add missing columns idempotently
   await client.query(`ALTER TABLE student_fee_category_assignments ADD COLUMN IF NOT EXISTS academic_year TEXT NOT NULL DEFAULT '2025-26'`)
   await client.query(`ALTER TABLE student_fee_category_assignments ADD COLUMN IF NOT EXISTS amount NUMERIC(10,2) NOT NULL DEFAULT 0`)

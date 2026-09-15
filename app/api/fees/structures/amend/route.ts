@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { todayIST } from '@/lib/istDate'
 
@@ -71,14 +71,7 @@ export async function POST(req: NextRequest) {
         [new_amount, school_id, fee_category_id, grade, academic_year]
       )
 
-      // Ensure audit table exists
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS student_fee_ledger_edits (
-          id SERIAL PRIMARY KEY, ledger_id INTEGER NOT NULL REFERENCES student_fee_ledger(id) ON DELETE CASCADE,
-          school_id INTEGER NOT NULL, student_id INTEGER NOT NULL,
-          old_amount NUMERIC(10,2) NOT NULL, new_amount NUMERIC(10,2) NOT NULL,
-          reason TEXT NOT NULL, changed_by TEXT NOT NULL, changed_at TIMESTAMPTZ DEFAULT NOW()
-        )`)
+      await ensureDB()
 
       // Fetch affected ledger entries before updating (for audit)
       // Includes partial entries — amount_due must reflect the new structure for all unpaid/partial students
