@@ -123,10 +123,12 @@ async function handlePOST(req: NextRequest) {
       if (!dateRe.test(paid_date)) {
         return NextResponse.json({ error: 'paid_date must be YYYY-MM-DD' }, { status: 400 })
       }
-      const d = new Date(paid_date)
-      const now = new Date()
-      const minDate = new Date('2000-01-01')
-      if (isNaN(d.getTime()) || d > now || d < minDate) {
+      // Compare calendar dates as plain "YYYY-MM-DD" strings, not `new Date(paid_date)`
+      // (UTC midnight) against `new Date()` (the current instant) — that comparison
+      // wrongly rejects today's own date as "in the future" during the 00:00-05:29 IST
+      // window, when UTC is still on the previous day. String comparison sidesteps the
+      // UTC/IST gap entirely; todayIST() gives "today" in the schools' actual timezone.
+      if (isNaN(new Date(paid_date).getTime()) || paid_date > todayIST() || paid_date < '2000-01-01') {
         return NextResponse.json({ error: 'paid_date must be a valid past date' }, { status: 400 })
       }
     }
