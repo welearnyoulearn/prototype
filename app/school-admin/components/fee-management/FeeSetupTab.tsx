@@ -131,6 +131,17 @@ export default function FeeSetupTab({
   const [lockingStructure, setLockingStructure] = useState(false)
   const [structureMsg, setStructureMsg] = useState('')
   const [showAmendLog, setShowAmendLog] = useState(false)
+  // Saving an amount here (unlike the dedicated Amend flow) never touches
+  // already-generated student_fee_ledger rows — it only updates fee_structures.
+  // Students already billed at the old amount silently keep owing it. This
+  // check warns before that happens instead of letting it pass silently.
+  const [checkingImpact, setCheckingImpact] = useState(false)
+  const [pendingAmountWarning, setPendingAmountWarning] = useState<{
+    cat: FeeCategory
+    structs: { fee_category_id: number; grade: string; amount: number }[]
+    totalAffected: number
+    byGrade: { grade: string; count: number }[]
+  } | null>(null)
 
   // ── Fee Plan ──
   // Sub-view: 'heads' = fee head cards (existing); 'variable' = combined all-variable-fees grid
@@ -331,13 +342,48 @@ export default function FeeSetupTab({
 
   // Save amounts for a single fee head (only that category's grades)
   async function saveFeeAmounts(cat: FeeCategory) {
-    setSavingStructure(true); setStructureMsg('')
-    const structs = []
+    const structs: { fee_category_id: number; grade: string; amount: number }[] = []
+    const changedGrades: string[] = []
     for (const grade of GRADES) {
       const val = editAmounts[`${cat.id}_${grade}`]
-      if (val && parseFloat(val) > 0)
-        structs.push({ fee_category_id: cat.id, grade, amount: parseFloat(val) })
+      if (val && parseFloat(val) > 0) {
+        const amount = parseFloat(val)
+        structs.push({ fee_category_id: cat.id, grade, amount })
+        const existing = structures.find(s => s.fee_category_id === cat.id && s.grade === grade)
+        if (existing && Number(existing.amount) !== amount) changedGrades.push(grade)
+      }
     }
+    if (changedGrades.length === 0) {
+      await doSaveFeeAmounts(cat, structs)
+      return
+    }
+    // Some of these grades already have a saved amount that's being changed —
+    // check how many students are already billed under the old amount before
+    // committing (reuses the same per-grade impact count the Amend flow computes).
+    setCheckingImpact(true); setStructureMsg('')
+    try {
+      const results = await Promise.all(changedGrades.map(async grade => {
+        const r = await fetch(`/api/fees/structures/amend?school_id=${schoolId}&academic_year=${academicYear}&preview=1&fee_category_id=${cat.id}&grade=${grade}`)
+        const d = r.ok ? await r.json() : { count: 0, partial_count: 0 }
+        return { grade, count: (d.count || 0) + (d.partial_count || 0) }
+      }))
+      const totalAffected = results.reduce((s, r) => s + r.count, 0)
+      if (totalAffected > 0) {
+        setPendingAmountWarning({ cat, structs, totalAffected, byGrade: results.filter(r => r.count > 0) })
+      } else {
+        await doSaveFeeAmounts(cat, structs)
+      }
+    } catch {
+      // The impact check is a safety net, not a hard gate — if it fails, save
+      // rather than silently blocking the admin with no way to proceed.
+      await doSaveFeeAmounts(cat, structs)
+    } finally {
+      setCheckingImpact(false)
+    }
+  }
+
+  async function doSaveFeeAmounts(cat: FeeCategory, structs: { fee_category_id: number; grade: string; amount: number }[]) {
+    setSavingStructure(true); setStructureMsg('')
     const r = await fetch('/api/fees/structures', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ school_id: schoolId, academic_year: academicYear, structures: structs, changed_by: adminName || 'Admin' }),
@@ -349,6 +395,7 @@ export default function FeeSetupTab({
       setStructureMsg(`✓ Amounts saved for ${cat.name}`)
     }
     setSavingStructure(false)
+    setPendingAmountWarning(null)
     onSetupChanged()
   }
 
@@ -1228,9 +1275,9 @@ export default function FeeSetupTab({
                             </div>
 
                             <div className="flex items-center justify-end">
-                              <button onClick={() => saveFeeAmounts(cat)} disabled={savingStructure}
+                              <button onClick={() => saveFeeAmounts(cat)} disabled={savingStructure || checkingImpact}
                                 className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-5 py-1.5 rounded-lg font-medium disabled:opacity-50">
-                                {savingStructure ? 'Saving…' : 'Save Amounts'}
+                                {checkingImpact ? 'Checking…' : savingStructure ? 'Saving…' : 'Save Amounts'}
                               </button>
                             </div>
                           </div>
@@ -1259,6 +1306,44 @@ export default function FeeSetupTab({
                 className="text-sm bg-blue-600 text-white px-5 py-2 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
                 {lockingStructure ? 'Locking…' : '🔒 Lock Fee Plan'}
               </button>
+            </div>
+          )}
+
+          {/* ── Warn before changing an amount students are already billed at ── */}
+          {pendingAmountWarning && (
+            <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-4" onClick={() => setPendingAmountWarning(null)}>
+              <div className="bg-white rounded-2xl w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                  <p className="font-semibold text-amber-700">⚠ Students already billed at the old amount</p>
+                  <button onClick={() => setPendingAmountWarning(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
+                </div>
+                <div className="p-5 space-y-3">
+                  <p className="text-sm text-gray-600">
+                    <strong>{pendingAmountWarning.totalAffected}</strong> student{pendingAmountWarning.totalAffected === 1 ? '' : 's'} already {pendingAmountWarning.totalAffected === 1 ? 'has' : 'have'} a bill for{' '}
+                    <strong>{pendingAmountWarning.cat.name}</strong> at the current amount:
+                  </p>
+                  <ul className="text-sm text-gray-700 bg-amber-50 border border-amber-100 rounded-lg px-4 py-2.5 space-y-1">
+                    {pendingAmountWarning.byGrade.map(g => (
+                      <li key={g.grade}>{gradeLabel(g.grade)}: <strong>{g.count}</strong> student{g.count === 1 ? '' : 's'}</li>
+                    ))}
+                  </ul>
+                  <p className="text-sm text-gray-500">
+                    Saving here only changes the fee plan going forward — it will <strong>not</strong> update these students&apos; existing bills.
+                    They&apos;ll keep owing the old amount while new bills use the new one, with no note on the ledger explaining the difference.
+                  </p>
+                </div>
+                <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-between">
+                  <button onClick={() => setPendingAmountWarning(null)}
+                    className="text-sm text-gray-500 hover:text-gray-700 px-4 py-2">
+                    ← Cancel
+                  </button>
+                  <button data-testid="btn-confirm-amount-change" onClick={() => doSaveFeeAmounts(pendingAmountWarning.cat, pendingAmountWarning.structs)}
+                    disabled={savingStructure}
+                    className="text-sm bg-amber-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-amber-700 disabled:opacity-50">
+                    {savingStructure ? 'Saving…' : 'Save anyway'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
