@@ -54,6 +54,7 @@ type Teacher = {
   school_id: number
   school_name: string
   school_city: string
+  date_of_birth?: string | null
 }
 
 
@@ -69,6 +70,7 @@ const NAV_KEY_TO_FEATURE: Record<string, string> = {
   attendance: 'attendance',
   library: 'library',
   leave: 'leave-requests',
+  syllabus: 'curriculum',
 }
 
 const NAV_SECTIONS: NavSection[] = [
@@ -150,7 +152,12 @@ export default function TeacherPortal() {
     router.push('/teacher/login')
   }, [router])
 
-  const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
+  // null = still loading (show everything so the sidebar doesn't flash
+  // empty); an actually-empty Set once loaded means the school genuinely has
+  // none of these features and must fail closed — see the nav filter below,
+  // which checks this distinction directly rather than through useFeature()
+  // (which can't tell "loading" from "genuinely zero" once handed a Set).
+  const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
   const [academicYear, setAcademicYear] = useState('')
   // The school's own current year — never changes based on what the teacher
   // is viewing, used only to tell whether selectedAcademicYear is read-only.
@@ -183,19 +190,17 @@ export default function TeacherPortal() {
   // features exist — same gate school-admin already applies (e.g. Timetable
   // tab hidden on the Basic plan). Without this, the teacher portal shows
   // Timetable/Attendance nav items and tabs regardless of the school's plan.
+  // Reads the same override-aware endpoint Student/Parent use (checks
+  // school_feature_overrides before falling back to tier) — a previous
+  // tier-only fetch here ignored per-school overrides entirely and, on a
+  // 'none'-tier school, left enabledFeatures empty forever, which
+  // useFeature() treats as "still loading" and fails OPEN (shows
+  // everything) rather than closed.
   useEffect(() => {
     if (!teacher?.school_id) return
-    fetch(`/api/schools/${teacher.school_id}/subscription`)
-      .then(r => r.json())
-      .then(async subData => {
-        const tier = subData.tier || 'none'
-        if (tier === 'none') return
-        const featRes = await fetch(`/api/platform/features?tier=${tier}`)
-        if (featRes.ok) {
-          const fd = await featRes.json()
-          setEnabledFeatures(new Set(fd.enabled || []))
-        }
-      })
+    fetch(`/api/school/enabled-features?school_id=${teacher.school_id}&portal=teacher`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.enabled) setEnabledFeatures(new Set<string>(d.enabled)) })
       .catch(() => {})
   }, [teacher?.school_id])
 
@@ -232,7 +237,7 @@ export default function TeacherPortal() {
   const greeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening'
 
   return (
-    <FeaturesProvider value={enabledFeatures}>
+    <FeaturesProvider value={enabledFeatures ?? new Set()}>
     <div className="min-h-screen flex flex-col bg-gray-100">
       {/* Top bar */}
       <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 flex items-center justify-between flex-shrink-0 z-30">
@@ -303,7 +308,7 @@ export default function TeacherPortal() {
               // plan-gated features and always show.
               const visibleItems = section.items.filter(item => {
                 const featureKey = NAV_KEY_TO_FEATURE[item.key]
-                return !featureKey || enabledFeatures.size === 0 || enabledFeatures.has(featureKey)
+                return !featureKey || enabledFeatures === null || enabledFeatures.has(featureKey)
               })
               if (visibleItems.length === 0) return null
               return (

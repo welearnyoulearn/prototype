@@ -24,6 +24,10 @@
     {
       "path": "/api/cron/exam-status-sweep",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/birthday-sweep",
+      "schedule": "30 18 * * *"
     }
   ]
 }

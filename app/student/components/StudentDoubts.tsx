@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { InlineLoader } from '@/components/loaders'
+import { burstFrom } from '@/app/components/gamification/confetti'
 
 type Student = { id: number; name: string; grade: string; section: string }
 type Task = { id: number; title: string; subject: string }
@@ -299,6 +300,7 @@ export default function StudentDoubts({ student, classId, schoolId }: Props) {
   }
 
   const [resolving, setResolving] = useState(false)
+  const resolveBtnRef = useRef<HTMLButtonElement>(null)
   const [reopening, setReopening] = useState(false)
   const [dismissedFinalPrompt, setDismissedFinalPrompt] = useState(false)
 
@@ -318,6 +320,7 @@ export default function StudentDoubts({ student, classId, schoolId }: Props) {
     })
     if (res.ok) {
       setSelected(prev => prev ? { ...prev, status: 'resolved', closed_by_teacher: false } : null)
+      burstFrom(resolveBtnRef.current)
       await fetchDoubts()
       if (pollerRef.current) clearInterval(pollerRef.current)
     }
@@ -526,7 +529,7 @@ export default function StudentDoubts({ student, classId, schoolId }: Props) {
           <div className="flex items-center gap-2 flex-shrink-0">
             {/* Show resolve button when in_progress AND no pending final answer prompt */}
             {selected.status === 'in_progress' && (dismissedFinalPrompt || !messages.some(m => m.is_final_answer)) && (
-              <button onClick={() => resolveDoubt(false)} disabled={resolving}
+              <button ref={resolveBtnRef} onClick={() => resolveDoubt(false)} disabled={resolving}
                 className="text-xs bg-green-600 hover:bg-green-700 disabled:opacity-40 text-white font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
                 {resolving ? 'Resolving...' : 'Mark Resolved'}

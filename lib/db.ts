@@ -71,7 +71,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 23
+const SCHEMA_VERSION = 24
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2987,4 +2987,68 @@ async function runIncrementalMigrations() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `).catch(() => {})
+
+  // ── Class Circle birthdays ───────────────────────────────────────────────
+  // date_of_birth is optional and never backfilled — existing records are
+  // simply never included in the daily birthday sweep until someone fills
+  // it in (first-login prompt or profile edit), never a broken/missing state.
+  await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS date_of_birth DATE`).catch(() => {})
+  await pool.query(`ALTER TABLE teachers ADD COLUMN IF NOT EXISTS date_of_birth DATE`).catch(() => {})
+  await pool.query(`ALTER TABLE parents  ADD COLUMN IF NOT EXISTS date_of_birth DATE`).catch(() => {})
+
+  // There is no standalone "grades" table in this schema — students.grade is
+  // a plain string, and `classes` rows are per-section (school_id, grade,
+  // section), not per-grade. A Class Circle spans every section of a grade,
+  // so it's keyed on the natural (school_id, grade) pair directly rather than
+  // a foreign key into `classes`. Created lazily (get-or-create) the first
+  // time a grade actually needs one — see getOrCreateClassCircle in
+  // lib/classCircle.ts — not pre-seeded for every grade in every school.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS class_circles (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      grade VARCHAR(20) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(school_id, grade)
+    )
+  `).catch(() => {})
+
+  // One row per person per birthday that has actually fired. This is the
+  // idempotency ledger for ALL three roles (student/teacher/parent), not
+  // just students — the UNIQUE constraint is what guarantees "once per
+  // person per year" even if the daily cron somehow runs twice, not just
+  // "don't call the job twice" discipline. class_circle_id is only ever set
+  // for student posts (the only role shown in a circle); teacher/parent
+  // birthdays are notification-only (see the daily cron) and always leave
+  // it NULL.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS birthday_posts (
+      id SERIAL PRIMARY KEY,
+      person_type VARCHAR(10) NOT NULL CHECK (person_type IN ('student', 'teacher', 'parent')),
+      person_id INTEGER NOT NULL,
+      class_circle_id INTEGER REFERENCES class_circles(id) ON DELETE CASCADE,
+      post_date DATE NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(person_type, person_id, post_date)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_birthday_posts_circle ON birthday_posts(class_circle_id, post_date)`).catch(() => {})
+
+  // Reactions on a student birthday post only — teacher/parent posts never
+  // have a circle_id and never have a wishing UI, so no row is ever created
+  // against one. `message` is always the server-side default text, never
+  // free-typed by the wisher (no moderation surface needed). One wish per
+  // wisher per post — UNIQUE prevents the same classmate padding the count.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS birthday_wishes (
+      id SERIAL PRIMARY KEY,
+      birthday_post_id INTEGER NOT NULL REFERENCES birthday_posts(id) ON DELETE CASCADE,
+      wisher_type VARCHAR(10) NOT NULL CHECK (wisher_type IN ('student', 'teacher', 'parent')),
+      wisher_id INTEGER NOT NULL,
+      message TEXT NOT NULL DEFAULT 'Happy Birthday! 🎉',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(birthday_post_id, wisher_type, wisher_id)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_birthday_wishes_post ON birthday_wishes(birthday_post_id)`).catch(() => {})
 }
