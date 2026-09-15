@@ -111,6 +111,13 @@ async function handlePOST(req: NextRequest) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: 'Corrected amount must be greater than 0' }, { status: 400 })
         }
+        // Same whitelist as payments POST — day-close's cash reconciliation only
+        // ever reads modeMap['cash'], so a non-canonical mode here would silently
+        // fall out of that total the same way an uncorrected one would.
+        if (!['cash', 'cheque', 'dd', 'upi', 'online'].includes(newMode)) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'new_payment_mode must be one of: cash, cheque, dd, upi, online' }, { status: 400 })
+        }
 
         // Current ledger state (after the reversal above)
         const { rows: [lg] } = await client.query(

@@ -116,6 +116,16 @@ async function handlePOST(req: NextRequest) {
     if (!school_id || !student_id || !payment_mode) {
       return NextResponse.json({ error: 'school_id, student_id, payment_mode required' }, { status: 400 })
     }
+    // payment_mode has no DB-level CHECK constraint — whitelist it here. Without
+    // this, a non-canonical value (e.g. a typo, or "cash " with a trailing space)
+    // still posts the payment and reduces the student's balance correctly, but
+    // silently falls out of day-close's SUM(...) GROUP BY payment_mode cash
+    // reconciliation (which only ever reads modeMap['cash']) — masking a real
+    // shortfall inside an unreconciled bucket no report flags.
+    const VALID_PAYMENT_MODES = ['cash', 'cheque', 'dd', 'upi', 'online']
+    if (!VALID_PAYMENT_MODES.includes(payment_mode)) {
+      return NextResponse.json({ error: `payment_mode must be one of: ${VALID_PAYMENT_MODES.join(', ')}` }, { status: 400 })
+    }
     // Required, not defaulted to the logged-in admin's own name — several staff
     // often share one admin login at the collection counter, so falling back to
     // access.actor would silently misattribute who actually took the cash.

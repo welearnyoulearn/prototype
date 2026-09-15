@@ -122,6 +122,27 @@ export async function POST(req: NextRequest) {
 
       if (studentIds.length === 0) return NextResponse.json({ upserted: 0, ledgerUpdated: 0 })
 
+      // requireFeeAccess above only verified the CALLER's own school_id — student_id
+      // and fee_category_id inside assignments[] are still client-supplied and were
+      // never checked against that school. Without this, a request could plant
+      // student_fee_category_assignments/student_fee_assignment_history rows (and
+      // UPDATE student_fee_ledger rows below) referencing another school's student
+      // or category, corrupting the FK relationship across tenants.
+      const { rows: ownedStudents } = await client.query(
+        `SELECT id FROM students WHERE id = ANY($1) AND school_id = $2`, [studentIds, school_id]
+      )
+      if (ownedStudents.length !== studentIds.length) {
+        client.release()
+        return NextResponse.json({ error: 'One or more students do not belong to this school' }, { status: 403 })
+      }
+      const { rows: ownedCategories } = await client.query(
+        `SELECT id FROM fee_categories WHERE id = ANY($1) AND school_id = $2`, [categoryIds, school_id]
+      )
+      if (ownedCategories.length !== categoryIds.length) {
+        client.release()
+        return NextResponse.json({ error: 'One or more fee categories do not belong to this school' }, { status: 403 })
+      }
+
       await client.query('BEGIN')
 
       // Block assignment changes on a closed year — every other mutating fee
@@ -183,6 +204,33 @@ export async function POST(req: NextRequest) {
              changed_by]
           )
         }
+      }
+
+      // Block a reduction that would leave amount_paid + waiver_amount exceeding the
+      // new amount_due — same guard structures/amend already has for fixed fees; this
+      // path (variable per-student amounts) was missing it, so reducing a student's
+      // assignment below what they'd already paid silently produced amount_due <
+      // amount_paid, an impossible state needing a refund/credit decision the ledger
+      // sync below has no way to make on its own.
+      const { rows: wouldOverpay } = await client.query(
+        `SELECT student_id, fee_category_id, amount_paid, COALESCE(waiver_amount,0) AS waiver_amount
+         FROM student_fee_ledger
+         WHERE school_id = $1 AND academic_year = $2
+           AND student_id = ANY($3) AND fee_category_id = ANY($4)`,
+        [school_id, academic_year, studentIds, categoryIds]
+      )
+      const overpaidMap = new Map(wouldOverpay.map((r: { student_id: number; fee_category_id: number; amount_paid: string; waiver_amount: string }) =>
+        [`${r.student_id}:${r.fee_category_id}`, parseFloat(r.amount_paid) + parseFloat(r.waiver_amount)]
+      ))
+      const overpaidCount = toSave.filter(({ student_id, fee_category_id, amount }: { student_id: number; fee_category_id: number; amount: string }) => {
+        const committed = overpaidMap.get(`${student_id}:${fee_category_id}`)
+        return committed !== undefined && committed > parseFloat(amount) + 0.01
+      }).length
+      if (overpaidCount > 0) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({
+          error: `${overpaidCount} student(s) have already paid or been waived more than the amount you're setting — reducing it this far isn't supported here. Use payment correction/refund or waiver correction for those students first.`,
+        }, { status: 409 })
       }
 
       // Sync existing ledger entries for saved amounts

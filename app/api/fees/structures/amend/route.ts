@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Update pending/overdue/partial ledger entries; re-check paid status after new amount applies
-      const { rowCount } = await client.query(
+      const { rows: updatedRows, rowCount } = await client.query(
         `UPDATE student_fee_ledger
          SET amount_due = $1,
              status = CASE
@@ -111,12 +111,18 @@ export async function POST(req: NextRequest) {
                WHEN amount_paid > 0 THEN 'partial'
                ELSE status
              END
-         WHERE fee_structure_id = $2 AND status IN ('pending', 'overdue', 'partial')`,
+         WHERE fee_structure_id = $2 AND status IN ('pending', 'overdue', 'partial')
+         RETURNING id`,
         [new_amount, current.id]
       )
 
-      // Write audit records for each affected entry
-      for (const row of affected) {
+      // Write audit records only for entries the UPDATE above actually touched —
+      // `affected` was snapshotted before the update, so if a concurrent payment or
+      // waiver moved a row to 'paid'/'waived' in between, the UPDATE's WHERE
+      // correctly skipped it, but looping over the stale `affected` array here would
+      // still write an audit entry claiming an amount change that never happened.
+      const updatedIds = new Set(updatedRows.map(r => r.id))
+      for (const row of affected.filter(r => updatedIds.has(r.id))) {
         await client.query(
           `INSERT INTO student_fee_ledger_edits
              (ledger_id, school_id, student_id, old_amount, new_amount, reason, changed_by)
