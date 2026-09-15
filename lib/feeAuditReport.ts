@@ -96,17 +96,27 @@ export async function buildFeeAuditReport(opts: {
     ).catch(() => ({ rows: [] }))
 
     const billed  = bills.reduce((s, b) => s + Number(b.billed), 0)
-    const waived  = bills.reduce((s, b) => s + Number(b.waived), 0)
     const paid    = bills.reduce((s, b) => s + Number(b.paid), 0)
     // bills.balance is already GREATEST(...)'d per row by the SQL above — sum
     // those, don't re-derive from the (unfloored) billed/waived/paid totals.
     const balance = bills.reduce((s, b) => s + Number(b.balance), 0)
+    // The headline "Waived" figure excludes 'carry_forward' (a bill's balance moved
+    // to a new bill, not forgiven) and 'writeoff' (an admin gave up collecting, not a
+    // fee reduction granted to the student) — same convention as every other fee
+    // screen. Computed from the waivers list (which carries waiver_type) rather than
+    // bills[].waived (which is the bill's own full, unfiltered waiver_amount — kept
+    // as-is per bill since that's an accurate per-bill figure, just not what belongs
+    // in a "discretionary waivers granted" headline). Revoked waivers are excluded —
+    // this list includes them for the audit trail, but they no longer reduce anything.
+    const discretionaryWaived = (waivers as Array<{ waiver_type: string; waiver_amount: string; is_revoked: boolean }>)
+      .filter(w => !w.is_revoked && w.waiver_type !== 'carry_forward' && w.waiver_type !== 'writeoff')
+      .reduce((s, w) => s + Number(w.waiver_amount), 0)
 
     return {
       kind: 'student',
       meta: { school_name: schoolName, academic_year, generated_by: actor, generated_on: new Date().toISOString() },
       student,
-      balance: money(billed, waived, paid, balance),
+      balance: money(billed, discretionaryWaived, paid, balance),
       bills: bills.map(b => ({ ...b, billed: Number(b.billed), waived: Number(b.waived), paid: Number(b.paid), balance: Number(b.balance) })),
       payments: payments.map(p => ({ ...p, amount: Number(p.amount) })),
       waivers: waivers.map((w: Record<string, unknown>) => ({ ...w, waiver_amount: Number(w.waiver_amount) })) as StudentReport['waivers'],
@@ -117,32 +127,51 @@ export async function buildFeeAuditReport(opts: {
   // derived from SUM(billed)-SUM(waived)-SUM(paid) instead.
   const BALANCE_SUM = `COALESCE(SUM(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0)),0)`
 
+  // l.waiver_amount is a bill's FULL running waiver total — it doesn't distinguish a
+  // discretionary waiver (a fee reduction granted to the student) from 'carry_forward'
+  // (a bill's balance moved to a new bill elsewhere, not forgiven) or 'writeoff' (an
+  // admin giving up on uncollectable debt, not a concession granted to the student).
+  // Every other fee screen already excludes both from its "Waived" figure; this report
+  // is the one place that was still summing l.waiver_amount unfiltered. bk.amt is the
+  // per-bill sum of just the bookkeeping types (non-revoked), subtracted out below so
+  // "waived"/"net_demand" here mean the same thing they mean everywhere else.
+  const BOOKKEEPING_JOIN = `
+     LEFT JOIN (
+       SELECT ledger_id, SUM(waiver_amount) AS amt FROM fee_waivers
+       WHERE waiver_type IN ('carry_forward','writeoff') AND COALESCE(is_revoked,FALSE) = FALSE
+       GROUP BY ledger_id
+     ) bk ON bk.ledger_id = l.id`
+  const WAIVED_SUM = `COALESCE(SUM(COALESCE(l.waiver_amount,0) - COALESCE(bk.amt,0)),0)`
+
   // ── BULK ──
   const { rows: [sm] } = await pool.query(
     `SELECT COALESCE(SUM(l.amount_due),0) AS billed,
-            COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived,
+            ${WAIVED_SUM} AS waived,
             COALESCE(SUM(l.amount_paid),0) AS paid,
             ${BALANCE_SUM} AS balance,
             COUNT(DISTINCT l.student_id) AS students
-     FROM student_fee_ledger l JOIN students s ON s.id = l.student_id WHERE ${WHERE}`, vals
+     FROM student_fee_ledger l JOIN students s ON s.id = l.student_id
+     ${BOOKKEEPING_JOIN} WHERE ${WHERE}`, vals
   )
   const summary = { ...money(Number(sm.billed), Number(sm.waived), Number(sm.paid), Number(sm.balance)), students: Number(sm.students) }
 
   const { rows: byType } = await pool.query(
     `SELECT fc.name AS fee_type, COALESCE(SUM(l.amount_due),0) AS billed,
-            COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived, COALESCE(SUM(l.amount_paid),0) AS paid,
+            ${WAIVED_SUM} AS waived, COALESCE(SUM(l.amount_paid),0) AS paid,
             ${BALANCE_SUM} AS balance
      FROM student_fee_ledger l JOIN fee_categories fc ON fc.id = l.fee_category_id
-     JOIN students s ON s.id = l.student_id WHERE ${WHERE} GROUP BY fc.name ORDER BY billed DESC`, vals
+     JOIN students s ON s.id = l.student_id
+     ${BOOKKEEPING_JOIN} WHERE ${WHERE} GROUP BY fc.name ORDER BY billed DESC`, vals
   )
   const by_type = byType.map(r => ({ fee_type: r.fee_type, ...money(Number(r.billed), Number(r.waived), Number(r.paid), Number(r.balance)) }))
 
   const { rows: byClass } = await pool.query(
     `SELECT s.grade, COALESCE(s.section,'') AS section, fc.name AS fee_type,
-            COALESCE(SUM(l.amount_due),0) AS billed, COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived,
+            COALESCE(SUM(l.amount_due),0) AS billed, ${WAIVED_SUM} AS waived,
             COALESCE(SUM(l.amount_paid),0) AS paid, ${BALANCE_SUM} AS balance
      FROM student_fee_ledger l JOIN fee_categories fc ON fc.id = l.fee_category_id
-     JOIN students s ON s.id = l.student_id WHERE ${WHERE}
+     JOIN students s ON s.id = l.student_id
+     ${BOOKKEEPING_JOIN} WHERE ${WHERE}
      GROUP BY s.grade, s.section, fc.name ORDER BY ${gradeOrderSql('s.grade')}, s.section, fc.name`, vals
   )
   const by_class = byClass.map(r => ({
@@ -156,12 +185,12 @@ export async function buildFeeAuditReport(opts: {
             COALESCE(s.school_roll_number::text, '') AS roll_number,
             s.parent_name, s.parent_phone,
             fc.name AS fee_type,
-            COALESCE(SUM(l.amount_due),0) AS billed, COALESCE(SUM(COALESCE(l.waiver_amount,0)),0) AS waived,
+            COALESCE(SUM(l.amount_due),0) AS billed, ${WAIVED_SUM} AS waived,
             COALESCE(SUM(l.amount_paid),0) AS paid, ${BALANCE_SUM} AS balance
      FROM student_fee_ledger l
      JOIN students s ON s.id = l.student_id
      JOIN fee_categories fc ON fc.id = l.fee_category_id
-     WHERE ${WHERE}
+     ${BOOKKEEPING_JOIN} WHERE ${WHERE}
      GROUP BY s.id, s.name, s.grade, s.section, s.school_roll_number, s.parent_name, s.parent_phone, fc.name
      ORDER BY ${gradeOrderSql('s.grade')}, s.section, s.name, fc.name`, vals
   )

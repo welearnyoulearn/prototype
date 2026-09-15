@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 25
+const SCHEMA_VERSION = 26
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3084,5 +3084,41 @@ async function runIncrementalMigrations() {
   // despite fee_payments growing without bound (one row per payment, forever).
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_fee_payments_ledger ON fee_payments(ledger_id)
+  `).catch(() => {})
+
+  // ── One-time backfill: year-end write-offs mislabeled as waiver_type='full' ──
+  //
+  // What happened: before this fix, a year-end "write off this debt" decision
+  // (an admin giving up on collecting from a student who left/graduated
+  // without paying) was recorded with the SAME waiver_type ('full') as a
+  // genuine discretionary fee waiver granted to a student — e.g. a scholarship
+  // or hardship reduction. Because every "Waived" figure in the app (Overview,
+  // Reports, Stats, Passbook, Archive, the downloadable Audit Report) excludes
+  // only 'carry_forward' bookkeeping entries and treats everything else as a
+  // real discretionary waiver, every year-end write-off was silently counted
+  // as if the school had chosen to reduce that student's fee — inflating
+  // "Waived" and understating "Net Demand" on every closed year's records.
+  //
+  // The fix (see app/api/fees/year-end/route.ts): write-offs now get their own
+  // waiver_type, 'writeoff', which every "Waived" total already excludes
+  // alongside 'carry_forward'. This statement retags PAST write-off rows so
+  // already-closed years' reports become correct too, not just future ones.
+  //
+  // How a past write-off is identified: a fee_waivers row with waiver_type =
+  // 'full' whose reason matches the exact auto-generated text the year-end
+  // route wrote when the admin didn't type a custom reason — 'Year-end
+  // write-off <academic year>' (e.g. "Year-end write-off 2026-27"). This only
+  // catches write-offs that used that default reason. A write-off where the
+  // admin typed their own custom reason instead looks identical, in the
+  // data, to a genuine discretionary waiver with an unusual reason — there is
+  // no reliable signal to tell those apart after the fact, so this backfill
+  // deliberately leaves them as 'full' rather than guessing. Safe to re-run:
+  // once retagged to 'writeoff', a row no longer matches waiver_type='full'
+  // and this UPDATE will not touch it again.
+  await pool.query(`
+    UPDATE fee_waivers
+    SET waiver_type = 'writeoff'
+    WHERE waiver_type = 'full'
+      AND reason LIKE 'Year-end write-off %'
   `).catch(() => {})
 }

@@ -51,7 +51,7 @@ export async function closeOutBill(
     ledgerId: number
     amountPaid: number
     balance: number
-    waiverType: 'carry_forward' | 'full'
+    waiverType: 'carry_forward' | 'full' | 'writeoff'
     reason: string
     doneBy: string
   }

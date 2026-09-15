@@ -21,15 +21,18 @@ export async function GET(req: NextRequest) {
 
     const { rows } = await pool.query(
       `WITH discretionary_waivers AS (
-         -- Excludes 'carry_forward' bookkeeping waivers (the zeroing entries written
-         -- when a bill is carried/passed-out) — same exclusion Reports and Year-End
-         -- apply, so "Waived" means the same thing on every tab for the same year.
+         -- Excludes two bookkeeping waiver types, neither a real discretionary waiver:
+         -- 'carry_forward' (the zeroing entry written when a bill is carried/passed-out)
+         -- and 'writeoff' (an admin giving up on uncollectable debt at year-end close —
+         -- an administrative decision, not a fee reduction granted to a student). Same
+         -- exclusion Reports/Stats/Passbook/Year-End apply, so "Waived" means the same
+         -- thing on every tab for the same year.
          SELECT l.academic_year, COALESCE(SUM(w.waiver_amount), 0) AS total
          FROM fee_waivers w
          JOIN student_fee_ledger l ON l.id = w.ledger_id
          WHERE w.school_id = $1
            AND COALESCE(w.is_revoked, FALSE) = FALSE
-           AND w.waiver_type != 'carry_forward'
+           AND w.waiver_type NOT IN ('carry_forward', 'writeoff')
          GROUP BY l.academic_year
        )
        SELECT

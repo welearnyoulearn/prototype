@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
        JOIN student_fee_ledger l ON l.id = w.ledger_id
        WHERE w.school_id = $1 AND l.academic_year = $2
          AND COALESCE(w.is_revoked, FALSE) = FALSE
-         AND w.waiver_type != 'carry_forward'`,
+         AND w.waiver_type NOT IN ('carry_forward', 'writeoff')`,
       [school_id, academic_year]
     ).catch(() => ({ rows: [{ total: summary.total_waived }] }))
 
@@ -293,10 +293,17 @@ export async function POST(req: NextRequest) {
 
           if (d.decision === 'writeoff') {
             for (const b of studentBills) {
+              // 'writeoff' (not 'full') — a year-end write-off is an administrative
+              // decision to give up on uncollectable debt, not the same thing as a
+              // discretionary fee waiver granted to a specific student mid-year.
+              // Before this distinction existed, write-offs shared waiver_type='full'
+              // with genuine discretionary waivers, silently inflating every screen's
+              // "Waived" total with bad-debt write-offs. See the SCHEMA_VERSION 26
+              // migration below for the one-time backfill of pre-existing rows.
               await closeOutBill(client, {
                 schoolId: school_id, studentId: d.student_id, ledgerId: b.id,
                 amountPaid: parseFloat(b.amount_paid), balance: parseFloat(b.balance),
-                waiverType: 'full', reason: d.reason || `Year-end write-off ${from_year}`, doneBy: done_by,
+                waiverType: 'writeoff', reason: d.reason || `Year-end write-off ${from_year}`, doneBy: done_by,
               })
             }
             writeoffCount++; writeoffTotal += studentBalance

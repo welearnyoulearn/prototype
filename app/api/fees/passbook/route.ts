@@ -122,9 +122,9 @@ export async function GET(req: NextRequest) {
     // same balance. Summing amount_due across all years would therefore count that
     // balance twice. A waiver_type='carry_forward' row is the exact signal that a
     // bill's balance moved rather than being genuinely billed twice — a real
-    // write-off uses waiver_type='full' and has no such new bill, so it's correctly
-    // left counted. Map ledger_id -> carried amount so both the per-year and overall
-    // totals can subtract just that portion.
+    // write-off uses waiver_type='writeoff' and has no such new bill, so it's
+    // correctly left counted. Map ledger_id -> carried amount so both the per-year
+    // and overall totals can subtract just that portion.
     const carriedByLedgerId = new Map<number, number>()
     for (const w of waivers as Array<{ ledger_id: number; waiver_amount: string; waiver_type: string }>) {
       if (w.waiver_type !== 'carry_forward') continue
@@ -161,11 +161,12 @@ export async function GET(req: NextRequest) {
       g.entries.push(e)
     }
 
-    // Add per-year discretionary waiver totals (excludes 'carry_forward' bookkeeping
-    // waivers) — fee_waivers carries waiver_type, student_fee_ledger doesn't, so this
-    // is computed from the waivers list rather than inside the ledger loop above.
+    // Add per-year discretionary waiver totals (excludes 'carry_forward' and
+    // 'writeoff' bookkeeping waivers — neither is a fee reduction granted to a
+    // student) — fee_waivers carries waiver_type, student_fee_ledger doesn't, so
+    // this is computed from the waivers list rather than inside the ledger loop above.
     for (const w of waivers as Array<{ bill_year: string; waiver_amount: string; waiver_type: string }>) {
-      if (w.waiver_type === 'carry_forward') continue
+      if (w.waiver_type === 'carry_forward' || w.waiver_type === 'writeoff') continue
       const g = yearMap.get(w.bill_year)
       if (g) g.discretionary_waived += parseFloat(w.waiver_amount)
     }
@@ -268,11 +269,12 @@ export async function GET(req: NextRequest) {
       .reduce((s, w) => s + parseFloat(w.waiver_amount), 0)
     // Per-bill floor applied in SQL (GREATEST(..., 0) AS balance) — sum those floors
     const outstanding = ledger.reduce((s: number, l: {balance: string}) => s + parseFloat(l.balance), 0)
-    // Discretionary waivers only (excludes 'carry_forward' bookkeeping waivers from
-    // year-end/rollover) — shown alongside total_waived so the passbook doesn't imply
-    // a student received more discretionary concessions than they actually did.
+    // Discretionary waivers only (excludes 'carry_forward' and 'writeoff' bookkeeping
+    // waivers from year-end/rollover — neither is a fee reduction granted to the
+    // student) — shown alongside total_waived so the passbook doesn't imply a student
+    // received more discretionary concessions than they actually did.
     const discretionaryWaived = (waivers as Array<{ waiver_amount: string; waiver_type: string }>)
-      .filter(w => w.waiver_type !== 'carry_forward')
+      .filter(w => w.waiver_type !== 'carry_forward' && w.waiver_type !== 'writeoff')
       .reduce((s, w) => s + parseFloat(w.waiver_amount), 0)
 
     // 10. Prior year unresolved dues (years before current_year with outstanding > 0)

@@ -48,7 +48,7 @@ async function handleGET(req: NextRequest) {
          JOIN student_fee_ledger l ON l.id = w.ledger_id
          WHERE w.school_id = $1 AND l.academic_year = $2
            AND COALESCE(w.is_revoked, FALSE) = FALSE
-           AND w.waiver_type != 'carry_forward'`,
+           AND w.waiver_type NOT IN ('carry_forward', 'writeoff')`,
         [school_id, academic_year]
       ).catch(() => ({ rows: [{ total: balance.total_waived }] }))
       balance.discretionary_waived = discretionary.total
@@ -120,7 +120,7 @@ async function handleGET(req: NextRequest) {
          JOIN students s ON s.id = l.student_id
          WHERE l.school_id = $1 AND l.academic_year = $2
            AND COALESCE(w.is_revoked, FALSE) = FALSE
-           AND w.waiver_type != 'carry_forward'
+           AND w.waiver_type NOT IN ('carry_forward', 'writeoff')
          GROUP BY s.grade, s.section`,
         [school_id, academic_year]
       ).catch(() => ({ rows: [] as Array<{grade: string; section: string; total: string}> }))
@@ -156,7 +156,7 @@ async function handleGET(req: NextRequest) {
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE l.school_id = $1 AND l.academic_year = $2
            AND COALESCE(w.is_revoked, FALSE) = FALSE
-           AND w.waiver_type != 'carry_forward'
+           AND w.waiver_type NOT IN ('carry_forward', 'writeoff')
          GROUP BY fc.id`,
         [school_id, academic_year]
       ).catch(() => ({ rows: [] }))
