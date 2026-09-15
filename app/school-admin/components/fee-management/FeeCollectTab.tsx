@@ -13,6 +13,15 @@ function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` :
 function fmt(n: number | string) {
   return `₹${Number(n).toLocaleString('en-IN')}`
 }
+// `new Date().toISOString().slice(0, 10)` always renders in UTC regardless of
+// the browser's own timezone, so for an admin in IST it silently shows
+// yesterday's date as "today" for the ~5.5 hours between 00:00-05:29 IST (UTC
+// is still on the previous day then). 'en-CA' formats as YYYY-MM-DD directly
+// and, with no explicit timeZone, uses the browser's own local time — what an
+// admin sitting at their desk actually means by "today".
+function todayLocal(): string {
+  return new Date().toLocaleDateString('en-CA')
+}
 function fmtDate(d: string) {
   return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
 }
@@ -154,7 +163,7 @@ export default function FeeCollectTab({
   const [payMode, setPayMode] = useState('cash')
   const [payRef, setPayRef] = useState('')
   const [payCollectedBy, setPayCollectedBy] = useState(adminName || '')
-  const [payDate, setPayDate] = useState(new Date().toISOString().slice(0, 10))
+  const [payDate, setPayDate] = useState(todayLocal())
   const [payNotes, setPayNotes] = useState('')
   const [payError, setPayError] = useState('')
   const [paySuccess, setPaySuccess] = useState<PaySuccess | null>(null)
@@ -186,7 +195,7 @@ export default function FeeCollectTab({
     setCollectChecked(new Set(row.open_entries.map(e => e.id)))
     const fullTotal = row.open_entries.reduce((s, e) => s + Number(e.balance), 0)
     setPayAmount(fullTotal > 0 ? String(fullTotal) : '')
-    setPayMode('cash'); setPayRef(''); setPayNotes(''); setPayDate(new Date().toISOString().slice(0, 10))
+    setPayMode('cash'); setPayRef(''); setPayNotes(''); setPayDate(todayLocal())
     setPayError(''); setPaySuccess(null); setShowCollectForm(true)
     setPassoutOpenStudent(row)
     clearCollectRequest()
@@ -366,7 +375,7 @@ export default function FeeCollectTab({
     const fullTotal = row.open_entries.reduce((s, e) => s + Number(e.balance), 0)
     setPayAmount(String(fullTotal))
     setPayMode('cash'); setPayRef(''); setPayCollectedBy(adminName || '')
-    setPayDate(new Date().toISOString().slice(0, 10)); setPayNotes('')
+    setPayDate(todayLocal()); setPayNotes('')
     setPayError(''); setPaySuccess(null)
     setShowCollectForm(true)
   }
@@ -382,6 +391,7 @@ export default function FeeCollectTab({
       setPayError(`Amount cannot exceed selected dues (${fmt(checkedTotal)})`); return
     }
     if (!payCollectedBy.trim()) { setPayError('Collected By is required'); return }
+    if (payDate > todayLocal()) { setPayError("Payment date can't be in the future"); return }
     setCollectLoading(true); setPayError('')
     const r = await fetch('/api/fees/payments', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -482,7 +492,7 @@ export default function FeeCollectTab({
     already_closed: boolean
   }
   const [dayCloseData, setDayCloseData] = useState<DayCloseData | null>(null)
-  const [dayCloseDate, setDayCloseDate] = useState(new Date().toISOString().slice(0, 10))
+  const [dayCloseDate, setDayCloseDate] = useState(todayLocal())
   const [dayCloseLoading, setDayCloseLoading] = useState(false)
   const [actualCash, setActualCash] = useState('')
   const [dayCloseMsg, setDayCloseMsg] = useState('')
@@ -747,8 +757,11 @@ export default function FeeCollectTab({
                               </div>
                               <div>
                                 <label className="text-xs font-medium text-gray-600">Date</label>
-                                <input type="date" value={payDate} onChange={e => setPayDate(e.target.value)}
-                                  className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                                <input data-testid="input-pay-date" type="date" value={payDate} max={todayLocal()} onChange={e => setPayDate(e.target.value)}
+                                  className={`w-full mt-1 border rounded-lg px-3 py-2 text-sm ${payDate > todayLocal() ? 'border-red-300' : 'border-gray-200'}`} />
+                                {payDate > todayLocal() && (
+                                  <p className="text-xs text-red-600 mt-1">⚠ Future date — payments can&apos;t be backdated to the future.</p>
+                                )}
                               </div>
                               <div>
                                 <label className="text-xs font-medium text-gray-600">Collected By <span className="text-red-500">*</span></label>
@@ -779,7 +792,7 @@ export default function FeeCollectTab({
                               <button
                                 data-testid="btn-review-payment"
                                 onClick={() => setShowPayConfirm(true)}
-                                disabled={collectLoading || !(parseFloat(payAmount) > 0) || parseFloat(payAmount) > checkedTotal + 0.01 || !payCollectedBy.trim()}
+                                disabled={collectLoading || !(parseFloat(payAmount) > 0) || parseFloat(payAmount) > checkedTotal + 0.01 || !payCollectedBy.trim() || payDate > todayLocal()}
                                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2">
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                                 Review & Confirm
