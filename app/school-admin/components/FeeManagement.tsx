@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback, Fragment } from 'react'
 import { useFeature } from '@/lib/features-context'
-import { GRADE_SEQUENCE } from '@/lib/grades'
 import type {
   FeeCategory, FeeStructure, StructureLock, Amendment,
   LedgerEntry, FeeStats, PaymentRecord, StudentRow, PassbookData,
@@ -21,8 +20,6 @@ import FeeSetupTab from './fee-management/FeeSetupTab'
 import { useFeeStore } from '@/lib/stores/feeStore'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const GRADES = GRADE_SEQUENCE
 
 const STATUS_COLORS: Record<string, string> = {
   paid:     'bg-green-100 text-green-700',
@@ -97,10 +94,9 @@ export default function FeeManagement({
   const [gradeStats, setGradeStats] = useState<GradeStat[]>([])
 
   // Setup
-  // Starts true (not false) so the setup wizard banner below doesn't render on
-  // the very first paint using the default empty categories/structureLock —
-  // same reasoning as statsLoading starting true, applied to the sibling piece
-  // of state the banner's step2/step3/step5 completion checks actually read.
+  // Starts true (not false) so the Setup tab doesn't render on the very first
+  // paint using the default empty categories/structureLock, before loadSetup()
+  // (only fired once the Setup tab is actually visited — see below) resolves.
   const [setupLoading, setSetupLoading] = useState(true)
   const [categories, setCategories]     = useState<FeeCategory[]>([])
   const [structures, setStructures]     = useState<FeeStructure[]>([])
@@ -111,6 +107,14 @@ export default function FeeManagement({
   // (e.g. a school with no Nursery/LKG/UKG section shouldn't be blocked on those).
   const [enrolledGrades, setEnrolledGrades] = useState<string[] | null>(null)
   const [editAmounts, setEditAmounts]   = useState<Record<string, string>>({})
+
+  // Overview tab's setup-wizard banner used to force the full loadSetup() below to
+  // run on every tab, not just Setup — 5 requests (one of them a JOIN against the
+  // whole student_fee_ledger table) purely to compute 3 booleans. This is the
+  // lightweight replacement: one small endpoint, no ledger-count join, used only by
+  // the banner; loadSetup() itself now only ever runs once the Setup tab is visited.
+  const [setupStatus, setSetupStatus] = useState<{ has_categories: boolean; amounts_complete: boolean; is_locked: boolean } | null>(null)
+  const [setupStatusLoading, setSetupStatusLoading] = useState(true)
 
   // Opens the shared Passbook Modal — also used by Collect via onOpenPassbook
   const [showPassbookModal, setShowPassbookModal] = useState(false)
@@ -420,12 +424,28 @@ export default function FeeManagement({
     finally { setSetupLoading(false) }
   }, [schoolId, academicYear])
 
-  // Load setup on tab switch; also load once on mount (academicYear change) so the
-  // 5-step wizard on the Overview tab shows accurate step state without a tab switch.
-  // The tab-switch effect guards on activeTab==='setup', so the two effects don't
-  // double-fire when the user is already on the setup tab and academicYear changes.
+  // Only load the full setup payload (5 requests, one a JOIN across the whole
+  // ledger table) once the Setup tab is actually visited — every other tab gets
+  // the lightweight setup-status check below instead.
   useEffect(() => { if (activeTab === 'setup' && academicYear) loadSetup() }, [activeTab, loadSetup, academicYear])
-  useEffect(() => { if (academicYear && activeTab !== 'setup') loadSetup() }, [academicYear]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Lightweight status check that feeds the Overview tab's setup-wizard banner —
+  // see the setupStatus state comment above for why this replaced calling the
+  // full loadSetup() on every tab.
+  const loadSetupStatus = useCallback(async () => {
+    if (!academicYear) return
+    setSetupStatusLoading(true)
+    try {
+      const r = await fetch(`/api/fees/setup-status?school_id=${schoolId}&academic_year=${academicYear}`)
+      setSetupStatus(r.ok ? await r.json() : null)
+    } catch { setSetupStatus(null) }
+    finally { setSetupStatusLoading(false) }
+  }, [schoolId, academicYear])
+  // Also refetch on every tab change (not just academicYear) — otherwise leaving
+  // the Setup tab after creating categories/amounts/bills/lock would show a stale
+  // banner on Overview until academicYear happened to change again. This endpoint
+  // is cheap enough that refetching on tab switches is a non-issue.
+  useEffect(() => { if (academicYear) loadSetupStatus() }, [academicYear, activeTab, loadSetupStatus])
 
   // ── Setup actions ────────────────────────────────────────────────────────────
   // Generate bills only for students who have no ledger rows yet (safe after lock)
@@ -434,38 +454,6 @@ export default function FeeManagement({
   // Create a fee head (from wizard) — does not navigate, refreshes list
   // Apply a group amount to all grades in that group for the managed fee
   // Save amounts for a single fee head (only that category's grades)
-  // Whether a fee head has any amount configured
-  // Grades the "every grade must have an amount" mandate actually applies to: grades
-  // with enrolled students if known, otherwise every grade in the master list (e.g.
-  // before any students have been onboarded yet, so setup isn't blocked on that).
-  function gradesToValidate(): string[] {
-    return enrolledGrades && enrolledGrades.length > 0
-      ? GRADES.filter(g => enrolledGrades.includes(g))
-      : GRADES
-  }
-  function feeHasAmounts(catId: number, type: string): boolean {
-    if (type === 'variable') {
-      return structures.some(s => s.fee_category_id === catId && Number(s.amount) > 0)
-    }
-    // ALL enrolled grades must have an amount, not just one — otherwise "Generate Bills"
-    // silently skips every grade left at 0 with no warning, contradicting the stated
-    // mandate that every fixed fee head must be fully configured before bills can be
-    // generated. Grades with no enrolled students (e.g. a school with no Nursery
-    // section) are excluded so setup isn't blocked on grades that don't apply.
-    return gradesToValidate().every(g => parseFloat(editAmounts[`${catId}_${g}`] || '0') > 0)
-  }
-  // Active FIXED fee heads only (variable fees are optional / per-student, and
-  // system-generated carry-forward categories are billed directly to the ledger —
-  // both are excluded from the per-grade setup gate)
-  function fixedFeeHeads(): FeeCategory[] {
-    return categories.filter(c => c.is_active && c.category_type !== 'variable' && !c.is_system)
-  }
-  // Generate Bills is allowed only when EVERY active fixed fee head has at least one amount set
-  function fixedAmountsComplete(): boolean {
-    const fixed = fixedFeeHeads()
-    if (fixed.length === 0) return false
-    return fixed.every(c => feeHasAmounts(c.id, c.category_type))
-  }
   // ── First-login year wizard: create the school's first academic year ────────────
   async function createFirstYear() {
     if (!wizLabel.trim() || !wizStart || !wizEnd) { setWizMsg('All fields are required'); return }
@@ -814,13 +802,13 @@ export default function FeeManagement({
       )}
 
       {/* ── 5-step setup wizard (shown when there are no bills yet) ── */}
-      {!setupWizardDismissed && academicYear && !closedYears.has(academicYear) && !statsLoading && !setupLoading && (
+      {!setupWizardDismissed && academicYear && !closedYears.has(academicYear) && !statsLoading && !setupStatusLoading && setupStatus && (
         (() => {
           const step1Done = true // year exists
-          const step2Done = categories.filter(c => c.is_active !== false && !c.is_system).length > 0
-          const step3Done = fixedAmountsComplete()
+          const step2Done = setupStatus.has_categories
+          const step3Done = setupStatus.amounts_complete
           const step4Done = (stats?.summary?.total_due ?? 0) > 0
-          const step5Done = !!structureLock
+          const step5Done = setupStatus.is_locked
           const allDone = step1Done && step2Done && step3Done && step4Done && step5Done
           if (allDone) return null
           const steps = [
