@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type { CancelCorrectBundle, LedgerEntry, PaySuccess, PendingPayment, ReceiptHeaderBlock, StudentRow } from './types'
 import { printDualCopyReceipt } from './receipts'
@@ -167,6 +167,13 @@ export default function FeeCollectTab({
   const [payNotes, setPayNotes] = useState('')
   const [payError, setPayError] = useState('')
   const [paySuccess, setPaySuccess] = useState<PaySuccess | null>(null)
+  // Stable per-attempt key so a retry (network timeout, or a click that slips
+  // past the disabled-while-saving state) reuses the same key instead of the
+  // server treating it as a brand-new payment/waiver — see lib/idempotency.ts.
+  // Cleared when a fresh form opens (startCollect / the Grant Waiver button) or
+  // a submission succeeds, so the NEXT genuinely new action gets a fresh key.
+  const payIdemKeyRef = useRef<string | null>(null)
+  const waiverIdemKeyRef = useRef<string | null>(null)
   const [showWaiver, setShowWaiver] = useState(false)
   const [waiverForm, setWaiverForm] = useState({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' })
   const [waiverLoading, setWaiverLoading] = useState(false)
@@ -370,6 +377,7 @@ export default function FeeCollectTab({
   }, [ledgerVersion])
 
   function startCollect(row: StudentRow) {
+    payIdemKeyRef.current = null
     setOpenStudentId(row.student_id)
     setCollectChecked(new Set(row.open_entries.map(e => e.id)))
     const fullTotal = row.open_entries.reduce((s, e) => s + Number(e.balance), 0)
@@ -393,6 +401,7 @@ export default function FeeCollectTab({
     if (!payCollectedBy.trim()) { setPayError('Collected By is required'); return }
     if (payDate > todayLocal()) { setPayError("Payment date can't be in the future"); return }
     setCollectLoading(true); setPayError('')
+    if (!payIdemKeyRef.current) payIdemKeyRef.current = crypto.randomUUID()
     const r = await fetch('/api/fees/payments', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -400,10 +409,12 @@ export default function FeeCollectTab({
         ledger_ids: ids, total_amount: enteredAmount,
         payment_mode: payMode, transaction_ref: payRef || null,
         collected_by_name: payCollectedBy.trim(), notes: payNotes || null, paid_date: payDate,
+        idempotency_key: payIdemKeyRef.current,
       }),
     })
     const d = await r.json()
     if (r.ok) {
+      payIdemKeyRef.current = null
       setPaySuccess({
         receipt_number: d.receipt_number, student_name: d.student_name || openStudent.student_name,
         amount: d.total_paid ?? enteredAmount,
@@ -456,6 +467,7 @@ export default function FeeCollectTab({
       }
     }
     setWaiverLoading(true); setWaiverError('')
+    if (!waiverIdemKeyRef.current) waiverIdemKeyRef.current = crypto.randomUUID()
     try {
       const r = await fetch('/api/fees/waivers', {
         method: 'POST',
@@ -465,9 +477,11 @@ export default function FeeCollectTab({
           ledger_id: selectedEntry.id, waiver_type: waiverForm.waiver_type,
           waiver_value: parseFloat(waiverForm.waiver_value) || null,
           reason: waiverForm.reason, granted_by_name: waiverForm.granted_by_name || null,
+          idempotency_key: waiverIdemKeyRef.current,
         }),
       })
       if (r.ok) {
+        waiverIdemKeyRef.current = null
         setShowWaiver(false)
         onStatsChanged(); refreshStudentLedger(selectedEntry.student_id)
         bumpReports(); bumpYearEnd()
@@ -805,7 +819,7 @@ export default function FeeCollectTab({
                               </button>
                               <button
                                 data-testid="btn-grant-waiver"
-                                onClick={() => { setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
+                                onClick={() => { waiverIdemKeyRef.current = null; setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
                                 className="px-3 py-2.5 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium whitespace-nowrap">
                                 Grant Waiver
                               </button>
@@ -840,7 +854,7 @@ export default function FeeCollectTab({
                                     </button>
                                     <button
                                       data-testid="btn-grant-waiver"
-                                      onClick={() => { setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
+                                      onClick={() => { waiverIdemKeyRef.current = null; setSelectedEntry(row.open_entries[0]); setWaiverForm({ waiver_type: 'percentage', waiver_value: '', reason: '', granted_by_name: adminName || '' }); setWaiverError(''); setShowWaiver(true) }}
                                       className="px-3 py-2 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium">
                                       Grant Waiver
                                     </button>

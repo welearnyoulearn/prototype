@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
+import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
 
 // GET /api/fees/waivers?school_id=X&student_id=Y
 async function handleGET(req: NextRequest) {
@@ -46,7 +47,7 @@ export const GET = withWatchline(handleGET, { route: '/api/fees/waivers' })
 async function handlePOST(req: NextRequest) {
   try {
     // Validate before acquiring pool connection
-    const { school_id, student_id, ledger_id, waiver_type, waiver_value, reason, granted_by_name: clientActor } = await req.json()
+    const { school_id, student_id, ledger_id, waiver_type, waiver_value, reason, granted_by_name: clientActor, idempotency_key } = await req.json()
     const access = await requireFeeAccess(school_id)
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     const granted_by_name = clientActor || access.actor
@@ -67,6 +68,16 @@ async function handlePOST(req: NextRequest) {
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
+
+      // Duplicate-submission guard — see lib/idempotency.ts. Without this, a
+      // network timeout + retry (or a double-click) on this exact form could
+      // grant the same discretionary waiver twice — the checks below only ever
+      // reject a retry once the remaining balance has shrunk to 0, not before.
+      const claim = await claimIdempotencyKey(client, { schoolId: school_id, key: idempotency_key, endpoint: '/api/fees/waivers' })
+      if (!claim.proceed) {
+        await client.query('ROLLBACK')
+        return NextResponse.json(claim.body as object, { status: claim.status })
+      }
 
       // #15/#16 — FOR UPDATE locks the row so a concurrent payment can't race with this waiver
       const { rows: [ledger] } = await client.query(
@@ -144,6 +155,7 @@ async function handlePOST(req: NextRequest) {
         [waiver_amount, ledger_id]
       )
 
+      await saveIdempotentResponse(client, { schoolId: school_id, key: idempotency_key, endpoint: '/api/fees/waivers', status: 201, body: waiver })
       await client.query('COMMIT')
       return NextResponse.json(waiver, { status: 201 })
     } catch (e) {

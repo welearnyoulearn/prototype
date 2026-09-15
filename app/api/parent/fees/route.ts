@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { getAnySession, getParentSession, schoolHasFeature } from '@/lib/auth'
 import { resolveAcademicYear } from '@/lib/academicYear'
+import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
 
 // GET /api/parent/fees?school_id=X&student_id=Y&academic_year=2025-26
 export async function GET(req: NextRequest) {
@@ -147,7 +148,7 @@ export async function POST(req: NextRequest) {
 
     const client = await pool.connect()
     try {
-      const { school_id, student_id, ledger_id, ledger_ids, amount, total_amount, transaction_ref, upi_id } = await req.json()
+      const { school_id, student_id, ledger_id, ledger_ids, amount, total_amount, transaction_ref, upi_id, idempotency_key } = await req.json()
       if (!school_id || !student_id) {
         return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
       }
@@ -189,6 +190,16 @@ export async function POST(req: NextRequest) {
       }
 
       await client.query('BEGIN')
+
+      // Duplicate-submission guard — see lib/idempotency.ts. A parent's flaky
+      // mobile connection retrying a submit is exactly the scenario this exists
+      // for; the balance/pending checks below only catch a retry once the
+      // remaining balance has shrunk below the amount, not before.
+      const claim = await claimIdempotencyKey(client, { schoolId: school_id, key: idempotency_key, endpoint: '/api/parent/fees' })
+      if (!claim.proceed) {
+        await client.query('ROLLBACK')
+        return NextResponse.json(claim.body as object, { status: claim.status })
+      }
 
       const { rows: [seq] } = await client.query(`SELECT nextval('receipt_number_seq') AS n`)
       const schoolCode = String(school_id).padStart(3, '0')
@@ -302,14 +313,16 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      await client.query('COMMIT')
-
-      return NextResponse.json({
+      const responseBody = {
         receipt_number,
         total_amount: payAmount,
         entries_count: createdPayments.length,
         message: 'Payment submitted. School will verify and confirm shortly.',
-      }, { status: 201 })
+      }
+      await saveIdempotentResponse(client, { schoolId: school_id, key: idempotency_key, endpoint: '/api/parent/fees', status: 201, body: responseBody })
+      await client.query('COMMIT')
+
+      return NextResponse.json(responseBody, { status: 201 })
     } catch (e) {
       await client.query('ROLLBACK')
       console.error(e)

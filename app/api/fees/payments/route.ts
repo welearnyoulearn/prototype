@@ -3,6 +3,7 @@ import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
 import { todayIST } from '@/lib/istDate'
+import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
 
 // Hard ceiling on rows per request so a payment history can never come back unbounded.
 const MAX_LIMIT = 500
@@ -108,6 +109,7 @@ async function handlePOST(req: NextRequest) {
       payment_mode, transaction_ref,
       collected_by_name: clientCollector, notes, paid_date,
       payment_status = 'completed',
+      idempotency_key,
     } = body
 
     const access = await requireFeeAccess(school_id)
@@ -185,6 +187,17 @@ async function handlePOST(req: NextRequest) {
       }
 
       await client.query('BEGIN')
+
+      // Duplicate-submission guard — see lib/idempotency.ts. A network timeout +
+      // retry, or a double-click before the UI's own disable-while-saving state
+      // lands, previously had no protection beyond "does the balance still have
+      // room for this amount", which happily admits a genuine duplicate whenever
+      // it does.
+      const claim = await claimIdempotencyKey(client, { schoolId: school_id, key: idempotency_key, endpoint: '/api/fees/payments' })
+      if (!claim.proceed) {
+        await client.query('ROLLBACK')
+        return NextResponse.json(claim.body as object, { status: claim.status })
+      }
 
       // Generate one receipt number shared across all allocations
       const { rows: [seq] } = await client.query(`SELECT nextval('receipt_number_seq') AS n`)
@@ -314,9 +327,11 @@ async function handlePOST(req: NextRequest) {
         }
       }
 
-      await client.query('COMMIT')
-
-      // Return enriched response for receipt display
+      // Enriched response for receipt display — computed before COMMIT (not after,
+      // as this used to be) so its exact shape can be cached against the
+      // idempotency key below; a retry then replays this same response instead of
+      // re-deriving it (and, more importantly, instead of re-running the payment
+      // logic above).
       const { rows: [full] } = await client.query(
         `SELECT fp.*, s.name AS student_name, s.roll_number, s.grade, s.section, s.parent_name,
                 fc.name AS category_name, l.period_label, l.amount_due,
@@ -342,13 +357,17 @@ async function handlePOST(req: NextRequest) {
         [createdPayments.map(p => p.id)]
       )
 
-      return NextResponse.json({
+      const responseBody = {
         ...full,
         receipt_number,
         total_paid: createdPayments.reduce((s, p) => s + parseFloat(p.amount), 0),
         line_items: lineItems.map(li => ({ category_name: li.category_name, period_label: li.period_label, amount: parseFloat(li.amount) })),
         allocations: createdPayments.map(p => ({ ledger_id: p.ledger_id, amount: parseFloat(p.amount) })),
-      }, { status: 201 })
+      }
+      await saveIdempotentResponse(client, { schoolId: school_id, key: idempotency_key, endpoint: '/api/fees/payments', status: 201, body: responseBody })
+      await client.query('COMMIT')
+
+      return NextResponse.json(responseBody, { status: 201 })
     } catch (e) {
       await client.query('ROLLBACK')
       console.error(e)

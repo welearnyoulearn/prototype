@@ -181,6 +181,11 @@ export default function ParentDashboard() {
   const [upiCopied, setUpiCopied] = useState(false)
   const [payTimerSecs, setPayTimerSecs] = useState(0)
   const payTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Stable per-attempt key so a flaky connection's retry reuses the same key
+  // instead of the server treating it as a second payment — see
+  // lib/idempotency.ts. Cleared on success/cancel so the next payment gets a
+  // fresh one.
+  const payIdemKeyRef = useRef<string | null>(null)
 
 
   const [ackingId, setAckingId] = useState<number | null>(null)
@@ -395,15 +400,17 @@ export default function ParentDashboard() {
     try {
       const isMulti = selectedLedgerIds.size > 0
       const ref = upiRef !== undefined ? upiRef : payUPI
+      if (!payIdemKeyRef.current) payIdemKeyRef.current = crypto.randomUUID()
       const body = isMulti
-        ? { school_id: student.school_id, student_id: student.id, ledger_ids: Array.from(selectedLedgerIds), total_amount: parseFloat(payAmount), transaction_ref: ref || null, upi_id: ref || null }
-        : { school_id: student.school_id, student_id: student.id, ledger_id: payingLedger?.id, amount: parseFloat(payAmount), upi_id: ref || null }
+        ? { school_id: student.school_id, student_id: student.id, ledger_ids: Array.from(selectedLedgerIds), total_amount: parseFloat(payAmount), transaction_ref: ref || null, upi_id: ref || null, idempotency_key: payIdemKeyRef.current }
+        : { school_id: student.school_id, student_id: student.id, ledger_id: payingLedger?.id, amount: parseFloat(payAmount), upi_id: ref || null, idempotency_key: payIdemKeyRef.current }
       const r = await fetch('/api/parent/fees', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
       const d = await r.json()
       if (r.ok) {
+        payIdemKeyRef.current = null
         setPaySuccess({ receipt_number: d.receipt_number, total_amount: d.total_amount || parseFloat(payAmount), entries_count: d.entries_count || 1 })
         setPayingLedger(null); setSelectedLedgerIds(new Set()); setPayAmount(''); setPayUPI('')
         setPayStep('form'); setUpiParentId(''); setQrRevealed(false); stopPayTimer()
@@ -436,6 +443,7 @@ export default function ParentDashboard() {
   }
 
   function cancelPayment() {
+    payIdemKeyRef.current = null
     setPayingLedger(null); setSelectedLedgerIds(new Set())
     setPayAmount(''); setPayUPI('')
     setPayStep('form'); setUpiParentId(''); setQrRevealed(false); stopPayTimer()

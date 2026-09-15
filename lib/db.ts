@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 26
+const SCHEMA_VERSION = 27
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3121,4 +3121,29 @@ async function runIncrementalMigrations() {
     WHERE waiver_type = 'full'
       AND reason LIKE 'Year-end write-off %'
   `).catch(() => {})
+
+  // ── Idempotency keys — see lib/idempotency.ts ───────────────────────────────
+  // Backs the payments/waivers duplicate-submission guard: a network timeout +
+  // client retry (or an impatient double-click) previously had no protection
+  // beyond "does the balance still have room for this amount" — which happily
+  // admits a genuine duplicate when it does. UNIQUE(school_id, idempotency_key,
+  // endpoint) is the actual lock: a second request claiming the same key blocks
+  // on this row until the first transaction commits or rolls back, then either
+  // replays the first one's stored response or (if it rolled back) proceeds
+  // itself — see claimIdempotencyKey()'s comment for the full mechanism.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS idempotency_keys (
+      id              SERIAL PRIMARY KEY,
+      school_id       INTEGER NOT NULL,
+      idempotency_key TEXT    NOT NULL,
+      endpoint        TEXT    NOT NULL,
+      response_status INTEGER,
+      response_body   JSONB,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(school_id, idempotency_key, endpoint)
+    )
+  `).catch(() => {})
+  // Rows only need to live long enough to catch a retry (seconds to minutes,
+  // realistically) — nothing prunes this table yet. Fine at this scale; revisit
+  // with a created_at-based cleanup if it ever becomes a real row-count concern.
 }
