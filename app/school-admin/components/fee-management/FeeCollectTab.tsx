@@ -125,6 +125,28 @@ export default function FeeCollectTab({
 
   useEffect(() => { loadLedger() }, [loadLedger, ledgerVersion])
 
+  // Targeted alternative to loadLedger() for an action that only ever changes
+  // ONE student's bills (a counter payment, a waiver, an online-payment
+  // verification) — loadLedger() re-fetches the whole school's year, which
+  // gets expensive fast for a large school (thousands of rows) and was
+  // previously re-run after every single payment collected at the counter.
+  // ledgerVersion-driven reloads (bulk changes from Year-End/Setup/category
+  // assignments, which genuinely can touch many students at once) still use
+  // the full loadLedger() above.
+  const refreshStudentLedger = useCallback(async (studentId: number) => {
+    if (!academicYear) return
+    try {
+      const params = new URLSearchParams({ school_id: String(schoolId), academic_year: academicYear, student_id: String(studentId) })
+      const r = await fetch(`/api/fees/ledger?${params}`)
+      if (r.ok) {
+        const fresh: LedgerEntry[] = await r.json()
+        setLedger(prev => [...prev.filter(e => e.student_id !== studentId), ...fresh])
+      }
+      // A failed targeted refresh isn't fatal — the next ledgerVersion-driven
+      // full reload (or a manual Refresh) will eventually show the true state.
+    } catch { /* non-critical, see above */ }
+  }, [schoolId, academicYear])
+
   // ── Collect (counter) ──
   const [collectLoading, setCollectLoading] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState<LedgerEntry | null>(null)
@@ -218,7 +240,11 @@ export default function FeeCollectTab({
     if (r.ok) {
       setVerifyMsg(action === 'approve' ? '✓ Payment approved and ledger updated' : '✓ Payment rejected')
       setShowRejectForm(null); setRejectReason('')
-      loadPending(); onStatsChanged(); loadLedger()
+      const pmt = pendingPayments.find(p => p.id === paymentId)
+      loadPending(); onStatsChanged()
+      // Reject only flips payment_status, never touches the ledger — nothing to
+      // refresh there. Approve does, so refresh just that one student's rows.
+      if (action === 'approve' && pmt) refreshStudentLedger(pmt.student_id)
       bumpReports(); bumpYearEnd()
     } else {
       const d = await r.json()
@@ -382,7 +408,7 @@ export default function FeeCollectTab({
       })
       setShowCollectForm(false)
       setPassoutOpenStudent(null)
-      loadLedger(); onStatsChanged(); onPassoutChanged()
+      refreshStudentLedger(openStudent.student_id); onStatsChanged(); onPassoutChanged()
       bumpReports(); bumpYearEnd()
     } else {
       setPayError(d.error || 'Payment failed')
@@ -431,10 +457,11 @@ export default function FeeCollectTab({
         }),
       })
       if (r.ok) {
-        setShowWaiver(false); setSelectedEntry(null)
-        setOpenStudentId(null); setShowCollectForm(false); setCollectChecked(new Set())
-        onStatsChanged(); loadLedger()
+        setShowWaiver(false)
+        onStatsChanged(); refreshStudentLedger(selectedEntry.student_id)
         bumpReports(); bumpYearEnd()
+        setSelectedEntry(null)
+        setOpenStudentId(null); setShowCollectForm(false); setCollectChecked(new Set())
       } else {
         const d = await r.json()
         setWaiverError(d.error || 'Failed to grant waiver')
