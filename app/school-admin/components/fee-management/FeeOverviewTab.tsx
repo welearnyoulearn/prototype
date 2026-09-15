@@ -458,7 +458,10 @@ export default function FeeOverviewTab({
                     )}
                     <div className={`bg-gray-50 rounded-lg px-3 py-2 text-center ${passoutData.summary.total_waived > 0 ? '' : 'col-span-2'}`}>
                       <p className="text-xs text-gray-400 mb-0.5">Net Pending</p>
-                      <p className="text-sm font-bold text-gray-700">{fmt(passoutData.summary.total_outstanding - passoutData.summary.total_collected)}</p>
+                      {/* total_outstanding (api/fees/passout GREATEST(due-waived-paid,0)) is
+                          already net of collections — subtracting total_collected again here
+                          double-counted it, understating (or even going negative on) this figure. */}
+                      <p className="text-sm font-bold text-gray-700">{fmt(passoutData.summary.total_outstanding)}</p>
                     </div>
                   </div>
                   {passoutCollectError && (
