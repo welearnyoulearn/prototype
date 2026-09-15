@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getAnySession } from '@/lib/auth'
+import { getAnySession, schoolHasFeature } from '@/lib/auth'
 
 // GET /api/fees/upi-qr/info?school_id=X — returns { upi_id, school_name } as
 // plain JSON, for the parent Fees tab to show the UPI ID as copyable text
@@ -17,6 +17,9 @@ export async function GET(req: NextRequest) {
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
   if (Number(school_id) !== Number(session.schoolId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  if (!await schoolHasFeature(Number(school_id), 'online-payments')) {
+    return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
   }
 
   try {

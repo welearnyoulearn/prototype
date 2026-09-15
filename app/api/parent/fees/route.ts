@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getAnySession, getParentSession } from '@/lib/auth'
+import { getAnySession, getParentSession, schoolHasFeature } from '@/lib/auth'
 import { resolveAcademicYear } from '@/lib/academicYear'
 
 // GET /api/parent/fees?school_id=X&student_id=Y&academic_year=2025-26
@@ -149,6 +149,14 @@ export async function POST(req: NextRequest) {
       const { school_id, student_id, ledger_id, ledger_ids, amount, total_amount, transaction_ref, upi_id } = await req.json()
       if (!school_id || !student_id) {
         return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
+      }
+      // Server-side plan gate — this is the actual write path that creates a
+      // fee_payments row; the QR/upi-id endpoints are gated too, but a caller
+      // could skip straight here. Without this, a school whose plan doesn't
+      // include online-payments could still have parents self-report payments
+      // that land in the admin's verification queue.
+      if (!await schoolHasFeature(Number(school_id), 'online-payments')) {
+        return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
       }
 
       const isMulti = Array.isArray(ledger_ids) && ledger_ids.length > 0

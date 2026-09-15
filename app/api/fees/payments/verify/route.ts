@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { sendFeePaymentConfirmedEmail, sendFeePaymentRejectedEmail } from '@/lib/email'
-import { requireFeeAccess } from '@/lib/auth'
+import { requireFeeAccess, schoolHasFeature } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
 
 // GET /api/fees/payments/verify?school_id=X — list pending_verification payments
@@ -88,6 +88,17 @@ async function handlePOST(req: NextRequest) {
       }
 
       if (action === 'approve') {
+        // Same reasoning as the closed-year guard just below: reject never
+        // touches money, so it stays available even for a school whose plan
+        // has since lost online-payments (still need to be able to clear a
+        // stuck queue); approve credits the ledger, so it needs the same
+        // server-side plan gate the self-report endpoint and QR/UPI-ID routes
+        // already have — the UI hides this tab, but that's presentation only.
+        if (!await schoolHasFeature(pmtRow.school_id, 'online-payments')) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
+        }
+
         // Block crediting a closed year's ledger — reject doesn't touch the
         // ledger at all (only flips payment_status), so it stays allowed
         // regardless of year-close state; approve does, so it needs the same
