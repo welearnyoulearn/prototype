@@ -1434,4 +1434,160 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
     const d = data as { error: string }
     expect(d.error).toBe('has_ledger_data')
   })
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SECTION 13 — SECURITY, IDEMPOTENCY & INTEGRITY FIXES
+  // Coverage for the multi-angle audit fixes: cross-tenant IDOR on the parent
+  // self-report endpoint, ownership check on category-assignments, duplicate-
+  // submission protection, the ledger-delete data-loss guard, write-off vs
+  // discretionary waiver separation, and the payment_mode/percentage-waiver
+  // validation gaps.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  test('SEC-101: POST parent/fees with mismatched school_id → 403 (cross-tenant IDOR fix)', async () => {
+    // getAnySession() admits any authenticated role, including school_admin —
+    // this exercises the exact same session.schoolId !== school_id check the
+    // route applies regardless of caller role, without needing a separate
+    // parent login flow.
+    const { status } = await api('/api/parent/fees', 'POST', {
+      school_id: schoolId + 9999, student_id: studentA, ledger_id: ledgerA1, amount: 10,
+    }, adminCookie)
+    expect(status).toBe(403)
+  })
+
+  test('SEC-102: POST category-assignments rejects a student_id that does not belong to this school → 403', async () => {
+    const { status, data } = await api('/api/fees/category-assignments', 'POST', {
+      school_id: schoolId, academic_year: AY,
+      assignments: [{ student_id: 999999999, fee_category_id: catVariable, amount: 500 }],
+    }, adminCookie)
+    expect(status).toBe(403)
+    const d = data as { error: string }
+    expect(d.error).toContain('do not belong')
+  })
+
+  test('IDEM-101: Duplicate payment submission with the same idempotency_key does not double-charge', async () => {
+    const { data: ledger } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}`, 'GET', undefined, adminCookie
+    )
+    const entries = ledger as Array<{ id: number; status: string; amount_due: number; amount_paid: number }>
+    const unpaid = entries.find(e => e.status !== 'paid' && e.status !== 'waived' &&
+      parseFloat(String(e.amount_due)) > parseFloat(String(e.amount_paid)))
+    if (!unpaid) return
+    const startingPaid = parseFloat(String(unpaid.amount_paid))
+
+    const idemKey = `e2e-idem-${ts}-${unpaid.id}`
+    const body = {
+      school_id: schoolId, student_id: studentC, ledger_id: unpaid.id, amount: 1,
+      payment_mode: 'cash', collected_by_name: 'Test Admin', idempotency_key: idemKey,
+    }
+    const { status: s1, data: d1 } = await api('/api/fees/payments', 'POST', body, adminCookie)
+    expect(s1).toBe(201)
+    const receipt1 = (d1 as { receipt_number: string }).receipt_number
+    expect(receipt1).toBeTruthy()
+
+    // Same key, same body — must replay the first response, not process a second payment.
+    const { status: s2, data: d2 } = await api('/api/fees/payments', 'POST', body, adminCookie)
+    expect(s2).toBe(201)
+    const receipt2 = (d2 as { receipt_number: string }).receipt_number
+    expect(receipt2).toBe(receipt1)
+
+    const { data: ledgerAfter } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}`, 'GET', undefined, adminCookie
+    )
+    const after = (ledgerAfter as Array<{ id: number; amount_paid: number }>).find(e => e.id === unpaid.id)
+    // Exactly +1, not +2 — proves the second request never re-ran the payment logic.
+    expect(parseFloat(String(after?.amount_paid))).toBe(startingPaid + 1)
+  })
+
+  test('DEL-101: DELETE ledger entry blocked when a waiver is recorded, not just when paid', async () => {
+    // Fresh throwaway category + structure + bill so this test doesn't depend
+    // on another test's exact ledger state.
+    const { data: catData } = await api('/api/fees/categories', 'POST', {
+      school_id: schoolId, name: `Delete Guard Test ${ts}`, frequency: 'annual', category_type: 'fixed',
+    }, adminCookie)
+    const cat = catData as { id: number }
+    await api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: AY,
+      structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
+    }, adminCookie)
+    await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY }, adminCookie)
+    const { data: ledger } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentA}`, 'GET', undefined, adminCookie
+    )
+    const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
+    if (!entry) return
+
+    // Partial waiver — leaves status='partial', amount_paid=0, waiver_amount>0.
+    // The pre-existing guard only checked status IN (paid, waived) and
+    // amount_paid > 0 — a partially-waived-but-never-paid bill slipped through
+    // both and got deleted outright, cascading away the fee_waivers row too.
+    const waiverRes = await api('/api/fees/waivers', 'POST', {
+      school_id: schoolId, student_id: studentA, ledger_id: entry.id,
+      waiver_type: 'fixed_amount', waiver_value: 200, reason: 'e2e delete-guard test',
+    }, adminCookie)
+    expect(waiverRes.status).toBe(201)
+
+    const { status, data } = await api(`/api/fees/ledger/${entry.id}?school_id=${schoolId}`, 'DELETE', undefined, adminCookie)
+    expect(status).toBe(400)
+    const d = data as { error: string }
+    expect(d.error).toContain('waiver')
+  })
+
+  test('WO-101: Year-end write-off lands in waiver_breakdown.written_off, and "Waived" stays discretionary-only', async () => {
+    const { status, data } = await api(
+      `/api/fees/audit-report?school_id=${schoolId}&academic_year=${AY}`, 'GET', undefined, adminCookie
+    )
+    expect(status).toBe(200)
+    const d = data as {
+      summary: { waived: number }
+      waiver_breakdown: { discretionary: number; carried_forward: number; written_off: number; total: number }
+    }
+    // YE-005 applied a write-off decision for studentD earlier in this suite.
+    expect(d.waiver_breakdown.written_off).toBeGreaterThan(0)
+    // The headline "Waived" figure must equal the discretionary bucket exactly —
+    // this is the actual claim of the fix: write-offs no longer inflate it.
+    expect(d.summary.waived).toBeCloseTo(d.waiver_breakdown.discretionary, 2)
+  })
+
+  test('PMODE-101: Invalid payment_mode → 400', async () => {
+    const { data: ledger } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentB}`, 'GET', undefined, adminCookie
+    )
+    const entries = ledger as Array<{ id: number; status: string }>
+    const unpaid = entries.find(e => e.status !== 'paid' && e.status !== 'waived')
+    if (!unpaid) return
+    const { status, data } = await api('/api/fees/payments', 'POST', {
+      school_id: schoolId, student_id: studentB, ledger_id: unpaid.id, amount: 1,
+      payment_mode: 'bitcoin', collected_by_name: 'Test Admin',
+    }, adminCookie)
+    expect(status).toBe(400)
+    const d = data as { error: string }
+    expect(d.error).toContain('payment_mode must be one of')
+  })
+
+  test('WVPCT-101: Percentage waiver value over 100 is capped at the remaining balance, not over-waived', async () => {
+    const { data: catData } = await api('/api/fees/categories', 'POST', {
+      school_id: schoolId, name: `Pct Cap Test ${ts}`, frequency: 'annual', category_type: 'fixed',
+    }, adminCookie)
+    const cat = catData as { id: number }
+    await api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: AY,
+      structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
+    }, adminCookie)
+    await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY }, adminCookie)
+    const { data: ledger } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentB}`, 'GET', undefined, adminCookie
+    )
+    const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
+    if (!entry) return
+
+    const { status, data } = await api('/api/fees/waivers', 'POST', {
+      school_id: schoolId, student_id: studentB, ledger_id: entry.id,
+      waiver_type: 'percentage', waiver_value: 150, reason: 'e2e percentage-cap test',
+    }, adminCookie)
+    expect(status).toBe(201)
+    const d = data as { waiver_amount: string }
+    // 150% of a ₹1000 bill must cap at ₹1000 (the remaining balance), never ₹1500.
+    expect(parseFloat(d.waiver_amount)).toBe(1000)
+  })
 })
