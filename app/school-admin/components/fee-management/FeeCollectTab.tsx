@@ -28,7 +28,7 @@ function fmtDate(d: string) {
 const STATUS_COLORS: Record<string, string> = {
   paid:     'bg-green-100 text-green-700',
   partial:  'bg-yellow-100 text-yellow-700',
-  pending:  'bg-gray-100 text-gray-600',
+  pending:  'bg-amber-100 text-amber-700',
   overdue:  'bg-red-100 text-red-700',
   waived:   'bg-purple-100 text-purple-700',
   settled:  'bg-teal-100 text-teal-700',
@@ -689,7 +689,11 @@ export default function FeeCollectTab({
                             <p className="text-sm font-semibold text-gray-700">Collect Payment — {row.student_name}</p>
                             <div className="space-y-1.5">
                               {row.open_entries.map(e => (
-                                <label key={e.id} className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-gray-50 cursor-pointer">
+                                <label key={e.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer border-l-2 transition-colors ${
+                                  e.source_academic_year
+                                    ? (collectChecked.has(e.id) ? 'bg-amber-50 border-amber-400 hover:bg-amber-100' : 'bg-amber-50/40 border-amber-200 hover:bg-amber-50')
+                                    : (collectChecked.has(e.id) ? 'bg-blue-50 border-blue-400 hover:bg-blue-100' : 'border-transparent hover:bg-gray-50')
+                                }`}>
                                   <input type="checkbox" checked={collectChecked.has(e.id)}
                                     onChange={ev => {
                                       const next = new Set(collectChecked)
@@ -701,7 +705,7 @@ export default function FeeCollectTab({
                                     className="w-4 h-4 rounded border-gray-300 text-blue-600" />
                                   <span className="flex-1 text-sm text-gray-700">
                                     {e.source_academic_year ? (
-                                      <>Previous Year Dues · <span className="text-gray-400">{e.notes?.replace(/^Carried from [^:]+:\s*/, '') || e.period_label}</span></>
+                                      <><span className="text-amber-700 font-medium">⏱ Previous Year Dues</span> · <span className="text-gray-400">{e.notes?.replace(/^Carried from [^:]+:\s*/, '') || e.period_label}</span></>
                                     ) : (
                                       <>{e.category_name} · <span className="text-gray-400">{e.period_label}</span></>
                                     )}
