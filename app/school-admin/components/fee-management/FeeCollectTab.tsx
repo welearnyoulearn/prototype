@@ -719,10 +719,10 @@ export default function FeeCollectTab({
                             {/* Amount being collected — editable for partial payments */}
                             <div className="border-t border-gray-100 pt-3">
                               <div className="flex items-center justify-between mb-1.5">
-                                <span className="text-sm text-gray-500">Selected dues</span>
+                                <span className="text-sm font-bold text-gray-800">Selected dues</span>
                                 <span className="text-sm font-bold text-gray-900">{fmt(checkedTotal)}</span>
                               </div>
-                              <label className="text-xs font-medium text-gray-600">Amount being collected now</label>
+                              <label className="text-xs font-bold text-gray-800">Amount being collected now</label>
                               <div className="relative mt-1">
                                 <span className="absolute left-3 top-2.5 text-gray-500 text-sm">₹</span>
                                 <input
@@ -751,7 +751,7 @@ export default function FeeCollectTab({
                             </div>
                             <div className="grid grid-cols-2 gap-3">
                               <div>
-                                <label className="text-xs font-medium text-gray-600">Mode</label>
+                                <label className="text-xs font-bold text-gray-800">Mode</label>
                                 <select value={payMode} onChange={e => setPayMode(e.target.value)}
                                   className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium text-gray-900">
                                   <option value="cash">Cash</option><option value="cheque">Cheque</option>
@@ -760,7 +760,7 @@ export default function FeeCollectTab({
                                 </select>
                               </div>
                               <div>
-                                <label className="text-xs font-medium text-gray-600">Date</label>
+                                <label className="text-xs font-bold text-gray-800">Date</label>
                                 <input data-testid="input-pay-date" type="date" value={payDate} max={todayLocal()} onChange={e => setPayDate(e.target.value)}
                                   className={`w-full mt-1 border rounded-lg px-3 py-2 text-sm font-medium text-gray-900 ${payDate > todayLocal() ? 'border-red-300' : 'border-gray-200'}`} />
                                 {payDate > todayLocal() && (
@@ -768,14 +768,14 @@ export default function FeeCollectTab({
                                 )}
                               </div>
                               <div>
-                                <label className="text-xs font-medium text-gray-600">Collected By <span className="text-red-500">*</span></label>
+                                <label className="text-xs font-bold text-gray-800">Collected By <span className="text-red-500">*</span></label>
                                 <input data-testid="input-pay-collected-by" type="text" required value={payCollectedBy} onChange={e => setPayCollectedBy(e.target.value)}
                                   placeholder="Staff name"
                                   className={`w-full mt-1 border rounded-lg px-3 py-2 text-sm font-medium text-gray-900 placeholder:text-gray-400 placeholder:font-normal ${!payCollectedBy.trim() ? 'border-red-200' : 'border-gray-200'}`} />
                               </div>
                               {['cheque','dd','upi','online'].includes(payMode) && (
                                 <div>
-                                  <label className="text-xs font-medium text-gray-600">Reference / Cheque No</label>
+                                  <label className="text-xs font-bold text-gray-800">Reference / Cheque No</label>
                                   <input type="text" value={payRef} onChange={e => setPayRef(e.target.value)}
                                     placeholder="Transaction / cheque number"
                                     className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium text-gray-900 placeholder:text-gray-400 placeholder:font-normal" />
@@ -783,7 +783,7 @@ export default function FeeCollectTab({
                               )}
                             </div>
                             <div>
-                              <label className="text-xs font-medium text-gray-600">Remarks (optional)</label>
+                              <label className="text-xs font-bold text-gray-800">Remarks (optional)</label>
                               <input type="text" value={payNotes} onChange={e => setPayNotes(e.target.value)}
                                 placeholder="e.g. Paid by elder brother · Late fee waived verbally · Cash short ₹10"
                                 className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm font-medium text-gray-900 placeholder:text-gray-400 placeholder:font-normal" />
