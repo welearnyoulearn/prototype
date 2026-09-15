@@ -43,6 +43,19 @@ const poolConfig = (process.env.PGHOST)
 
 const pool = new Pool(poolConfig)
 
+// Every session-timezone-dependent SQL function (CURRENT_DATE, NOW(), the
+// overdue-status flips in fees/ledger/stats routes, "days until year end",
+// etc.) otherwise resolves in Postgres's server default — UTC on Supabase —
+// while this app's schools operate in IST (UTC+5:30). Between 00:00-05:29 IST
+// that's still "yesterday" in UTC, so a bill due today could show as not-yet-
+// overdue, or a year-end date comparison could be a full day off, for that
+// ~5.5-hour window every single day. This project has already been bitten by
+// the DATE-column half of this exact IST/UTC mismatch once (see the
+// setTypeParser comment above) — this closes the other half, at the
+// connection level, so every existing and future CURRENT_DATE/NOW() query is
+// correct without having to patch each one individually.
+pool.on('connect', client => { client.query(`SET TIME ZONE 'Asia/Kolkata'`).catch(() => {}) })
+
 export default pool
 
 // Lazy singleton — ensures bootstrap runs at most once per server process.
