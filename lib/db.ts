@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 24
+const SCHEMA_VERSION = 25
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3075,5 +3075,14 @@ async function runIncrementalMigrations() {
       changed_by       TEXT    NOT NULL DEFAULT 'Admin',
       changed_at       TIMESTAMPTZ DEFAULT NOW()
     )
+  `).catch(() => {})
+
+  // fee_payments.ledger_id is joined/filtered in nearly every fee route
+  // (payments GET, audit-log, day-close, export, passbook, passout,
+  // payments/cancel, payments/verify) via `JOIN student_fee_ledger l ON
+  // l.id = fp.ledger_id` or `WHERE ledger_id = $1` — never had its own index
+  // despite fee_payments growing without bound (one row per payment, forever).
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_fee_payments_ledger ON fee_payments(ledger_id)
   `).catch(() => {})
 }
