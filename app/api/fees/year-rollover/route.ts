@@ -141,6 +141,7 @@ export async function POST(req: NextRequest) {
                 array_agg(l.id ORDER BY l.id) AS ledger_ids,
                 array_agg(GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) ORDER BY l.id) AS balances,
                 array_agg(l.amount_paid ORDER BY l.id) AS amounts_paid,
+                array_agg(l.source_academic_year ORDER BY l.id) AS source_years,
                 string_agg(fc.name || ' - ' || l.period_label, ', ' ORDER BY l.id) AS breakdown
          FROM student_fee_ledger l
          JOIN students s ON s.id = l.student_id
@@ -162,12 +163,22 @@ export async function POST(req: NextRequest) {
         if (balance <= 0) continue
         const periodLabel = `Previous Year Dues (${from_year})`
 
+        // If any of this student's bills is itself already a carry-forward (rolling
+        // a balance forward for more than one year), propagate the TRUE origin year
+        // rather than just "the year we rolled from this time" — same reasoning as
+        // the equivalent fix in year-end/route.ts's per-student carry decision.
+        const sourceYears: (string | null)[] = row.source_years || []
+        const earliestSourceYear = sourceYears.reduce(
+          (earliest: string, y: string | null) => (y && y < earliest) ? y : earliest,
+          from_year
+        )
+
         // Insert/upsert a single carried-forward bill in the new year
         await upsertCarryForwardBill(client, {
           schoolId: school_id, studentId: row.student_id, categoryId: prevDuesCatId,
           targetYear: to_year, periodLabel, amount: balance,
           dueDate: `${toStartYear + 1}-03-31`, notes: `Carried from ${from_year}: ${row.breakdown}`,
-          sourceYear: from_year,
+          sourceYear: earliestSourceYear,
         })
 
         // Mark original bills as settled/waived in old year.

@@ -236,7 +236,7 @@ export async function POST(req: NextRequest) {
                     COALESCE(l.waiver_amount,0) AS waiver_amount,
                     GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) AS balance,
                     s.grade, COALESCE(s.status,'active') AS student_status,
-                    fc.name AS category_name
+                    fc.name AS category_name, l.source_academic_year
              FROM student_fee_ledger l
              JOIN students s ON s.id = l.student_id
              JOIN fee_categories fc ON fc.id = l.fee_category_id
@@ -267,10 +267,20 @@ export async function POST(req: NextRequest) {
             // Create ONE "Previous Year Dues" bill tagged to the student in to_year
             const periodLabel = `Previous Year Dues (${from_year})`
             const note = studentBills.map(b => `${b.category_name} - ${b.period_label}`).join(', ')
+            // If any of these bills is itself already a carry-forward (this student has
+            // been rolling a balance forward for more than one year), propagate the
+            // TRUE origin year rather than just "the year we rolled from this time" —
+            // otherwise source_academic_year only ever points one hop back, and a
+            // chronic non-payer's passbook loses track of which year the debt actually
+            // originated in after 2+ rollovers.
+            const earliestSourceYear = studentBills.reduce(
+              (earliest, b) => (b.source_academic_year && b.source_academic_year < earliest) ? b.source_academic_year : earliest,
+              from_year
+            )
             await upsertCarryForwardBill(client, {
               schoolId: school_id, studentId: d.student_id, categoryId: prevDuesCatId!,
               targetYear: to_year, periodLabel, amount: studentBalance,
-              dueDate: toYearEndDate!, notes: `Carried from ${from_year}: ${note}`, sourceYear: from_year,
+              dueDate: toYearEndDate!, notes: `Carried from ${from_year}: ${note}`, sourceYear: earliestSourceYear,
             })
             // Close out the original bills in source year.
             for (const b of studentBills) {
@@ -317,7 +327,10 @@ export async function POST(req: NextRequest) {
                 [school_id, d.student_id, passoutDuesCatId, periodLabel,
                  parseFloat(b.balance),
                  `Passout carry from ${from_year}: ${b.category_name} - ${b.period_label}`,
-                 from_year, b.id]
+                 // Same "propagate the true origin year" reasoning as the carry
+                 // branch above — this bill may itself already be a multi-year
+                 // carry-forward.
+                 b.source_academic_year || from_year, b.id]
               )
               // Close original bill — 'settled' if partial cash, else 'waived'
               await closeOutBill(client, {
