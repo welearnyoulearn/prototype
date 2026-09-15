@@ -97,7 +97,7 @@ Platform Admin is served on `admin.welearnyoulearn.com` subdomain only — block
 - `plan_features` table — feature enabled/disabled per tier (basic/standard/premium)
 - `school_feature_overrides` table — per-school override takes precedence
 - `schoolHasFeature(schoolId, featureKey)` in `lib/auth.ts` — checks override first, then tier, returns `false` by default
-- Feature keys in `lib/features.ts` — `OVERRIDABLE_FEATURE_KEYS = ['online-payments', 'whatsapp']`
+- Feature keys in `lib/features.ts` — `OVERRIDABLE_FEATURE_KEYS = ['student-portal', 'parent-portal', 'api-monitoring', 'online-payments']` (`'whatsapp'` is not a feature key — `sendWhatsappMessage()` in `lib/whatsapp.ts` is a logging-only scaffold called from onboarding, ungated, not wired to any real send)
 
 ### Fee Management
 - `app/school-admin/components/FeeManagement.tsx` — large single component (~4000 lines), tabs: overview/setup/ledger/collect/students/reports/yearend + optional online-payments/whatsapp
@@ -110,8 +110,8 @@ Platform Admin is served on `admin.welearnyoulearn.com` subdomain only — block
 - Excel template served from `/api/students/template` via ExcelJS
 
 ### Encryption
-- `lib/encryption.ts` — AES-256-GCM, key from `ENCRYPTION_KEY` env var (64-char hex = 32 bytes)
-- Used for Cashfree secret key and WhatsApp access token at rest
+- Not yet built — `lib/encryption.ts` does not exist in the repo. `ENCRYPTION_KEY` (64-char hex = 32 bytes) is reserved for it.
+- Planned use: AES-256-GCM at rest for the Cashfree secret key and WhatsApp access token once those integrations are built — `school_payment_config`/`payment_transactions`/`payment_webhook_log` (`lib/db.ts`) are schema-only scaffolding today; no route creates a Cashfree order or handles its webhook. The only working "online payment" path is a manual UPI-QR + parent self-report + admin-approve flow (`app/api/fees/upi-*`, `app/api/parent/fees` POST, `app/api/fees/payments/verify`), which stores no secret needing encryption.
 
 ### Branch Strategy
 - `wlylV1` — dev/testing branch (Vercel preview)

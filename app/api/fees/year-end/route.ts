@@ -1,21 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { gradeOrderSql, FINAL_GRADE, isFinalOrBeyondGrade } from '@/lib/grades'
-
-// Returns the start year of an academic-year label like "2025-26" -> 2025
-function startYearOf(label: string): number {
-  const [s] = label.split('-')
-  return parseInt(s)
-}
-
-// Compute the "next" academic-year label, e.g. 2025-26 -> 2026-27
-function nextYearLabel(label: string): string {
-  const start = startYearOf(label)
-  const next = start + 1
-  const nextEnd = String((next + 1) % 100).padStart(2, '0')
-  return `${next}-${nextEnd}`
-}
+import { closeOutBill, getOrCreateSystemFeeCategory, getRemainingOpenSummary, lockYearClose, nextAcademicYearLabel, upsertCarryForwardBill } from '@/lib/feeRollover'
 
 // ── GET: student-grouped year-end review ────────────────────────────────────────
 // /api/fees/year-end?school_id=X&academic_year=Y
@@ -56,7 +43,7 @@ export async function GET(req: NextRequest) {
        JOIN student_fee_ledger l ON l.id = w.ledger_id
        WHERE w.school_id = $1 AND l.academic_year = $2
          AND COALESCE(w.is_revoked, FALSE) = FALSE
-         AND w.waiver_type != 'carry_forward'`,
+         AND w.waiver_type NOT IN ('carry_forward', 'writeoff')`,
       [school_id, academic_year]
     ).catch(() => ({ rows: [{ total: summary.total_waived }] }))
 
@@ -115,7 +102,7 @@ export async function GET(req: NextRequest) {
     const students = Array.from(groups.values())
 
     // Target year info for carry-forward
-    const target = nextYearLabel(academic_year)
+    const target = nextAcademicYearLabel(academic_year)
     const { rows: [targetYear] } = await pool.query(
       `SELECT label FROM academic_years WHERE school_id = $1 AND label = $2`,
       [school_id, target]
@@ -161,9 +148,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'school_id, from_year required' }, { status: 400 })
     }
 
+    // Must run before pool.connect() below, not after — on Vercel's max:1 pool,
+    // ensureDB()'s own pool.query() calls would otherwise block waiting for a
+    // connection that `client` is already holding, and `client` can't be
+    // released until this call returns: a deadlock resolved only by
+    // connectionTimeoutMillis expiring into an error.
+    await ensureDB()
     const client = await pool.connect()
     try {
-      // ── REOPEN ──
+      // ── REOPEN ── (doesn't touch ledger data, no locking needed)
       if (action === 'reopen') {
         await client.query(
           `UPDATE fee_year_close
@@ -174,12 +167,22 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ reopened: true })
       }
 
+      await client.query('BEGIN')
+
+      // Serialize all apply/close calls for this (school_id, from_year) — without this,
+      // two concurrent requests (double-click, two tabs) could both pass the "not closed"
+      // guard below and both mutate the same students' bills before either's fee_year_close
+      // write lands. Also serializes against year-rollover for the same key — see
+      // lockYearClose's own comment for why this must be the one shared implementation.
+      await lockYearClose(client, school_id, from_year)
+
       // Guard: cannot apply / close a year that is already closed
       const { rows: [existing] } = await client.query(
         `SELECT * FROM fee_year_close WHERE school_id = $1 AND academic_year = $2`,
         [school_id, from_year]
       )
       if (existing && !existing.is_reopened && action !== 'close') {
+        await client.query('ROLLBACK')
         return NextResponse.json({ error: 'This year is closed. Reopen it before making changes.' }, { status: 409 })
       }
 
@@ -187,29 +190,15 @@ export async function POST(req: NextRequest) {
       if (action === 'apply') {
         const decisions: Array<{ student_id: number; decision: string; reason?: string }> = body.decisions || []
         if (!Array.isArray(decisions) || decisions.length === 0) {
+          await client.query('ROLLBACK')
           return NextResponse.json({ error: 'decisions array required' }, { status: 400 })
         }
 
         // Prepare "Passout Dues" fee head for any passout decisions
         const passoutRequested = decisions.some(d => d.decision === 'passout')
-        let passoutDuesCatId: number | null = null
-        if (passoutRequested) {
-          const { rows: [pd2] } = await client.query(
-            `SELECT id FROM fee_categories WHERE school_id = $1 AND name = 'Passout Dues'`, [school_id]
-          )
-          if (pd2) {
-            passoutDuesCatId = pd2.id
-            await client.query(`UPDATE fee_categories SET is_active = TRUE, is_system = TRUE WHERE id = $1`, [pd2.id])
-          } else {
-            const { rows: [created2] } = await client.query(
-              `INSERT INTO fee_categories (school_id, name, description, frequency, category_type, is_active, is_system)
-               VALUES ($1, 'Passout Dues', 'Pending dues for graduating/leaving students', 'one_time', 'fixed', TRUE, TRUE)
-               RETURNING id`,
-              [school_id]
-            )
-            passoutDuesCatId = created2.id
-          }
-        }
+        const passoutDuesCatId = passoutRequested
+          ? await getOrCreateSystemFeeCategory(client, school_id, 'Passout Dues', 'Pending dues for graduating/leaving students')
+          : null
 
         // For carry-forward, verify the target year exists and prepare the "Previous Year Dues" head
         const carryRequested = decisions.some(d => d.decision === 'carry')
@@ -217,48 +206,26 @@ export async function POST(req: NextRequest) {
         let toYearEndDate: string | null = null
         if (carryRequested) {
           if (!to_year) {
+            await client.query('ROLLBACK')
             return NextResponse.json({ error: 'to_year required for carry-forward' }, { status: 400 })
           }
           const { rows: [ty] } = await client.query(
             `SELECT label, end_date FROM academic_years WHERE school_id = $1 AND label = $2`, [school_id, to_year]
           )
           if (!ty) {
+            await client.query('ROLLBACK')
             return NextResponse.json({ error: `Academic year ${to_year} does not exist. Create it first.` }, { status: 400 })
           }
           toYearEndDate = ty.end_date
-          // Auto-create the "Previous Year Dues" fee head (one-time) if missing
-          const { rows: [pd] } = await client.query(
-            `SELECT id FROM fee_categories WHERE school_id = $1 AND name = 'Previous Year Dues'`, [school_id]
+          prevDuesCatId = await getOrCreateSystemFeeCategory(
+            client, school_id, 'Previous Year Dues', 'Carried-forward unpaid balance from a previous year'
           )
-          if (pd) {
-            prevDuesCatId = pd.id
-            await client.query(`UPDATE fee_categories SET is_active = TRUE, is_system = TRUE WHERE id = $1`, [pd.id])
-          } else {
-            const { rows: [created] } = await client.query(
-              `INSERT INTO fee_categories (school_id, name, description, frequency, category_type, is_active, is_system)
-               VALUES ($1, 'Previous Year Dues', 'Carried-forward unpaid balance from a previous year', 'one_time', 'fixed', TRUE, TRUE)
-               RETURNING id`,
-              [school_id]
-            )
-            prevDuesCatId = created.id
-          }
         }
-
-        await client.query('BEGIN')
 
         let carriedCount = 0, carriedTotal = 0
         let writeoffCount = 0, writeoffTotal = 0
         let openCount = 0, openTotal = 0
         let passoutCount = 0, passoutTotal = 0
-
-        // Ensure passout_students table exists (created in migration but guard here too)
-        await client.query(`
-          CREATE TABLE IF NOT EXISTS passout_students (
-            id SERIAL PRIMARY KEY, school_id INTEGER NOT NULL, student_id INTEGER NOT NULL,
-            passout_year TEXT NOT NULL, moved_by TEXT NOT NULL, moved_at TIMESTAMPTZ DEFAULT NOW(),
-            notes TEXT, UNIQUE(school_id, student_id)
-          )
-        `).catch(() => {})
 
         for (const d of decisions) {
           // Fetch this student's unpaid bills in from_year (with leaver status)
@@ -267,7 +234,7 @@ export async function POST(req: NextRequest) {
                     COALESCE(l.waiver_amount,0) AS waiver_amount,
                     GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) AS balance,
                     s.grade, COALESCE(s.status,'active') AS student_status,
-                    fc.name AS category_name
+                    fc.name AS category_name, l.source_academic_year
              FROM student_fee_ledger l
              JOIN students s ON s.id = l.student_id
              JOIN fee_categories fc ON fc.id = l.fee_category_id
@@ -298,55 +265,46 @@ export async function POST(req: NextRequest) {
             // Create ONE "Previous Year Dues" bill tagged to the student in to_year
             const periodLabel = `Previous Year Dues (${from_year})`
             const note = studentBills.map(b => `${b.category_name} - ${b.period_label}`).join(', ')
-            await client.query(
-              `INSERT INTO student_fee_ledger
-                 (school_id, student_id, fee_category_id, fee_structure_id, academic_year,
-                  period_label, amount_due, due_date, status, notes, source_academic_year)
-               VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, 'pending', $8, $9)
-               ON CONFLICT (student_id, fee_category_id, academic_year, period_label) DO UPDATE
-                 SET amount_due = EXCLUDED.amount_due, notes = EXCLUDED.notes,
-                     source_academic_year = EXCLUDED.source_academic_year`,
-              [school_id, d.student_id, prevDuesCatId, to_year, periodLabel,
-               studentBalance, toYearEndDate,
-               `Carried from ${from_year}: ${note}`, from_year]
+            // If any of these bills is itself already a carry-forward (this student has
+            // been rolling a balance forward for more than one year), propagate the
+            // TRUE origin year rather than just "the year we rolled from this time" —
+            // otherwise source_academic_year only ever points one hop back, and a
+            // chronic non-payer's passbook loses track of which year the debt actually
+            // originated in after 2+ rollovers.
+            const earliestSourceYear = studentBills.reduce(
+              (earliest, b) => (b.source_academic_year && b.source_academic_year < earliest) ? b.source_academic_year : earliest,
+              from_year
             )
+            await upsertCarryForwardBill(client, {
+              schoolId: school_id, studentId: d.student_id, categoryId: prevDuesCatId!,
+              targetYear: to_year, periodLabel, amount: studentBalance,
+              dueDate: toYearEndDate!, notes: `Carried from ${from_year}: ${note}`, sourceYear: earliestSourceYear,
+            })
             // Close out the original bills in source year.
-            // 'settled' = some cash was collected before carry; 'waived' = nothing paid at all.
             for (const b of studentBills) {
-              const newStatus = parseFloat(b.amount_paid) > 0 ? 'settled' : 'waived'
-              await client.query(
-                `UPDATE student_fee_ledger
-                 SET status = $1,
-                     waiver_amount = COALESCE(waiver_amount,0) + $2
-                 WHERE id = $3`,
-                [newStatus, parseFloat(b.balance), b.id]
-              )
-              await client.query(
-                `INSERT INTO fee_waivers (school_id, student_id, ledger_id, waiver_type, waiver_amount, reason, granted_by_name)
-                 VALUES ($1, $2, $3, 'carry_forward', $4, $5, $6)`,
-                [school_id, d.student_id, b.id, parseFloat(b.balance),
-                 `Carried forward to ${to_year}`, done_by]
-              )
+              await closeOutBill(client, {
+                schoolId: school_id, studentId: d.student_id, ledgerId: b.id,
+                amountPaid: parseFloat(b.amount_paid), balance: parseFloat(b.balance),
+                waiverType: 'carry_forward', reason: `Carried forward to ${to_year}`, doneBy: done_by,
+              })
             }
             carriedCount++; carriedTotal += studentBalance
           }
 
           if (d.decision === 'writeoff') {
             for (const b of studentBills) {
-              const newStatus = parseFloat(b.amount_paid) > 0 ? 'settled' : 'waived'
-              await client.query(
-                `UPDATE student_fee_ledger
-                 SET status = $1,
-                     waiver_amount = COALESCE(waiver_amount,0) + $2
-                 WHERE id = $3`,
-                [newStatus, parseFloat(b.balance), b.id]
-              )
-              await client.query(
-                `INSERT INTO fee_waivers (school_id, student_id, ledger_id, waiver_type, waiver_amount, reason, granted_by_name)
-                 VALUES ($1, $2, $3, 'full', $4, $5, $6)`,
-                [school_id, d.student_id, b.id, parseFloat(b.balance),
-                 d.reason || `Year-end write-off ${from_year}`, done_by]
-              )
+              // 'writeoff' (not 'full') — a year-end write-off is an administrative
+              // decision to give up on uncollectable debt, not the same thing as a
+              // discretionary fee waiver granted to a specific student mid-year.
+              // Before this distinction existed, write-offs shared waiver_type='full'
+              // with genuine discretionary waivers, silently inflating every screen's
+              // "Waived" total with bad-debt write-offs. See the SCHEMA_VERSION 26
+              // migration below for the one-time backfill of pre-existing rows.
+              await closeOutBill(client, {
+                schoolId: school_id, studentId: d.student_id, ledgerId: b.id,
+                amountPaid: parseFloat(b.amount_paid), balance: parseFloat(b.balance),
+                waiverType: 'writeoff', reason: d.reason || `Year-end write-off ${from_year}`, doneBy: done_by,
+              })
             }
             writeoffCount++; writeoffTotal += studentBalance
           }
@@ -374,22 +332,17 @@ export async function POST(req: NextRequest) {
                 [school_id, d.student_id, passoutDuesCatId, periodLabel,
                  parseFloat(b.balance),
                  `Passout carry from ${from_year}: ${b.category_name} - ${b.period_label}`,
-                 from_year, b.id]
+                 // Same "propagate the true origin year" reasoning as the carry
+                 // branch above — this bill may itself already be a multi-year
+                 // carry-forward.
+                 b.source_academic_year || from_year, b.id]
               )
               // Close original bill — 'settled' if partial cash, else 'waived'
-              const newStatus = parseFloat(b.amount_paid) > 0 ? 'settled' : 'waived'
-              await client.query(
-                `UPDATE student_fee_ledger
-                 SET status = $1, waiver_amount = COALESCE(waiver_amount,0) + $2
-                 WHERE id = $3`,
-                [newStatus, parseFloat(b.balance), b.id]
-              )
-              await client.query(
-                `INSERT INTO fee_waivers (school_id, student_id, ledger_id, waiver_type, waiver_amount, reason, granted_by_name)
-                 VALUES ($1, $2, $3, 'carry_forward', $4, $5, $6)`,
-                [school_id, d.student_id, b.id, parseFloat(b.balance),
-                 `Moved to passout ledger from ${from_year}`, done_by]
-              )
+              await closeOutBill(client, {
+                schoolId: school_id, studentId: d.student_id, ledgerId: b.id,
+                amountPaid: parseFloat(b.amount_paid), balance: parseFloat(b.balance),
+                waiverType: 'carry_forward', reason: `Moved to passout ledger from ${from_year}`, doneBy: done_by,
+              })
             }
             // Register student as passout
             await client.query(
@@ -403,22 +356,10 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        await client.query('COMMIT')
-
         // Any remaining pending/overdue/partial balance for the year — not just this
         // request's decisions — determines whether the year can auto-close. A student
         // left on 'open' (or never included in `decisions` at all) must keep the year open.
-        const { rows: [remainingAgg] } = await client.query(
-          `SELECT COUNT(DISTINCT student_id) AS cnt,
-                  COALESCE(SUM(GREATEST(amount_due - COALESCE(waiver_amount,0) - amount_paid, 0)),0) AS total
-           FROM student_fee_ledger
-           WHERE school_id = $1 AND academic_year = $2
-             AND status IN ('pending','overdue','partial')
-             AND GREATEST(amount_due - COALESCE(waiver_amount,0) - amount_paid, 0) > 0`,
-          [school_id, from_year]
-        )
-        const stillOpenCount = parseInt(remainingAgg.cnt)
-        const stillOpenTotal = parseFloat(remainingAgg.total)
+        const { count: stillOpenCount, total: stillOpenTotal } = await getRemainingOpenSummary(client, school_id, from_year)
         const autoClosed = stillOpenCount === 0
 
         // M-18: persist apply counts into fee_year_close so the year-close banner
@@ -426,6 +367,9 @@ export async function POST(req: NextRequest) {
         // decision (nothing left pending/overdue/partial), close the year in the same
         // request — previously this always left is_reopened=TRUE, so a fully-resolved
         // year-end still showed "has not been closed" until a separate Close click.
+        // Runs inside the same transaction as the decision loop above (previously this
+        // was a separate autocommit statement with its own swallowed error) so a failure
+        // here now rolls back the whole apply instead of silently under-reporting it.
         await client.query(
           `INSERT INTO fee_year_close
              (school_id, academic_year, closed_by, carried_count, carried_total,
@@ -443,7 +387,9 @@ export async function POST(req: NextRequest) {
            writeoffCount, writeoffTotal,
            stillOpenCount, stillOpenTotal,
            !autoClosed]
-        ).catch(e => console.warn('[year-end apply] fee_year_close upsert skipped:', e))
+        )
+
+        await client.query('COMMIT')
 
         return NextResponse.json({
           applied: true,
@@ -458,26 +404,20 @@ export async function POST(req: NextRequest) {
       // ── CLOSE the year ──
       if (action === 'close') {
         // Snapshot remaining-open totals
-        const { rows: [openAgg] } = await client.query(
-          `SELECT COUNT(DISTINCT student_id) AS cnt,
-                  COALESCE(SUM(GREATEST(amount_due - COALESCE(waiver_amount,0) - amount_paid, 0)),0) AS total
-           FROM student_fee_ledger
-           WHERE school_id = $1 AND academic_year = $2
-             AND status IN ('pending','overdue','partial')
-             AND GREATEST(amount_due - COALESCE(waiver_amount,0) - amount_paid, 0) > 0`,
-          [school_id, from_year]
-        )
+        const { count: openCount, total: openTotal } = await getRemainingOpenSummary(client, school_id, from_year)
         await client.query(
           `INSERT INTO fee_year_close (school_id, academic_year, closed_by, open_count, open_total)
            VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT (school_id, academic_year) DO UPDATE
              SET closed_by = $3, closed_at = NOW(), is_reopened = FALSE,
                  open_count = $4, open_total = $5`,
-          [school_id, from_year, done_by, parseInt(openAgg.cnt), parseFloat(openAgg.total)]
+          [school_id, from_year, done_by, openCount, openTotal]
         )
+        await client.query('COMMIT')
         return NextResponse.json({ closed: true })
       }
 
+      await client.query('ROLLBACK')
       return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
     } catch (e) {
       await client.query('ROLLBACK').catch(() => {})

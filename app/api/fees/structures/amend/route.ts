@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { todayIST } from '@/lib/istDate'
 
 // POST /api/fees/structures/amend — amend a locked fee structure amount
 // Updates fee_structures + creates amendment record + updates unpaid ledger entries
@@ -8,6 +9,12 @@ import { requireFeeAccess } from '@/lib/auth'
 // changed_by is derived server-side from the session (client value ignored for audit integrity)
 export async function POST(req: NextRequest) {
   try {
+    // Must run before pool.connect() below, not after — on Vercel's max:1 pool,
+    // ensureDB()'s own pool.query() calls would otherwise block waiting for a
+    // connection that `client` is already holding, and `client` can't be
+    // released until this call returns: a deadlock resolved only by
+    // connectionTimeoutMillis expiring into an error.
+    await ensureDB()
     const client = await pool.connect()
     try {
       const body = await req.json()
@@ -24,6 +31,21 @@ export async function POST(req: NextRequest) {
       }
 
       await client.query('BEGIN')
+
+      // Block amendments on a closed year — same guard as payments/waivers routes.
+      // Missing here previously let an admin amend amounts on a closed year without
+      // reopening it first, bypassing the "changes need an amendment" rule for the
+      // wrong reason: not because it wasn't tracked, but because the year shouldn't
+      // have been editable at all.
+      const { rows: [closedYear] } = await client.query(
+        `SELECT 1 FROM fee_year_close
+         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
+        [school_id, academic_year]
+      )
+      if (closedYear) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to amend fee structures.' }, { status: 409 })
+      }
 
       // Get current structure
       const { rows: [current] } = await client.query(
@@ -43,7 +65,7 @@ export async function POST(req: NextRequest) {
             old_amount, new_amount, effective_from, reason, changed_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
         [school_id, current.id, fee_category_id, grade, academic_year,
-         current.amount, new_amount, effective_from || new Date().toISOString().slice(0, 10),
+         current.amount, new_amount, effective_from || todayIST(),
          reason, changed_by]
       )
 
@@ -55,36 +77,33 @@ export async function POST(req: NextRequest) {
         [new_amount, school_id, fee_category_id, grade, academic_year]
       )
 
-      // Ensure audit table exists
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS student_fee_ledger_edits (
-          id SERIAL PRIMARY KEY, ledger_id INTEGER NOT NULL REFERENCES student_fee_ledger(id) ON DELETE CASCADE,
-          school_id INTEGER NOT NULL, student_id INTEGER NOT NULL,
-          old_amount NUMERIC(10,2) NOT NULL, new_amount NUMERIC(10,2) NOT NULL,
-          reason TEXT NOT NULL, changed_by TEXT NOT NULL, changed_at TIMESTAMPTZ DEFAULT NOW()
-        )`)
-
       // Fetch affected ledger entries before updating (for audit)
       // Includes partial entries — amount_due must reflect the new structure for all unpaid/partial students
       const { rows: affected } = await client.query(
-        `SELECT id, student_id, amount_due, amount_paid FROM student_fee_ledger
+        `SELECT id, student_id, amount_due, amount_paid, waiver_amount FROM student_fee_ledger
          WHERE fee_structure_id = $1 AND status IN ('pending', 'overdue', 'partial')`,
         [current.id]
       )
 
-      // Block a reduction that would leave any student's amount_paid exceeding the new
-      // amount_due — that's an impossible state (paid more than is owed) and needs a
-      // separate refund/credit decision, not a silent ledger overwrite.
-      const overpaidCount = affected.filter(r => parseFloat(r.amount_paid) > parseFloat(new_amount) + 0.01).length
+      // Block a reduction that would leave any student's amount_paid + waiver_amount
+      // exceeding the new amount_due — that's an impossible state (paid/waived more
+      // than is owed) and needs a separate refund/credit decision, not a silent
+      // ledger overwrite. Must include waiver_amount, not just amount_paid: a bill
+      // that's ₹200 waived + ₹750 paid against a ₹1000 due is already committed for
+      // ₹950 — reducing the amount to ₹800 is just as impossible as if that ₹200 had
+      // been cash.
+      const overpaidCount = affected.filter(r =>
+        parseFloat(r.amount_paid) + parseFloat(r.waiver_amount || '0') > parseFloat(new_amount) + 0.01
+      ).length
       if (overpaidCount > 0) {
         await client.query('ROLLBACK')
         return NextResponse.json({
-          error: `${overpaidCount} student(s) have already paid more than ₹${new_amount} toward this fee — reducing the amount this far isn't supported here. Use payment correction/refund for those students first.`,
+          error: `${overpaidCount} student(s) have already paid or been waived more than ₹${new_amount} toward this fee — reducing the amount this far isn't supported here. Use payment correction/refund or waiver correction for those students first.`,
         }, { status: 409 })
       }
 
       // Update pending/overdue/partial ledger entries; re-check paid status after new amount applies
-      const { rowCount } = await client.query(
+      const { rows: updatedRows, rowCount } = await client.query(
         `UPDATE student_fee_ledger
          SET amount_due = $1,
              status = CASE
@@ -92,12 +111,18 @@ export async function POST(req: NextRequest) {
                WHEN amount_paid > 0 THEN 'partial'
                ELSE status
              END
-         WHERE fee_structure_id = $2 AND status IN ('pending', 'overdue', 'partial')`,
+         WHERE fee_structure_id = $2 AND status IN ('pending', 'overdue', 'partial')
+         RETURNING id`,
         [new_amount, current.id]
       )
 
-      // Write audit records for each affected entry
-      for (const row of affected) {
+      // Write audit records only for entries the UPDATE above actually touched —
+      // `affected` was snapshotted before the update, so if a concurrent payment or
+      // waiver moved a row to 'paid'/'waived' in between, the UPDATE's WHERE
+      // correctly skipped it, but looping over the stale `affected` array here would
+      // still write an audit entry claiming an amount change that never happened.
+      const updatedIds = new Set(updatedRows.map(r => r.id))
+      for (const row of affected.filter(r => updatedIds.has(r.id))) {
         await client.query(
           `INSERT INTO student_fee_ledger_edits
              (ledger_id, school_id, student_id, old_amount, new_amount, reason, changed_by)

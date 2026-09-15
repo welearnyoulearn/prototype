@@ -1,42 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
-
-const ENSURE = `
-  CREATE TABLE IF NOT EXISTS fee_day_close (
-    id            SERIAL PRIMARY KEY,
-    school_id     INTEGER NOT NULL,
-    close_date    DATE    NOT NULL,
-    total_cash    NUMERIC(10,2) NOT NULL DEFAULT 0,
-    total_cheque  NUMERIC(10,2) NOT NULL DEFAULT 0,
-    total_upi     NUMERIC(10,2) NOT NULL DEFAULT 0,
-    total_online  NUMERIC(10,2) NOT NULL DEFAULT 0,
-    total_dd      NUMERIC(10,2) NOT NULL DEFAULT 0,
-    system_cash   NUMERIC(10,2) NOT NULL DEFAULT 0,
-    actual_cash   NUMERIC(10,2),
-    difference    NUMERIC(10,2),
-    receipt_from  TEXT,
-    receipt_to    TEXT,
-    txn_count     INTEGER NOT NULL DEFAULT 0,
-    submitted_by  TEXT NOT NULL,
-    submitted_at  TIMESTAMPTZ DEFAULT NOW(),
-    notes         TEXT,
-    UNIQUE(school_id, close_date)
-  )
-`
+import { todayIST } from '@/lib/istDate'
 
 // GET /api/fees/day-close?school_id=X&date=YYYY-MM-DD
 // Returns collection summary for a date (or today if no date)
 export async function GET(req: NextRequest) {
   const p         = req.nextUrl.searchParams
   const school_id = p.get('school_id')
-  const date      = p.get('date') || new Date().toISOString().slice(0, 10)
+  const date      = p.get('date') || todayIST()
 
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
   if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
-    await pool.query(ENSURE)
+    await ensureDB()
 
     // Today's payment breakdown by mode
     const { rows: byMode } = await pool.query(
@@ -106,13 +84,16 @@ export async function GET(req: NextRequest) {
 // Body: { school_id, date, actual_cash, submitted_by, notes? }
 export async function POST(req: NextRequest) {
   try {
-    await pool.query(ENSURE)
+    await ensureDB()
     const { school_id, date, actual_cash, submitted_by: clientActor, notes } = await req.json()
     const access = await requireFeeAccess(school_id)
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     const submitted_by = clientActor || access.actor
     if (!school_id || !date) {
       return NextResponse.json({ error: 'school_id, date required' }, { status: 400 })
+    }
+    if (actual_cash != null && !Number.isFinite(parseFloat(actual_cash))) {
+      return NextResponse.json({ error: 'actual_cash must be a number' }, { status: 400 })
     }
 
     // Get system totals for the day

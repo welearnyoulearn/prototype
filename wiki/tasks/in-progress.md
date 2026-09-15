@@ -6,6 +6,28 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 
 <!-- Add new entries at the top -->
 
+### Fee Management v2 rebuild — consolidated rollover, past-records archive (#119)
+**Type:** Feature
+**Portal:** School Admin
+**Assigned to:** Kowsik
+**Branch:** feature/119-fee-management-v2
+**Started:** 2026-09-14
+**Summary:** In-place rebuild of the fee system toward a modern, single tool covering structure setup, collection, year rollover, and past records — mirroring the Exam Schedule/Marks v2 rebuild (#104): same nav entry and feature flag, rewritten in place across sequential commits rather than a parallel build. Full detail: `wiki/features/fee-management.md`.
+**Progress:**
+- [x] Consolidated duplicated year-end/year-rollover logic into `lib/feeRollover.ts` (get-or-create system category, close-out-a-bill, carry-forward-a-bill, race-safe year-close claim, remaining-open-balance aggregate)
+- [x] Fixed a real concurrency gap: year-end's apply action had no claim lock (unlike year-rollover), so concurrent double-submits could double-apply carry-forward/write-off — now serialized per `(school_id, academic_year)` via `pg_advisory_xact_lock`
+- [x] New read-only `/api/fees/archive` endpoint — every academic year's headline + close status, reusing existing `student_fee_ledger`/`fee_year_close` data (no new tables)
+- [x] New "Past Records" tab in `FeeManagement.tsx` browsing archived years, linking into the existing Reports/Ledger tabs scoped to a chosen year
+- [x] `tsc --noEmit` clean; `eslint` shows no new problem categories vs. the pre-existing baseline
+- [x] Split `FeeManagement.tsx` (6,478 lines, 8 tabs, real cross-tab state coupling) into per-tab components under `app/school-admin/components/fee-management/`, one tab at a time with `tsc`/`eslint`/`/code-review` verification between each — **all 8 tabs done**: Archive, Leavers, Reports, Year-End, Collect, Student Passbook, Overview, Setup (+Applicability). Parent down to 1,329 lines (a 79.5% reduction), now a thin shell over per-tab components. First real use of Zustand in this repo (`lib/stores/feeStore.ts`) for cross-tab refresh signaling and one-shot request handoffs (e.g. Leavers/Overview handing a synthesized student row to Collect's payment form).
+- [x] Student Passbook extracted with shared `CancelCorrectBundle`/`WaiverCorrectBundle` prop bundles (moved to `fee-management/types.ts`) — payment cancel/correct and waiver revoke/correct stay parent-owned since they're also used by the Passbook Modal that Collect opens directly
+- [x] Overview dashboard extracted — found and fixed a real duplicate-`data-testid` bug in the shared `LoadErrorBanner` (first tab to render two instances at once); added an optional `testId` prop
+- [x] Fee Plan / Setup (+Applicability) extracted — the largest slice (1,392 lines). Dropped a large confirmed-dead subsystem (category delete/deactivate/reactivate, amendment-request form, assignment-history and changelog panels — none reachable in the live app, verified by exhaustive grep). Self-caught and fixed a real fidelity bug: module-level constants (grade groups, frequency labels, fee icons, category suggestions) were first transcribed from memory instead of copied verbatim and diverged from the original in user-visible ways; caught by diffing against the original before deleting it, then corrected.
+- [ ] `fmt()`/`fmtDate()`/`pct()`/`sanitizeMoney()`/`blockNonNumericKeys()` are now duplicated across all 8 extracted tab files instead of a shared `fee-management/format.ts` — flagged repeatedly during the split, deferred until the full duplication surface was known. Now that all 8 tabs are done, this is ready to do as a follow-up cleanup pass.
+- [ ] Run `e2e/workflow-fee-management.spec.ts` (109 cases) — blocked locally on missing `E2E_PLATFORM_ADMIN_EMAIL`/`PASSWORD` for a platform admin that already exists in the shared dev DB
+- [ ] Extend the e2e spec with cases for the archive endpoint and the year-end race fix
+- [ ] Open PR linked to #119
+
 ### Feedback Management — public form + admin dashboard (#TBD)
 **Type:** Feature
 **Portal:** School Admin (public-facing entry point outside all portals) / Platform Admin (feature toggle)
