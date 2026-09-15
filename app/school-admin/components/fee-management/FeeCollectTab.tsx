@@ -437,6 +437,11 @@ export default function FeeCollectTab({
       })
       setShowCollectForm(false)
       setPassoutOpenStudent(null)
+      // The confirm dialog is a full-screen overlay — once it closes, the row
+      // underneath (and the "Payment Recorded" success view inside it) can be
+      // scrolled well out of view in a long list, with nothing telling the
+      // admin the payment actually went through. Bring it back into view.
+      document.getElementById(`student-row-${openStudent.student_id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
       refreshStudentLedger(openStudent.student_id); onStatsChanged(); onPassoutChanged()
       bumpReports(); bumpYearEnd()
     } else {
