@@ -1312,7 +1312,13 @@ export default function FeeCollectTab({
                   .filter(e => collectChecked.has(e.id))
                   .map(e => (
                     <div key={e.id} className="flex items-center justify-between text-sm">
-                      <span className="text-gray-600">{e.category_name} · {e.period_label}</span>
+                      <span className="text-gray-600">
+                        {e.source_academic_year ? (
+                          <><span className="text-amber-700 font-medium">⏱ Previous Year Dues</span> · {e.notes?.replace(/^Carried from [^:]+:\s*/, '') || e.period_label}</>
+                        ) : (
+                          <>{e.category_name} · {e.period_label}</>
+                        )}
+                      </span>
                       <span className="font-semibold text-gray-800">{fmt(e.balance)}</span>
                     </div>
                   ))}
