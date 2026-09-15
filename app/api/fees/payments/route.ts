@@ -112,10 +112,16 @@ async function handlePOST(req: NextRequest) {
 
     const access = await requireFeeAccess(school_id)
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    const collected_by_name = clientCollector || access.actor
 
     if (!school_id || !student_id || !payment_mode) {
       return NextResponse.json({ error: 'school_id, student_id, payment_mode required' }, { status: 400 })
+    }
+    // Required, not defaulted to the logged-in admin's own name — several staff
+    // often share one admin login at the collection counter, so falling back to
+    // access.actor would silently misattribute who actually took the cash.
+    const collected_by_name = typeof clientCollector === 'string' ? clientCollector.trim() : ''
+    if (!collected_by_name) {
+      return NextResponse.json({ error: 'collected_by_name is required' }, { status: 400 })
     }
 
     if (paid_date !== undefined && paid_date !== null) {

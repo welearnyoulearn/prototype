@@ -381,6 +381,7 @@ export default function FeeCollectTab({
     if (enteredAmount > checkedTotal + 0.01) {
       setPayError(`Amount cannot exceed selected dues (${fmt(checkedTotal)})`); return
     }
+    if (!payCollectedBy.trim()) { setPayError('Collected By is required'); return }
     setCollectLoading(true); setPayError('')
     const r = await fetch('/api/fees/payments', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -388,7 +389,7 @@ export default function FeeCollectTab({
         school_id: schoolId, student_id: openStudent.student_id,
         ledger_ids: ids, total_amount: enteredAmount,
         payment_mode: payMode, transaction_ref: payRef || null,
-        collected_by_name: payCollectedBy || null, notes: payNotes || null, paid_date: payDate,
+        collected_by_name: payCollectedBy.trim(), notes: payNotes || null, paid_date: payDate,
       }),
     })
     const d = await r.json()
@@ -750,9 +751,9 @@ export default function FeeCollectTab({
                                   className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" />
                               </div>
                               <div>
-                                <label className="text-xs font-medium text-gray-600">Collected By</label>
-                                <input type="text" value={payCollectedBy} onChange={e => setPayCollectedBy(e.target.value)}
-                                  className="w-full mt-1 border border-gray-200 rounded-lg px-3 py-2 text-sm" />
+                                <label className="text-xs font-medium text-gray-600">Collected By <span className="text-red-500">*</span></label>
+                                <input data-testid="input-pay-collected-by" type="text" required value={payCollectedBy} onChange={e => setPayCollectedBy(e.target.value)}
+                                  className={`w-full mt-1 border rounded-lg px-3 py-2 text-sm ${!payCollectedBy.trim() ? 'border-red-200' : 'border-gray-200'}`} />
                               </div>
                               {['cheque','dd','upi','online'].includes(payMode) && (
                                 <div>
@@ -778,7 +779,7 @@ export default function FeeCollectTab({
                               <button
                                 data-testid="btn-review-payment"
                                 onClick={() => setShowPayConfirm(true)}
-                                disabled={collectLoading || !(parseFloat(payAmount) > 0) || parseFloat(payAmount) > checkedTotal + 0.01}
+                                disabled={collectLoading || !(parseFloat(payAmount) > 0) || parseFloat(payAmount) > checkedTotal + 0.01 || !payCollectedBy.trim()}
                                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2">
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                                 Review & Confirm
