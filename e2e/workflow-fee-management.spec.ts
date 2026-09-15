@@ -638,6 +638,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       amount: 2500,   // matches edited amount_due
       payment_mode: 'cash',
       paid_date: today(),
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(201)
     const d = data as { receipt_number: string }
@@ -657,6 +658,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       ledger_id: ledgerA1,
       amount: 2000,  // partial of 5000
       payment_mode: 'cash',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(201)
     const d = data as { receipt_number: string }
@@ -678,6 +680,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       amount: 3000,  // remaining 3000
       payment_mode: 'cheque',
       transaction_ref: 'CHQ-001',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(201)
 
@@ -695,6 +698,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       ledger_id: ledgerA2,
       amount: 99999,
       payment_mode: 'cash',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(400)
     const d = data as { error: string }
@@ -708,6 +712,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       amount: 1000,
       payment_mode: 'cheque',
       transaction_ref: 'CHQ-TEST-999',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(201)
     const d = data as { transaction_ref: string }
@@ -727,6 +732,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       })(),
       amount: 100,
       payment_mode: 'upi',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(201)
   })
@@ -738,6 +744,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       amount: 100,
       payment_mode: 'cash',
       paid_date: '01-01-2025',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(400)
     const d = data as { error: string }
@@ -752,6 +759,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       ledger_id: ledgerA2, amount: 100,
       payment_mode: 'cash',
       paid_date: tomorrow.toISOString().slice(0, 10),
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(400)
   })
@@ -769,6 +777,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       school_id: schoolId, student_id: studentA,
       ledger_id: 9999999, amount: 100,
       payment_mode: 'cash',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(404)
   })
@@ -780,6 +789,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       school_id: schoolId, student_id: studentA,
       ledger_id: ledgerA2, amount: 5000,
       payment_mode: 'cash',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(s1).toBe(201)
     receiptMulti = (d1 as { receipt_number: string }).receipt_number
@@ -789,6 +799,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       school_id: schoolId, student_id: studentA,
       ledger_id: ledgerA3, amount: 2000,
       payment_mode: 'cash',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(s2).toBe(201)
     const r2 = (d2 as { receipt_number: string }).receipt_number
@@ -1276,6 +1287,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       school_id: schoolId, student_id: studentB,
       ledger_id: entries[0].id, amount: 100,
       payment_mode: 'cash',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(payStatus).toBe(409)
     const d = payData as { error: string }
@@ -1371,6 +1383,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       school_id: schoolId, student_id: studentA,
       ledger_id: ledgerAnnual, amount: 1,
       payment_mode: 'cash',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(400)
     const d = data as { error: string }
@@ -1394,6 +1407,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       ledger_id: unpaid.id, amount: 100,
       payment_mode: 'cash',
       paid_date: '1999-01-01',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(400)
   })
