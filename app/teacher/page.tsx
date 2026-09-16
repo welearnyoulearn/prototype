@@ -8,6 +8,8 @@ import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { useNavHistory } from '@/lib/useNavHistory'
+import NavBackForward from '../components/NavBackForward'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
@@ -104,7 +106,8 @@ export default function TeacherPortal() {
   const router = useRouter()
   const [teacher, setTeacher]     = useState<Teacher | null>(null)
   const [loading, setLoading]     = useState(true)
-  const [activeNav, setActiveNav] = useState('snapshot')
+  // In-app Back/Forward for the sidebar nav — see NavBackForward in the topbar below.
+  const { current: activeNav, navigate: setActiveNav, goBack: navGoBack, goForward: navGoForward, canGoBack: navCanGoBack, canGoForward: navCanGoForward } = useNavHistory<string>('snapshot')
   const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set(['snapshot']))
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null } | null>(null)
@@ -262,6 +265,7 @@ export default function TeacherPortal() {
           </nav>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
+          <NavBackForward canGoBack={navCanGoBack} canGoForward={navCanGoForward} onBack={navGoBack} onForward={navGoForward} />
           {(selectedAcademicYear || academicYear) && (
             <span
               data-testid="academic-year-badge"

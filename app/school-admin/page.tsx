@@ -9,6 +9,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { useNavHistory } from '@/lib/useNavHistory'
+import NavBackForward from '../components/NavBackForward'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { ALL_FEATURES, PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 
@@ -284,7 +286,8 @@ function SchoolAdmin() {
   const [tier, setTier] = useState<Tier>('none')
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
   const initialTab = searchParams.get('tab') || 'overview'
-  const [activeNav, setActiveNav] = useState(initialTab)
+  // In-app Back/Forward for the sidebar nav — see NavBackForward in the header below.
+  const { current: activeNav, navigate: setActiveNav, goBack: navGoBack, goForward: navGoForward, canGoBack: navCanGoBack, canGoForward: navCanGoForward } = useNavHistory(initialTab)
   const [visited, setVisited] = useState<Set<string>>(new Set([initialTab]))
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -312,7 +315,7 @@ function SchoolAdmin() {
     params.set('tab', key)
     router.replace(`/school-admin?${params.toString()}`, { scroll: false })
     trackOpen(key)
-  }, [router, trackOpen])
+  }, [router, trackOpen, setActiveNav])
 
   useUsageHeartbeat()
 
@@ -453,6 +456,7 @@ function SchoolAdmin() {
         </div>
 
         <div className="flex items-center gap-3">
+          <NavBackForward canGoBack={navCanGoBack} canGoForward={navCanGoForward} onBack={navGoBack} onForward={navGoForward} />
           {tier !== 'none' && (
             <span className={`hidden sm:inline-flex text-xs font-medium px-2.5 py-1 rounded-full capitalize ${
               tier === 'basic' ? 'bg-green-100 text-green-700' :
