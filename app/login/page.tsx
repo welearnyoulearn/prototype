@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import AuthShell, { THEMES, AuthError, AuthInput, AuthButton, PasswordField } from '@/app/components/AuthShell'
-import { setUsageSessionId } from '@/lib/usageSession'
+import { setUsageSessionId, getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 
 function LoginForm() {
   const router = useRouter()
@@ -18,6 +18,32 @@ function LoginForm() {
   const [password, setPassword]     = useState('')
   const [loading, setLoading]       = useState(false)
   const [error, setError]           = useState('')
+
+  // Landing here (e.g. via the browser's Back button from the dashboard)
+  // doesn't actually end the session — the auth cookie is untouched — so an
+  // empty login form would be misleading. Check for a still-valid session and
+  // surface it instead of silently pretending the user needs to sign in again.
+  const [existingSession, setExistingSession] = useState<{ role: string; name: string } | null>(null)
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setExistingSession(d ? { role: d.role, name: d.full_name || d.email } : null))
+      .catch(() => {})
+  }, [])
+
+  function continueToDashboard() {
+    if (existingSession?.role === 'platform_admin') window.location.href = '/platform-admin'
+    else router.push('/school-admin')
+  }
+
+  async function logOutExistingSession() {
+    await fetch('/api/auth/logout', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usageSessionId: getUsageSessionId() }),
+    })
+    clearUsageSessionId()
+    setExistingSession(null)
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -54,6 +80,23 @@ function LoginForm() {
 
   return (
     <AuthShell theme={theme} title={title} subtitle={subtitle}>
+      {existingSession && (
+        <div data-testid="existing-session-notice" className="mb-5 bg-blue-50 border border-blue-200 text-blue-800 text-sm px-4 py-3 rounded-xl space-y-2.5">
+          <p>
+            You&apos;re still signed in as <strong>{existingSession.name}</strong> — going back here doesn&apos;t log you out.
+          </p>
+          <div className="flex gap-2">
+            <button type="button" data-testid="btn-continue-to-dashboard" onClick={continueToDashboard}
+              className="text-xs font-semibold bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">
+              Continue to Dashboard
+            </button>
+            <button type="button" data-testid="btn-logout-existing-session" onClick={logOutExistingSession}
+              className="text-xs font-semibold text-blue-700 border border-blue-300 px-3 py-1.5 rounded-lg hover:bg-blue-100">
+              Log out instead
+            </button>
+          </div>
+        </div>
+      )}
       <AuthError message={error} />
       <form onSubmit={handleSubmit} data-testid="login-form" className="space-y-4">
         <AuthInput
