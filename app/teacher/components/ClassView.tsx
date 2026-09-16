@@ -5,7 +5,7 @@ import Tasks from './Tasks'
 import ClassDoubts from './ClassDoubts'
 import ExamMarks from './ExamMarks'
 import { SCHEDULE } from '@/lib/schedule'
-import { BookOpen, ChevronDown, Check, Loader2, X, Upload, Hash, Trash2, Pencil } from 'lucide-react'
+import { BookOpen, ChevronDown, Check, Loader2, X, Upload, Hash, Trash2, Pencil, Sparkles } from 'lucide-react'
 import { INK, GOLD, PURPLE, GREEN, BORDER, SURFACE } from '@/app/components/ulearn/theme'
 import { ProgressBar, Toast } from '@/app/components/ulearn/primitives'
 import { InlineLoader } from '@/components/loaders'
@@ -479,6 +479,91 @@ type SetupChapter = {
   // own shared `semester` column (used elsewhere for admin's book tabs).
   semester_label: string | null
   topics: SetupTopic[]
+}
+
+// Teachers type a Telugu/Hindi name the way it sounds, in English letters
+// ("amma prema"), and press Translate to convert it in place. No keyboard or
+// browser extension needed. Uses GET /api/transliterate; alternative spellings
+// show as chips so the teacher can pick the right one.
+const TRANSLIT_LANGS = [
+  { code: 'te', label: 'తెలుగు' },
+  { code: 'hi', label: 'हिन्दी' },
+] as const
+type TranslitLang = typeof TRANSLIT_LANGS[number]['code']
+
+function TranslitControl({ value, onPick, subject, testId }: {
+  value: string
+  onPick: (text: string) => void
+  subject: string
+  testId: string
+}) {
+  const [lang, setLang] = useState<TranslitLang>(/hindi/i.test(subject) ? 'hi' : 'te')
+  const [options, setOptions] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function convert() {
+    const text = value.trim()
+    if (!text) return
+    setBusy(true)
+    setError('')
+    try {
+      const res = await fetch(`/api/transliterate?lang=${lang}&text=${encodeURIComponent(text)}`)
+      const data: { candidates?: string[]; error?: string } = await res.json()
+      if (!res.ok || !data.candidates?.length) throw new Error(data.error || 'Could not translate')
+      setOptions(data.candidates)
+      onPick(data.candidates[0])
+    } catch (err: unknown) {
+      setOptions([])
+      setError(err instanceof Error ? err.message : 'Could not translate')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <select
+        value={lang}
+        onChange={e => setLang(e.target.value as TranslitLang)}
+        aria-label="Language to translate into"
+        data-testid={`${testId}-translit-lang`}
+        className="border rounded-lg px-2 py-1.5 text-xs bg-white flex-shrink-0"
+        style={{ borderColor: BORDER, color: INK }}>
+        {TRANSLIT_LANGS.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+      </select>
+      <button
+        type="button"
+        onClick={convert}
+        disabled={busy || !value.trim()}
+        title="Type how it sounds in English letters, e.g. amma prema"
+        data-testid={`${testId}-translit-btn`}
+        className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg border disabled:opacity-50 flex-shrink-0"
+        style={{ borderColor: PURPLE, color: PURPLE }}>
+        {busy ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} Translate
+      </button>
+      {(options.length > 1 || error) && (
+        <div className="basis-full flex gap-1.5 flex-wrap items-center text-xs">
+          {error ? <span role="alert" className="text-red-500">{error}</span> : (
+            <>
+              <span className="text-gray-400">Other spellings:</span>
+              {options.map((opt, i) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => onPick(opt)}
+                  data-testid={`${testId}-translit-option-${i}`}
+                  className={`px-2 py-0.5 rounded-full border ${opt === value ? 'font-semibold' : ''}`}
+                  style={{ borderColor: opt === value ? PURPLE : BORDER, color: INK }}>
+                  {opt}
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </>
+  )
 }
 
 export function SyllabusTracking({
@@ -1865,7 +1950,7 @@ export function SyllabusTracking({
                 {/* Chapter header */}
                 <div className="w-full px-5 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors">
                   {isRenaming ? (
-                    <div className="flex-1 flex items-center gap-2 min-w-0">
+                    <div className="flex-1 flex items-center gap-2 min-w-0 flex-wrap">
                       <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-black flex-shrink-0"
                         style={{ background: pct === 100 ? '#E1F5EE' : '#FCEBDB', color: pct === 100 ? '#085041' : '#8A4B12' }}>
                         {chIdx + 1}
@@ -1874,11 +1959,12 @@ export function SyllabusTracking({
                         autoFocus
                         value={renameChapterName}
                         onChange={e => setRenameChapterName(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && saveChapterRename(ch)}
+                        onKeyDown={e => e.key === 'Enter' && !e.nativeEvent.isComposing && saveChapterRename(ch)}
                         data-testid={`syllabus-rename-chapter-input-${chIdx}`}
                         className="flex-1 min-w-0 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2"
                         style={{ borderColor: BORDER, color: INK }}
                       />
+                      <TranslitControl value={renameChapterName} onPick={setRenameChapterName} subject={selectedSubject} testId={`syllabus-rename-chapter-${chIdx}`} />
                       <button
                         onClick={() => saveChapterRename(ch)}
                         disabled={savingChapterRename || !renameChapterName.trim()}
@@ -1966,17 +2052,18 @@ export function SyllabusTracking({
                       return (
                         <div key={topic.id} className="w-full px-5 py-3 flex items-center gap-3" style={{ borderColor: SURFACE }}>
                           {isRenamingTopic ? (
-                            <div className="flex-1 flex items-center gap-2 min-w-0">
+                            <div className="flex-1 flex items-center gap-2 min-w-0 flex-wrap">
                               <span className="text-xs font-bold text-gray-300 flex-shrink-0">{tIdx + 1}.</span>
                               <input
                                 autoFocus
                                 value={renameTopicName}
                                 onChange={e => setRenameTopicName(e.target.value)}
-                                onKeyDown={e => e.key === 'Enter' && saveTopicRename(topic)}
+                                onKeyDown={e => e.key === 'Enter' && !e.nativeEvent.isComposing && saveTopicRename(topic)}
                                 data-testid={`syllabus-rename-topic-input-${topic.id}`}
                                 className="flex-1 min-w-0 border rounded-lg px-2.5 py-1 text-sm focus:outline-none focus:ring-2"
                                 style={{ borderColor: BORDER, color: INK }}
                               />
+                              <TranslitControl value={renameTopicName} onPick={setRenameTopicName} subject={selectedSubject} testId={`syllabus-rename-topic-${topic.id}`} />
                               <button
                                 onClick={() => saveTopicRename(topic)}
                                 disabled={savingTopicRename || !renameTopicName.trim()}
@@ -2067,12 +2154,13 @@ export function SyllabusTracking({
                           autoFocus
                           value={newTopicName}
                           onChange={e => setNewTopicName(e.target.value)}
-                          onKeyDown={e => e.key === 'Enter' && addCustomTopic(ch)}
+                          onKeyDown={e => e.key === 'Enter' && !e.nativeEvent.isComposing && addCustomTopic(ch)}
                           placeholder="Topic name"
                           data-testid={`syllabus-new-topic-input-${chIdx}`}
                           className="flex-1 min-w-40 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2"
                           style={{ borderColor: BORDER, color: INK }}
                         />
+                        <TranslitControl value={newTopicName} onPick={setNewTopicName} subject={selectedSubject} testId={`syllabus-new-topic-${chIdx}`} />
                         <button
                           onClick={() => addCustomTopic(ch)}
                           disabled={addingTopic || !newTopicName.trim()}
@@ -2104,23 +2192,29 @@ export function SyllabusTracking({
             </div>
           ))}
 
-          {/* Add chapter — subject-level, sibling to the accordion above.
-              Uses POST /api/syllabus/chapters so a teacher can lay down a
-              chapter shell before adding any subtopics. Hidden when
-              viewing a closed past year, same as the add-topic control. */}
-          {!readOnly && <div className="pt-1">
+        </div>
+      )}
+
+      {/* Add chapter — subject-level, rendered after the accordion. Also shown for
+          an empty subject once "Or add chapters one at a time" is clicked, which
+          previously had no input to reveal. Uses POST /api/syllabus/chapters.
+          Hidden when viewing a closed past year, same as the add-topic control. */}
+      {setupMode === 'closed' && !needsSetup && !showInactiveChapters && currentSubject && !readOnly
+        && (currentSubject.chapters.length > 0 || addingChapter) && (
+        <div className="pt-1 mt-4">
             {addingChapter ? (
               <div className="bg-white rounded-2xl border px-5 py-3 flex gap-2 items-center flex-wrap" style={{ borderColor: BORDER }}>
                 <input
                   autoFocus
                   value={newChapterName}
                   onChange={e => setNewChapterName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && addCustomChapter()}
+                  onKeyDown={e => e.key === 'Enter' && !e.nativeEvent.isComposing && addCustomChapter()}
                   placeholder="Chapter name"
                   data-testid="syllabus-new-chapter-input"
                   className="flex-1 min-w-40 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2"
                   style={{ borderColor: BORDER, color: INK }}
                 />
+                <TranslitControl value={newChapterName} onPick={setNewChapterName} subject={selectedSubject} testId="syllabus-new-chapter" />
                 <button
                   onClick={addCustomChapter}
                   disabled={creatingChapter || !newChapterName.trim()}
@@ -2144,7 +2238,6 @@ export function SyllabusTracking({
                 + Add Chapter
               </button>
             )}
-          </div>}
         </div>
       )}
 
