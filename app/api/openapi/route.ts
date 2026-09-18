@@ -4,9 +4,12 @@ import { requirePlatformAdmin, requireSchoolAdmin } from "@/lib/auth";
 // break it on Vercel's case-sensitive filesystem.
 import spec from "@/DOCS/openapi.json";
 
-// Staff only: the spec lists every route and the session each one accepts.
+// Staff only on deployments: the spec lists every route and the session each
+// one accepts. Open in local `next dev` so developers can browse it without
+// signing in; Vercel previews and production run with NODE_ENV=production.
 export async function GET() {
-  if (!(await requirePlatformAdmin()) && !(await requireSchoolAdmin())) {
+  const isLocalDev = process.env.NODE_ENV === "development";
+  if (!isLocalDev && !(await requirePlatformAdmin()) && !(await requireSchoolAdmin())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   return NextResponse.json(spec, { headers: { "Cache-Control": "private, max-age=60" } });

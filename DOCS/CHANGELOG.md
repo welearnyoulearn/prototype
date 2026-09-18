@@ -24,7 +24,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 - `DOCS/openapi.json` regenerated from the route handlers: all 247 paths and 362 operations, grouped into 26 module tags, each with parameters, request body, responses, accepted sessions, in-handler checks, server-side feature flag and source file. Tags start collapsed on `/api-docs`. (#131)
-- `GET /api/openapi` now requires a platform admin or school admin session; it was public with `Access-Control-Allow-Origin: *`. (#131)
+- `GET /api/openapi` now requires a platform admin or school admin session on deployments; it was public with `Access-Control-Allow-Origin: *`. Local `next dev` serves it without sign-in. (#131)
 
 ### Fixed
 - `GET /api/openapi` read `docs/openapi.json` at runtime while the file lives in `DOCS/`, so it failed on Vercel's case-sensitive filesystem. The spec is now imported at build time. (#131)
