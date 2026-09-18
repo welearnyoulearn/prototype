@@ -17,28 +17,22 @@ export default function ApiDocsPage() {
 
     const script1 = document.createElement("script");
     script1.src = "https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-bundle.js";
+    // Default BaseLayout: StandaloneLayout needs the DownloadUrl plugin and
+    // crashed with "reading 'download'" before the spec was ever fetched.
     script1.onload = () => {
-      const script2 = document.createElement("script");
-      script2.src = "https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-standalone-preset.js";
-      script2.onload = () => {
-        const w = window as unknown as Record<string, unknown>;
-        const SwaggerUIBundle = w.SwaggerUIBundle as (cfg: Record<string, unknown>) => void;
-        const SwaggerUIStandalonePreset = w.SwaggerUIStandalonePreset;
-        if (SwaggerUIBundle && containerRef.current) {
-          SwaggerUIBundle({
-            url: "/api/openapi",
-            dom_id: "#swagger-ui",
-            deepLinking: false,
-            presets: [SwaggerUIStandalonePreset].filter(Boolean),
-            layout: "StandaloneLayout",
-            docExpansion: "none",
-            filter: true,
-            tryItOutEnabled: true,
-          });
-          setLoaded(true);
-        }
-      };
-      document.body.appendChild(script2);
+      const SwaggerUIBundle = (window as unknown as Record<string, unknown>).SwaggerUIBundle as
+        ((cfg: Record<string, unknown>) => void) | undefined;
+      if (SwaggerUIBundle && containerRef.current) {
+        SwaggerUIBundle({
+          url: "/api/openapi",
+          dom_id: "#swagger-ui",
+          deepLinking: false,
+          docExpansion: "none",
+          filter: true,
+          tryItOutEnabled: true,
+        });
+        setLoaded(true);
+      }
     };
     document.body.appendChild(script1);
   }, [loaded]);
