@@ -23,9 +23,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
-- `DOCS/openapi.json` regenerated from the route handlers: all 247 paths and 362 operations, grouped into 26 module tags, each with parameters, request body, responses, accepted sessions, in-handler checks, server-side feature flag and source file. (#131)
+- `DOCS/openapi.json` regenerated from the route handlers: all 247 paths and 362 operations, grouped into 9 sections and 43 subcategories, each with parameters, request body, responses, accepted sessions, in-handler checks, server-side feature flag and source file. (#131)
 - `/api-docs` now uses Scalar instead of Swagger UI: a sidebar of 9 sections and 43 subcategories, coloured badges showing who can call each route, Inter and JetBrains Mono fonts, and a Test Request panel. Scalar telemetry, Ask AI and MCP export are turned off. (#131)
-- `GET /api/openapi` now requires a platform admin or school admin session on deployments; it was public with `Access-Control-Allow-Origin: *`. Local `next dev` serves it without sign-in. (#131)
+- `GET /api/openapi` and `/api-docs` stay public (no sign-in), by product decision. The wildcard `Access-Control-Allow-Origin: *` header was removed, so other sites can't read the spec from a browser. (#131)
 
 ### Fixed
 - `GET /api/openapi` read `docs/openapi.json` at runtime while the file lives in `DOCS/`, so it failed on Vercel's case-sensitive filesystem. The spec is now imported at build time. (#131)

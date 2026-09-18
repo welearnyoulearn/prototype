@@ -45361,16 +45361,9 @@
           "Operations"
         ],
         "summary": "Get the OpenAPI spec",
-        "description": "Returns the bundled DOCS/openapi.json spec with Cache-Control private, max-age=60.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** Accepts either requirePlatformAdmin or requireSchoolAdmin.",
+        "description": "Returns this OpenAPI spec, bundled from DOCS/openapi.json at build time. Public by product decision, cached for 5 minutes.\n\n**Who can call:** anyone, no sign-in check.",
         "operationId": "getOpenapi",
-        "security": [
-          {
-            "platformAdmin": []
-          },
-          {
-            "schoolAdmin": []
-          }
-        ],
+        "security": [],
         "responses": {
           "200": {
             "description": "OpenAPI 3 document",
@@ -45395,19 +45388,12 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Not platform admin or school admin"
           }
         },
         "x-badges": [
           {
-            "name": "Platform admin",
-            "color": "#6d28d9"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
+            "name": "Public",
+            "color": "#dc2626"
           }
         ],
         "x-source-file": "app/api/openapi/route.ts"

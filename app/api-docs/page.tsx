@@ -44,17 +44,16 @@ const SCALAR_CONFIG = {
   mcp: { disabled: true },
 };
 
-type LoadState = "loading" | "ready" | "signin" | "error";
+type LoadState = "loading" | "ready" | "error";
 
 export default function ApiDocsPage() {
   const [state, setState] = useState<LoadState>("loading");
 
-  // Fetch the spec ourselves so a 401 (deployments are staff-only) shows a
-  // sign-in prompt instead of Scalar's "Document could not be loaded".
+  // Fetch the spec ourselves so a failure shows a clear message instead of
+  // Scalar's "Document could not be loaded".
   async function mountReference() {
     try {
-      const res = await fetch("/api/openapi", { credentials: "same-origin", cache: "no-store" });
-      if (res.status === 401) return setState("signin");
+      const res = await fetch("/api/openapi");
       if (!res.ok) return setState("error");
       const spec: unknown = await res.json();
       const scalar = (window as unknown as { Scalar?: ScalarGlobal }).Scalar;
@@ -92,12 +91,6 @@ export default function ApiDocsPage() {
         }
         .api-docs-notice h1 { font-size: 22px; font-weight: 600; margin: 0 0 8px; }
         .api-docs-notice p { font-size: 15px; line-height: 1.6; color: #475569; margin: 0 0 24px; }
-        .api-docs-notice a {
-          display: inline-block; margin: 0 6px; padding: 10px 18px; border-radius: 8px;
-          background: #1d4ed8; color: #fff; font-size: 14px; font-weight: 500; text-decoration: none;
-        }
-        .api-docs-notice a.secondary { background: #eef2f7; color: #0f172a; }
-        .api-docs-notice a:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
       `}</style>
       <header className="api-docs-header" data-testid="api-docs-header">
         <div>
@@ -106,14 +99,6 @@ export default function ApiDocsPage() {
         </div>
         <Link href="/" data-testid="api-docs-home-link">← Back to Home</Link>
       </header>
-      {state === "signin" && (
-        <main className="api-docs-notice" data-testid="api-docs-signin">
-          <h1>Sign in to view the API reference</h1>
-          <p>The API reference is available to school admins and platform admins. Sign in, then come back to this page.</p>
-          <a href="/login?role=school" data-testid="api-docs-signin-school">School admin sign-in</a>
-          <a href="/login?role=platform" className="secondary" data-testid="api-docs-signin-platform">Platform admin sign-in</a>
-        </main>
-      )}
       {state === "error" && (
         <main className="api-docs-notice" role="alert" data-testid="api-docs-error">
           <h1>The API reference could not be loaded</h1>
