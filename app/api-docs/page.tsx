@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Script from "next/script";
+import { useState } from "react";
 
 // ponytail: Scalar from a pinned CDN build, same approach as the old Swagger UI
 // page. It reads the spec's x-tagGroups (sections -> subcategories) and x-badges
@@ -29,31 +30,48 @@ const CUSTOM_CSS = `
 
 type ScalarGlobal = { createApiReference: (el: string, cfg: Record<string, unknown>) => unknown };
 
-function mountReference() {
-  const scalar = (window as unknown as { Scalar?: ScalarGlobal }).Scalar;
-  scalar?.createApiReference("#wlyl-api-reference", {
-    url: "/api/openapi",
-    theme: "default",
-    layout: "modern",
-    darkMode: false,
-    withDefaultFonts: false,
-    hideModels: true,
-    defaultOpenAllTags: false,
-    customCss: CUSTOM_CSS,
-    // Keep the spec on our servers: no Scalar telemetry, "Ask AI" agent or MCP export.
-    telemetry: false,
-    agent: { disabled: true },
-    mcp: { disabled: true },
-  });
-}
+const SCALAR_CONFIG = {
+  theme: "default",
+  layout: "modern",
+  darkMode: false,
+  withDefaultFonts: false,
+  hideModels: true,
+  defaultOpenAllTags: false,
+  customCss: CUSTOM_CSS,
+  // Keep the spec on our servers: no Scalar telemetry, "Ask AI" agent or MCP export.
+  telemetry: false,
+  agent: { disabled: true },
+  mcp: { disabled: true },
+};
+
+type LoadState = "loading" | "ready" | "signin" | "error";
 
 export default function ApiDocsPage() {
+  const [state, setState] = useState<LoadState>("loading");
+
+  // Fetch the spec ourselves so a 401 (deployments are staff-only) shows a
+  // sign-in prompt instead of Scalar's "Document could not be loaded".
+  async function mountReference() {
+    try {
+      const res = await fetch("/api/openapi", { credentials: "same-origin", cache: "no-store" });
+      if (res.status === 401) return setState("signin");
+      if (!res.ok) return setState("error");
+      const spec: unknown = await res.json();
+      const scalar = (window as unknown as { Scalar?: ScalarGlobal }).Scalar;
+      if (!scalar) return setState("error");
+      setState("ready");
+      scalar.createApiReference("#wlyl-api-reference", { ...SCALAR_CONFIG, content: spec });
+    } catch {
+      setState("error");
+    }
+  }
+
   return (
     <>
       <link rel="stylesheet" href={FONTS_HREF} precedence="default" />
       {/* lazyOnload: Scalar edits <body>; running it before hydration finishes
           causes a hydration mismatch. onReady also re-mounts on client-side nav. */}
-      <Script src={SCALAR_SRC} strategy="lazyOnload" onReady={mountReference} />
+      <Script src={SCALAR_SRC} strategy="lazyOnload" onReady={() => { void mountReference(); }} />
       <style>{`
         body { margin: 0; }
         .api-docs-header {
@@ -68,6 +86,18 @@ export default function ApiDocsPage() {
         .api-docs-header span { margin-left: 10px; font-size: 13px; color: #94a3b8; }
         .api-docs-header a { color: #93c5fd; font-size: 13px; text-decoration: none; }
         .api-docs-header a:hover, .api-docs-header a:focus-visible { text-decoration: underline; }
+        .api-docs-notice {
+          max-width: 480px; margin: 96px auto; padding: 0 24px; text-align: center;
+          font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; color: #0f172a;
+        }
+        .api-docs-notice h1 { font-size: 22px; font-weight: 600; margin: 0 0 8px; }
+        .api-docs-notice p { font-size: 15px; line-height: 1.6; color: #475569; margin: 0 0 24px; }
+        .api-docs-notice a {
+          display: inline-block; margin: 0 6px; padding: 10px 18px; border-radius: 8px;
+          background: #1d4ed8; color: #fff; font-size: 14px; font-weight: 500; text-decoration: none;
+        }
+        .api-docs-notice a.secondary { background: #eef2f7; color: #0f172a; }
+        .api-docs-notice a:focus-visible { outline: 2px solid #93c5fd; outline-offset: 2px; }
       `}</style>
       <header className="api-docs-header" data-testid="api-docs-header">
         <div>
@@ -76,7 +106,21 @@ export default function ApiDocsPage() {
         </div>
         <Link href="/" data-testid="api-docs-home-link">← Back to Home</Link>
       </header>
-      <div id="wlyl-api-reference" data-testid="api-docs-reference" />
+      {state === "signin" && (
+        <main className="api-docs-notice" data-testid="api-docs-signin">
+          <h1>Sign in to view the API reference</h1>
+          <p>The API reference is available to school admins and platform admins. Sign in, then come back to this page.</p>
+          <a href="/login?role=school" data-testid="api-docs-signin-school">School admin sign-in</a>
+          <a href="/login?role=platform" className="secondary" data-testid="api-docs-signin-platform">Platform admin sign-in</a>
+        </main>
+      )}
+      {state === "error" && (
+        <main className="api-docs-notice" role="alert" data-testid="api-docs-error">
+          <h1>The API reference could not be loaded</h1>
+          <p>Refresh the page to try again.</p>
+        </main>
+      )}
+      <div id="wlyl-api-reference" data-testid="api-docs-reference" hidden={state !== "ready"} />
     </>
   );
 }
