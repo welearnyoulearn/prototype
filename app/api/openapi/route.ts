@@ -1,20 +1,13 @@
 import { NextResponse } from "next/server";
-import { readFileSync } from "fs";
-import { join } from "path";
+import { requirePlatformAdmin, requireSchoolAdmin } from "@/lib/auth";
+// Bundled at build time: no runtime fs read, so the DOCS/ folder casing can't
+// break it on Vercel's case-sensitive filesystem.
+import spec from "@/DOCS/openapi.json";
 
+// Staff only: the spec lists every route and the session each one accepts.
 export async function GET() {
-  try {
-    const specPath = join(process.cwd(), "docs", "openapi.json");
-    const spec = JSON.parse(readFileSync(specPath, "utf-8"));
-    return NextResponse.json(spec, {
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "public, max-age=60",
-      },
-    });
-  } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : "Failed to load OpenAPI spec";
-    return NextResponse.json({ error: message }, { status: 500 });
+  if (!(await requirePlatformAdmin()) && !(await requireSchoolAdmin())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  return NextResponse.json(spec, { headers: { "Cache-Control": "private, max-age=60" } });
 }

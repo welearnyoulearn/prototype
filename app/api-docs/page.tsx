@@ -31,7 +31,7 @@ export default function ApiDocsPage() {
             deepLinking: false,
             presets: [SwaggerUIStandalonePreset].filter(Boolean),
             layout: "StandaloneLayout",
-            docExpansion: "list",
+            docExpansion: "none",
             filter: true,
             tryItOutEnabled: true,
           });

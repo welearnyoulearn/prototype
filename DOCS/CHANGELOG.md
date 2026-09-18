@@ -22,6 +22,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Changed
+- `DOCS/openapi.json` regenerated from the route handlers: all 247 paths and 362 operations, grouped into 26 module tags, each with parameters, request body, responses, accepted sessions, in-handler checks, server-side feature flag and source file. Tags start collapsed on `/api-docs`. (#131)
+- `GET /api/openapi` now requires a platform admin or school admin session; it was public with `Access-Control-Allow-Origin: *`. (#131)
+
+### Fixed
+- `GET /api/openapi` read `docs/openapi.json` at runtime while the file lives in `DOCS/`, so it failed on Vercel's case-sensitive filesystem. The spec is now imported at build time. (#131)
+
 ### Added
 - Daily Supabase → Cloudflare R2 backup: Vercel Cron (`02:30 UTC`) → `POST /api/cron/backup` streams every public table row-by-row through gzip into an R2 multipart upload (`db/supabase-<ts>.jsonl.gz` + `db/latest.json`) so memory stays flat regardless of DB size; retains the newest 14 backups (paginated listing + batched deletes). (#NN)
 - Non-destructive restore: `POST /api/restore` re-inserts only rows missing from the live DB (matched by primary key) via `INSERT ... ON CONFLICT DO NOTHING`; supports `dryRun`; never updates/deletes/truncates. Tables without a primary key are skipped and reported. (#NN)

@@ -5,6 +5,12 @@ Current bugs and workarounds for the WLYL School prototype.
 <!-- 
 ## Active Issues
 
+### [#131] 74 API operations have no session check
+- **Severity:** High
+- **Detail:** The regenerated OpenAPI spec marks 74 of 362 operations as public. Some are intentional (sign-in, password reset, public feedback form, health). Others expose student data or allow writes without a login, for example attendance analytics, per-student homework submissions and rewards, the weekly test, notification writes and school calendar writes.
+- **Workaround:** None. Filter `/api-docs` for "public, no session check" to list them.
+- **Status:** Needs a separate issue to triage each route. Out of scope for #131, which only documents current behaviour.
+
 ### [#issue-number] Short description
 - **Severity:** Critical / High / Medium / Low
 - **Workaround:** Description of workaround
