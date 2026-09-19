@@ -7,6 +7,7 @@ import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/studentOnboarding'
 import { gradeOrderSql } from '@/lib/grades'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { withWatchline } from '@/lib/logger'
 
 // Never `SELECT *`: students carries password_hash, which would otherwise be
 // serialised straight to the browser. Enumerate every safe column instead.
@@ -24,7 +25,11 @@ function parseCount(raw: string | null, fallback: number): number {
   return /^\d+$/.test(raw) ? Number(raw) : NaN
 }
 
-export async function GET(req: NextRequest) {
+// Wrapped with withWatchline so its duration_ms shows up in request_logs
+// alongside the fee routes that already call it (ledger, reports, stats, ...) —
+// this is the route Passbook and Reports hit for a school's full roster, so
+// its cost matters just as much for diagnosing slow fee-tab loads as theirs.
+async function handleGET(req: NextRequest) {
   try {
     const session = await getAnySession()
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -116,6 +121,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+export const GET = withWatchline(handleGET, { route: '/api/students' })
 
 export async function POST(req: NextRequest) {
   const admin = await requireSchoolAdmin()

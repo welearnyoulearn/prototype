@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import jwt from 'jsonwebtoken'
 import pool from '@/lib/db'
-import { requireFeeAccess, verifyPassword } from '@/lib/auth'
+import { requireFeeAccess, verifyPassword, schoolHasFeature } from '@/lib/auth'
 import { JWT_SECRET } from '@/lib/auth-constants'
 
 // POST /api/fees/upi-id/verify  Body: { school_id, password }
@@ -23,6 +23,9 @@ export async function POST(req: NextRequest) {
 
     const access = await requireFeeAccess(school_id)
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!await schoolHasFeature(Number(school_id), 'online-payments')) {
+      return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
+    }
 
     const { rows: [user] } = await pool.query(
       `SELECT password_hash FROM users WHERE id = $1`,

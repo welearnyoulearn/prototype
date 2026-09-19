@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import QRCode from 'qrcode'
 import pool from '@/lib/db'
-import { getAnySession } from '@/lib/auth'
+import { getAnySession, schoolHasFeature } from '@/lib/auth'
 
 // GET /api/fees/upi-qr?amount=1000&school_id=X — returns PNG QR code for school's UPI ID
 // Callable by any logged-in user (admin records; parent pays) but only for THEIR school.
@@ -51,6 +51,12 @@ export async function GET(req: NextRequest) {
   // Tenant check: the requested school must match the session's school
   if (Number(school_id) !== Number(session.schoolId)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+  // Server-side plan gate — parents/admins could otherwise still fetch a
+  // working payment QR for a school whose plan doesn't include online
+  // payments, bypassing the UI-only hide.
+  if (!await schoolHasFeature(Number(school_id), 'online-payments')) {
+    return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
   }
 
   // Fetch school's UPI ID
