@@ -5,10 +5,6 @@ import { useEffect, useState } from 'react'
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
 }
-type Doubt = {
-  id: number; subject: string; question: string; status: string
-  teacher_answer: string | null; created_at: string
-}
 type AnnouncementItem = {
   id: number; title: string; content: string; announcement_type: string
   target_audience: string; priority: string; created_by_name: string
@@ -25,26 +21,6 @@ function getGreeting() {
   if (h < 12) return { text: 'Good Morning', emoji: '☀️' }
   if (h < 17) return { text: 'Good Afternoon', emoji: '👋' }
   return { text: 'Good Evening', emoji: '🌙' }
-}
-
-function subjectEmoji(subject: string): string {
-  const s = (subject || '').toLowerCase()
-  if (s.includes('math'))                              return '🔢'
-  if (s.includes('physics'))                           return '⚡'
-  if (s.includes('chem'))                              return '⚗️'
-  if (s.includes('bio'))                               return '🌱'
-  if (s.includes('science'))                           return '🔬'
-  if (s.includes('english'))                           return '📖'
-  if (s.includes('history') || s.includes('social'))   return '🌍'
-  if (s.includes('geo'))                               return '🗺️'
-  if (s.includes('computer') || s.includes('cs'))      return '💻'
-  if (s.includes('telugu'))                            return '🌺'
-  if (s.includes('hindi'))                             return '🪷'
-  if (s.includes('sanskrit'))                          return '📜'
-  if (s.includes('eco'))                               return '💰'
-  if (s.includes('art'))                               return '🎨'
-  if (s.includes('music'))                             return '🎵'
-  return '📌'
 }
 
 /* ── Engagement Ring (SVG + float) ─────────────────────────── */
@@ -76,7 +52,6 @@ function EngagementRing({ score }: { score: number }) {
    MAIN COMPONENT
 ══════════════════════════════════════════════════════════════ */
 export default function StudentDashboard({ student, classId, schoolId, onNavigate, isNavItemVisible }: Props) {
-  const [doubts,          setDoubts]          = useState<Doubt[]>([])
   const [loading,         setLoading]         = useState(true)
   const [engagementScore, setEngagementScore] = useState<number | null>(null)
   const [announcements,   setAnnouncements]   = useState<AnnouncementItem[]>([])
@@ -85,11 +60,8 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
   const hasAttendance = isNavItemVisible?.('attendance') ?? true
 
   useEffect(() => {
-    Promise.all([
-      fetch(`/api/doubts?school_id=${schoolId}&student_id=${student.id}`).then(r => r.json()).catch(() => []),
-      fetch(`/api/announcements?school_id=${schoolId}&audience=students`).then(r => r.json()).catch(() => []),
-    ]).then(([doubtData, annData]) => {
-      setDoubts(Array.isArray(doubtData) ? doubtData.slice(0, 5) : [])
+    fetch(`/api/announcements?school_id=${schoolId}&audience=students`).then(r => r.json()).catch(() => [])
+      .then((annData) => {
       setAnnouncements(Array.isArray(annData) ? annData : [])
 
       // Engagement ring is based on attendance %, so it must never use a
@@ -177,7 +149,6 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
       {/* ── Quick Actions ─────────────────────────────────────────── */}
       {(() => {
         const quickActions = [
-          { label: 'Ask a Doubt', emoji: '💬', key: 'doubts'   },
           { label: 'My Marks',   emoji: '📊', key: 'my-marks' },
           { label: 'Timetable',  emoji: '🗓️', key: 'timetable' },
         ].filter(item => isNavItemVisible?.(item.key) ?? true)
@@ -202,71 +173,6 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
         )
       })()}
 
-      {/* ── My Doubts ─────────────────────────────────────────────── */}
-      {(isNavItemVisible?.('doubts') ?? true) && doubts.length > 0 && (
-        <div
-          className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden anim-slide-up"
-          style={{ animationDelay: '0.6s' }}
-        >
-          <div className="px-5 py-4 flex items-center justify-between border-b border-gray-50">
-            <div className="flex items-center gap-2">
-              <span className="text-base emoji-wobble">💬</span>
-              <h3 className="text-sm font-black text-gray-900">My Doubts</h3>
-              {doubts.filter(d => d.status === 'in_progress').length > 0 && (
-                <span className="relative inline-flex">
-                  <span className="text-[10px] font-black bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">
-                    {doubts.filter(d => d.status === 'in_progress').length} replied!
-                  </span>
-                  {/* ping ring */}
-                  <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-blue-400 anim-ping" />
-                </span>
-              )}
-            </div>
-            <button onClick={() => onNavigate?.('doubts')} className="text-xs font-black text-orange-500 hover:text-orange-600">
-              Ask new →
-            </button>
-          </div>
-
-          {/* Counts */}
-          <div className="grid grid-cols-3 border-b border-gray-50">
-            {[
-              { label: 'Waiting',  count: doubts.filter(d => d.status === 'open').length,        color: 'text-amber-500'  },
-              { label: 'Replied',  count: doubts.filter(d => d.status === 'in_progress').length, color: 'text-blue-500'   },
-              { label: 'Resolved', count: doubts.filter(d => d.status === 'resolved').length,    color: 'text-green-500'  },
-            ].map((s, i) => (
-              <div key={s.label} className={`py-3 text-center ${i < 2 ? 'border-r border-gray-50' : ''}`}>
-                <p className={`text-xl font-black ${s.color}`}>{s.count}</p>
-                <p className="text-[9px] font-semibold text-gray-400 uppercase tracking-wide mt-0.5">{s.label}</p>
-              </div>
-            ))}
-          </div>
-
-          <div className="divide-y divide-gray-50">
-            {doubts.slice(0, 3).map((d, i) => (
-              <button
-                key={d.id}
-                onClick={() => onNavigate?.('doubts')}
-                className="w-full flex items-start gap-3 px-5 py-3.5 text-left hover:bg-gray-50 active:bg-gray-100 transition-colors"
-                style={{
-                  animation: 'slideInLeft 0.35s cubic-bezier(0.16,1,0.3,1) both',
-                  animationDelay: `${0.65 + i * 0.07}s`,
-                }}
-              >
-                <span className={`text-lg flex-shrink-0 mt-0.5 ${d.status === 'in_progress' ? 'animate-bounce' : ''}`}>
-                  {d.status === 'resolved' ? '✅' : d.status === 'in_progress' ? '💬' : '⏳'}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold text-gray-700 truncate">{d.question}</p>
-                  <p className="text-[10px] text-gray-400 mt-0.5">{subjectEmoji(d.subject)} {d.subject}</p>
-                </div>
-                {d.status === 'in_progress' && (
-                  <span className="text-[9px] bg-blue-100 text-blue-600 font-black px-2 py-0.5 rounded-full flex-shrink-0">
-                    New!
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
         </div>
       )}
 

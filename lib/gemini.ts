@@ -44,57 +44,6 @@ async function callAI(
   return (data.choices?.[0]?.message?.content ?? '').trim()
 }
 
-async function callAIChat(
-  systemPrompt: string,
-  messages: { role: 'user' | 'assistant'; content: string }[],
-  maxTokens = 512
-): Promise<string> {
-  const key = process.env.GROQ_API_KEY
-  if (!key) throw new Error('GROQ_API_KEY not set')
-
-  const res = await fetch(GROQ_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${key}`,
-    },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...messages,
-      ],
-      max_tokens: maxTokens,
-      temperature: 0.7,
-    }),
-  })
-
-  if (!res.ok) {
-    const err = await res.text()
-    throw new Error(`Groq API error ${res.status}: ${err}`)
-  }
-
-  const data = await res.json()
-  return (data.choices?.[0]?.message?.content ?? '').trim()
-}
-
-// ─── 1. Doubt AI Answer ────────────────────────────────────────────────────
-
-export async function generateDoubtAnswer(
-  subject: string,
-  question: string,
-  grade: string,
-  textbookContext?: string
-): Promise<string> {
-  const tbSection = textbookContext
-    ? `\n\nRelevant textbook content:\n${textbookContext}\n\nUse this to give a curriculum-aligned answer.`
-    : ''
-  return callAI(
-    `You are a helpful school teacher. Give clear, simple answers suitable for Grade ${grade} students. Keep answers under 150 words. Plain text only, no markdown.${tbSection}`,
-    `A Grade ${grade} student asked this ${subject} question: "${question}"`,
-    350
-  )
-}
 
 // ─── 2. Daily Newspaper ────────────────────────────────────────────────────
 
@@ -157,20 +106,6 @@ Return a JSON object with exactly these fields:
   parsed.topic    = cat.topic
   parsed.category = cat.category
   return parsed
-}
-
-// ─── 3. Student AI Chatbot (multi-turn) ───────────────────────────────────
-
-export async function chatWithAI(
-  messages: { role: 'user' | 'assistant'; content: string }[],
-  subject: string,
-  grade: string
-): Promise<string> {
-  return callAIChat(
-    `You are a friendly, patient school tutor helping a Grade ${grade} student understand a doubt in ${subject}. Give clear explanations using simple language appropriate for Grade ${grade}. Number steps when explaining a process. Use real-life examples when helpful. Keep each reply under 150 words. Be encouraging. No markdown, no asterisks, plain text only.`,
-    messages,
-    400
-  )
 }
 
 // ─── 4. Announcement Drafter ──────────────────────────────────────────────
@@ -268,36 +203,6 @@ Return a JSON object:
   )
   const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
   return JSON.parse(cleaned) as LessonPlan
-}
-
-// ─── 7. Confusion Pattern Detection ────────────────────────────────────────
-
-export async function analyzeDoubtPatterns(
-  doubts: { question: string; subject: string; count?: number }[]
-): Promise<{ pattern: string; affected_count: number; suggested_action: string; concept: string }[]> {
-  if (doubts.length === 0) return []
-  const list = doubts.map((d, i) => `${i + 1}. [${d.subject}] ${d.question}`).join('\n')
-  const raw = await callAI(
-    'You are a teacher analyzing student doubts. Find patterns and group similar questions. Always respond with valid JSON only.',
-    `Analyze these student doubts and identify confusion patterns:
-
-${list}
-
-Return a JSON array of patterns found:
-[
-  {
-    "pattern": "brief description of the confusion pattern",
-    "concept": "the specific concept students are confused about",
-    "affected_count": number_of_doubts_related,
-    "suggested_action": "1 specific teaching action to resolve this"
-  }
-]
-Return at most 3 patterns. Focus on real conceptual gaps, not surface-level similarities.`,
-    500,
-    true
-  )
-  const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
-  return JSON.parse(cleaned)
 }
 
 // ─── 8. Post-Test AI Diagnosis ──────────────────────────────────────────────

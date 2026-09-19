@@ -29,7 +29,6 @@ function ModuleSkeleton() {
   )
 }
 // Turbopack requires inline object literals for next/dynamic options
-const StudentDoubts    = dynamic(() => import('./components/StudentDoubts'),    { loading: () => <ModuleSkeleton /> })
 const StudentMarks     = dynamic(() => import('./components/StudentMarks'),     { loading: () => <ModuleSkeleton /> })
 const StudentTimetable = dynamic(() => import('./components/StudentTimetable'), { loading: () => <ModuleSkeleton /> })
 const StudentSyllabus  = dynamic(() => import('./components/StudentSyllabus'),  { loading: () => <ModuleSkeleton /> })
@@ -59,7 +58,6 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'LEARNING',
     items: [
-      { key: 'doubts', label: 'Ask a Doubt', icon: '💬' },
       { key: 'class-circle', label: 'Class Circle', icon: '🎈' },
     ],
   },
@@ -95,11 +93,10 @@ const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
 // 'attendance' has no dedicated nav item — it only gates the Dashboard's
 // engagement-score ring, so isNavItemVisible('attendance') is read directly
 // by StudentDashboard, not used for a sidebar entry.
-const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'timetable', 'my-marks', 'doubts', 'attendance'])
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'timetable', 'my-marks', 'attendance'])
 
 const BOTTOM_NAV = [
   { key: 'dashboard', label: 'Home',    emoji: '🏠' },
-  { key: 'doubts',    label: 'Doubts',  emoji: '💬' },
   { key: 'my-marks',  label: 'Marks',   emoji: '📊' },
   { key: 'profile',   label: 'Profile', emoji: '👤' },
 ]
@@ -357,7 +354,6 @@ export default function StudentPortal() {
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 pb-24 lg:pb-6 scroll-smooth">
           <div className="max-w-3xl mx-auto">
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} isNavItemVisible={isNavItemVisible} /></div>}
-            {visitedNav.has('doubts')      && <div hidden={activeNav !== 'doubts'}><StudentDoubts student={student} classId={classId} schoolId={student.school_id} /></div>}
             {visitedNav.has('class-circle') && <div hidden={activeNav !== 'class-circle'}><StudentClassCircle /></div>}
             {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={student.school_id} classId={classId} /></div>}
             {visitedNav.has('timetable')   && <div hidden={activeNav !== 'timetable'}><StudentTimetable classId={classId} schoolId={student.school_id} grade={student.grade} section={student.section} /></div>}

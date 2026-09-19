@@ -17,7 +17,6 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'student-portal',     label: 'Student Portal Access',           category: 'Core', portals: ['school-admin'] },
   { key: 'parent-portal',      label: 'Parent Portal Access',            category: 'Core', portals: ['school-admin'] },
   { key: 'library',            label: 'WLYL Digital Library',            category: 'Core', portals: ['school-admin', 'student', 'parent', 'teacher'] },
-  { key: 'doubts',             label: 'Ask a Doubt',                     category: 'Core', portals: ['school-admin', 'student'] },
 
   // ── Scheduling ───────────────────────────────────────────────────────────────
   { key: 'attendance',         label: 'Attendance Tracking',             category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },

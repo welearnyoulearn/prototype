@@ -24,7 +24,6 @@ type RewardsData = {
 type Props = { studentId: number; schoolId: number; classId?: number; grade?: string }
 
 const ACTION_LABELS: Record<string, string> = {
-  doubt_resolved:        'Got a doubt resolved',
   newspaper_read:        'Read daily knowledge',
   newspaper_quiz_correct:'Daily knowledge quiz correct',
   streak_7days:          '7-day streak bonus',
@@ -136,7 +135,7 @@ export default function StudentRewards({ studentId, schoolId, classId, grade }: 
           <div className="text-2xl mb-1">⭐</div>
           <p className="text-2xl font-black leading-none">{data.academic_points}</p>
           <p className="text-xs mt-1 opacity-80 font-medium">Academic Points</p>
-          <p className="text-[10px] opacity-60 mt-0.5">Tests · Doubts</p>
+          <p className="text-[10px] opacity-60 mt-0.5">Tests</p>
         </button>
         {canUseMarketplace && (
           <button onClick={() => setTab('marketplace')}
@@ -317,7 +316,7 @@ export default function StudentRewards({ studentId, schoolId, classId, grade }: 
             <div className="text-center py-12 text-gray-500">
               <p className="text-4xl mb-3">🌱</p>
               <p className="font-medium text-gray-700">Start earning Academic Points!</p>
-              <p className="text-sm mt-1">Take weekly tests and get doubts resolved.</p>
+              <p className="text-sm mt-1">Take weekly tests to start earning.</p>
             </div>
           )}
         </>
