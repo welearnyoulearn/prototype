@@ -6,6 +6,17 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 
 <!-- Add new entries at the top -->
 
+### Extract Leave Requests out of dev into its own branch (#139)
+**Type:** Refactor / Extraction
+**Portal:** School Admin, Teacher
+**Branch:** feature/139-remove-leave-requests
+**Started:** 2026-09-20
+**Summary:** Leave Requests (`leave-requests` feature key) is being pulled out of `dev` and preserved on this dedicated branch, alongside 4 other extractions (#136-#138, #140). This branch is the preservation snapshot; [EXTRACTION-139.md](../../EXTRACTION-139.md) lists the removal plan — `lib/features.ts` entry, `leave_requests` table, `/api/leave-requests/**` routes, `LeaveRequests.tsx`/`TeacherLeave.tsx`, and surgical edits to 6 shared dashboard/analytics files that surface leave counts as one metric among many. Flags a hard coupling to Emergency Cover (#140) via `substitute_assignments.leave_request_id` — removal order/coordination needed between the two.
+**Progress:**
+- [x] Located every file touching the `leave-requests` feature key
+- [x] `EXTRACTION-139.md` written with file/line-level removal plan, including the #140 coupling
+- [ ] Actual removal from `dev` (separate follow-up, not done on this branch)
+
 ### Teacher Syllabus — add chapters in Telugu & Hindi without an extension (#116)
 **Type:** Feature + Bug Fix
 **Portal:** Teacher
