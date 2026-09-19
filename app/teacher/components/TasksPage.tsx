@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { AlertCircle } from 'lucide-react'
 import Tasks from './Tasks'
+import { EmptyState } from '@/components/ui/empty-state'
 
 type Teacher = {
   id: number
@@ -89,16 +91,13 @@ export default function TasksPage({ teacher, schoolId }: Props) {
 
   if (classes.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full min-h-[400px]">
-        <div className="text-center">
-          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <h3 className="text-lg font-semibold text-gray-700 mb-2">No Classes Found</h3>
-          <p className="text-gray-400 text-sm">You have no class assignments yet. Ask your school admin to assign you a subject in Class Management.</p>
-        </div>
+      <div className="flex h-full min-h-[400px] items-center justify-center">
+        <EmptyState
+          icon={AlertCircle}
+          title="No Classes Found"
+          description="You have no class assignments yet. Ask your school admin to assign you a subject in Class Management."
+          className="border-0"
+        />
       </div>
     )
   }

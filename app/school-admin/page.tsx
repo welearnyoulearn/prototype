@@ -3,14 +3,14 @@
 import { useEffect, useState, useCallback, Suspense } from 'react'
 import Link from 'next/link'
 import dynamic from 'next/dynamic'
+import { motion, MotionConfig } from 'framer-motion'
 import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
-import { useNavHistory } from '@/lib/useNavHistory'
-import NavBackForward from '../components/NavBackForward'
+import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { ALL_FEATURES, PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 
@@ -280,15 +280,17 @@ const NAV_ITEMS: NavItem[] = [
 
 function SchoolAdmin() {
   const router = useRouter()
-  const searchParams = useSearchParams()
   const [selectedSchool, setSelectedSchool] = useState<School | null>(null)
   const [academicYear, setAcademicYear] = useState('')
   const [tier, setTier] = useState<Tier>('none')
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
-  const initialTab = searchParams.get('tab') || 'overview'
-  // In-app Back/Forward for the sidebar nav — see NavBackForward in the header below.
-  const { current: activeNav, navigate: setActiveNav, goBack: navGoBack, goForward: navGoForward, canGoBack: navCanGoBack, canGoForward: navCanGoForward } = useNavHistory(initialTab)
-  const [visited, setVisited] = useState<Set<string>>(new Set([initialTab]))
+  // Sidebar section nav lives in the URL's `tab` param — real navigation, so
+  // the browser/phone Back button moves through the portal's own screens.
+  const { current: activeNav, navigate: navigateSection } = useSectionNav<string>('overview')
+  const [visited, setVisited] = useState<Set<string>>(new Set([activeNav]))
+  useEffect(() => {
+    setVisited(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
+  }, [activeNav])
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const [myRole, setMyRole] = useState<string>('school_admin')
@@ -306,16 +308,12 @@ function SchoolAdmin() {
   // instead of the default List) — optional, existing callers that only
   // pass `key` keep the previous always-reset-to-default behavior.
   const navigateTo = useCallback((key: string, subTab?: string) => {
-    setActiveNav(key)
-    setVisited(prev => new Set([...prev, key]))
     setSidebarOpen(false)
     if (key === 'staff') setStaffSubTab((subTab as 'directory' | 'onboard') || 'directory')
     if (key === 'students') setStudentsSubTab((subTab as 'list' | 'onboard') || 'list')
-    const params = new URLSearchParams(window.location.search)
-    params.set('tab', key)
-    router.replace(`/school-admin?${params.toString()}`, { scroll: false })
+    navigateSection(key)
     trackOpen(key)
-  }, [router, trackOpen, setActiveNav])
+  }, [navigateSection, trackOpen])
 
   useUsageHeartbeat()
 
@@ -327,17 +325,17 @@ function SchoolAdmin() {
       body: JSON.stringify({ usageSessionId }),
     })
     clearUsageSessionId()
-    router.push('/login')
+    router.replace('/login')
   }
 
   useEffect(() => {
     async function init() {
       try {
         const meRes = await fetch('/api/auth/me')
-        if (!meRes.ok) { router.push('/login?role=school'); return }
+        if (!meRes.ok) { router.replace('/login?role=school'); return }
         const me = await meRes.json()
         const schoolRoles = ['school_admin', 'principal', 'vice_principal']
-        if (!schoolRoles.includes(me.role) || !me.school_id) { router.push('/login?role=school'); return }
+        if (!schoolRoles.includes(me.role) || !me.school_id) { router.replace('/login?role=school'); return }
         setMyRole(me.role)
 
         // School and subscription both depend only on me.school_id, not on each
@@ -425,15 +423,15 @@ function SchoolAdmin() {
   if (loading) return <FullPageLoader portal="school-admin" sub="Setting up your school workspace…" />
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="h-screen flex flex-col overflow-hidden bg-slate-50">
       {/* Top bar */}
       <div className="bg-white border-b border-slate-200 px-3 sm:px-5 py-3 flex items-center justify-between flex-shrink-0 z-50 relative shadow-sm">
         <div className="flex items-center gap-3">
-          <button onClick={() => setSidebarOpen(o => !o)} className="lg:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
+          <motion.button whileTap={{ scale: 0.9 }} onClick={() => setSidebarOpen(o => !o)} className="lg:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
-          </button>
+          </motion.button>
           <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm hidden sm:inline">← Home</Link>
-          <NavBackForward canGoBack={navCanGoBack} canGoForward={navCanGoForward} onBack={navGoBack} onForward={navGoForward} />
           <span className="text-gray-200 hidden sm:inline">|</span>
 
           {/* School name */}
@@ -457,7 +455,6 @@ function SchoolAdmin() {
         </div>
 
         <div className="flex items-center gap-3">
-          <NavBackForward canGoBack={navCanGoBack} canGoForward={navCanGoForward} onBack={navGoBack} onForward={navGoForward} />
           {tier !== 'none' && (
             <span className={`hidden sm:inline-flex text-xs font-medium px-2.5 py-1 rounded-full capitalize ${
               tier === 'basic' ? 'bg-green-100 text-green-700' :
@@ -468,25 +465,30 @@ function SchoolAdmin() {
             </span>
           )}
           {selectedSchool && (
-            <NotificationBell schoolId={selectedSchool.id} onNavigate={setActiveNav} />
+            <NotificationBell schoolId={selectedSchool.id} onNavigate={navigateSection} />
           )}
-          <button
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.97 }}
             onClick={() => { const e = new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }); window.dispatchEvent(e) }}
-            className="hidden md:flex items-center gap-2 text-xs text-gray-400 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors"
+            className="hidden md:flex items-center gap-2 text-xs text-gray-400 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-colors"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             Search
             <kbd className="text-[10px] bg-gray-100 px-1 rounded font-mono">Ctrl K</kbd>
-          </button>
+          </motion.button>
           <span className="hidden sm:inline-flex bg-blue-100 text-blue-700 text-xs font-medium px-3 py-1 rounded-full">
             {myRole === 'principal' ? 'Principal' : myRole === 'vice_principal' ? 'Vice Principal' : 'School Admin'}
           </span>
-          <button onClick={handleLogout}
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.97 }}
+            onClick={handleLogout}
             className="text-sm text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition-colors">
             Logout
-          </button>
+          </motion.button>
         </div>
       </div>
 
@@ -561,21 +563,28 @@ function SchoolAdmin() {
                         {sectionEnabled.map(item => {
                           const isActive = activeNav === item.key
                           return (
-                            <button
+                            <motion.button
                               key={item.key}
                               onClick={() => navigateTo(item.key)}
-                              className={`w-full flex items-center gap-3 px-3 mx-1 py-2 text-sm transition-all text-left rounded-lg ${
-                                isActive
-                                  ? 'bg-indigo-600 text-white font-semibold shadow-md'
-                                  : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                              whileHover={{ x: isActive ? 0 : 2 }}
+                              whileTap={{ scale: 0.98 }}
+                              className={`relative w-full flex items-center gap-3 px-3 mx-1 py-2 text-sm text-left rounded-lg ${
+                                isActive ? 'text-white font-semibold' : 'text-slate-300 hover:bg-slate-800/70 hover:text-white'
                               }`}
                               style={{ width: 'calc(100% - 8px)' }}
                             >
-                              <span className={`flex-shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`}>
+                              {isActive && (
+                                <motion.span
+                                  layoutId="school-admin-nav-pill"
+                                  className="absolute inset-0 rounded-lg bg-indigo-600 shadow-md"
+                                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                                />
+                              )}
+                              <span className={`relative flex-shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`}>
                                 {item.icon}
                               </span>
-                              <span className="truncate">{item.label}</span>
-                            </button>
+                              <span className="relative truncate">{item.label}</span>
+                            </motion.button>
                           )
                         })}
                       </div>
@@ -593,17 +602,26 @@ function SchoolAdmin() {
                         {unsectioned.map(item => {
                           const isActive = activeNav === item.key
                           return (
-                            <button
+                            <motion.button
                               key={item.key}
                               onClick={() => navigateTo(item.key)}
-                              className={`w-full flex items-center gap-3 px-3 mx-1 py-2 text-sm transition-all text-left rounded-lg ${
-                                isActive ? 'bg-indigo-600 text-white font-semibold shadow-md' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                              whileHover={{ x: isActive ? 0 : 2 }}
+                              whileTap={{ scale: 0.98 }}
+                              className={`relative w-full flex items-center gap-3 px-3 mx-1 py-2 text-sm text-left rounded-lg ${
+                                isActive ? 'text-white font-semibold' : 'text-slate-300 hover:bg-slate-800/70 hover:text-white'
                               }`}
                               style={{ width: 'calc(100% - 8px)' }}
                             >
-                              <span className={isActive ? 'text-white' : 'text-slate-400'}>{item.icon}</span>
-                              <span className="truncate">{item.label}</span>
-                            </button>
+                              {isActive && (
+                                <motion.span
+                                  layoutId="school-admin-nav-pill"
+                                  className="absolute inset-0 rounded-lg bg-indigo-600 shadow-md"
+                                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                                />
+                              )}
+                              <span className={`relative ${isActive ? 'text-white' : 'text-slate-400'}`}>{item.icon}</span>
+                              <span className="relative truncate">{item.label}</span>
+                            </motion.button>
                           )
                         })}
                       </div>
@@ -631,19 +649,28 @@ function SchoolAdmin() {
             {/* Sidebar footer */}
             <div className="px-3 py-3 border-t border-slate-700/60 space-y-1">
               {isStaffAccount && (
-                <button
+                <motion.button
                   onClick={() => navigateTo('profile')}
-                  className={`w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg transition-all text-left ${
+                  whileHover={{ x: activeNav === 'profile' ? 0 : 2 }}
+                  whileTap={{ scale: 0.98 }}
+                  className={`relative w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg text-left ${
                     activeNav === 'profile'
-                      ? 'bg-indigo-600 text-white font-semibold shadow-md'
-                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                      ? 'text-white font-semibold'
+                      : 'text-slate-300 hover:bg-slate-800/70 hover:text-white'
                   }`}
                 >
-                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {activeNav === 'profile' && (
+                    <motion.span
+                      layoutId="school-admin-nav-pill"
+                      className="absolute inset-0 rounded-lg bg-indigo-600 shadow-md"
+                      transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                    />
+                  )}
+                  <svg className="relative w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
-                  My Profile
-                </button>
+                  <span className="relative">My Profile</span>
+                </motion.button>
               )}
               <p className="text-[10px] text-slate-600 text-center pt-1">WLYL School Management</p>
             </div>
@@ -735,6 +762,7 @@ function SchoolAdmin() {
         </div>
       )}
     </div>
+    </MotionConfig>
   )
 }
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
 import Link from 'next/link'
@@ -10,8 +10,7 @@ import DigitalLibrary from '../components/library/DigitalLibrary'
 import ParentProfile from './components/ParentProfile'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
-import { useNavHistory } from '@/lib/useNavHistory'
-import NavBackForward from '../components/NavBackForward'
+import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 import NotificationBell from '../components/NotificationBell'
@@ -125,19 +124,23 @@ function relTime(iso: string) {
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────────
-export default function ParentDashboard() {
+function ParentDashboard() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
   const [parentInfo, setParentInfo] = useState<ParentInfo | null>(null)
   const [showChildPicker, setShowChildPicker] = useState(false)
   const [student, setStudent] = useState<Student | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
-  // In-app Back/Forward for the sidebar nav — see NavBackForward in the topbar
-  // below. resetNav clears the whole stack instead of pushing onto it, used
-  // when switching between children (the previous stack's "back" targets
-  // belonged to the previous child's data).
-  const { current: activeNav, navigate: setActiveNav, reset: resetNav, goBack: navGoBack, goForward: navGoForward, canGoBack: navCanGoBack, canGoForward: navCanGoForward } = useNavHistory<string>('overview')
-  const [visited, setVisited] = useState<Set<string>>(new Set(['overview']))
+  // Sidebar section nav lives in the URL's `tab` param — real navigation, so
+  // the browser/phone Back button moves through the portal's own screens.
+  // resetNav replaces instead of pushing, used when switching between
+  // children (the previous history's "back" targets belonged to the
+  // previous child's data).
+  const { current: activeNav, navigate: navigateSection, reset: resetNav } = useSectionNav<string>('overview')
+  const [visited, setVisited] = useState<Set<string>>(new Set([activeNav]))
+  useEffect(() => {
+    setVisited(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
+  }, [activeNav])
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
 
   // Filters out nav items gated by a plan feature the school doesn't have
@@ -215,9 +218,8 @@ export default function ParentDashboard() {
   const trackOpen = useFeatureTracking('parent')
 
   function navigateTo(key: string) {
-    setActiveNav(key)
-    setVisited(prev => new Set([...prev, key]))
     setSidebarOpen(false)
+    navigateSection(key)
     trackOpen(key)
   }
 
@@ -330,7 +332,7 @@ export default function ParentDashboard() {
   async function redirectToLogin(r: Response) {
     const data = await r.json().catch(() => null)
     const notice = data?.error === 'access_revoked' ? data.message : null
-    router.push(notice ? `/parent/login?notice=${encodeURIComponent(notice)}` : '/parent/login')
+    router.replace(notice ? `/parent/login?notice=${encodeURIComponent(notice)}` : '/parent/login')
   }
 
   useEffect(() => {
@@ -349,7 +351,7 @@ export default function ParentDashboard() {
           setShowChildPicker(true)
         }
       })
-      .catch(() => router.push('/parent/login'))
+      .catch(() => router.replace('/parent/login'))
       .finally(() => setLoading(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -375,7 +377,7 @@ export default function ParentDashboard() {
       body: JSON.stringify({ usageSessionId }),
     }).catch(() => {})
     clearUsageSessionId()
-    router.push('/parent/login')
+    router.replace('/parent/login')
   }
 
   // Acknowledgement is now identity-verified server-side against the
@@ -565,7 +567,6 @@ export default function ParentDashboard() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <NavBackForward canGoBack={navCanGoBack} canGoForward={navCanGoForward} onBack={navGoBack} onForward={navGoForward} />
           {feeAcYear && (
             <span
               data-testid="academic-year-badge"
@@ -1566,5 +1567,13 @@ export default function ParentDashboard() {
         </main>
       </div>
     </div>
+  )
+}
+
+export default function ParentPortalPage() {
+  return (
+    <Suspense>
+      <ParentDashboard />
+    </Suspense>
   )
 }

@@ -1,6 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { ShoppingBag } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { EmptyState } from '@/components/ui/empty-state'
 
 type Order = {
   id: number
@@ -67,20 +71,19 @@ export default function MarketplaceOrders({ schoolId }: { schoolId: number }) {
           <h2 className="text-lg font-bold text-gray-900">Marketplace Orders</h2>
           <p className="text-xs text-gray-500 mt-0.5">Students redeem their hub activity coins for prizes. Fulfill orders and mark them delivered.</p>
         </div>
-        <button onClick={load} className="text-xs text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded-lg hover:bg-indigo-50">
+        <Button onClick={load} variant="outline" size="sm" className="text-indigo-600 border-indigo-200 hover:bg-indigo-50">
           Refresh
-        </button>
+        </Button>
       </div>
 
       {/* Summary chips */}
       <div className="flex gap-2 flex-wrap">
         {(['all', 'pending', 'approved', 'delivered', 'rejected'] as const).map(s => (
-          <button key={s} onClick={() => setFilter(s)}
-            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors capitalize ${
-              filter === s ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'
-            }`}>
+          <Button key={s} onClick={() => setFilter(s)} size="sm"
+            variant={filter === s ? 'default' : 'outline'}
+            className={`rounded-full capitalize ${filter === s ? 'bg-indigo-600 hover:bg-indigo-700 border-indigo-600' : 'text-gray-600 hover:border-indigo-300'}`}>
             {s === 'all' ? `All (${orders.length})` : `${s} (${counts[s] ?? 0})`}
-          </button>
+          </Button>
         ))}
       </div>
 
@@ -89,11 +92,12 @@ export default function MarketplaceOrders({ schoolId }: { schoolId: number }) {
           {[1,2,3,4].map(i => <div key={i} className="h-20 bg-gray-100 rounded-2xl animate-pulse" />)}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-dashed border-gray-200 py-16 text-center">
-          <p className="text-3xl mb-3">🛍️</p>
-          <p className="text-gray-500 font-medium">{filter === 'all' ? 'No orders yet' : `No ${filter} orders`}</p>
-          <p className="text-gray-400 text-sm mt-1">Students earn coins from Daily Hub activities and redeem them here.</p>
-        </div>
+        <EmptyState
+          icon={ShoppingBag}
+          title={filter === 'all' ? 'No orders yet' : `No ${filter} orders`}
+          description="Students earn coins from Daily Hub activities and redeem them here."
+          className="rounded-2xl bg-white py-16"
+        />
       ) : (
         <div className="space-y-3">
           {filtered.map(order => {
@@ -106,9 +110,9 @@ export default function MarketplaceOrders({ schoolId }: { schoolId: number }) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-semibold text-sm text-gray-900">{order.item_name}</p>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${STATUS_STYLE[order.status] ?? 'bg-gray-100 text-gray-600 border-gray-200'}`}>
+                    <Badge variant="outline" className={`capitalize ${STATUS_STYLE[order.status] ?? 'bg-gray-100 text-gray-600 border-gray-200'}`}>
                       {order.status}
-                    </span>
+                    </Badge>
                   </div>
                   <p className="text-sm text-gray-600 mt-0.5">{name} · Grade {order.grade}-{order.section}</p>
                   <div className="flex items-center gap-3 mt-1">
@@ -119,21 +123,21 @@ export default function MarketplaceOrders({ schoolId }: { schoolId: number }) {
                 <div className="flex gap-2 flex-shrink-0">
                   {isPending && (
                     <>
-                      <button onClick={() => updateStatus(order.id, 'approved')} disabled={updating === order.id}
-                        className="text-xs bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold px-3 py-1.5 rounded-lg transition-colors">
+                      <Button onClick={() => updateStatus(order.id, 'approved')} disabled={updating === order.id} size="sm"
+                        className="bg-blue-600 hover:bg-blue-700">
                         {updating === order.id ? '...' : 'Approve'}
-                      </button>
-                      <button onClick={() => updateStatus(order.id, 'rejected')} disabled={updating === order.id}
-                        className="text-xs border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50 font-semibold px-3 py-1.5 rounded-lg transition-colors">
+                      </Button>
+                      <Button onClick={() => updateStatus(order.id, 'rejected')} disabled={updating === order.id} size="sm" variant="outline"
+                        className="border-red-200 text-red-600 hover:bg-red-50">
                         Reject
-                      </button>
+                      </Button>
                     </>
                   )}
                   {isApproved && (
-                    <button onClick={() => updateStatus(order.id, 'delivered')} disabled={updating === order.id}
-                      className="text-xs bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white font-semibold px-3 py-1.5 rounded-lg transition-colors">
+                    <Button onClick={() => updateStatus(order.id, 'delivered')} disabled={updating === order.id} size="sm"
+                      className="bg-green-600 hover:bg-green-700">
                       {updating === order.id ? '...' : 'Mark Delivered'}
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>

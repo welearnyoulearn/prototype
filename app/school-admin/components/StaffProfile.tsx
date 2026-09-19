@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 const ROLE_LABELS: Record<string, string> = {
   principal: 'Principal',
@@ -77,26 +79,22 @@ export default function StaffProfile() {
         <form onSubmit={handleChangePassword} className="space-y-3">
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">Current Password</label>
-            <input type="password" value={curPwd} onChange={e => setCurPwd(e.target.value)} required
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <Input type="password" value={curPwd} onChange={e => setCurPwd(e.target.value)} required />
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">New Password</label>
-            <input type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} required minLength={8}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <Input type="password" value={newPwd} onChange={e => setNewPwd(e.target.value)} required minLength={8} />
           </div>
           <div>
             <label className="block text-xs font-semibold text-gray-500 mb-1.5">Confirm New Password</label>
-            <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            <Input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} required />
           </div>
           {msg && (
             <p className={`text-sm ${msg.ok ? 'text-green-600' : 'text-red-600'}`}>{msg.text}</p>
           )}
-          <button type="submit" disabled={saving || !curPwd || !newPwd || !confirm}
-            className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50">
+          <Button type="submit" disabled={saving || !curPwd || !newPwd || !confirm}>
             {saving ? 'Saving…' : 'Update Password'}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

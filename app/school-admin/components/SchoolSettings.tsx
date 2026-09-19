@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { getBoardLabels } from '@/lib/board-syllabus/data'
 import { ALL_FEATURES, CATEGORY_ORDER } from '@/lib/features'
 import { useFeature } from '@/lib/features-context'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -105,6 +106,7 @@ function suggestNextYear(years: AcademicYear[]): { label: string; start_date: st
 
 export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const router = useRouter()
+  const { confirm, ConfirmDialog } = useConfirm()
   const [tab, setTab] = useState<SettingsTab>('profile')
 
   // ── School profile ─────────────────────────────────────────────────────────
@@ -470,7 +472,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   }
 
   async function switchYear(id: number, label: string) {
-    if (!confirm(`Set "${label}" as the active academic year? All fee, attendance and exam data will show this year by default.`)) return
+    const ok = await confirm(`Set "${label}" as the active academic year? All fee, attendance and exam data will show this year by default.`, { title: 'Switch academic year?', confirmText: 'Switch' })
+    if (!ok) return
     setSwitchingYear(id); setYearsMsg(null)
     try {
       const r = await fetch(`/api/academic-years?id=${id}&school_id=${schoolId}`, { method: 'PATCH' })
@@ -500,7 +503,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   }
 
   async function deactivateStaff(id: number) {
-    if (!confirm('Deactivate this account? They will lose access immediately.')) return
+    const ok = await confirm('Deactivate this account? They will lose access immediately.', { title: 'Deactivate account?', confirmText: 'Deactivate', destructive: true })
+    if (!ok) return
     await fetch('/api/school-admin/staff-accounts', {
       method: 'DELETE', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id }),
@@ -613,6 +617,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
   return (
     <div className="space-y-5 max-w-3xl">
+      {ConfirmDialog}
 
       {/* Header */}
       <div>

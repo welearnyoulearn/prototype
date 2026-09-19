@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import TaskReview from './TaskReview'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -118,6 +119,7 @@ const DEFAULT_FORM: TaskForm = {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export default function Tasks({ classId, grade, section, schoolId, teacher, prefillTitle, prefillSubject, onPrefillConsumed }: Props) {
+  const { confirm, ConfirmDialog } = useConfirm()
   const isClassTeacher = teacher.class_teacher_grade === grade && teacher.class_teacher_section === section
 
   // View: 'list' | 'create' | 'review'
@@ -229,7 +231,8 @@ export default function Tasks({ classId, grade, section, schoolId, teacher, pref
   }
 
   async function deleteTask(task: Task) {
-    if (!confirm(`Delete "${task.title}"? This cannot be undone.`)) return
+    const ok = await confirm(`Delete "${task.title}"? This cannot be undone.`, { title: 'Delete task?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     await fetch(`/api/tasks/${task.id}?school_id=${schoolId}&teacher_id=${teacher.id}`, { method: 'DELETE' })
     fetchTasks()
   }
@@ -370,6 +373,7 @@ export default function Tasks({ classId, grade, section, schoolId, teacher, pref
   // ── LIST VIEW ─────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4">
+      {ConfirmDialog}
       {/* Class teacher info banner */}
       {isClassTeacher && (
         <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 flex items-start gap-3">

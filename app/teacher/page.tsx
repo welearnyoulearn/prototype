@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { FullPageLoader } from '@/components/loaders'
@@ -8,8 +8,7 @@ import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
-import { useNavHistory } from '@/lib/useNavHistory'
-import NavBackForward from '../components/NavBackForward'
+import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
@@ -102,13 +101,17 @@ const NAV_SECTIONS: NavSection[] = [
   },
 ]
 
-export default function TeacherPortal() {
+function TeacherPortal() {
   const router = useRouter()
   const [teacher, setTeacher]     = useState<Teacher | null>(null)
   const [loading, setLoading]     = useState(true)
-  // In-app Back/Forward for the sidebar nav — see NavBackForward in the topbar below.
-  const { current: activeNav, navigate: setActiveNav, goBack: navGoBack, goForward: navGoForward, canGoBack: navCanGoBack, canGoForward: navCanGoForward } = useNavHistory<string>('snapshot')
-  const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set(['snapshot']))
+  // Sidebar section nav lives in the URL's `tab` param — real navigation, so
+  // the browser/phone Back button moves through the portal's own screens.
+  const { current: activeNav, navigate: navigateSection } = useSectionNav<string>('snapshot')
+  const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set([activeNav]))
+  useEffect(() => {
+    setVisitedNav(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
+  }, [activeNav])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null } | null>(null)
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
@@ -117,9 +120,8 @@ export default function TeacherPortal() {
   const trackOpen = useFeatureTracking('teacher')
 
   function navigateTo(key: string) {
-    setActiveNav(key)
-    setVisitedNav(prev => new Set([...prev, key]))
     setSidebarOpen(false)
+    navigateSection(key)
     trackOpen(key)
   }
 
@@ -152,7 +154,7 @@ export default function TeacherPortal() {
       body: JSON.stringify({ usageSessionId }),
     })
     clearUsageSessionId()
-    router.push('/teacher/login')
+    router.replace('/teacher/login')
   }, [router])
 
   // null = still loading (show everything so the sidebar doesn't flash
@@ -178,14 +180,14 @@ export default function TeacherPortal() {
   useEffect(() => {
     fetch('/api/teacher/auth/me')
       .then(async r => {
-        if (r.status === 401) { router.push('/teacher/login'); return null }
+        if (r.status === 401) { router.replace('/teacher/login'); return null }
         return r.json()
       })
       .then(data => {
         if (!data) return
         setTeacher(data)
       })
-      .catch(() => router.push('/teacher/login'))
+      .catch(() => router.replace('/teacher/login'))
       .finally(() => setLoading(false))
   }, [router])
 
@@ -265,7 +267,6 @@ export default function TeacherPortal() {
           </nav>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
-          <NavBackForward canGoBack={navCanGoBack} canGoForward={navCanGoForward} onBack={navGoBack} onForward={navGoForward} />
           {(selectedAcademicYear || academicYear) && (
             <span
               data-testid="academic-year-badge"
@@ -366,5 +367,13 @@ export default function TeacherPortal() {
       </div>
     </div>
     </FeaturesProvider>
+  )
+}
+
+export default function TeacherPortalPage() {
+  return (
+    <Suspense>
+      <TeacherPortal />
+    </Suspense>
   )
 }

@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
 import { CURRICULA } from '@/lib/curricula'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type ClassInfo = {
@@ -48,6 +49,7 @@ export default function ClassDetailPage() {
   const router = useRouter()
   const classId = params.id as string
   const schoolId = searchParams.get('school_id') || ''
+  const { confirm, ConfirmDialog } = useConfirm()
 
   const [cls, setCls] = useState<ClassInfo | null>(null)
   const [subjects, setSubjects] = useState<Subject[]>([])
@@ -162,7 +164,8 @@ export default function ClassDetailPage() {
   }
 
   async function removeSubject(subjectId: number, name: string) {
-    if (!confirm(`Remove "${name}" from this class?`)) return
+    const ok = await confirm(`Remove "${name}" from this class?`, { title: 'Remove subject?', confirmText: 'Remove', destructive: true })
+    if (!ok) return
     setRemovingSubjectId(subjectId)
     try {
       await fetch(`/api/classes/${classId}/subjects?subject_id=${subjectId}`, { method: 'DELETE' })
@@ -245,6 +248,7 @@ export default function ClassDetailPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {ConfirmDialog}
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-5xl mx-auto">

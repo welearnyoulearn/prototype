@@ -1,14 +1,13 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { FullPageLoader } from '@/components/loaders'
 import NotificationBell from '../components/NotificationBell'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
-import { useNavHistory } from '@/lib/useNavHistory'
-import NavBackForward from '../components/NavBackForward'
+import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 
@@ -108,14 +107,18 @@ const BOTTOM_NAV = [
   { key: 'profile',   label: 'Profile', emoji: '👤' },
 ]
 
-export default function StudentPortal() {
+function StudentPortal() {
   const router = useRouter()
   const [student,     setStudent]     = useState<Student | null>(null)
   const [classId,     setClassId]     = useState(0)
   const [academicYear, setAcademicYear] = useState('')
-  // In-app Back/Forward for the sidebar nav — see NavBackForward in the topbar below.
-  const { current: activeNav, navigate: setActiveNav, goBack: navGoBack, goForward: navGoForward, canGoBack: navCanGoBack, canGoForward: navCanGoForward } = useNavHistory<string>('dashboard')
-  const [visitedNav,  setVisitedNav]  = useState<Set<string>>(new Set(['dashboard']))
+  // Sidebar section nav lives in the URL's `tab` param — real navigation, so
+  // the browser/phone Back button moves through the portal's own screens.
+  const { current: activeNav, navigate: navigateSection } = useSectionNav<string>('dashboard')
+  const [visitedNav,  setVisitedNav]  = useState<Set<string>>(new Set([activeNav]))
+  useEffect(() => {
+    setVisitedNav(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
+  }, [activeNav])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [loading,     setLoading]     = useState(true)
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
@@ -138,9 +141,8 @@ export default function StudentPortal() {
   const trackOpen = useFeatureTracking('student')
 
   function navigateTo(key: string) {
-    setActiveNav(key)
-    setVisitedNav(prev => new Set([...prev, key]))
     setSidebarOpen(false)
+    navigateSection(key)
     trackOpen(key)
   }
 
@@ -150,7 +152,7 @@ export default function StudentPortal() {
   async function redirectToLogin(r: Response) {
     const data = await r.json().catch(() => null)
     const notice = data?.error === 'access_revoked' ? data.message : null
-    router.push(notice ? `/student/login?notice=${encodeURIComponent(notice)}` : '/student/login')
+    router.replace(notice ? `/student/login?notice=${encodeURIComponent(notice)}` : '/student/login')
   }
 
   useEffect(() => {
@@ -181,7 +183,7 @@ export default function StudentPortal() {
           .then(d => { if (d?.label) setAcademicYear(d.label) })
           .catch(() => {})
       })
-      .catch(() => router.push('/student/login'))
+      .catch(() => router.replace('/student/login'))
       .finally(() => setLoading(false))
   }, [router])
 
@@ -209,7 +211,7 @@ export default function StudentPortal() {
       body: JSON.stringify({ usageSessionId }),
     }).catch(() => {})
     clearUsageSessionId()
-    router.push('/student/login')
+    router.replace('/student/login')
   }
 
   if (loading) return <FullPageLoader portal="student" sub="Fetching your courses and progress…" />
@@ -250,7 +252,6 @@ export default function StudentPortal() {
         </div>
 
         <div className="flex items-center gap-2">
-          <NavBackForward canGoBack={navCanGoBack} canGoForward={navCanGoForward} onBack={navGoBack} onForward={navGoForward} />
           {academicYear && (
             <span
               data-testid="academic-year-badge"
@@ -407,5 +408,13 @@ export default function StudentPortal() {
       </nav>
 
     </div>
+  )
+}
+
+export default function StudentPortalPage() {
+  return (
+    <Suspense>
+      <StudentPortal />
+    </Suspense>
   )
 }

@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Inbox } from 'lucide-react'
 import { useFeedbackFetch } from './useFeedbackFetch'
 
 interface Issue {
@@ -71,7 +73,7 @@ export default function FeedbackIssueTable({ schoolId }: { schoolId: number }) {
       ) : error ? (
         <div className="py-16 text-center text-sm text-red-500">{error}</div>
       ) : rows.length === 0 ? (
-        <div className="py-16 text-center text-sm text-gray-400">No issues here.</div>
+        <EmptyState icon={Inbox} title="No issues here." className="border-0 py-16" />
       ) : (
         <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
           <Table>

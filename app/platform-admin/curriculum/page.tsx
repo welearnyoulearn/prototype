@@ -5,7 +5,10 @@ import Link from 'next/link'
 import {
   BookOpen, Plus, Pencil, X, Upload, ChevronRight, FileText, Sparkles,
   HelpCircle, CheckCircle2, Layers, ArrowLeft, Trash2, Check, FolderInput, Loader2, Download,
+  ImageOff,
 } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
+import { useConfirm } from '@/components/ui/use-confirm'
 import { INK, TEAL, CREAM, GREEN, PURPLE, BORDER, SURFACE } from '@/app/components/ulearn/theme'
 import { ProgressBar } from '@/components/loaders'
 import { BulkImportPanel } from '@/app/components/ulearn/BulkImportPanel'
@@ -246,6 +249,7 @@ const GRADES = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']
 const EXTRA_BOARD = 'EXTRA'
 
 export default function PlatformCurriculum() {
+  const { confirm, ConfirmDialog } = useConfirm()
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [category, setCategory] = useState<'academic' | 'extra'>('academic')
   const [selectedBoard, setSelectedBoard] = useState('CBSE')
@@ -524,9 +528,13 @@ export default function PlatformCurriculum() {
   const handleBulkImport = async (json: string, mode: 'append' | 'replace') => {
     if (!activeSubject) return
     const bookLabel = bulkBookName.trim() || BOOK_TYPE_LABELS[bulkBookType]
-    if (mode === 'replace' && !confirm(
-      `Replace all chapters for "${activeSubject.subject_name}"?\n\nThis permanently deletes every existing chapter (and its topics) for whichever exact book this JSON covers — typically "${bookLabel}" — before writing the new ones. Other books on this subject (including other ${BOOK_TYPE_LABELS[bulkBookType]}s) are untouched. This cannot be undone.`
-    )) return
+    if (mode === 'replace') {
+      const ok = await confirm(
+        `Replace all chapters for "${activeSubject.subject_name}"?\n\nThis permanently deletes every existing chapter (and its topics) for whichever exact book this JSON covers — typically "${bookLabel}" — before writing the new ones. Other books on this subject (including other ${BOOK_TYPE_LABELS[bulkBookType]}s) are untouched. This cannot be undone.`,
+        { title: 'Replace all chapters?', confirmText: 'Replace', destructive: true }
+      )
+      if (!ok) return
+    }
     setBulkError('')
     setImporting(true)
     try {
@@ -786,7 +794,8 @@ export default function PlatformCurriculum() {
   }
 
   const handleDeleteTopic = async (topicId: number, name: string) => {
-    if (!confirm(`Are you absolutely sure you want to delete the Master Topic "${name}"?\nThis will permanently delete this topic and all its attachments.`)) return
+    const ok = await confirm(`Are you absolutely sure you want to delete the Master Topic "${name}"?\nThis will permanently delete this topic and all its attachments.`, { title: 'Delete Master Topic?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     setError('')
     setSuccess('')
     try {
@@ -871,7 +880,8 @@ export default function PlatformCurriculum() {
   }
 
   const handleDeleteMaterial = async (id: number, title: string) => {
-    if (!confirm(`Delete "${title}"?`)) return
+    const ok = await confirm(`Delete "${title}"?`, { title: 'Delete material?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     setError('')
     setSuccess('')
     try {
@@ -889,9 +899,11 @@ export default function PlatformCurriculum() {
   // wants a clean slate instead of re-importing over it with "Replace all".
   const handleDeleteBook = async (group: BookGroup) => {
     if (!activeSubject) return
-    if (!confirm(
-      `Delete "${group.label}" for "${activeSubject.subject_name}"?\n\nThis permanently deletes all ${group.chapters.length} chapter${group.chapters.length === 1 ? '' : 's'} (and their topics) in this book. Other books on this subject are untouched. This cannot be undone.`
-    )) return
+    const ok = await confirm(
+      `Delete "${group.label}" for "${activeSubject.subject_name}"?\n\nThis permanently deletes all ${group.chapters.length} chapter${group.chapters.length === 1 ? '' : 's'} (and their topics) in this book. Other books on this subject are untouched. This cannot be undone.`,
+      { title: 'Delete book?', confirmText: 'Delete', destructive: true }
+    )
+    if (!ok) return
     setError('')
     setSuccess('')
     try {
@@ -1190,7 +1202,8 @@ export default function PlatformCurriculum() {
   }
 
   const handleDeleteSubject = async (id: number, name: string) => {
-    if (!confirm(`Are you absolutely sure you want to delete the Master Subject "${name}"?\nThis will cascade and delete all Chapters, Topics, and Tasks in this master template.`)) return
+    const ok = await confirm(`Are you absolutely sure you want to delete the Master Subject "${name}"?\nThis will cascade and delete all Chapters, Topics, and Tasks in this master template.`, { title: 'Delete Master Subject?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     setError('')
     setSuccess('')
     try {
@@ -1214,7 +1227,8 @@ export default function PlatformCurriculum() {
   const handleBulkDeleteSubjects = async () => {
     const ids = Array.from(selectedSubjectIds)
     if (ids.length === 0) return
-    if (!confirm(`Delete ${ids.length} selected subject${ids.length === 1 ? '' : 's'}?\nThis will cascade and delete all their Chapters, Topics, and Tasks.`)) return
+    const ok = await confirm(`Delete ${ids.length} selected subject${ids.length === 1 ? '' : 's'}?\nThis will cascade and delete all their Chapters, Topics, and Tasks.`, { title: 'Delete selected subjects?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     setError('')
     setSuccess('')
     setBulkDeleting(true)
@@ -1281,6 +1295,7 @@ export default function PlatformCurriculum() {
 
   return (
     <div className="min-h-screen font-sans" style={{ background: CREAM, color: INK }}>
+      {ConfirmDialog}
       {/* Top Header */}
       <div className="bg-white border-b sticky top-0 z-20 shadow-sm" style={{ borderColor: BORDER }}>
         <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
@@ -1361,11 +1376,13 @@ export default function PlatformCurriculum() {
               <p className="text-xs text-gray-400 font-semibold">Scanning catalog for gaps…</p>
             </div>
           ) : emptySubjects.length === 0 && emptyChapters.length === 0 ? (
-            <div className="bg-white border border-dashed rounded-3xl py-24 text-center" style={{ borderColor: BORDER }}>
-              <CheckCircle2 size={28} className="mx-auto mb-3" style={{ color: GREEN }} />
-              <h3 className="text-base font-semibold mb-1" style={{ color: INK }}>No gaps found</h3>
-              <p className="text-xs text-gray-500 max-w-sm mx-auto">Every subject has at least one chapter, and every chapter has at least one topic.</p>
-            </div>
+            <EmptyState
+              icon={CheckCircle2}
+              title="No gaps found"
+              description="Every subject has at least one chapter, and every chapter has at least one topic."
+              className="rounded-3xl border-dashed bg-white py-24"
+              style={{ borderColor: BORDER }}
+            />
           ) : (
             <div className="space-y-6">
               {emptySubjects.length > 0 && (
@@ -1669,9 +1686,12 @@ export default function PlatformCurriculum() {
                     Current Attachments ({editingTopic.resources.length})
                   </h4>
                   {editingTopic.resources.length === 0 ? (
-                    <div className="border border-dashed rounded-2xl py-12 text-center" style={{ borderColor: BORDER }}>
-                      <p className="text-xs text-gray-400 font-medium">No media items attached yet</p>
-                    </div>
+                    <EmptyState
+                      icon={ImageOff}
+                      title="No media items attached yet"
+                      className="rounded-2xl border-dashed py-12"
+                      style={{ borderColor: BORDER }}
+                    />
                   ) : (
                     <div className="space-y-2">
                       {editingTopic.resources.map((res, rIdx) => (
@@ -2224,10 +2244,15 @@ export default function PlatformCurriculum() {
                     <p className="text-xs text-gray-400 font-medium">Loading syllabus template…</p>
                   </div>
                 ) : chapters.length === 0 ? (
-                  <div className="bg-white border border-dashed rounded-3xl py-16 text-center" style={{ borderColor: BORDER }}>
-                    <p className="text-xs text-gray-400 mb-3">No chapters yet — add one, or bulk-import above.</p>
-                    <button onClick={() => setShowChapterModal(true)} className="text-xs font-bold hover:underline" style={{ color: PURPLE }}>+ Add first chapter</button>
-                  </div>
+                  <EmptyState
+                    icon={BookOpen}
+                    title="No chapters yet — add one, or bulk-import above."
+                    className="rounded-3xl border-dashed bg-white py-16"
+                    style={{ borderColor: BORDER }}
+                    action={
+                      <button onClick={() => setShowChapterModal(true)} className="text-xs font-bold hover:underline" style={{ color: PURPLE }}>+ Add first chapter</button>
+                    }
+                  />
                 ) : (
                   <div className="space-y-6">
                     {semesterGroups.map(group => (

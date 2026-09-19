@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { calcGrade } from '@/lib/examGrading'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -124,7 +125,7 @@ export default function ExportCenter({ schoolId }: { schoolId: number }) {
     try {
       const url = `/api/export/attendance?school_id=${schoolId}&class_id=${attClass}&from=${attFrom}&to=${attTo}`
       const r = await fetch(url)
-      if (!r.ok) { alert('Export failed'); return }
+      if (!r.ok) { toast.error('Export failed'); return }
       const blob = await r.blob()
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
@@ -143,7 +144,7 @@ export default function ExportCenter({ schoolId }: { schoolId: number }) {
     try {
       const url = `/api/export/marks?school_id=${schoolId}&exam_id=${marksExam}`
       const r = await fetch(url)
-      if (!r.ok) { alert('Export failed'); return }
+      if (!r.ok) { toast.error('Export failed'); return }
       const blob = await r.blob()
       const examLabel = exams.find(e => String(e.id) === marksExam)?.exam_name ?? 'marks'
       const a = document.createElement('a')
