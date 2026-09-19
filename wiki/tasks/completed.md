@@ -18,6 +18,12 @@ All finished features and bug fixes. Most recent first.
 
 ---
 
+### 2026-09-18 — OpenAPI spec covers every API route (#131)
+**Type:** Enhancement
+**Portal:** Platform Admin / Infrastructure
+**Summary:** Regenerated `DOCS/openapi.json` for all 247 routes (362 operations) with auth, parameters and bodies; fixed the `/api/openapi` path bug. `/api-docs` now uses Scalar with 9 sections, 43 subcategories and who-can-call badges, and is public with no sign-in.
+**PR:** #132
+
 ### 2026-07-01 — Database backup & restore to Cloudflare R2 (#NN)
 **Type:** Feature
 **Portal:** Platform Admin / Infrastructure

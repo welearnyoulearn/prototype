@@ -16,6 +16,12 @@ Current bugs and workarounds for the WLYL School prototype.
 
 ## Active Issues
 
+### [#131] 75 API operations have no session check
+- **Severity:** High
+- **Detail:** The OpenAPI spec marks 75 of 362 operations as public. Some are intentional (sign-in, password reset, public feedback form, health, the spec itself). Others expose student data or allow writes without a login, for example attendance analytics, per-student homework submissions and rewards, the weekly test, notification writes and school calendar writes. `/api-docs` is public by product decision, so this list is visible to anyone.
+- **Workaround:** None. Search `/api-docs` for routes with the red Public badge.
+- **Status:** Needs a separate issue to triage each route. Out of scope for #131, which only documents current behaviour.
+
 ### [#116] Syllabus Translate relies on Google's undocumented Input Tools endpoint
 - **Severity:** Medium
 - **Detail:** `GET /api/transliterate` proxies `inputtools.google.com`, which has no published quota, SLA, pricing or API terms. Google can throttle or block it at any time, and on Vercel all schools share the same outbound IPs.
