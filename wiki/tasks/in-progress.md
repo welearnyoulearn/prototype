@@ -6,6 +6,17 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 
 <!-- Add new entries at the top -->
 
+### Extract Homework/Tasks out of dev into its own branch (#136)
+**Type:** Refactor / Extraction
+**Portal:** Teacher, Student
+**Branch:** feature/136-remove-homework-tasks
+**Started:** 2026-09-20
+**Summary:** Homework/Tasks (`homework` feature key) is being pulled out of `dev` entirely and preserved on this dedicated branch for future rework, alongside 4 other features (#137-#140). This branch is the preservation snapshot (code unchanged); [EXTRACTION-136.md](../../EXTRACTION-136.md) lists exactly what a human removes from `dev`'s baseline — `lib/features.ts` entry, `tasks`/`task_submissions`/`task_reminders` tables in `lib/db.ts`, `/api/tasks/**` routes, and the Homework tab/components in `ClassView.tsx`/`StudentTasks.tsx`/`StudentDashboard.tsx`. Explicitly does not touch the similarly-named `master_tasks`/`school_tasks` curriculum-builder tables (a different feature).
+**Progress:**
+- [x] Located every file touching the `homework` feature key
+- [x] `EXTRACTION-136.md` written with file/line-level removal plan
+- [ ] Actual removal from `dev` (separate follow-up, not done on this branch)
+
 ### Teacher Syllabus — add chapters in Telugu & Hindi without an extension (#116)
 **Type:** Feature + Bug Fix
 **Portal:** Teacher
