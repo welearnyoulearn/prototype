@@ -6,7 +6,6 @@ import pool, { ensureDB } from '@/lib/db'
 // Returns:
 //   date            — today
 //   attendance      — today's school-wide attendance (% present, unmarked classes)
-//   uncovered       — uncovered periods today
 //   exams_today     — exams scheduled today
 //   exams_upcoming  — exams in next 7 days
 //   chronic_absentees — students with ≥3 absences in last 30 days
@@ -29,7 +28,6 @@ export async function GET(req: NextRequest) {
 
   const [
     attendanceData,
-    uncoveredData,
     examsTodayData,
     examsUpcomingData,
     chronicData,
@@ -53,35 +51,6 @@ export async function GET(req: NextRequest) {
       `, [sid, today])
       return rows[0]
     }, null),
-
-    // Uncovered periods today
-    safe(async () => {
-      const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()]
-      const { rows } = await pool.query(`
-        SELECT COUNT(*)::int AS count
-        FROM class_timetable ct
-        WHERE ct.school_id = $1
-          AND ct.day_of_week = $2
-          AND ct.is_break = FALSE
-          AND ct.teacher_id IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM substitute_assignments sa
-            WHERE sa.class_id = ct.class_id
-              AND sa.period_number = ct.period_number
-              AND sa.date = $3
-          )
-          AND EXISTS (
-            SELECT 1 FROM leave_requests lr
-            JOIN teachers t ON t.id = lr.teacher_id
-            WHERE lr.teacher_id = ct.teacher_id
-              AND lr.school_id = $1
-              AND lr.status = 'approved'
-              AND lr.start_date <= $3
-              AND lr.end_date >= $3
-          )
-      `, [sid, dayName, today])
-      return rows[0]
-    }, { count: 0 }),
 
     // Exams today
     safe(async () => {
@@ -177,8 +146,6 @@ export async function GET(req: NextRequest) {
   type Alert = { level: 'critical' | 'warning' | 'info'; message: string; action: string }
   const alerts: Alert[] = []
 
-  if (uncoveredData.count > 0)
-    alerts.push({ level: 'critical', message: `${uncoveredData.count} period${uncoveredData.count > 1 ? 's' : ''} uncovered today`, action: 'emergency-cover' })
   if (chronicData.count > 0)
     alerts.push({ level: 'warning', message: `${chronicData.count} chronic absentee${chronicData.count > 1 ? 's' : ''} this month`, action: 'attendance' })
   if (unmarked_classes > 0)
@@ -200,7 +167,6 @@ export async function GET(req: NextRequest) {
       unmarked_classes,
       total_classes:   attendanceData?.total_classes ?? 0,
     },
-    uncovered_periods:   uncoveredData.count,
     exams_today:         examsTodayData,
     exams_upcoming:      examsUpcomingData,
     chronic_absentees:   chronicData.count,

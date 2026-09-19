@@ -13,7 +13,6 @@ type BriefingData = {
     unmarked_classes: number
     total_classes: number
   }
-  uncovered_periods: number
   exams_today: { exam_name: string; grade: string; section: string }[]
   exams_upcoming: { exam_name: string; exam_date: string; grade: string; section: string }[]
   chronic_absentees: number
@@ -178,17 +177,8 @@ export default function DailyBriefing({
             </div>
 
             {/* Ops quick-stats */}
-            <div className="col-span-2 grid grid-cols-2 gap-4">
+            <div className="col-span-2 grid grid-cols-1 gap-4">
               {[
-                {
-                  label: 'Uncovered Periods',
-                  value: data.uncovered_periods,
-                  icon: '🚨',
-                  action: 'emergency-cover',
-                  urgent: data.uncovered_periods > 0,
-                  color: data.uncovered_periods > 0 ? 'border-red-200 bg-red-50' : 'border-gray-100 bg-white',
-                  valueColor: data.uncovered_periods > 0 ? 'text-red-600' : 'text-gray-400',
-                },
                 {
                   label: 'Chronic Absentees',
                   value: data.chronic_absentees,

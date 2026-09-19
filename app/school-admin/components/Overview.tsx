@@ -7,7 +7,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 type Props = { schoolId: number; onNavigate?: (key: string) => void }
 
 type Stats          = { teachers: number; students: number; classes: number }
-type UncoveredPeriod = { class_id: number; grade: string; section: string; period_number: number; subject_name: string | null; time_from: string; time_to: string; teacher_id: number; teacher_name: string; department: string; leave_request_id: number; leave_type: string }
 type AttendanceSummary = { class_id: number; grade: string; section: string; morning_present: number; morning_absent: number; morning_total: number; morning_marked: boolean }
 type HealthTimetable   = { class_id: number; timetable_exists: boolean; conflict_count: number; no_teacher_count: number; subjects_unassigned: number }
 type ExamRow           = { id: number; exam_name: string; exam_date: string; exam_type: string; grade: string; section: string }
@@ -51,13 +50,11 @@ function StatCardSkeleton() {
 export default function Overview({ schoolId, onNavigate }: Props) {
   // Feature flags — only fetch/render what this plan allows
   const hasAttendance     = useFeature('attendance')
-  const hasCover          = useFeature('emergency-cover')
   const hasTimetable      = useFeature('timetable')
   const hasExams          = useFeature('exam-marks')
   const hasFeeManagement  = useFeature('fee-management')
 
   const [stats, setStats]                     = useState<Stats>({ teachers: 0, students: 0, classes: 0 })
-  const [uncovered, setUncovered]             = useState<UncoveredPeriod[]>([])
   const [attendance, setAttendance]           = useState<AttendanceSummary[]>([])
   const [timetableHealth, setTimetableHealth] = useState<HealthTimetable[]>([])
   const [upcomingExams, setUpcomingExams]     = useState<ExamRow[]>([])
@@ -73,7 +70,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
 
     // Build features list for batched API — only request what's enabled
     const featuresList = [
-      hasCover       && 'cover',
       hasAttendance  && 'attendance',
       hasTimetable   && 'timetable',
       hasExams       && 'exams',
@@ -95,7 +91,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
       })
 
       // Feature-gated
-      if (d.uncovered  !== null) setUncovered(Array.isArray(d.uncovered) ? d.uncovered : [])
       if (d.attendance !== null) setAttendance(Array.isArray(d.attendance) ? d.attendance : [])
       if (d.timetable  !== null) setTimetableHealth(Array.isArray(d.timetable) ? d.timetable : [])
       if (d.exams      !== null) setUpcomingExams(Array.isArray(d.exams) ? d.exams : [])
@@ -106,7 +101,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [schoolId, hasAttendance, hasCover, hasTimetable, hasExams, hasFeeManagement])
+  }, [schoolId, hasAttendance, hasTimetable, hasExams, hasFeeManagement])
 
   // Fetch current academic year once, then load overview with it
   useEffect(() => {
@@ -134,13 +129,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
   const ttNoTimetable = timetableHealth.filter(h => !h.timetable_exists).length
   const ttHealthy    = timetableHealth.filter(h => h.timetable_exists && h.conflict_count === 0 && h.no_teacher_count === 0).length
 
-  const uncByTeacher = new Map<number, { name: string; leave_type: string; periods: UncoveredPeriod[] }>()
-  for (const p of uncovered) {
-    if (!uncByTeacher.has(p.teacher_id)) uncByTeacher.set(p.teacher_id, { name: p.teacher_name, leave_type: p.leave_type, periods: [] })
-    uncByTeacher.get(p.teacher_id)!.periods.push(p)
-  }
-
-  const alertCount = uncovered.length + ttConflicts + attNotMarked + (hasFeeManagement && feeOverdue > 0 ? 1 : 0)
+  const alertCount = ttConflicts + attNotMarked + (hasFeeManagement && feeOverdue > 0 ? 1 : 0)
 
   // Count cards (shown at bottom)
   const countCards = [
@@ -191,21 +180,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
       {/* ── Alert strip (feature-gated) ── */}
       {!loading && (
         <div className="space-y-2">
-          {hasCover && uncovered.length > 0 && (
-            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <span className="w-7 h-7 rounded-full bg-red-100 text-red-600 flex items-center justify-center text-sm font-bold flex-shrink-0">!</span>
-                <div>
-                  <p className="text-sm font-semibold text-red-800">{uncovered.length} uncovered period{uncovered.length > 1 ? 's' : ''} today</p>
-                  <p className="text-xs text-red-500">{uncByTeacher.size} teacher{uncByTeacher.size > 1 ? 's' : ''} absent without substitute</p>
-                </div>
-              </div>
-              <button onClick={() => onNavigate?.('emergency-cover')}
-                className="text-xs font-semibold text-red-600 hover:text-red-800 border border-red-200 hover:border-red-400 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0">
-                Assign Cover →
-              </button>
-            </div>
-          )}
           {hasTimetable && ttConflicts > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
@@ -396,41 +370,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
               )}
             </div>
           )}
-        </div>
-      )}
-
-      {/* ── Uncovered periods detail ── */}
-      {!loading && hasCover && uncovered.length > 0 && (
-        <div className="bg-white rounded-2xl border border-red-200 overflow-hidden">
-          <div className="px-5 py-3 bg-red-50 border-b border-red-100 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-red-500" />
-            <p className="text-sm font-bold text-red-800">Uncovered Periods — {todayLabel}</p>
-          </div>
-          <div className="px-5 py-4 space-y-3">
-            {Array.from(uncByTeacher.values()).map(({ name, leave_type, periods }) => (
-              <div key={name} className="flex items-start gap-3">
-                <div className="w-7 h-7 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <span className="text-red-700 font-bold text-xs">{name.charAt(0)}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-semibold text-gray-800">{name}</p>
-                    <span className="text-[10px] bg-red-100 text-red-600 border border-red-200 px-2 py-0.5 rounded-full">{leave_type}</span>
-                  </div>
-                  <div className="flex gap-2 flex-wrap mt-1.5">
-                    {periods.map((p, i) => (
-                      <span key={i} className="flex items-center gap-1 bg-red-50 border border-red-100 rounded-lg px-2.5 py-1 text-xs">
-                        <span className="font-bold text-gray-700">P{p.period_number}</span>
-                        {p.subject_name && <span className="text-gray-500">{p.subject_name}</span>}
-                        <span className="text-gray-400">·</span>
-                        <span className="text-gray-600 font-medium">Cl.{p.grade}-{p.section}</span>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
       )}
 

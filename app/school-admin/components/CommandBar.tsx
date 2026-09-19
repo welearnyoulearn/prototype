@@ -37,7 +37,6 @@ const NAV_SEARCH: Result[] = [
   { type: 'nav', label: 'Announcements',    sub: 'Notice board',        nav: 'announcements' },
   { type: 'nav', label: 'Export & Reports', sub: 'Download data',       nav: 'export' },
   { type: 'nav', label: 'School Settings',  sub: 'Configuration',       nav: 'settings' },
-  { type: 'nav', label: 'Emergency Cover',  sub: 'Substitute teachers', nav: 'emergency-cover' },
 ]
 
 const TYPE_ICON: Record<string, string> = {
