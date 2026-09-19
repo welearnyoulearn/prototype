@@ -43,6 +43,19 @@ const poolConfig = (process.env.PGHOST)
 
 const pool = new Pool(poolConfig)
 
+// Every session-timezone-dependent SQL function (CURRENT_DATE, NOW(), the
+// overdue-status flips in fees/ledger/stats routes, "days until year end",
+// etc.) otherwise resolves in Postgres's server default — UTC on Supabase —
+// while this app's schools operate in IST (UTC+5:30). Between 00:00-05:29 IST
+// that's still "yesterday" in UTC, so a bill due today could show as not-yet-
+// overdue, or a year-end date comparison could be a full day off, for that
+// ~5.5-hour window every single day. This project has already been bitten by
+// the DATE-column half of this exact IST/UTC mismatch once (see the
+// setTypeParser comment above) — this closes the other half, at the
+// connection level, so every existing and future CURRENT_DATE/NOW() query is
+// correct without having to patch each one individually.
+pool.on('connect', client => { client.query(`SET TIME ZONE 'Asia/Kolkata'`).catch(() => {}) })
+
 export default pool
 
 // Lazy singleton — ensures bootstrap runs at most once per server process.
@@ -71,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 24
+const SCHEMA_VERSION = 28
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2987,6 +3000,152 @@ async function runIncrementalMigrations() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `).catch(() => {})
+
+  // ── Fee tables that were previously only self-healed inline in their own
+  // route files (categories/PUT, day-close, payments/cancel, structures/POST),
+  // each hit lazily via its own local `CREATE TABLE IF NOT EXISTS` with no
+  // shared source of truth. Promoted here so ensureDB() — already the single
+  // bootstrap path every other domain relies on — covers them too; the route
+  // files now call ensureDB() instead of carrying their own copy of the DDL,
+  // which closes off the drift risk of the two copies silently diverging.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_category_changelog (
+      id            SERIAL PRIMARY KEY,
+      school_id     INTEGER NOT NULL,
+      category_id   INTEGER NOT NULL,
+      field_changed TEXT    NOT NULL,
+      old_value     TEXT,
+      new_value     TEXT,
+      changed_by    TEXT    NOT NULL DEFAULT 'Admin',
+      changed_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_day_close (
+      id            SERIAL PRIMARY KEY,
+      school_id     INTEGER NOT NULL,
+      close_date    DATE    NOT NULL,
+      total_cash    NUMERIC(10,2) NOT NULL DEFAULT 0,
+      total_cheque  NUMERIC(10,2) NOT NULL DEFAULT 0,
+      total_upi     NUMERIC(10,2) NOT NULL DEFAULT 0,
+      total_online  NUMERIC(10,2) NOT NULL DEFAULT 0,
+      total_dd      NUMERIC(10,2) NOT NULL DEFAULT 0,
+      system_cash   NUMERIC(10,2) NOT NULL DEFAULT 0,
+      actual_cash   NUMERIC(10,2),
+      difference    NUMERIC(10,2),
+      receipt_from  TEXT,
+      receipt_to    TEXT,
+      txn_count     INTEGER NOT NULL DEFAULT 0,
+      submitted_by  TEXT NOT NULL,
+      submitted_at  TIMESTAMPTZ DEFAULT NOW(),
+      notes         TEXT,
+      UNIQUE(school_id, close_date)
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_payment_corrections (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL,
+      payment_id INTEGER NOT NULL,
+      ledger_id INTEGER NOT NULL,
+      student_id INTEGER NOT NULL,
+      action TEXT NOT NULL,                 -- cancel | correct
+      old_amount NUMERIC(10,2),
+      new_amount NUMERIC(10,2),
+      old_mode TEXT, new_mode TEXT,
+      reason TEXT NOT NULL,
+      done_by TEXT NOT NULL,
+      new_receipt_number TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS fee_structure_history (
+      id               SERIAL PRIMARY KEY,
+      school_id        INTEGER NOT NULL,
+      fee_structure_id INTEGER,
+      fee_category_id  INTEGER NOT NULL,
+      grade            TEXT    NOT NULL,
+      academic_year    TEXT    NOT NULL,
+      old_amount       NUMERIC(10,2),
+      new_amount       NUMERIC(10,2) NOT NULL,
+      old_due_day      INTEGER,
+      new_due_day      INTEGER NOT NULL,
+      change_type      TEXT    NOT NULL DEFAULT 'updated',
+      changed_by       TEXT    NOT NULL DEFAULT 'Admin',
+      changed_at       TIMESTAMPTZ DEFAULT NOW()
+    )
+  `).catch(() => {})
+
+  // fee_payments.ledger_id is joined/filtered in nearly every fee route
+  // (payments GET, audit-log, day-close, export, passbook, passout,
+  // payments/cancel, payments/verify) via `JOIN student_fee_ledger l ON
+  // l.id = fp.ledger_id` or `WHERE ledger_id = $1` — never had its own index
+  // despite fee_payments growing without bound (one row per payment, forever).
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_fee_payments_ledger ON fee_payments(ledger_id)
+  `).catch(() => {})
+
+  // ── One-time backfill: year-end write-offs mislabeled as waiver_type='full' ──
+  //
+  // What happened: before this fix, a year-end "write off this debt" decision
+  // (an admin giving up on collecting from a student who left/graduated
+  // without paying) was recorded with the SAME waiver_type ('full') as a
+  // genuine discretionary fee waiver granted to a student — e.g. a scholarship
+  // or hardship reduction. Because every "Waived" figure in the app (Overview,
+  // Reports, Stats, Passbook, Archive, the downloadable Audit Report) excludes
+  // only 'carry_forward' bookkeeping entries and treats everything else as a
+  // real discretionary waiver, every year-end write-off was silently counted
+  // as if the school had chosen to reduce that student's fee — inflating
+  // "Waived" and understating "Net Demand" on every closed year's records.
+  //
+  // The fix (see app/api/fees/year-end/route.ts): write-offs now get their own
+  // waiver_type, 'writeoff', which every "Waived" total already excludes
+  // alongside 'carry_forward'. This statement retags PAST write-off rows so
+  // already-closed years' reports become correct too, not just future ones.
+  //
+  // How a past write-off is identified: a fee_waivers row with waiver_type =
+  // 'full' whose reason matches the exact auto-generated text the year-end
+  // route wrote when the admin didn't type a custom reason — 'Year-end
+  // write-off <academic year>' (e.g. "Year-end write-off 2026-27"). This only
+  // catches write-offs that used that default reason. A write-off where the
+  // admin typed their own custom reason instead looks identical, in the
+  // data, to a genuine discretionary waiver with an unusual reason — there is
+  // no reliable signal to tell those apart after the fact, so this backfill
+  // deliberately leaves them as 'full' rather than guessing. Safe to re-run:
+  // once retagged to 'writeoff', a row no longer matches waiver_type='full'
+  // and this UPDATE will not touch it again.
+  await pool.query(`
+    UPDATE fee_waivers
+    SET waiver_type = 'writeoff'
+    WHERE waiver_type = 'full'
+      AND reason LIKE 'Year-end write-off %'
+  `).catch(() => {})
+
+  // ── Idempotency keys — see lib/idempotency.ts ───────────────────────────────
+  // Backs the payments/waivers duplicate-submission guard: a network timeout +
+  // client retry (or an impatient double-click) previously had no protection
+  // beyond "does the balance still have room for this amount" — which happily
+  // admits a genuine duplicate when it does. UNIQUE(school_id, idempotency_key,
+  // endpoint) is the actual lock: a second request claiming the same key blocks
+  // on this row until the first transaction commits or rolls back, then either
+  // replays the first one's stored response or (if it rolled back) proceeds
+  // itself — see claimIdempotencyKey()'s comment for the full mechanism.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS idempotency_keys (
+      id              SERIAL PRIMARY KEY,
+      school_id       INTEGER NOT NULL,
+      idempotency_key TEXT    NOT NULL,
+      endpoint        TEXT    NOT NULL,
+      response_status INTEGER,
+      response_body   JSONB,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(school_id, idempotency_key, endpoint)
+    )
+  `).catch(() => {})
+  // Rows only need to live long enough to catch a retry (seconds to minutes,
+  // realistically) — nothing prunes this table yet. Fine at this scale; revisit
+  // with a created_at-based cleanup if it ever becomes a real row-count concern.
 
   // ── Class Circle birthdays ───────────────────────────────────────────────
   // date_of_birth is optional and never backfilled — existing records are

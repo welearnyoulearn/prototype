@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
+import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
 
 // GET /api/fees/waivers?school_id=X&student_id=Y
 async function handleGET(req: NextRequest) {
@@ -46,7 +47,7 @@ export const GET = withWatchline(handleGET, { route: '/api/fees/waivers' })
 async function handlePOST(req: NextRequest) {
   try {
     // Validate before acquiring pool connection
-    const { school_id, student_id, ledger_id, waiver_type, waiver_value, reason, granted_by_name: clientActor } = await req.json()
+    const { school_id, student_id, ledger_id, waiver_type, waiver_value, reason, granted_by_name: clientActor, idempotency_key } = await req.json()
     const access = await requireFeeAccess(school_id)
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     const granted_by_name = clientActor || access.actor
@@ -67,6 +68,16 @@ async function handlePOST(req: NextRequest) {
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
+
+      // Duplicate-submission guard — see lib/idempotency.ts. Without this, a
+      // network timeout + retry (or a double-click) on this exact form could
+      // grant the same discretionary waiver twice — the checks below only ever
+      // reject a retry once the remaining balance has shrunk to 0, not before.
+      const claim = await claimIdempotencyKey(client, { schoolId: school_id, key: idempotency_key, endpoint: '/api/fees/waivers' })
+      if (!claim.proceed) {
+        await client.query('ROLLBACK')
+        return NextResponse.json(claim.body as object, { status: claim.status })
+      }
 
       // #15/#16 — FOR UPDATE locks the row so a concurrent payment can't race with this waiver
       const { rows: [ledger] } = await client.query(
@@ -91,17 +102,35 @@ async function handlePOST(req: NextRequest) {
 
       // Calculate waiver amount — always on remaining balance (after existing waiver), not full amount_due
       const remaining = parseFloat(ledger.amount_due) - parseFloat(ledger.waiver_amount || '0') - parseFloat(ledger.amount_paid)
+      // A non-numeric waiver_value (e.g. a UI bug sending "20%" instead of 20)
+      // must not reach the arithmetic below — `"20%" || 0` is truthy, and
+      // Math.round(remaining * NaN) silently produces NaN, which Postgres
+      // numeric accepts as the literal 'NaN' and poisons every downstream
+      // balance for this bill. Parse and validate before use, for both
+      // 'percentage' and 'fixed_amount' (waiver_value is unused for 'full').
       let waiver_amount = 0
       if (waiver_type === 'full') {
         waiver_amount = remaining
-      } else if (waiver_type === 'percentage') {
-        // BUG 7 fix: apply percentage to remaining balance, not full amount_due
-        waiver_amount = Math.round(remaining * (waiver_value || 0)) / 100
-      } else if (waiver_type === 'fixed_amount') {
-        // BUG 8 fix: cap fixed waiver at remaining balance
-        waiver_amount = Math.min(waiver_value || 0, remaining)
+      } else {
+        const numericValue = Number(waiver_value)
+        if (waiver_value !== undefined && waiver_value !== null && !Number.isFinite(numericValue)) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'waiver_value must be a number' }, { status: 400 })
+        }
+        const value = Number.isFinite(numericValue) ? numericValue : 0
+        if (waiver_type === 'percentage') {
+          // BUG 7 fix: apply percentage to remaining balance, not full amount_due.
+          // Capped at remaining, same as fixed_amount below — a value over 100
+          // (e.g. 150 typed instead of 15) would otherwise waive more than the
+          // bill's remaining balance, the exact "impossible state" the
+          // structures/amend overpay guard exists to prevent elsewhere.
+          waiver_amount = Math.min(Math.round(remaining * value) / 100, remaining)
+        } else if (waiver_type === 'fixed_amount') {
+          // BUG 8 fix: cap fixed waiver at remaining balance
+          waiver_amount = Math.min(value, remaining)
+        }
       }
-      if (waiver_amount <= 0) {
+      if (!(waiver_amount > 0)) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'Nothing to waive — ledger entry is already fully paid' }, { status: 400 })
       }
@@ -126,6 +155,7 @@ async function handlePOST(req: NextRequest) {
         [waiver_amount, ledger_id]
       )
 
+      await saveIdempotentResponse(client, { schoolId: school_id, key: idempotency_key, endpoint: '/api/fees/waivers', status: 201, body: waiver })
       await client.query('COMMIT')
       return NextResponse.json(waiver, { status: 201 })
     } catch (e) {
@@ -179,13 +209,25 @@ async function handlePATCH(req: NextRequest) {
 
       // Validate: new waiver + existing payments must not exceed amount_due
       const { rows: [lgCheck] } = await client.query(
-        `SELECT amount_due, amount_paid FROM student_fee_ledger WHERE id = $1 FOR UPDATE`, [w0.ledger_id]
+        `SELECT amount_due, amount_paid, academic_year FROM student_fee_ledger WHERE id = $1 FOR UPDATE`, [w0.ledger_id]
       )
       if (parseFloat(lgCheck.amount_paid) + newAmt > parseFloat(lgCheck.amount_due) + 0.01) {
         await client.query('ROLLBACK')
         return NextResponse.json({
           error: `Waiver ₹${newAmt} + already paid ₹${lgCheck.amount_paid} exceeds bill ₹${lgCheck.amount_due}`
         }, { status: 400 })
+      }
+
+      // Block correcting a waiver on a closed year — same guard as every other
+      // mutating fee route.
+      const { rows: [closedYear] } = await client.query(
+        `SELECT 1 FROM fee_year_close
+         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
+        [w0.school_id, lgCheck.academic_year]
+      )
+      if (closedYear) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to correct waivers.' }, { status: 409 })
       }
 
       // Soft-revoke old waiver
@@ -250,7 +292,12 @@ async function handleDELETE(req: NextRequest) {
 
     const client = await pool.connect()
     try {
-      const { rows: [w0] } = await client.query(`SELECT school_id, waiver_type FROM fee_waivers WHERE id = $1`, [id])
+      const { rows: [w0] } = await client.query(
+        `SELECT w.school_id, w.waiver_type, w.ledger_id, l.academic_year
+         FROM fee_waivers w JOIN student_fee_ledger l ON l.id = w.ledger_id
+         WHERE w.id = $1`,
+        [id]
+      )
       if (!w0) return NextResponse.json({ error: 'Waiver not found' }, { status: 404 })
       const access = await requireFeeAccess(w0.school_id)
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -264,6 +311,19 @@ async function handleDELETE(req: NextRequest) {
         return NextResponse.json({
           error: 'This waiver was created automatically during year-end closure and cannot be revoked here. Reopen the academic year to undo the closure instead.',
         }, { status: 409 })
+      }
+
+      // Block revoking a waiver on a closed year — same guard as every other
+      // mutating fee route (payments, waivers POST, structures/amend, etc.).
+      // Missing here previously let a closed year's ledger balance be silently
+      // rewritten (waiver reversed, status recalculated) with no reopen step.
+      const { rows: [closedYear] } = await client.query(
+        `SELECT 1 FROM fee_year_close
+         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
+        [w0.school_id, w0.academic_year]
+      )
+      if (closedYear) {
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to revoke waivers.' }, { status: 409 })
       }
 
       await client.query('BEGIN')
@@ -280,6 +340,14 @@ async function handleDELETE(req: NextRequest) {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'Waiver not found or already revoked' }, { status: 404 })
       }
+
+      // Lock the ledger row before re-deriving amounts from it — unlike every
+      // other ledger-mutating handler in this file (waivers POST, PATCH), this
+      // one writes amount_paid/waiver_amount back as absolute values computed
+      // from fresh SUMs below. Without a lock, a concurrent payment or waiver
+      // committed between those SUMs and this handler's own UPDATE would be
+      // silently overwritten by the stale absolute values computed here.
+      await client.query(`SELECT 1 FROM student_fee_ledger WHERE id = $1 FOR UPDATE`, [waiver.ledger_id])
 
       // Reverse waiver from ledger — recalculate status correctly
       // Sum actual confirmed payments (real cash only, not waivers)

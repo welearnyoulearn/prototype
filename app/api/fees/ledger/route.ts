@@ -68,14 +68,6 @@ async function handleGET(req: NextRequest) {
         )
       }
 
-      // Check whether the audit table exists (created by migration)
-      const { rows: [tableCheck] } = await pool.query(
-        `SELECT to_regclass('student_fee_ledger_edits') IS NOT NULL AS exists`
-      )
-      const hasEditsCol = tableCheck.exists
-        ? `EXISTS(SELECT 1 FROM student_fee_ledger_edits e WHERE e.ledger_id = l.id) AS has_edits`
-        : `FALSE AS has_edits`
-
       const where = `WHERE ${conditions.join(' AND ')}`
       // Both JOINs are on primary keys (students.id, fee_categories.id), so they
       // filter but never multiply rows — the count below reuses the exact same
@@ -110,13 +102,8 @@ async function handleGET(req: NextRequest) {
            s.email, s.phone, s.parent_name, s.parent_phone, s.parent_email,
            COALESCE(s.status, 'active') AS student_status,
            fc.name AS category_name, fc.frequency,
-           COALESCE(
-             (SELECT SUM(fp.amount) FROM fee_payments fp WHERE fp.ledger_id = l.id AND fp.payment_status = 'completed'),
-             0
-           ) AS total_paid_confirmed,
            GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS balance,
-           (CURRENT_DATE - l.due_date) AS days_overdue,
-           ${hasEditsCol}
+           (CURRENT_DATE - l.due_date) AS days_overdue
          ${from}
          ${where}
          ORDER BY l.due_date, ${gradeOrderSql('s.grade')}, s.section, s.school_roll_number NULLS LAST, s.name, l.id
