@@ -286,8 +286,7 @@ function SchoolAdmin() {
   const [tier, setTier] = useState<Tier>('none')
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
   const initialTab = searchParams.get('tab') || 'overview'
-  // In-app Back/Forward for the sidebar nav — see NavBackForward beside the
-  // Home link in the topbar below.
+  // In-app Back/Forward for the sidebar nav — see NavBackForward in the header below.
   const { current: activeNav, navigate: setActiveNav, goBack: navGoBack, goForward: navGoForward, canGoBack: navCanGoBack, canGoForward: navCanGoForward } = useNavHistory(initialTab)
   const [visited, setVisited] = useState<Set<string>>(new Set([initialTab]))
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -458,6 +457,7 @@ function SchoolAdmin() {
         </div>
 
         <div className="flex items-center gap-3">
+          <NavBackForward canGoBack={navCanGoBack} canGoForward={navCanGoForward} onBack={navGoBack} onForward={navGoForward} />
           {tier !== 'none' && (
             <span className={`hidden sm:inline-flex text-xs font-medium px-2.5 py-1 rounded-full capitalize ${
               tier === 'basic' ? 'bg-green-100 text-green-700' :

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { motion } from 'framer-motion'
 import { BookOpen, Check, Lock } from 'lucide-react'
 import TopicContentViewer from '@/app/components/TopicContentViewer'
 import { INK, GREEN, BORDER, SURFACE, CREAM } from '@/app/components/ulearn/theme'
@@ -159,18 +160,29 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
         />
       )}
 
-      <UlearnCard className="p-4 flex items-center justify-between gap-4" borderColor={BORDER}>
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium mb-1.5 truncate" style={{ color: INK }}>
-            {subject.subject} &middot; {subject.covered}/{subject.total} topics taught
+      <motion.div key={subject.subject} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+        <UlearnCard className="p-4 flex items-center justify-between gap-4" borderColor={BORDER}>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium mb-1.5 truncate" style={{ color: INK }}>
+              {subject.subject} &middot; {subject.covered}/{subject.total} topics taught
+            </div>
+            <ProgressBar pct={subject.completion_pct} color={GREEN} className="w-full" />
           </div>
-          <ProgressBar pct={subject.completion_pct} color={GREEN} className="w-full" />
-        </div>
-        <div className="text-right shrink-0">
-          <div className="text-2xl font-semibold" style={{ color: INK }}>{subject.completion_pct}%</div>
-          <div className="text-xs text-gray-400">covered</div>
-        </div>
-      </UlearnCard>
+          <div className="text-right shrink-0">
+            <motion.div
+              key={subject.completion_pct}
+              initial={{ scale: 0.85, opacity: 0.5 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+              className="text-2xl font-semibold"
+              style={{ color: INK }}
+            >
+              {subject.completion_pct}%
+            </motion.div>
+            <div className="text-xs text-gray-400">covered</div>
+          </div>
+        </UlearnCard>
+      </motion.div>
 
       {materials.length > 0 && (
         <UlearnCard className="p-4" borderColor={BORDER}>
@@ -196,8 +208,14 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
           {group.semester && (
             <h3 className="text-xs font-bold uppercase tracking-widest px-1" style={{ color: GREEN }}>{group.semester}</h3>
           )}
-          {group.chapters.map(ch => (
-        <UlearnCard key={ch.chapter_name} className="p-4" borderColor={BORDER}>
+          {group.chapters.map((ch, i) => (
+        <motion.div
+          key={ch.chapter_name}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: Math.min(i * 0.05, 0.3), duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+        >
+        <UlearnCard className="p-4" borderColor={BORDER}>
           <div className="flex items-center gap-2 mb-3">
             <BookOpen size={16} style={{ color: GREEN }} />
             <span className="font-medium text-sm" style={{ color: INK }}>{ch.chapter_name}</span>
@@ -242,6 +260,7 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
             })}
           </div>
         </UlearnCard>
+        </motion.div>
           ))}
         </div>
       ))}

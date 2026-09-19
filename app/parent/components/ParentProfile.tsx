@@ -1,12 +1,16 @@
 'use client'
 
+import { useState } from 'react'
 import ChangePasswordCard from '@/app/components/ChangePasswordCard'
+import BirthdayField from '@/app/components/BirthdayField'
 
-type ParentInfo = { id: number; name: string; email: string; school_id: number; school_name: string }
+type ParentInfo = { id: number; name: string; email: string; school_id: number; school_name: string; date_of_birth?: string | null }
 
 type Props = { parentInfo: ParentInfo }
 
 export default function ParentProfile({ parentInfo }: Props) {
+  const [dob, setDob] = useState(parentInfo.date_of_birth ?? null)
+
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -28,6 +32,15 @@ export default function ParentProfile({ parentInfo }: Props) {
             <InfoRow label="Full Name" value={parentInfo.name} />
             <InfoRow label="Email" value={parentInfo.email || '—'} />
           </div>
+
+          <BirthdayField
+            value={dob}
+            endpoint="/api/parent/auth/date-of-birth"
+            kind="adult"
+            ring="focus:ring-pink-300"
+            accentGradient="from-pink-500 to-rose-500"
+            onSaved={setDob}
+          />
         </div>
       </div>
 

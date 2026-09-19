@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { ProgressBar } from '@/components/loaders'
+import { burstFrom } from '@/app/components/gamification/confetti'
 
 type Student = { id: number; name: string; grade: string; section: string }
 
@@ -58,6 +59,7 @@ export default function StudentTasks({ student, classId, schoolId }: Props) {
   const [submissionText, setSubmissionText] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitMsg, setSubmitMsg] = useState('')
+  const submitBtnRef = useRef<HTMLButtonElement>(null)
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadedFile, setUploadedFile] = useState<{ url: string; name: string; public_id: string; size_kb: number } | null>(null)
@@ -192,6 +194,7 @@ export default function StudentTasks({ student, classId, schoolId }: Props) {
 
     if (res.ok) {
       setSubmitMsg('Submitted successfully!')
+      burstFrom(submitBtnRef.current)
       await fetchAll()
     } else {
       const err = await res.json().catch(() => ({}))
@@ -359,6 +362,7 @@ export default function StudentTasks({ student, classId, schoolId }: Props) {
               )}
 
               <button
+                ref={submitBtnRef}
                 onClick={submitTask}
                 disabled={submitting || (!submissionText.trim() && !uploadedFile) || (!!uploadFile && uploadProgress < 100)}
                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-semibold py-2.5 rounded-lg transition-colors text-sm"

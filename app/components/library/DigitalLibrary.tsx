@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { motion } from 'framer-motion'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 
 type LibraryRow = {
@@ -33,6 +34,25 @@ const TYPE_STYLE: Record<string, string> = {
 
 function gradeLabel(grade: string) {
   return /^\d+$/.test(grade) ? `Grade ${grade}` : grade
+}
+
+// A small curated set of "book spine" colors, assigned deterministically per
+// subject name (same subject always gets the same color) — gives the grid a
+// bookshelf feel instead of a wall of identical white cards.
+const SPINE_COLORS = [
+  { bar: '#dc2626', tint: '#fef2f2' }, // red
+  { bar: '#ea580c', tint: '#fff7ed' }, // orange
+  { bar: '#ca8a04', tint: '#fefce8' }, // amber
+  { bar: '#16a34a', tint: '#f0fdf4' }, // green
+  { bar: '#0891b2', tint: '#ecfeff' }, // cyan
+  { bar: '#2563eb', tint: '#eff6ff' }, // blue
+  { bar: '#7c3aed', tint: '#f5f3ff' }, // violet
+  { bar: '#db2777', tint: '#fdf2f8' }, // pink
+]
+function spineFor(subject: string) {
+  let hash = 0
+  for (let i = 0; i < subject.length; i++) hash = (hash * 31 + subject.charCodeAt(i)) | 0
+  return SPINE_COLORS[Math.abs(hash) % SPINE_COLORS.length]
 }
 
 // WLYL Digital Library — a standalone, read-only browsing view over every
@@ -155,29 +175,43 @@ export default function DigitalLibrary({ apiUrl }: { apiUrl: string }) {
                 <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">{b}</h3>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {subjectGroups.map(g => (
-                  <div key={g.key} className="bg-white rounded-xl border border-gray-200 p-4" data-testid="library-subject-card">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="font-semibold text-gray-900 text-sm">{g.subject_name}</p>
-                      <span className="text-xs text-gray-400">{gradeLabel(g.grade)}</span>
-                    </div>
-                    <div className="space-y-1.5">
-                      {g.materials.map(m => (
-                        <a key={m.material_id} href={m.file_url} target="_blank" rel="noopener noreferrer"
-                          data-testid="library-material-link"
-                          className="flex items-center gap-2 text-sm px-2.5 py-1.5 rounded-lg hover:bg-gray-50 group">
-                          <svg className="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-                          </svg>
-                          <span className="flex-1 text-gray-700 group-hover:text-blue-700 group-hover:underline truncate">{m.title}</span>
-                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border shrink-0 ${TYPE_STYLE[m.material_type]}`}>
-                            {TYPE_LABEL[m.material_type] ?? m.material_type}
-                          </span>
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+                {subjectGroups.map((g, i) => {
+                  const spine = spineFor(g.subject_name)
+                  return (
+                    <motion.div
+                      key={g.key}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: Math.min(i * 0.04, 0.4), duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                      whileHover={{ y: -3 }}
+                      className="bg-white rounded-xl border border-gray-200 overflow-hidden transition-shadow hover:shadow-md"
+                      data-testid="library-subject-card"
+                    >
+                      <div className="h-1.5" style={{ background: spine.bar }} />
+                      <div className="p-4" style={{ background: `linear-gradient(180deg, ${spine.tint} 0%, white 60%)` }}>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="font-semibold text-gray-900 text-sm">{g.subject_name}</p>
+                          <span className="text-xs text-gray-400">{gradeLabel(g.grade)}</span>
+                        </div>
+                        <div className="space-y-1.5">
+                          {g.materials.map(m => (
+                            <a key={m.material_id} href={m.file_url} target="_blank" rel="noopener noreferrer"
+                              data-testid="library-material-link"
+                              className="flex items-center gap-2 text-sm px-2.5 py-1.5 rounded-lg hover:bg-white/70 group">
+                              <svg className="w-4 h-4 shrink-0" style={{ color: spine.bar }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                              </svg>
+                              <span className="flex-1 text-gray-700 group-hover:text-gray-900 group-hover:underline truncate">{m.title}</span>
+                              <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border shrink-0 ${TYPE_STYLE[m.material_type]}`}>
+                                {TYPE_LABEL[m.material_type] ?? m.material_type}
+                              </span>
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )
+                })}
               </div>
             </div>
           ))}

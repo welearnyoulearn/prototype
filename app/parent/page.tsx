@@ -10,6 +10,8 @@ import DigitalLibrary from '../components/library/DigitalLibrary'
 import ParentProfile from './components/ParentProfile'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { useNavHistory } from '@/lib/useNavHistory'
+import NavBackForward from '../components/NavBackForward'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 import NotificationBell from '../components/NotificationBell'
@@ -21,7 +23,7 @@ type Student = {
   roll_number: string; school_id: number; class_id: number
   parent_name: string | null; parent_phone: string | null
 }
-type ParentInfo = { id: number; name: string; email: string; school_id: number; school_name: string; children: Child[] }
+type ParentInfo = { id: number; name: string; email: string; school_id: number; school_name: string; children: Child[]; date_of_birth?: string | null }
 
 type Summary = {
   upcoming_exams: Array<{
@@ -130,7 +132,11 @@ export default function ParentDashboard() {
   const [showChildPicker, setShowChildPicker] = useState(false)
   const [student, setStudent] = useState<Student | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
-  const [activeNav, setActiveNav] = useState('overview')
+  // In-app Back/Forward for the sidebar nav — see NavBackForward in the topbar
+  // below. resetNav clears the whole stack instead of pushing onto it, used
+  // when switching between children (the previous stack's "back" targets
+  // belonged to the previous child's data).
+  const { current: activeNav, navigate: setActiveNav, reset: resetNav, goBack: navGoBack, goForward: navGoForward, canGoBack: navCanGoBack, canGoForward: navCanGoForward } = useNavHistory<string>('overview')
   const [visited, setVisited] = useState<Set<string>>(new Set(['overview']))
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string> | null>(null)
 
@@ -294,7 +300,7 @@ export default function ParentDashboard() {
     setShowChildPicker(false)
     setSummary(null); setFeeLedger([]); setFeePayments([]); setFeeWaivers([]); setFeeSummary(null)
     setTimetable([]); setAttDays([]); setAttMonthly([]); setAttSummary(null)
-    setActiveNav('overview'); setVisited(new Set(['overview']))
+    resetNav('overview'); setVisited(new Set(['overview']))
 
     await loadSummary(s)
     Promise.all([
@@ -559,6 +565,7 @@ export default function ParentDashboard() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <NavBackForward canGoBack={navCanGoBack} canGoForward={navCanGoForward} onBack={navGoBack} onForward={navGoForward} />
           {feeAcYear && (
             <span
               data-testid="academic-year-badge"

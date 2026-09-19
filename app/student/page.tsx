@@ -7,6 +7,8 @@ import { FullPageLoader } from '@/components/loaders'
 import NotificationBell from '../components/NotificationBell'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
+import { useNavHistory } from '@/lib/useNavHistory'
+import NavBackForward from '../components/NavBackForward'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 
@@ -34,11 +36,12 @@ const StudentTimetable = dynamic(() => import('./components/StudentTimetable'), 
 const StudentSyllabus  = dynamic(() => import('./components/StudentSyllabus'),  { loading: () => <ModuleSkeleton /> })
 const DigitalLibrary    = dynamic(() => import('../components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
 const StudentAiHub      = dynamic(() => import('./components/StudentAiHub'),     { loading: () => <ModuleSkeleton /> })
+const StudentClassCircle = dynamic(() => import('./components/StudentClassCircle'), { loading: () => <ModuleSkeleton /> })
 
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
   email: string | null; phone: string | null; parent_name: string | null; parent_phone: string | null
-  school_id: number; school_name: string
+  school_id: number; school_name: string; date_of_birth?: string | null
 }
 
 type NavItem    = { key: string; label: string; icon: string; comingSoon?: boolean }
@@ -59,6 +62,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { key: 'tasks',  label: 'Homework',    icon: '📝' },
       { key: 'doubts', label: 'Ask a Doubt', icon: '💬' },
+      { key: 'class-circle', label: 'Class Circle', icon: '🎈' },
     ],
   },
   {
@@ -90,7 +94,11 @@ const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
 // been unconditionally available and stays that way. 'syllabus'/'timetable'/
 // 'my-marks'/'tasks' resolve through PORTAL_NAV_KEY_ALIASES to their real
 // ALL_FEATURES keys ('curriculum'/'timetable'/'exam-marks'/'homework').
-const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'timetable', 'my-marks', 'tasks', 'doubts'])
+// 'attendance' has no dedicated nav item — it only gates the Dashboard's
+// engagement-score ring (which blends attendance % with task %), so
+// isNavItemVisible('attendance') is read directly by StudentDashboard, not
+// used for a sidebar entry.
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'timetable', 'my-marks', 'tasks', 'doubts', 'attendance'])
 
 const BOTTOM_NAV = [
   { key: 'dashboard', label: 'Home',    emoji: '🏠' },
@@ -105,7 +113,8 @@ export default function StudentPortal() {
   const [student,     setStudent]     = useState<Student | null>(null)
   const [classId,     setClassId]     = useState(0)
   const [academicYear, setAcademicYear] = useState('')
-  const [activeNav,   setActiveNav]   = useState('dashboard')
+  // In-app Back/Forward for the sidebar nav — see NavBackForward in the topbar below.
+  const { current: activeNav, navigate: setActiveNav, goBack: navGoBack, goForward: navGoForward, canGoBack: navCanGoBack, canGoForward: navCanGoForward } = useNavHistory<string>('dashboard')
   const [visitedNav,  setVisitedNav]  = useState<Set<string>>(new Set(['dashboard']))
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [loading,     setLoading]     = useState(true)
@@ -241,6 +250,7 @@ export default function StudentPortal() {
         </div>
 
         <div className="flex items-center gap-2">
+          <NavBackForward canGoBack={navCanGoBack} canGoForward={navCanGoForward} onBack={navGoBack} onForward={navGoForward} />
           {academicYear && (
             <span
               data-testid="academic-year-badge"
@@ -353,6 +363,7 @@ export default function StudentPortal() {
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} isNavItemVisible={isNavItemVisible} /></div>}
             {visitedNav.has('tasks')       && <div hidden={activeNav !== 'tasks'}><StudentTasks student={student} classId={classId} schoolId={student.school_id} /></div>}
             {visitedNav.has('doubts')      && <div hidden={activeNav !== 'doubts'}><StudentDoubts student={student} classId={classId} schoolId={student.school_id} /></div>}
+            {visitedNav.has('class-circle') && <div hidden={activeNav !== 'class-circle'}><StudentClassCircle /></div>}
             {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={student.school_id} classId={classId} /></div>}
             {visitedNav.has('timetable')   && <div hidden={activeNav !== 'timetable'}><StudentTimetable classId={classId} schoolId={student.school_id} grade={student.grade} section={student.section} /></div>}
             {visitedNav.has('syllabus') && isNavItemVisible('syllabus') && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={student.school_id} classId={classId} grade={student.grade} /></div>}

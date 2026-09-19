@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
-import { getSession } from '@/lib/auth'
+import { getSession, getPlatformSession } from '@/lib/auth'
 import pool from '@/lib/db'
 
 export async function GET() {
   try {
-    const session = await getSession()
+    // School-side cookie first, then Platform Admin's own cookie — the two are
+    // separate (see lib/auth.ts) so a Platform Admin session is otherwise invisible here.
+    const session = (await getSession()) ?? (await getPlatformSession())
     if (!session) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
 
     const result = await pool.query(

@@ -11,6 +11,17 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 **Consequences:** What trade-offs come with this decision?
 -->
 
+## 2026-09-12 — Syllabus "Translate" uses transliteration via a server-side proxy (#116)
+
+**Context:** Telugu and Hindi teachers could not enter chapter names in their language without installing Google Input Tools or changing keyboards. We want an in-app option.
+
+**Decision:** Sound-based transliteration, not meaning translation: the teacher types "amma prema" and gets అమ్మ ప్రేమ, with alternative spellings to pick. Textbook titles must match exactly, which meaning translation would reword. The browser calls our own staff-only `GET /api/transliterate`, which proxies Google's public Input Tools endpoint (no API key).
+
+**Alternatives considered:** Google Cloud Translation (meaning-based, $20/1M chars, no Latin→Telugu transliteration); Google's free `translate.googleapis.com` (blocked our requests); Groq AI via `lib/gemini.ts` (needs `GROQ_API_KEY`, not configured for this release, weaker on Telugu); client-side libraries like Sanscript (need strict ITRANS spelling teachers won't know); Chrome's built-in Translator API (desktop Chrome only, meaning-based).
+
+**Consequences:** Zero cost and good quality today, but the upstream is undocumented with no SLA (tracked in KNOWN_ISSUES). The proxy route is the seam: swapping to Azure Translator Transliterate later changes only the route, not the UI.
+
+
 ## 2026-07-01 — Data-only backup to R2 + gap-fill-only restore
 
 **Context:** We need protection against accidental data loss (deleted rows) without introducing a way to clobber good data. Vercel serverless cannot run `pg_dump`/`pg_restore` binaries.
