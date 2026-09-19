@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 type Teacher = { id: number; name: string; subject: string }
 
@@ -102,6 +103,7 @@ export default function DoubtsCenter({ teacher, schoolId }: Props) {
   const [togglingFaq, setTogglingFaq] = useState(false)
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const { confirm, ConfirmDialog } = useConfirm()
 
   const fetchDoubts = useCallback(async () => {
     const data = await fetch(`/api/doubts?school_id=${schoolId}&teacher_id=${teacher.id}`)
@@ -174,7 +176,8 @@ export default function DoubtsCenter({ teacher, schoolId }: Props) {
 
   async function closeAsAnswered() {
     if (!selected) return
-    if (!confirm('Mark this doubt as answered and close it? The student will be notified and can re-open if still confused.')) return
+    const ok = await confirm('Mark this doubt as answered and close it? The student will be notified and can re-open if still confused.', { title: 'Close this doubt?', confirmText: 'Close as Answered' })
+    if (!ok) return
     setClosing(true)
     const res = await fetch(`/api/doubts/${selected.id}/messages`, {
       method: 'PATCH',
@@ -261,6 +264,7 @@ export default function DoubtsCenter({ teacher, schoolId }: Props) {
 
     return (
       <div className="flex flex-col h-full max-h-[calc(100vh-7rem)]">
+        {ConfirmDialog}
         {/* Chat header */}
         <div className="bg-white rounded-xl border border-gray-200 p-4 mb-3 flex items-center gap-4">
           <button onClick={() => setSelected(null)}

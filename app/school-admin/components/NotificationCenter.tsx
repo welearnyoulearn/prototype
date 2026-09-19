@@ -1,6 +1,11 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { Bell } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { EmptyState } from '@/components/ui/empty-state'
 
 type Notification = {
   id: number
@@ -108,37 +113,36 @@ export default function NotificationCenter({ schoolId }: { schoolId: number }) {
         </div>
         <div className="flex gap-2">
           {unreadCount > 0 && (
-            <button onClick={markAllRead} disabled={markingAll}
-              className="px-3 py-1.5 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50">
+            <Button onClick={markAllRead} disabled={markingAll} variant="outline" size="sm" className="text-gray-600">
               {markingAll ? 'Marking…' : `Mark all read (${unreadCount})`}
-            </button>
+            </Button>
           )}
-          <button onClick={load}
-            className="px-3 py-1.5 border border-gray-200 text-gray-500 text-sm rounded-lg hover:bg-gray-50 transition-colors">
+          <Button onClick={load} variant="outline" size="sm" className="text-gray-500">
             ↻ Refresh
-          </button>
+          </Button>
         </div>
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
-        <button onClick={() => setFilter('all')}
-          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${filter === 'all' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-          All <span className="ml-1 text-xs text-gray-400">{notifications.length}</span>
-        </button>
-        <button onClick={() => setFilter('unread')}
-          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${filter === 'unread' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-          Unread {unreadCount > 0 && <span className="ml-1 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{unreadCount}</span>}
-        </button>
-      </div>
+      <Tabs value={filter} onValueChange={v => setFilter(v as 'all' | 'unread')}>
+        <TabsList className="w-fit">
+          <TabsTrigger value="all">
+            All <span className="ml-1 text-xs text-gray-400">{notifications.length}</span>
+          </TabsTrigger>
+          <TabsTrigger value="unread">
+            Unread {unreadCount > 0 && <Badge className="ml-1 bg-red-500 text-white">{unreadCount}</Badge>}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {loading && <div className="text-center py-12 text-gray-400 text-sm">Loading notifications…</div>}
 
       {!loading && filtered.length === 0 && (
-        <div className="text-center py-16 bg-white border border-gray-100 rounded-xl">
-          <div className="text-4xl mb-3">🔔</div>
-          <p className="text-gray-500 font-medium">{filter === 'unread' ? 'No unread notifications' : 'No notifications yet'}</p>
-        </div>
+        <EmptyState
+          icon={Bell}
+          title={filter === 'unread' ? 'No unread notifications' : 'No notifications yet'}
+          className="rounded-xl bg-white py-16"
+        />
       )}
 
       {/* Notification list */}

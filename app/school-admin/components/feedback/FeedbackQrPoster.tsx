@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { useFeedbackFetch } from './useFeedbackFetch'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 interface Settings { public_code: string; is_active: boolean; feedback_url: string }
 
@@ -13,6 +14,7 @@ export default function FeedbackQrPoster({ schoolId }: { schoolId: number }) {
   const [pdfLoading, setPdfLoading] = useState(false)
   const [actionError, setActionError] = useState('')
   const posterRef = useRef<HTMLDivElement>(null)
+  const { confirm, ConfirmDialog } = useConfirm()
 
   async function toggleActive() {
     if (!settings) return
@@ -33,7 +35,8 @@ export default function FeedbackQrPoster({ schoolId }: { schoolId: number }) {
   }
 
   async function regenerateCode() {
-    if (!confirm('This invalidates the current QR poster — anyone scanning the old poster will get a "not available" message. Continue?')) return
+    const ok = await confirm('This invalidates the current QR poster — anyone scanning the old poster will get a "not available" message. Continue?', { title: 'Regenerate QR code?', confirmText: 'Regenerate', destructive: true })
+    if (!ok) return
     setBusy(true); setActionError('')
     try {
       const res = await fetch('/api/feedback/settings/regenerate-code', {
@@ -76,6 +79,7 @@ export default function FeedbackQrPoster({ schoolId }: { schoolId: number }) {
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2" data-testid="feedback-settings-qr">
+      {ConfirmDialog}
       {actionError && <div className="col-span-full rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{actionError}</div>}
       <div className="rounded-xl border border-gray-200 bg-white p-5">
         <h3 className="mb-3 text-sm font-bold text-gray-900">Public Form</h3>

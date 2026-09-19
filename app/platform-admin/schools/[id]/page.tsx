@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 type SchoolDetail = {
   id: number
@@ -47,6 +48,7 @@ export default function SchoolDetailPage() {
   const [school, setSchool]       = useState<SchoolDetail | null>(null)
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState('')
+  const { confirm, ConfirmDialog } = useConfirm()
 
   // Feature plan config (from platform admin)
   const [features, setFeatures]   = useState<Feature[]>([])
@@ -211,7 +213,8 @@ export default function SchoolDetailPage() {
   }
 
   async function handleResetPassword() {
-    if (!confirm('Generate a new temporary password for this school admin?')) return
+    const ok = await confirm('Generate a new temporary password for this school admin?', { title: 'Reset password?', confirmText: 'Generate', destructive: true })
+    if (!ok) return
     setResetting(true); setError('')
     try {
       const res = await fetch('/api/platform/schools/reset-password', {
@@ -228,7 +231,8 @@ export default function SchoolDetailPage() {
   }
 
   async function handleDelete() {
-    if (!confirm(`Permanently delete "${school?.name}"?`)) return
+    const ok = await confirm(`Permanently delete "${school?.name}"?`, { title: 'Delete school?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     try {
       const res = await fetch(`/api/schools/${schoolId}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
@@ -275,6 +279,7 @@ export default function SchoolDetailPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {ConfirmDialog}
       {/* Top bar */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">

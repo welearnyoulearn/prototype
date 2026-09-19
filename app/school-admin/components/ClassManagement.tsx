@@ -5,6 +5,7 @@ import StudentSyllabus from '../../student/components/StudentSyllabus'
 import { useFeature } from '@/lib/features-context'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import { InlineLoader, ButtonLoader } from '@/components/loaders'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 type Props = { schoolId: number; onNavigate?: (tab: string, subTab?: string) => void }
 
@@ -439,6 +440,7 @@ function ClassDetail({
 }) {
   const timetableFeatureEnabled = useFeature('timetable')
   const hasAttendance = useFeature('attendance')
+  const { confirm, ConfirmDialog } = useConfirm()
   const [tab, setTab] = useState<'overview' | 'subjects' | 'timetable' | 'students' | 'syllabus'>('overview')
   const [attSummary, setAttSummary] = useState<{ date: string; present: number; absent: number; late: number }[]>([])
   const [attLoading, setAttLoading] = useState(false)
@@ -545,7 +547,8 @@ function ClassDetail({
   }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function removeSubject(subjectId: number, name: string) {
-    if (!confirm(`Remove "${name}"?`)) return
+    const ok = await confirm(`Remove "${name}"?`, { title: 'Remove subject?', confirmText: 'Remove', destructive: true })
+    if (!ok) return
     setRemovingId(subjectId)
     try {
       await fetch(`/api/classes/${cls.id}/subjects?subject_id=${subjectId}`, { method: 'DELETE' })
@@ -627,6 +630,7 @@ function ClassDetail({
 
   return (
     <div className="flex flex-col h-full">
+      {ConfirmDialog}
       {/* Header */}
       <div className="px-6 py-4 border-b border-gray-100">
         <div className="flex items-start justify-between flex-wrap gap-3">

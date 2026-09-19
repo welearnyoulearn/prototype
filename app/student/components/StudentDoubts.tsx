@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { InlineLoader } from '@/components/loaders'
 import { burstFrom } from '@/app/components/gamification/confetti'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 type Student = { id: number; name: string; grade: string; section: string }
 type Task = { id: number; title: string; subject: string }
@@ -80,6 +81,7 @@ function fmtFull(dt: string) {
 }
 
 export default function StudentDoubts({ student, classId, schoolId }: Props) {
+  const { confirm, ConfirmDialog } = useConfirm()
   const [doubts, setDoubts] = useState<Doubt[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
@@ -306,7 +308,10 @@ export default function StudentDoubts({ student, classId, schoolId }: Props) {
 
   async function resolveDoubt(skipConfirm = false) {
     if (!selected) return
-    if (!skipConfirm && !confirm('Mark this doubt as resolved? The chat will be archived and closed.')) return
+    if (!skipConfirm) {
+      const ok = await confirm('Mark this doubt as resolved? The chat will be archived and closed.', { title: 'Resolve this doubt?', confirmText: 'Resolve' })
+      if (!ok) return
+    }
     setResolving(true)
     setDismissedFinalPrompt(false)
     const res = await fetch(`/api/doubts/${selected.id}/messages`, {
@@ -353,7 +358,8 @@ export default function StudentDoubts({ student, classId, schoolId }: Props) {
   }
 
   async function deleteDoubt(id: number) {
-    if (!confirm('Delete this doubt and all messages?')) return
+    const ok = await confirm('Delete this doubt and all messages?', { title: 'Delete this doubt?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     await fetch(`/api/doubts/${id}?school_id=${schoolId}&student_id=${student.id}`, { method: 'DELETE' })
     await fetchDoubts()
   }
@@ -508,6 +514,7 @@ export default function StudentDoubts({ student, classId, schoolId }: Props) {
 
     return (
       <div className="flex flex-col max-h-[calc(100vh-7rem)] h-[75vh]">
+        {ConfirmDialog}
         {/* Header */}
         <div className="bg-white rounded-xl border border-gray-200 p-4 mb-3 flex items-center gap-3 flex-shrink-0">
           <button onClick={() => { setSelected(null); setMessages([]) }}
@@ -798,6 +805,7 @@ export default function StudentDoubts({ student, classId, schoolId }: Props) {
 
   return (
     <div className="flex flex-col gap-4">
+      {ConfirmDialog}
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

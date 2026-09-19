@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { EmptyState } from '@/components/ui/empty-state'
+import { MessageSquare } from 'lucide-react'
 import { ADVANCED_FORM_TYPES, FEEDBACK_ROLES } from '@/lib/feedback-defaults'
 import { ADVANCED_FORM_FIELDS, AdvancedFormType } from '@/app/feedback/[code]/types'
 import { useFeedbackFetch } from './useFeedbackFetch'
@@ -54,7 +56,7 @@ export default function FeedbackSubmissionsTab({ schoolId }: { schoolId: number 
       {loading ? (
         <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
       ) : submissions.length === 0 ? (
-        <div className="py-16 text-center text-sm text-gray-400">No feedback submitted yet.</div>
+        <EmptyState icon={MessageSquare} title="No feedback submitted yet." className="border-0 py-16" />
       ) : (
         <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white">
           {submissions.map(sub => (
