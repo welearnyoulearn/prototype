@@ -115,7 +115,7 @@ export default function TextbookLibrary({ schoolId }: { schoolId: number }) {
       <div className="mb-6">
         <h2 className="text-xl font-bold text-gray-900">Textbook Library</h2>
         <p className="text-sm text-gray-500 mt-0.5">
-          Upload class textbooks as PDFs — AI automatically uses them for homework suggestions, student Q&amp;A, lesson plans and doubt answers.
+          Upload class textbooks as PDFs — AI automatically uses them for lesson plans.
         </p>
       </div>
 
@@ -201,9 +201,6 @@ export default function TextbookLibrary({ schoolId }: { schoolId: number }) {
         <h4 className="font-semibold text-gray-800 mb-3 text-sm">How the AI uses uploaded textbooks</h4>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { icon: '💬', label: 'Student Q&A', desc: 'AI answers from actual textbook content' },
-            { icon: '📝', label: 'Homework', desc: 'Homework questions match what\'s in the book' },
-            { icon: '🎯', label: 'Doubt Answers', desc: 'Doubt explanations cite textbook material' },
             { icon: '📋', label: 'Lesson Plans', desc: 'Lesson plans built around textbook chapters' },
           ].map(item => (
             <div key={item.label} className="bg-white rounded-lg p-3 border border-violet-100">

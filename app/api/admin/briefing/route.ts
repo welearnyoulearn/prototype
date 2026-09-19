@@ -6,11 +6,8 @@ import pool, { ensureDB } from '@/lib/db'
 // Returns:
 //   date            — today
 //   attendance      — today's school-wide attendance (% present, unmarked classes)
-//   leave_requests  — pending approvals count
-//   uncovered       — uncovered periods today
 //   exams_today     — exams scheduled today
 //   exams_upcoming  — exams in next 7 days
-//   tasks_overdue   — published tasks past due date
 //   chronic_absentees — students with ≥3 absences in last 30 days
 //   announcements   — active announcements count
 //   low_syllabus    — classes with <50% syllabus coverage
@@ -31,11 +28,8 @@ export async function GET(req: NextRequest) {
 
   const [
     attendanceData,
-    leaveData,
-    uncoveredData,
     examsTodayData,
     examsUpcomingData,
-    overdueTasksData,
     chronicData,
     announcementsData,
     lowSyllabusData,
@@ -57,44 +51,6 @@ export async function GET(req: NextRequest) {
       `, [sid, today])
       return rows[0]
     }, null),
-
-    // Pending leave requests
-    safe(async () => {
-      const { rows } = await pool.query(
-        `SELECT COUNT(*)::int AS count FROM leave_requests WHERE school_id=$1 AND status='pending'`,
-        [sid]
-      )
-      return rows[0]
-    }, { count: 0 }),
-
-    // Uncovered periods today
-    safe(async () => {
-      const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()]
-      const { rows } = await pool.query(`
-        SELECT COUNT(*)::int AS count
-        FROM class_timetable ct
-        WHERE ct.school_id = $1
-          AND ct.day_of_week = $2
-          AND ct.is_break = FALSE
-          AND ct.teacher_id IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM substitute_assignments sa
-            WHERE sa.class_id = ct.class_id
-              AND sa.period_number = ct.period_number
-              AND sa.date = $3
-          )
-          AND EXISTS (
-            SELECT 1 FROM leave_requests lr
-            JOIN teachers t ON t.id = lr.teacher_id
-            WHERE lr.teacher_id = ct.teacher_id
-              AND lr.school_id = $1
-              AND lr.status = 'approved'
-              AND lr.start_date <= $3
-              AND lr.end_date >= $3
-          )
-      `, [sid, dayName, today])
-      return rows[0]
-    }, { count: 0 }),
 
     // Exams today
     safe(async () => {
@@ -125,18 +81,6 @@ export async function GET(req: NextRequest) {
       `, [sid, today, in7days])
       return rows
     }, []),
-
-    // Overdue published tasks
-    safe(async () => {
-      const { rows } = await pool.query(`
-        SELECT COUNT(*)::int AS count
-        FROM tasks
-        WHERE school_id = $1
-          AND status = 'published'
-          AND due_date < $2
-      `, [sid, today])
-      return rows[0]
-    }, { count: 0 }),
 
     // Chronic absentees (≥3 absences in last 30 days)
     safe(async () => {
@@ -202,14 +146,8 @@ export async function GET(req: NextRequest) {
   type Alert = { level: 'critical' | 'warning' | 'info'; message: string; action: string }
   const alerts: Alert[] = []
 
-  if (leaveData.count > 0)
-    alerts.push({ level: 'warning', message: `${leaveData.count} pending leave request${leaveData.count > 1 ? 's' : ''} need approval`, action: 'leave-requests' })
-  if (uncoveredData.count > 0)
-    alerts.push({ level: 'critical', message: `${uncoveredData.count} period${uncoveredData.count > 1 ? 's' : ''} uncovered today`, action: 'emergency-cover' })
   if (chronicData.count > 0)
     alerts.push({ level: 'warning', message: `${chronicData.count} chronic absentee${chronicData.count > 1 ? 's' : ''} this month`, action: 'attendance' })
-  if (overdueTasksData.count > 0)
-    alerts.push({ level: 'info', message: `${overdueTasksData.count} overdue task${overdueTasksData.count > 1 ? 's' : ''}`, action: 'academic-analytics' })
   if (unmarked_classes > 0)
     alerts.push({ level: 'info', message: `${unmarked_classes} class${unmarked_classes > 1 ? 'es' : ''} haven't marked attendance today`, action: 'attendance' })
   if (lowSyllabusData.count > 0)
@@ -229,11 +167,8 @@ export async function GET(req: NextRequest) {
       unmarked_classes,
       total_classes:   attendanceData?.total_classes ?? 0,
     },
-    leave_pending:       leaveData.count,
-    uncovered_periods:   uncoveredData.count,
     exams_today:         examsTodayData,
     exams_upcoming:      examsUpcomingData,
-    overdue_tasks:       overdueTasksData.count,
     chronic_absentees:   chronicData.count,
     active_announcements: announcementsData.count,
     low_syllabus_classes: lowSyllabusData.count,

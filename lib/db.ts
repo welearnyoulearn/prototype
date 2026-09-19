@@ -2148,21 +2148,22 @@ async function runIncrementalMigrations() {
     ON CONFLICT (feature_key, tier) DO NOTHING
   `).catch(() => {})
 
-  // Student/parent portal nav items newly added to ALL_FEATURES' plan-gating
-  // (results, homework, doubts) — same self-heal/seed pattern as library
-  // above, enabled at every tier by default so existing schools keep seeing
-  // Homework/Ask-a-Doubt/Results exactly as before this change. Unlike
-  // attendance/exam-schedule/timetable/fee-management (which reuse the
-  // school-admin feature's EXISTING plan_features rows, and therefore
-  // intentionally restrict basic-tier student/parent portals to match what
-  // school-admin already restricts), these three had no prior concept at
-  // all — so there's no existing row to reuse and no basis to restrict them.
+  // Student/parent portal nav item newly added to ALL_FEATURES' plan-gating
+  // (results) — same self-heal/seed pattern as library above, enabled at
+  // every tier by default so existing schools keep seeing Results exactly
+  // as before this change. Unlike attendance/exam-schedule/timetable/
+  // fee-management (which reuse the school-admin feature's EXISTING
+  // plan_features rows, and therefore intentionally restrict basic-tier
+  // student/parent portals to match what school-admin already restricts),
+  // this one had no prior concept at all — so there's no existing row to
+  // reuse and no basis to restrict it.
+  // Homework/doubts seed rows removed — Homework/Tasks (#136) and Ask a
+  // Doubt (#137) were pulled out of dev, preserved on feature/136-remove-
+  // homework-tasks and feature/137-remove-ask-a-doubt for future rework.
   await pool.query(`
     INSERT INTO plan_features (feature_key, tier, enabled)
     VALUES
-      ('results',  'basic', true), ('results',  'standard', true), ('results',  'premium', true),
-      ('homework', 'basic', true), ('homework', 'standard', true), ('homework', 'premium', true),
-      ('doubts',   'basic', true), ('doubts',   'standard', true), ('doubts',   'premium', true)
+      ('results',  'basic', true), ('results',  'standard', true), ('results',  'premium', true)
     ON CONFLICT (feature_key, tier) DO NOTHING
   `).catch(() => {})
 

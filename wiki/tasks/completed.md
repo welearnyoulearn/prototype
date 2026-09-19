@@ -18,6 +18,26 @@ All finished features and bug fixes. Most recent first.
 
 ---
 
+### 2026-09-20 — Removed Emergency Cover from dev, pending rework (#140)
+**Type:** Removal
+**Portal:** School Admin / Teacher
+**Summary:** Pulled the admin substitute-assignment workflow out of `dev` — feature flag, `EmergencyCover.tsx`, nav wiring, and the uncovered-periods stat/alert in Overview/DailyBriefing/admin overview & briefing routes. Kept `/api/substitutes` GET (read-only) alive since the protected Attendance dashboard and a few teacher views still read it; removed its POST/DELETE write actions. Full code + `EXTRACTION-140.md` preserved on `feature/140-remove-emergency-cover`. DB schema untouched.
+
+### 2026-09-20 — Removed Leave Requests from dev, pending rework (#139)
+**Type:** Removal
+**Portal:** School Admin / Teacher
+**Summary:** Pulled the Leave Requests feature out of `dev` — feature flag, `/api/leave-requests` routes, `LeaveRequests.tsx`/`TeacherLeave.tsx`, nav wiring, and surgical edits to Overview, admin overview/briefing routes, StudentTeacherAnalysis, SmartSnapshot, TeachersManagement, NotificationCenter/Bell, and CommandBar. Full code + `EXTRACTION-139.md` preserved on `feature/139-remove-leave-requests`. DB schema untouched (`leave_requests` table stays; Emergency Cover's uncovered-periods query still joins against it).
+
+### 2026-09-20 — Removed Ask a Doubt from dev, pending rework (#137)
+**Type:** Removal
+**Portal:** Student / Teacher
+**Summary:** Pulled the Gemini-backed Ask a Doubt feature out of `dev` — feature flag, `/api/doubts` routes, `StudentDoubts.tsx`/`ClassDoubts.tsx`, and orphaned dead code found during cleanup (`DoubtsCenter.tsx`, `FloatingAIChat.tsx` — confirmed zero importers repo-wide before deleting — plus `lib/gemini.ts`'s `generateDoubtAnswer`/`analyzeDoubtPatterns`/`chatWithAI` and `lib/textbook-search.ts`, all left with no callers). Full code + `EXTRACTION-137.md` preserved on `feature/137-remove-ask-a-doubt`. DB schema untouched.
+
+### 2026-09-20 — Removed Homework/Tasks from dev, pending rework (#136)
+**Type:** Removal
+**Portal:** Teacher / Student
+**Summary:** Pulled the Homework/Tasks feature out of `dev` — feature flag, `/api/tasks` routes, `Tasks.tsx`/`TasksPage.tsx`/`TaskReview.tsx`/`StudentTasks.tsx`, and surgical edits to ClassView, StudentDashboard, StudentDetail, TeachersManagement, AcademicAnalytics, DailyBriefing, rewards copy, and marketing text. Also removed `app/api/students/[id]/submissions` (task-submissions only, found during cleanup, no other use) and the orphaned `suggestHomework()` in `lib/gemini.ts`. Full code + `EXTRACTION-136.md` preserved on `feature/136-remove-homework-tasks`. DB schema untouched — `tasks`/`task_submissions`/`task_reminders` stay as inert scaffolding.
+
 ### 2026-09-18 — OpenAPI spec covers every API route (#131)
 **Type:** Enhancement
 **Portal:** Platform Admin / Infrastructure

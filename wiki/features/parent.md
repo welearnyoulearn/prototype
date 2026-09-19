@@ -15,10 +15,10 @@ The Parent portal provides read-only visibility into a child's school life at `/
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Child Summary | Built | Overview: attendance %, recent marks, pending tasks, announcements. Fetched via `Promise.all` |
+| Child Summary | Built | Overview: attendance %, upcoming/released exam results. Fetched via `Promise.all` (a "recent tasks/homework" tile was in the UI but never wired to real data — removed along with Homework/Tasks, #136) |
 | Attendance Calendar | Built | Month-view calendar for the child. Shows present/absent/late per day |
 | Fee Ledger | Built | Outstanding fees, payment history, waiver details. Amount due vs paid per category |
-| Learning Activity | Built | Child's recent activity: tasks submitted, doubts asked, newspapers read, rewards earned |
+| Learning Activity | Built | Child's recent activity: newspapers read, rewards earned (tasks-submitted/doubts-asked entries removed with #136/#137) |
 | Timetable View | Built | Child's class timetable (read-only) |
 | Parent Login | Partial | Lookup by parent phone + child roll number works. No proper JWT session — no persistent login |
 | Mark Acknowledgement | Partial | API and DB table exist. Not prominently surfaced in parent portal UI |

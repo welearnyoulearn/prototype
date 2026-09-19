@@ -6,25 +6,21 @@ type Props = { schoolId: number }
 
 type Teacher = { id: number; name: string; subject: string; department: string; status: string }
 type Student = { id: number; name: string; grade: string; section: string; status: string }
-type LeaveRequest = { status: string }
 
 export default function StudentTeacherAnalysis({ schoolId }: Props) {
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [students, setStudents] = useState<Student[]>([])
-  const [leaves, setLeaves] = useState<LeaveRequest[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function load() {
       try {
-        const [t, s, l] = await Promise.all([
+        const [t, s] = await Promise.all([
           fetch(`/api/teachers?school_id=${schoolId}`).then(r => r.json()),
           fetch(`/api/students?school_id=${schoolId}`).then(r => r.json()),
-          fetch(`/api/leave-requests?school_id=${schoolId}`).then(r => r.json()),
         ])
         setTeachers(Array.isArray(t) ? t : [])
         setStudents(Array.isArray(s) ? s : [])
-        setLeaves(Array.isArray(l) ? l : [])
       } finally {
         setLoading(false)
       }
@@ -52,12 +48,6 @@ export default function StudentTeacherAnalysis({ schoolId }: Props) {
   })
   const deptEntries = Object.entries(departmentMap).sort(([, a], [, b]) => b - a)
 
-  const leaveStats = {
-    pending: leaves.filter(l => l.status === 'pending').length,
-    approved: leaves.filter(l => l.status === 'approved').length,
-    rejected: leaves.filter(l => l.status === 'rejected').length,
-  }
-
   const sectionMap: Record<string, number> = {}
   students.forEach(s => {
     if (s.grade && s.section) {
@@ -72,7 +62,7 @@ export default function StudentTeacherAnalysis({ schoolId }: Props) {
       <h2 className="text-xl font-bold text-gray-900 mb-6">Student-Teacher Analysis</h2>
 
       {/* Key metrics */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
         <div className="bg-blue-50 border border-blue-100 rounded-xl p-5">
           <p className="text-xs text-gray-500 mb-1">Total Teachers</p>
           <p className="text-3xl font-bold text-blue-600">{teachers.length}</p>
@@ -85,11 +75,6 @@ export default function StudentTeacherAnalysis({ schoolId }: Props) {
           <p className="text-xs text-gray-500 mb-1">Student : Teacher Ratio</p>
           <p className="text-3xl font-bold text-violet-600">{ratio}</p>
           {teachers.length > 0 && <p className="text-xs text-gray-400 mt-1">{ratio} students per teacher</p>}
-        </div>
-        <div className="bg-orange-50 border border-orange-100 rounded-xl p-5">
-          <p className="text-xs text-gray-500 mb-1">Leave Requests</p>
-          <p className="text-3xl font-bold text-orange-600">{leaves.length}</p>
-          {leaveStats.pending > 0 && <p className="text-xs text-orange-500 mt-1">{leaveStats.pending} pending</p>}
         </div>
       </div>
 
@@ -137,35 +122,6 @@ export default function StudentTeacherAnalysis({ schoolId }: Props) {
                       />
                     </div>
                     <span className="text-sm text-gray-500 w-8 text-right">{count}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Leave request summary */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <h3 className="font-semibold text-gray-700 mb-4">Leave Request Summary</h3>
-          {leaves.length === 0 ? (
-            <p className="text-gray-400 text-sm">No leave requests yet</p>
-          ) : (
-            <div className="space-y-3">
-              {([
-                { key: 'pending', label: 'Pending', color: 'bg-orange-500', count: leaveStats.pending },
-                { key: 'approved', label: 'Approved', color: 'bg-green-500', count: leaveStats.approved },
-                { key: 'rejected', label: 'Rejected', color: 'bg-red-500', count: leaveStats.rejected },
-              ] as const).map(item => (
-                <div key={item.key}>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-gray-700">{item.label}</span>
-                    <span className="text-gray-500">{item.count}</span>
-                  </div>
-                  <div className="w-full bg-gray-100 rounded-full h-2">
-                    <div
-                      className={`${item.color} h-2 rounded-full transition-all`}
-                      style={{ width: leaves.length > 0 ? `${(item.count / leaves.length) * 100}%` : '0%' }}
-                    />
                   </div>
                 </div>
               ))}

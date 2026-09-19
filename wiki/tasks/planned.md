@@ -30,6 +30,31 @@ These are defined in `lib/features.ts` but have no implementation:
 
 ---
 
+## Removed From `dev`, Rework Pending
+
+These four features were fully working but pulled out of `dev` on 2026-09-20
+for a rework. Each has its full original code plus an `EXTRACTION-<N>.md`
+removal plan preserved on its own branch — pull from there rather than
+rebuilding from scratch.
+
+### Homework / Tasks (#136)
+**Branch:** `feature/136-remove-homework-tasks`
+**Feature key:** `homework` (removed from `lib/features.ts`; DB tables `tasks`/`task_submissions`/`task_reminders` still exist)
+
+### Ask a Doubt (#137)
+**Branch:** `feature/137-remove-ask-a-doubt`
+**Feature key:** `doubts` (removed from `lib/features.ts`; DB tables `doubts`/`doubt_messages`/`doubt_upvotes` still exist)
+
+### Leave Requests (#139)
+**Branch:** `feature/139-remove-leave-requests`
+**Feature key:** `leave-requests` (removed from `lib/features.ts`; DB table `leave_requests` still exists — Emergency Cover's uncovered-periods query still joins against it)
+
+### Emergency Cover (#140)
+**Branch:** `feature/140-remove-emergency-cover`
+**Feature key:** `emergency-cover` (removed from `lib/features.ts`; DB table `substitute_assignments` still exists; `/api/substitutes` GET was kept read-only for the Attendance dashboard and a few teacher views, POST/DELETE removed)
+
+---
+
 ## Partial Features to Complete
 
 ### Student Auth — Proper Login

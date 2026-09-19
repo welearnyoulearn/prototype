@@ -32,8 +32,6 @@ function ModuleSkeleton() {
 }
 // Turbopack requires inline object literals for next/dynamic options
 const AttendanceDashboard   = dynamic(() => import('./components/AttendanceDashboard'),   { loading: () => <ModuleSkeleton /> })
-const LeaveRequests         = dynamic(() => import('./components/LeaveRequests'),          { loading: () => <ModuleSkeleton /> })
-const EmergencyCover        = dynamic(() => import('./components/EmergencyCover'),         { loading: () => <ModuleSkeleton /> })
 const StaffOnboarding       = dynamic(() => import('./components/StaffOnboarding'),        { loading: () => <ModuleSkeleton /> })
 const StudentOnboarding     = dynamic(() => import('./components/StudentOnboarding'),      { loading: () => <ModuleSkeleton /> })
 const ClassManagement       = dynamic(() => import('./components/ClassManagement'),        { loading: () => <ModuleSkeleton /> })
@@ -78,7 +76,7 @@ const NAV_SECTIONS = [
   { label: 'OVERVIEW',      keys: ['overview'] },
   { label: 'PEOPLE',        keys: ['staff', 'students', 'class-management'] },
   { label: 'MANAGEMENT',    keys: ['fee-management'] },
-  { label: 'SCHEDULING',    keys: ['timetable', 'curriculum', 'library', 'attendance', 'leave-requests', 'emergency-cover', 'exam-schedule'] },
+  { label: 'SCHEDULING',    keys: ['timetable', 'curriculum', 'library', 'attendance', 'exam-schedule'] },
   { label: 'COMMUNICATION', keys: ['announcements', 'feedback-management'] },
   { label: 'TOOLS',         keys: ['export', 'settings', 'year-rollover'] },
 ]
@@ -104,27 +102,6 @@ const NAV_ITEMS: NavItem[] = [
       </svg>
     ),
   },
-  {
-    key: 'leave-requests',
-    label: 'Leave Requests',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-      </svg>
-    ),
-  },
-  {
-    key: 'emergency-cover',
-    label: 'Emergency Cover',
-    tier: ['basic', 'standard', 'premium'],
-    icon: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-      </svg>
-    ),
-  },
-  
   {
     key: 'class-management',
     label: 'Class Management',
@@ -702,8 +679,6 @@ function SchoolAdmin() {
               <FeaturesProvider value={enabledFeatures}>
                 {visited.has('overview')         && <div hidden={activeNav !== 'overview'}><Overview schoolId={selectedSchool.id} onNavigate={navigateTo} /></div>}
                 {visited.has('attendance')       && <div hidden={activeNav !== 'attendance'}><AttendanceDashboard schoolId={selectedSchool.id} /></div>}
-                {visited.has('leave-requests')   && <div hidden={activeNav !== 'leave-requests'}><LeaveRequests schoolId={selectedSchool.id} /></div>}
-                {visited.has('emergency-cover')  && <div hidden={activeNav !== 'emergency-cover'}><EmergencyCover schoolId={selectedSchool.id} /></div>}
                 {/* ── Staff Hub: Directory + Onboarding combined ── */}
                 {visited.has('staff') && (
                   <div hidden={activeNav !== 'staff'}>

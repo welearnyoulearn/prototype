@@ -7,7 +7,7 @@
 
 ## Overview
 
-The Teacher portal is the daily workspace for teachers at `/teacher`. It covers class management, attendance, tasks, doubts, syllabus tracking, and personal account management.
+The Teacher portal is the daily workspace for teachers at `/teacher`. It covers class management, attendance, syllabus tracking, and personal account management. (Homework/Tasks, Ask a Doubt, and Leave Requests were pulled out for rework — see the Tasks & Learning and My Account sections below.)
 
 ---
 
@@ -17,7 +17,7 @@ The Teacher portal is the daily workspace for teachers at `/teacher`. It covers 
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Smart Snapshot | Built | Today's schedule, tasks with pending submissions, open doubts, upcoming exams, announcements (filtered to teachers) |
+| Smart Snapshot | Built | Today's schedule, upcoming exams, announcements (filtered to teachers) — the tasks-pending and open-doubts tiles were removed with Homework/Tasks (#136) and Ask a Doubt (#137) |
 
 ### My Classes
 
@@ -25,7 +25,7 @@ The Teacher portal is the daily workspace for teachers at `/teacher`. It covers 
 |---------|--------|-------------|
 | My Classes | Built | List of assigned classes with grade, section, student count, class teacher status |
 | My Students | Built | All students across assigned classes. Sortable, searchable |
-| Class View | Built | Drill-down: student list, attendance summary, tasks, doubts, marks overview |
+| Class View | Built | Drill-down: student list, attendance summary, marks overview (Homework and Doubts tabs removed, #136/#137) |
 | Timetable | Built | Personal weekly schedule with times, rooms, subjects, grades |
 | Attendance Marking | Built | Mark per class per session. Offline support via service worker. Auto-saves |
 
@@ -33,8 +33,8 @@ The Teacher portal is the daily workspace for teachers at `/teacher`. It covers 
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Tasks | Built | Create tasks (homework/practice/test), set due date, publish. View submissions, grade with score + feedback, request resubmission, send reminders |
-| Doubt Center | Built | View open doubts. Live chat with students. Mark resolved. Toggle as class FAQ. View AI-generated initial answers |
+| Tasks | Removed | Pulled out of `dev` for rework — full code + removal notes on `feature/136-remove-homework-tasks` (issue #136) |
+| Doubt Center | Removed | Pulled out of `dev` for rework — full code + removal notes on `feature/137-remove-ask-a-doubt` (issue #137) |
 | Syllabus Tracker | Built | Chapter/topic list per subject per class. Mark topics as covered with date. Add/rename chapters and subtopics; a sparkle **Translate** button converts English-letter typing into Telugu or Hindi script (#116) |
 | Test Calendar | Built | Upcoming tests/exams in calendar format |
 | Performance Analytics | Partial | Navigation item exists but flagged `comingSoon: true`. No component loaded |
@@ -44,7 +44,7 @@ The Teacher portal is the daily workspace for teachers at `/teacher`. It covers 
 | Feature | Status | Description |
 |---------|--------|-------------|
 | My Profile | Built | View/edit profile (name, email, phone, qualification). Change password |
-| Leave Request | Built | Submit leave requests (casual/sick/earned). View approval status and history |
+| Leave Request | Removed | Pulled out of `dev` for rework — full code + removal notes on `feature/139-remove-leave-requests` (issue #139) |
 
 ---
 
@@ -54,10 +54,7 @@ The Teacher portal is the daily workspace for teachers at `/teacher`. It covers 
 |----------|---------|
 | `GET /api/class-timetable` | Teacher's timetable |
 | `GET/POST /api/attendance` | Attendance marking |
-| `GET/POST /api/tasks` | Task CRUD |
-| `POST /api/tasks/[id]/submissions/[sid]` | Grade submissions |
-| `GET/POST /api/doubts` | Doubt management |
-| `GET/POST /api/doubts/[id]/messages` | Doubt chat |
 | `GET/POST /api/syllabus` | Syllabus tracking |
 | `GET /api/transliterate` | Staff-only: English letters → Telugu/Hindi spellings for syllabus names (#116) |
-| `POST /api/leave-requests` | Submit leave |
+
+Task, doubt, and leave-request endpoints were removed with #136/#137/#139 — see each feature's preservation branch.

@@ -17,8 +17,8 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Overview Dashboard | Built | Stats cards (teachers, students, classes), pending leaves, timetable conflicts, uncovered periods, attendance summary, upcoming exams, fee collection %. Uses batched `/api/admin/overview` |
-| Daily Briefing | Built | Morning briefing: uncovered periods, teachers on leave, emergency cover needs. From `/api/admin/briefing` |
+| Overview Dashboard | Built | Stats cards (teachers, students, classes), timetable conflicts, attendance summary, upcoming exams, fee collection %. Uses batched `/api/admin/overview` (pending-leaves and uncovered-periods metrics removed with Leave Requests/Emergency Cover below) |
+| Daily Briefing | Built | Morning briefing: exams, chronic absentees, syllabus coverage, announcements. From `/api/admin/briefing` (leave/uncovered-periods alerts removed with Leave Requests/Emergency Cover below) |
 
 ### People Management
 
@@ -36,8 +36,8 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 |---------|--------|-------------|
 | Timetable Management | Built | Generate, view conflicts, swap periods, lock/publish. Master/slave sync. Version control (draft → published). Teacher unavailability constraints. Schedule templates |
 | Attendance Dashboard | Built | School-wide view per day. Mark per class per session. Offline support via service worker |
-| Leave Requests | Built | List all pending/approved/rejected leaves. Approve/reject. Shows substitute coverage status |
-| Emergency Cover | Built | View uncovered periods from approved leaves. Assign substitute teachers. Shows availability |
+| Leave Requests | Removed | Pulled out of `dev` for rework — full code + removal notes on `feature/139-remove-leave-requests` (issue #139) |
+| Emergency Cover | Removed | Pulled out of `dev` for rework — full code + removal notes on `feature/140-remove-emergency-cover` (issue #140) |
 | Exam Schedule | Built | Create exams, add subjects, track marks entry status, publish marks, exam calendar |
 
 ### Analytics

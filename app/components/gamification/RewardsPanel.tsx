@@ -181,7 +181,7 @@ export default function RewardsPanel({ studentId, schoolId, classId }: Props) {
           <div className="flex-1 min-w-0">
             <p className="text-xs text-amber-800 leading-relaxed">
               {data.streak.current === 0
-                ? "Submit homework, ask a doubt, or take a test today to start a streak! 🌱"
+                ? "Take a test today to start a streak! 🌱"
                 : `You're on fire! Keep going to beat your best of ${data.streak.longest} days.`}
             </p>
           </div>

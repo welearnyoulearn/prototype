@@ -22,21 +22,9 @@ type Props =
   | { parentId: number; teacherId?: never; schoolId?: never; studentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
 
 const TYPE_ICONS: Record<string, string> = {
-  leave_request: '📋',
-  leave_approved: '✅',
-  leave_rejected: '❌',
   period_delay: '⏰',
   substitute_needed: '🔄',
   substitute_assigned: '👤',
-  task_reviewed: '⭐',
-  doubt_replied: '💬',
-  task_reminder: '⏳',
-  task_submitted: '📤',
-  new_doubt: '❓',
-  doubt_resolved: '✅',
-  doubt_follow_up: '🔁',
-  doubt_pattern: '⚠️',
-  doubt_answered: '💡',
   marks_entry_required: '📝',
   marks_submitted: '✅',
   marks_published: '📊',
@@ -49,21 +37,9 @@ const TYPE_ICONS: Record<string, string> = {
 }
 
 const TYPE_COLORS: Record<string, string> = {
-  leave_request: 'text-blue-600 bg-blue-50',
-  leave_approved: 'text-green-600 bg-green-50',
-  leave_rejected: 'text-red-600 bg-red-50',
   period_delay: 'text-amber-600 bg-amber-50',
   substitute_needed: 'text-orange-600 bg-orange-50',
   substitute_assigned: 'text-teal-600 bg-teal-50',
-  task_reviewed: 'text-purple-600 bg-purple-50',
-  doubt_replied: 'text-blue-600 bg-blue-50',
-  task_reminder: 'text-amber-600 bg-amber-50',
-  task_submitted: 'text-teal-600 bg-teal-50',
-  new_doubt: 'text-orange-600 bg-orange-50',
-  doubt_resolved: 'text-green-600 bg-green-50',
-  doubt_follow_up: 'text-blue-600 bg-blue-50',
-  doubt_pattern: 'text-red-600 bg-red-50',
-  doubt_answered: 'text-purple-600 bg-purple-50',
   marks_entry_required: 'text-orange-700 bg-orange-50',
   marks_submitted: 'text-green-700 bg-green-50',
   marks_published: 'text-blue-700 bg-blue-50',
@@ -76,18 +52,6 @@ const TYPE_COLORS: Record<string, string> = {
 }
 
 const TYPE_NAV: Record<string, string> = {
-  leave_request: 'leave-requests',
-  leave_approved: 'leave',
-  leave_rejected: 'leave',
-  task_reviewed: 'tasks',
-  doubt_replied: 'doubts',
-  task_reminder: 'tasks',
-  task_submitted: 'tasks',
-  new_doubt: 'doubts',
-  doubt_resolved: 'doubts',
-  doubt_follow_up: 'doubts',
-  doubt_pattern: 'doubts',
-  doubt_answered: 'doubts',
   marks_entry_required: 'class-view',  // teacher: open class's marks tab
   marks_submitted: 'class-view',        // class teacher: see marks submission
   marks_published: 'my-marks',          // student: go to marks page
