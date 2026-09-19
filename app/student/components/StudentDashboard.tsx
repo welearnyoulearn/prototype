@@ -173,9 +173,6 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
         )
       })()}
 
-        </div>
-      )}
-
       {/* ── Announcements ─────────────────────────────────────────── */}
       {announcements.length > 0 && (
         <div
