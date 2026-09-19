@@ -490,57 +490,6 @@ Rules:
   return JSON.parse(cleaned) as MCQQuestion[]
 }
 
-// ─── Homework suggestion ──────────────────────────────────────────────────────
-
-export type HomeworkSuggestion = {
-  title: string
-  instructions: string
-  task_type: 'homework'
-  max_marks: number
-  estimated_time_minutes: number
-}
-
-export async function suggestHomework(
-  subject: string,
-  chapterName: string,
-  topicName: string,
-  grade: string,
-  textbookContext?: string
-): Promise<HomeworkSuggestion> {
-  const tbSection = textbookContext
-    ? `\n\nRelevant passage from the student's textbook:\n${textbookContext}\n\nUse this content to create homework that references specific examples, definitions, or exercises from the textbook. If there are exercise numbers (e.g. Exercise 1.1 Q3), mention them in the instructions.`
-    : ''
-
-  const raw = await callAI(
-    `You are an experienced school teacher creating homework assignments for Indian school students. Always respond with valid JSON only, no markdown.${tbSection}`,
-    `Create a homework assignment for:
-- Grade: ${grade}
-- Subject: ${subject}
-- Chapter: ${chapterName}
-- Topic just covered in class: ${topicName}
-
-Return JSON with exactly these fields:
-{
-  "title": "Short homework title (max 60 chars)",
-  "instructions": "Clear homework instructions (2-4 sentences, practical and specific to this topic${textbookContext ? ', referencing the textbook content where relevant' : ''})",
-  "task_type": "homework",
-  "max_marks": 10,
-  "estimated_time_minutes": 20
-}
-
-Rules:
-- Instructions should be practical and directly reinforce today's topic
-- Appropriate difficulty for Grade ${grade}
-- max_marks between 5 and 20 based on complexity
-- estimated_time_minutes between 15 and 45
-${textbookContext ? '- Reference specific textbook content (examples, exercises, definitions) in the instructions' : ''}`,
-    600,
-    true
-  )
-
-  const c = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim()
-  return { ...JSON.parse(c), task_type: 'homework' } as HomeworkSuggestion
-}
 
 // ─── PDF Syllabus Extractor ───────────────────────────────────────────────────
 

@@ -10,7 +10,6 @@ import pool, { ensureDB } from '@/lib/db'
 //   uncovered       — uncovered periods today
 //   exams_today     — exams scheduled today
 //   exams_upcoming  — exams in next 7 days
-//   tasks_overdue   — published tasks past due date
 //   chronic_absentees — students with ≥3 absences in last 30 days
 //   announcements   — active announcements count
 //   low_syllabus    — classes with <50% syllabus coverage
@@ -35,7 +34,6 @@ export async function GET(req: NextRequest) {
     uncoveredData,
     examsTodayData,
     examsUpcomingData,
-    overdueTasksData,
     chronicData,
     announcementsData,
     lowSyllabusData,
@@ -126,18 +124,6 @@ export async function GET(req: NextRequest) {
       return rows
     }, []),
 
-    // Overdue published tasks
-    safe(async () => {
-      const { rows } = await pool.query(`
-        SELECT COUNT(*)::int AS count
-        FROM tasks
-        WHERE school_id = $1
-          AND status = 'published'
-          AND due_date < $2
-      `, [sid, today])
-      return rows[0]
-    }, { count: 0 }),
-
     // Chronic absentees (≥3 absences in last 30 days)
     safe(async () => {
       const { rows } = await pool.query(`
@@ -208,8 +194,6 @@ export async function GET(req: NextRequest) {
     alerts.push({ level: 'critical', message: `${uncoveredData.count} period${uncoveredData.count > 1 ? 's' : ''} uncovered today`, action: 'emergency-cover' })
   if (chronicData.count > 0)
     alerts.push({ level: 'warning', message: `${chronicData.count} chronic absentee${chronicData.count > 1 ? 's' : ''} this month`, action: 'attendance' })
-  if (overdueTasksData.count > 0)
-    alerts.push({ level: 'info', message: `${overdueTasksData.count} overdue task${overdueTasksData.count > 1 ? 's' : ''}`, action: 'academic-analytics' })
   if (unmarked_classes > 0)
     alerts.push({ level: 'info', message: `${unmarked_classes} class${unmarked_classes > 1 ? 'es' : ''} haven't marked attendance today`, action: 'attendance' })
   if (lowSyllabusData.count > 0)
@@ -233,7 +217,6 @@ export async function GET(req: NextRequest) {
     uncovered_periods:   uncoveredData.count,
     exams_today:         examsTodayData,
     exams_upcoming:      examsUpcomingData,
-    overdue_tasks:       overdueTasksData.count,
     chronic_absentees:   chronicData.count,
     active_announcements: announcementsData.count,
     low_syllabus_classes: lowSyllabusData.count,

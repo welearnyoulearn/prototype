@@ -36,7 +36,6 @@ type Summary = {
     parent_acknowledged: boolean
   }>
   unacknowledged_count: number
-  recent_tasks: Array<{ title: string; due_date: string; task_type: string; submitted: boolean }>
   attendance_pct: number | null
 }
 
@@ -751,25 +750,6 @@ export default function ParentDashboard() {
               )
             })}
 
-            {/* Recent tasks */}
-            {summary?.recent_tasks && summary.recent_tasks.length > 0 && (
-              <div className="bg-white rounded-xl border border-gray-200 p-4">
-                <p className="text-sm font-bold text-gray-800 mb-3">{T.recentTasks}</p>
-                <div className="space-y-1.5">
-                  {summary.recent_tasks.map((t, i) => (
-                    <div key={i} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
-                      <div>
-                        <p className="text-sm text-gray-700">{t.title}</p>
-                        <p className="text-xs text-gray-400">{t.task_type} · {T.due} {t.due_date}</p>
-                      </div>
-                      <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${t.submitted ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                        {t.submitted ? T.done : T.pending}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             {/* School announcements for parents */}
             {announcements.length > 0 && (

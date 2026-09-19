@@ -17,7 +17,6 @@ type BriefingData = {
   uncovered_periods: number
   exams_today: { exam_name: string; grade: string; section: string }[]
   exams_upcoming: { exam_name: string; exam_date: string; grade: string; section: string }[]
-  overdue_tasks: number
   chronic_absentees: number
   active_announcements: number
   low_syllabus_classes: number
@@ -208,15 +207,6 @@ export default function DailyBriefing({
                   urgent: data.chronic_absentees > 0,
                   color: data.chronic_absentees > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-white',
                   valueColor: data.chronic_absentees > 0 ? 'text-amber-600' : 'text-gray-400',
-                },
-                {
-                  label: 'Overdue Tasks',
-                  value: data.overdue_tasks,
-                  icon: '📋',
-                  action: 'academic-analytics',
-                  urgent: data.overdue_tasks > 0,
-                  color: data.overdue_tasks > 0 ? 'border-orange-200 bg-orange-50' : 'border-gray-100 bg-white',
-                  valueColor: data.overdue_tasks > 0 ? 'text-orange-600' : 'text-gray-400',
                 },
               ].map(k => (
                 <div key={k.label}

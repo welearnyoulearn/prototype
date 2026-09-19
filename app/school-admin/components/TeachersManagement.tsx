@@ -177,7 +177,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   const [timetableLoading, setTimetableLoading] = useState(false)
   const [detailTab, setDetailTab] = useState<'info' | 'analytics'>('info')
   const [teacherAnalytics, setTeacherAnalytics] = useState<{
-    taskCount: number; pendingLeaves: number; totalLeaves: number; subDutyCount: number; periodsPerWeek: number
+    pendingLeaves: number; totalLeaves: number; subDutyCount: number; periodsPerWeek: number
   } | null>(null)
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [showRemoveDialog, setShowRemoveDialog] = useState(false)
@@ -311,17 +311,14 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   async function loadTeacherAnalytics(teacherId: number) {
     setAnalyticsLoading(true); setTeacherAnalytics(null)
     try {
-      const [tasks, leaves, tt] = await Promise.all([
-        fetch(`/api/tasks?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
+      const [leaves, tt] = await Promise.all([
         fetch(`/api/leave-requests?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
         fetch(`/api/timetable?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
       ])
-      const taskArr = Array.isArray(tasks) ? tasks : []
       const leaveArr = Array.isArray(leaves) ? leaves : []
       const ttArr = Array.isArray(tt) ? tt : []
       const pendingLeaves = leaveArr.filter((l: { status: string }) => l.status === 'pending').length
       setTeacherAnalytics({
-        taskCount: taskArr.length,
         pendingLeaves,
         totalLeaves: leaveArr.length,
         subDutyCount: teacherSubDuties.length,
@@ -697,7 +694,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                     <div className="grid grid-cols-4 gap-3">
                       {[
                         { label: 'Periods/Week', value: teacherAnalytics.periodsPerWeek, color: 'text-blue-600', bg: 'bg-blue-50' },
-                        { label: 'Tasks Assigned', value: teacherAnalytics.taskCount, color: 'text-violet-600', bg: 'bg-violet-50' },
                         { label: 'Total Leaves', value: teacherAnalytics.totalLeaves, color: 'text-orange-600', bg: 'bg-orange-50' },
                         { label: 'Pending Leaves', value: teacherAnalytics.pendingLeaves, color: 'text-red-600', bg: 'bg-red-50' },
                       ].map(({ label, value, color, bg }) => (

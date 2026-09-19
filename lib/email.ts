@@ -191,7 +191,6 @@ export async function sendParentWelcomeEmail(params: {
       <div class="info-row"><span class="info-label">Exam results & report cards</span><span class="info-value">✓</span></div>
       <div class="info-row"><span class="info-label">Attendance records</span><span class="info-value">✓</span></div>
       <div class="info-row"><span class="info-label">Fee status & payments</span><span class="info-value">✓</span></div>
-      <div class="info-row"><span class="info-label">Homework & task submissions</span><span class="info-value">✓</span></div>
       <div class="info-row"><span class="info-label">Timetable & announcements</span><span class="info-value">✓</span></div>
     </div>`)
   return sendMail(params.to, `Your WLYL Parent Account — ${params.schoolName}`, html)

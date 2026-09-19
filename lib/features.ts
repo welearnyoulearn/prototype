@@ -17,7 +17,6 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'student-portal',     label: 'Student Portal Access',           category: 'Core', portals: ['school-admin'] },
   { key: 'parent-portal',      label: 'Parent Portal Access',            category: 'Core', portals: ['school-admin'] },
   { key: 'library',            label: 'WLYL Digital Library',            category: 'Core', portals: ['school-admin', 'student', 'parent', 'teacher'] },
-  { key: 'homework',           label: 'Homework / Tasks',                category: 'Core', portals: ['school-admin', 'student'] },
   { key: 'doubts',             label: 'Ask a Doubt',                     category: 'Core', portals: ['school-admin', 'student'] },
 
   // ── Scheduling ───────────────────────────────────────────────────────────────
@@ -84,6 +83,5 @@ export const PORTAL_NAV_KEY_ALIASES: Record<string, string> = {
   'my-marks': 'exam-marks',           // student portal's results nav key
   'results': 'exam-marks',            // parent portal's results nav key
   'exams': 'exam-marks',              // parent portal's exam-calendar nav key
-  'tasks': 'homework',                // student portal's homework/tasks nav key
   'fees': 'fee-management',           // parent portal's fees nav key for the same capability
 }

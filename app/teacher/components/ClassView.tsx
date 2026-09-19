@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import Tasks from './Tasks'
 import ClassDoubts from './ClassDoubts'
 import ExamMarks from './ExamMarks'
 import { SCHEDULE } from '@/lib/schedule'
@@ -129,8 +128,8 @@ type Props = {
   readOnly?: boolean
 }
 
-const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Attendance', 'Timetable', 'Marks & Results', 'Homework', 'Doubts', 'Syllabus']
-const SUBJECT_TEACHER_TABS = ['My Overview', 'Students', 'Marks & Results', 'Homework', 'Doubts', 'Timetable', 'Syllabus']
+const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Attendance', 'Timetable', 'Marks & Results', 'Doubts', 'Syllabus']
+const SUBJECT_TEACHER_TABS = ['My Overview', 'Students', 'Marks & Results', 'Doubts', 'Timetable', 'Syllabus']
 
 // API returns: { id, exam_name, exam_type, exam_date, status, subject_name, subject_status, max_marks, ... }
 type MyExamRow = {
@@ -138,21 +137,19 @@ type MyExamRow = {
   status: string; subject_name: string; subject_status: string; max_marks: number
   total_subjects: number; submitted_subjects: number
 }
-type MyTask = { id: number; title: string; subject: string; task_type: string; due_date: string; submission_count: number; total_students: number }
 type MyDoubt = { id: number; question: string; student_name: string; created_at: string; subject: string; status: string }
 
 const EXAM_LABELS: Record<string, string> = { unit_test: 'Unit Test', mid_term: 'Mid Term', final_exam: 'Final Exam', practical: 'Practical' }
 const EXAM_COLORS: Record<string, string> = { unit_test: 'bg-red-100 text-red-700', mid_term: 'bg-orange-100 text-orange-700', final_exam: 'bg-purple-100 text-purple-700', practical: 'bg-blue-100 text-blue-700' }
 
 function SubjectTeacherOverview({
-  classId, schoolId, grade, section, teacher, onGoToMarks, onGoToTasks, onGoToDoubts,
+  classId, schoolId, grade, section, teacher, onGoToMarks, onGoToDoubts,
 }: {
   classId: number; schoolId: number; grade: string; section: string
   teacher: TeacherObj
-  onGoToMarks: () => void; onGoToTasks: () => void; onGoToDoubts: () => void
+  onGoToMarks: () => void; onGoToDoubts: () => void
 }) {
   const [myExams, setMyExams]     = useState<MyExamRow[]>([])
-  const [myTasks, setMyTasks]     = useState<MyTask[]>([])
   const [myDoubts, setMyDoubts]   = useState<MyDoubt[]>([])
   const [loading, setLoading]     = useState(true)
 
@@ -161,15 +158,11 @@ function SubjectTeacherOverview({
       // Exams where this teacher has a subject in this class
       fetch(`/api/exams?school_id=${schoolId}&class_id=${classId}&teacher_id=${teacher.id}`)
         .then(r => r.json()).catch(() => []),
-      // Tasks this teacher created for this class
-      fetch(`/api/tasks?school_id=${schoolId}&class_id=${classId}&teacher_id=${teacher.id}`)
-        .then(r => r.json()).catch(() => []),
       // Open doubts from this class related to this teacher's subject
       fetch(`/api/doubts?school_id=${schoolId}&class_id=${classId}&status=open&subject=${encodeURIComponent(teacher.subject || '')}`)
         .then(r => r.json()).catch(() => []),
-    ]).then(([examsData, tasksData, doubtsData]) => {
+    ]).then(([examsData, doubtsData]) => {
       setMyExams(Array.isArray(examsData) ? examsData : [])
-      setMyTasks(Array.isArray(tasksData) ? tasksData : [])
       setMyDoubts(Array.isArray(doubtsData) ? doubtsData.slice(0, 5) : [])
       setLoading(false)
     })
@@ -193,14 +186,10 @@ function SubjectTeacherOverview({
           <p className="text-white font-bold text-base mt-0.5">{teacher.subject} · Grade {grade}-{section}</p>
           <p className="text-indigo-200 text-xs mt-0.5">{teacher.department}</p>
         </div>
-        <div className="grid grid-cols-3 gap-4 text-center">
+        <div className="grid grid-cols-2 gap-4 text-center">
           <div>
             <div className={`text-xl font-black ${pendingExams.length > 0 ? 'text-amber-300' : 'text-white'}`}>{pendingExams.length}</div>
             <div className="text-indigo-200 text-[10px]">Pending Marks</div>
-          </div>
-          <div>
-            <div className="text-xl font-black">{myTasks.length}</div>
-            <div className="text-indigo-200 text-[10px]">Homework</div>
           </div>
           <div>
             <div className={`text-xl font-black ${myDoubts.length > 0 ? 'text-yellow-300' : 'text-white'}`}>{myDoubts.length}</div>
@@ -242,7 +231,7 @@ function SubjectTeacherOverview({
       )}
 
       {/* Quick action tiles */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         <button onClick={onGoToMarks}
           className={`rounded-xl p-4 text-left transition-all group border ${pendingExams.length > 0 ? 'bg-amber-50 border-amber-200 hover:border-amber-400' : 'bg-white border-gray-200 hover:border-orange-300 hover:bg-orange-50'}`}>
           <div className={`w-9 h-9 rounded-lg flex items-center justify-center mb-3 ${pendingExams.length > 0 ? 'bg-amber-100' : 'bg-orange-100'}`}>
@@ -254,17 +243,6 @@ function SubjectTeacherOverview({
           <p className={`text-xs mt-0.5 font-medium ${pendingExams.length > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
             {pendingExams.length > 0 ? `${pendingExams.length} pending` : submittedExams.length > 0 ? 'All submitted ✓' : 'No exams yet'}
           </p>
-        </button>
-
-        <button onClick={onGoToTasks}
-          className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:border-blue-300 hover:bg-blue-50 transition-all group">
-          <div className="w-9 h-9 bg-blue-100 rounded-lg flex items-center justify-center mb-3 group-hover:bg-blue-200">
-            <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-            </svg>
-          </div>
-          <p className="text-sm font-bold text-gray-800">Homework</p>
-          <p className="text-xs text-gray-400 mt-0.5">{myTasks.length} assigned</p>
         </button>
 
         <button onClick={onGoToDoubts}
@@ -281,37 +259,7 @@ function SubjectTeacherOverview({
         </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Recent tasks */}
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-bold text-gray-700 uppercase tracking-wide">Recent Tasks</p>
-            <button onClick={onGoToTasks} className="text-xs text-blue-500 font-medium hover:underline">View all</button>
-          </div>
-          {myTasks.length === 0 ? (
-            <div className="py-6 text-center">
-              <p className="text-xs text-gray-400">No tasks assigned to this class yet</p>
-              <button onClick={onGoToTasks} className="mt-2 text-xs text-blue-600 font-semibold hover:underline">+ Create task</button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {myTasks.slice(0, 4).map(t => (
-                <div key={t.id} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-700 font-medium truncate">{t.title}</p>
-                    <p className="text-xs text-gray-400">{t.task_type} · {t.due_date}</p>
-                  </div>
-                  {t.total_students > 0 && (
-                    <span className="text-[10px] font-bold text-gray-500 ml-2">
-                      {t.submission_count}/{t.total_students}
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
+      <div className="grid grid-cols-1 gap-4">
         {/* Open doubts */}
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <div className="flex items-center justify-between mb-3">
@@ -2261,10 +2209,6 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState(initialTab && tabs.includes(initialTab) ? initialTab : tabs[0])
   const [detailStudent, setDetailStudent] = useState<Student | null>(null)
-  // Set when a syllabus topic's "Add Homework" button navigates here — read
-  // once by Tasks to open its create form pre-filled, then cleared so
-  // switching tabs manually afterward doesn't keep re-triggering it.
-  const [homeworkPrefill, setHomeworkPrefill] = useState<{ title: string; subject: string } | null>(null)
 
   // Today's timetable (for 1st period card + day-wise view)
   const [todaySlots, setTodaySlots] = useState<TimetableSlot[]>([])
@@ -2579,7 +2523,6 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           section={section}
           teacher={teacher!}
           onGoToMarks={() => setActiveTab('Marks & Results')}
-          onGoToTasks={() => setActiveTab('Homework')}
           onGoToDoubts={() => setActiveTab('Doubts')}
         />
       )}
@@ -2651,11 +2594,6 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
               <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Class Average</p>
               <p className="text-3xl font-bold text-gray-900">—</p>
               <p className="text-xs text-gray-400 mt-0.5">Across all subjects</p>
-            </div>
-            <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
-              <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Pending Tasks</p>
-              <p className="text-3xl font-bold text-gray-900">0</p>
-              <p className="text-xs text-gray-400 mt-0.5">No tasks assigned</p>
             </div>
             <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
               <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">At Risk Students</p>
@@ -3252,25 +3190,6 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           </div>
         )
       })()}
-
-      {/* ── TASKS TAB ───────────────────────────────────────────────────────── */}
-      {activeTab === 'Homework' && teacher && (
-        <Tasks
-          classId={classId}
-          grade={grade}
-          section={section}
-          schoolId={schoolId}
-          teacher={teacher}
-          prefillTitle={homeworkPrefill?.title}
-          prefillSubject={homeworkPrefill?.subject}
-          onPrefillConsumed={() => setHomeworkPrefill(null)}
-        />
-      )}
-      {activeTab === 'Homework' && !teacher && (
-        <div className="bg-white rounded-xl border border-gray-200 py-20 text-center">
-          <p className="text-sm text-gray-400">Loading teacher info...</p>
-        </div>
-      )}
 
       {activeTab === 'Doubts' && teacher && (
         <ClassDoubts
