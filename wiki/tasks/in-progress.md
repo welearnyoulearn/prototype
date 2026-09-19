@@ -6,6 +6,17 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 
 <!-- Add new entries at the top -->
 
+### Extract Ask a Doubt out of dev into its own branch (#137)
+**Type:** Refactor / Extraction
+**Portal:** Teacher, Student
+**Branch:** feature/137-remove-ask-a-doubt
+**Started:** 2026-09-20
+**Summary:** Ask a Doubt (`doubts` feature key, Gemini-backed chat) is being pulled out of `dev` and preserved on this dedicated branch, alongside 4 other extractions (#136, #138-#140). This branch is the preservation snapshot; [EXTRACTION-137.md](../../EXTRACTION-137.md) lists the removal plan — `lib/features.ts` entry, `generateDoubtAnswer` in `lib/gemini.ts`, `doubts`/`doubt_messages`/`doubt_upvotes` tables, `/api/doubts/**` routes, and `StudentDoubts.tsx`/`ClassDoubts.tsx`. Also flags `app/components/FloatingAIChat.tsx` as already-orphaned dead code (no importer found anywhere in the repo).
+**Progress:**
+- [x] Located every file touching the `doubts` feature key
+- [x] `EXTRACTION-137.md` written with file/line-level removal plan
+- [ ] Actual removal from `dev` (separate follow-up, not done on this branch)
+
 ### Teacher Syllabus — add chapters in Telugu & Hindi without an extension (#116)
 **Type:** Feature + Bug Fix
 **Portal:** Teacher
