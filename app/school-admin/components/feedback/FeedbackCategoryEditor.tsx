@@ -2,6 +2,9 @@
 
 import { useState } from 'react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { FEEDBACK_ROLES } from '@/lib/feedback-defaults'
 import { useFeedbackFetch } from './useFeedbackFetch'
 
@@ -82,46 +85,48 @@ export default function FeedbackCategoryEditor({ schoolId }: { schoolId: number 
               <span className="text-lg">{cat.icon}</span>
               <span className={`flex-1 text-sm font-medium ${cat.is_active ? 'text-gray-800' : 'text-gray-400 line-through'}`}>{cat.label}</span>
               <span className="text-xs text-gray-400">{cat.department || '—'}</span>
-              <button
+              <Button
                 type="button"
                 data-testid={`feedback-category-toggle-${cat.key}`}
                 onClick={() => toggleActive(cat)}
-                className={`rounded-md px-2 py-1 text-xs font-semibold ${cat.is_active ? 'bg-gray-100 text-gray-600' : 'bg-emerald-50 text-emerald-600'}`}
+                size="sm"
+                variant="ghost"
+                className={cat.is_active ? 'text-gray-600' : 'text-emerald-600 hover:text-emerald-700'}
               >
                 {cat.is_active ? 'Deactivate' : 'Activate'}
-              </button>
+              </Button>
             </div>
           ))}
-          {rows.length === 0 && <p className="px-4 py-6 text-center text-sm text-gray-400">No categories for this role yet.</p>}
+          {rows.length === 0 && <EmptyState title="No categories for this role yet." className="border-0 py-6" />}
         </div>
       )}
 
       <div className="rounded-xl border border-dashed border-gray-300 p-4">
         <p className="mb-2 text-xs font-bold uppercase tracking-wide text-gray-400">Add category</p>
         <div className="flex flex-wrap gap-2">
-          <input
+          <Input
             data-testid="feedback-new-category-label"
             value={newLabel}
             onChange={e => setNewLabel(e.target.value)}
             placeholder="e.g. Library"
-            className="flex-1 min-w-[140px] rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            className="flex-1 min-w-[140px]"
           />
-          <input
+          <Input
             data-testid="feedback-new-category-department"
             value={newDepartment}
             onChange={e => setNewDepartment(e.target.value)}
             placeholder="Department (optional)"
-            className="flex-1 min-w-[140px] rounded-lg border border-gray-200 px-3 py-2 text-sm"
+            className="flex-1 min-w-[140px]"
           />
-          <button
+          <Button
             type="button"
             data-testid="feedback-add-category-btn"
             onClick={addCategory}
             disabled={saving || !newLabel.trim()}
-            className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className="bg-violet-600 hover:bg-violet-700"
           >
             Add
-          </button>
+          </Button>
         </div>
         {formError && <p className="mt-2 text-xs text-red-500">{formError}</p>}
       </div>

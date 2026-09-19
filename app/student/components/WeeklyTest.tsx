@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { Sparkles, CalendarClock, AlertTriangle } from 'lucide-react'
 import { INK, GREEN, GOLD, CORAL, PURPLE, BORDER, SURFACE } from '@/app/components/ulearn/theme'
 import { UlearnCard, ProgressBar } from '@/app/components/ulearn/primitives'
@@ -70,7 +71,7 @@ export default function WeeklyTest({ student, classId, schoolId }: Props) {
     if (!test) return
     const unanswered = test.questions.findIndex((_, i) => !answers[i])
     if (unanswered !== -1) {
-      alert(`Please answer question ${unanswered + 1} before submitting.`)
+      toast.error(`Please answer question ${unanswered + 1} before submitting.`)
       return
     }
     setSubmitting(true)
@@ -82,7 +83,7 @@ export default function WeeklyTest({ student, classId, schoolId }: Props) {
         body: JSON.stringify({ test_id: test.id, student_id: student.id, submitted_answers }),
       })
       const data = await res.json()
-      if (data.error) { alert(data.error); return }
+      if (data.error) { toast.error(data.error); return }
       setResults(data.results)
       setFinalScore({ score: data.score, max: data.max_score })
       setTest(prev => prev ? { ...prev, status: 'submitted' } : prev)
@@ -102,7 +103,7 @@ export default function WeeklyTest({ student, classId, schoolId }: Props) {
         .catch(() => {})
         .finally(() => setDiagnosisLoading(false))
     } catch {
-      alert('Submit failed. Please try again.')
+      toast.error('Submit failed. Please try again.')
     } finally {
       setSubmitting(false)
     }

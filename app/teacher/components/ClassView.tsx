@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { toast as sonnerToast } from 'sonner'
 import ExamMarks from './ExamMarks'
 import { SCHEDULE } from '@/lib/schedule'
 import { BookOpen, ChevronDown, Check, Loader2, X, Upload, Hash, Trash2, Pencil, Sparkles } from 'lucide-react'
@@ -10,6 +11,7 @@ import { InlineLoader } from '@/components/loaders'
 import { BulkImportPanel } from '@/app/components/ulearn/BulkImportPanel'
 import { useToast } from '@/app/components/ulearn/useToast'
 import { useFeature } from '@/lib/features-context'
+import { useConfirm } from '@/components/ui/use-confirm'
 import { syllabusPrompt, SYLLABUS_EXAMPLE } from '@/lib/syllabus/chatgpt-prompt'
 import StudentDetail from './StudentDetail'
 
@@ -500,6 +502,7 @@ export function SyllabusTracking({
   const [loading, setLoading] = useState(true)
   const [markingId, setMarkingId] = useState<number | null>(null)
   const { toast, flash, copyPrompt } = useToast()
+  const { confirm, ConfirmDialog } = useConfirm()
 
   // Add-custom-topic form — one open at a time, keyed by chapter name so a
   // teacher can add topics to a chapter before or after marking others taught,
@@ -888,7 +891,8 @@ export function SyllabusTracking({
 
   async function deleteCustomChapter(chapter: SylChapter) {
     if (!selectedSubject) return
-    if (!window.confirm(`Delete "${chapter.chapter_name}" and all its topics? This can't be undone.`)) return
+    const ok = await confirm(`Delete "${chapter.chapter_name}" and all its topics? This can't be undone.`, { title: 'Delete chapter?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     setDeletingChapter(chapter.chapter_name)
     try {
       const params = new URLSearchParams({
@@ -908,7 +912,8 @@ export function SyllabusTracking({
   }
 
   async function deleteCustomTopic(topic: SylTopic) {
-    if (!window.confirm(`Delete "${topic.topic_name}"? This can't be undone.`)) return
+    const ok = await confirm(`Delete "${topic.topic_name}"? This can't be undone.`, { title: 'Delete topic?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     setDeletingTopicId(topic.id)
     try {
       const params = new URLSearchParams({ school_id: String(schoolId), class_id: String(classId) })
@@ -1003,7 +1008,7 @@ export function SyllabusTracking({
     if (!selectedSubject || !setupTree) return
     const anyChapterChecked = setupTree.some(ch => setupChapterChecked[ch.school_chapter_id])
     if (!anyChapterChecked) {
-      const ok = window.confirm('This will hide the entire subject from your class — continue?')
+      const ok = await confirm('This will hide the entire subject from your class — continue?', { title: 'Hide entire subject?', destructive: true })
       if (!ok) return
     }
     if (setupOrg === 'semester') {
@@ -1221,6 +1226,7 @@ export function SyllabusTracking({
 
   return (
     <div>
+      {ConfirmDialog}
       {/* Subject tabs */}
       {subjects.length > 1 && (
         <div className="flex gap-2 flex-wrap mb-5">
@@ -2218,11 +2224,11 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         setTodaySlots(daySlots)
         setEditSlot(null)
       } else {
-        alert('Failed to save slot. Please try again.')
+        sonnerToast.error('Failed to save slot. Please try again.')
       }
     } catch (err) {
       console.error(err)
-      alert('Error updating timetable slot.')
+      sonnerToast.error('Error updating timetable slot.')
     } finally {
       setSavingSlot(false)
     }

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { GRADE_SEQUENCE } from '@/lib/grades'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 type Book = {
   id: number
@@ -29,6 +30,7 @@ function fmt(chars: number) {
 }
 
 export default function TextbookLibrary({ schoolId }: { schoolId: number }) {
+  const { confirm, ConfirmDialog } = useConfirm()
   const [books, setBooks]           = useState<Book[]>([])
   const [loading, setLoading]       = useState(true)
   const [filterGrade, setFilterGrade] = useState('')
@@ -94,7 +96,8 @@ export default function TextbookLibrary({ schoolId }: { schoolId: number }) {
   }
 
   async function handleDelete(id: number, title: string) {
-    if (!confirm(`Remove "${title}" from the library? This will also remove all its AI context.`)) return
+    const ok = await confirm(`Remove "${title}" from the library? This will also remove all its AI context.`, { title: 'Remove textbook?', confirmText: 'Remove', destructive: true })
+    if (!ok) return
     await fetch(`/api/textbooks/${id}?school_id=${schoolId}`, { method: 'DELETE' })
     setBooks(prev => prev.filter(b => b.id !== id))
   }
@@ -108,6 +111,7 @@ export default function TextbookLibrary({ schoolId }: { schoolId: number }) {
 
   return (
     <div>
+      {ConfirmDialog}
       <div className="mb-6">
         <h2 className="text-xl font-bold text-gray-900">Textbook Library</h2>
         <p className="text-sm text-gray-500 mt-0.5">

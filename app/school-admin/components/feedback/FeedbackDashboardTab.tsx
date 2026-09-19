@@ -2,6 +2,7 @@
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { useFeedbackFetch } from './useFeedbackFetch'
 
 interface Stats {
@@ -28,7 +29,7 @@ export default function FeedbackDashboardTab({ schoolId }: { schoolId: number })
   if (error || !stats) return (
     <div className="py-16 text-center text-sm text-red-500">
       {error || 'No data'}
-      <button type="button" onClick={reload} className="mt-2 block w-full font-semibold underline">Retry</button>
+      <Button type="button" onClick={reload} variant="link" className="mt-2 block w-full font-semibold">Retry</Button>
     </div>
   )
 

@@ -1,7 +1,10 @@
 'use client'
 
 import React, { useEffect, useState, useCallback, useRef } from 'react'
+import { toast } from 'sonner'
+import { CalendarDays } from 'lucide-react'
 import { SCHEDULE, DAYS, ACADEMIC_SLOTS, ScheduleSlot, buildScheduleFromSettings, DEFAULT_SCHEDULE_SETTINGS, SchoolScheduleSettings } from '@/lib/schedule'
+import { EmptyState } from '@/components/ui/empty-state'
 
 function canTeachGrade(teachesGrades: string | null | undefined, grade: string): boolean {
   if (!teachesGrades || !teachesGrades.trim()) return true
@@ -386,7 +389,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
 
   // ── Swap two slots from within the modal ─────────────────────────────────
   async function doSwapFromModal(_slotA: TimetableSlot, _slotB: TimetableSlot) {
-    alert('Timetable swap is not available in this version.')
+    toast.error('Timetable swap is not available in this version.')
   }
 
   // ── Add a new subject directly to a slot ─────────────────────────────────
@@ -532,7 +535,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   }
 
   function doSwap(_slotA: TimetableSlot, _slotB: TimetableSlot) {
-    alert('Slot swap is not available in this version.')
+    toast.error('Slot swap is not available in this version.')
   }
 
   function handleCellClick(slot: TimetableSlot) {
@@ -564,17 +567,17 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
 
   // ── Regenerate timetable ──────────────────────────────────────────────────
   async function regenerate() {
-    alert('Timetable generation is not available in this version. Please enter your timetable manually by clicking on a slot.')
+    toast.error('Timetable generation is not available in this version. Please enter your timetable manually by clicking on a slot.')
   }
 
   async function createCustomTimetable() {
-    alert('Timetable generation is not available in this version.')
+    toast.error('Timetable generation is not available in this version.')
     setShowCustomModal(false)
   }
 
   // ── Circulate timetable ───────────────────────────────────────────────────
   async function circulate() {
-    alert('Timetable publication is not available in this version.')
+    toast.error('Timetable publication is not available in this version.')
   }
 
   // ── Undo last swap ────────────────────────────────────────────────────────
@@ -591,7 +594,7 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
 
   // ── Publish all classes that were changed in this session ─────────────────
   async function publishAll() {
-    alert('Timetable publication is not available in this version.')
+    toast.error('Timetable publication is not available in this version.')
   }
 
   // Group by grade
@@ -1181,10 +1184,12 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
 
             {/* ── Timetable grid (days × periods) ── */}
             {timetable.length === 0 ? (
-              <div className="py-16 text-center space-y-3">
-                <p className="text-gray-400 text-sm">No timetable generated yet for Grade {selected.grade}-{selected.section}</p>
-                <p className="text-gray-300 text-xs">Add subjects in Class Management, then click <strong className="text-blue-500">Generate Timetable</strong> above</p>
-              </div>
+              <EmptyState
+                icon={CalendarDays}
+                title={`No timetable generated yet for Grade ${selected.grade}-${selected.section}`}
+                description={<>Add subjects in Class Management, then click <strong className="text-blue-500">Generate Timetable</strong> above</>}
+                className="border-0 py-16"
+              />
             ) : (
               <div className="overflow-x-auto p-4">
                 <table className="w-full text-xs border-collapse">
@@ -1986,8 +1991,8 @@ function TemplateTab({
 
   useEffect(() => { setTemplates([]); setTemplatesLoading(false) }, [schoolId])
 
-  async function saveAsTemplate() { alert('Schedule templates not available in this version.') }
-  async function deleteTemplate(_id: number) { alert('Schedule templates not available in this version.') }
+  async function saveAsTemplate() { toast.error('Schedule templates not available in this version.') }
+  async function deleteTemplate(_id: number) { toast.error('Schedule templates not available in this version.') }
 
   function loadTemplate(t: SavedTemplate) {
     setForm(t.settings)

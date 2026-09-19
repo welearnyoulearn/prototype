@@ -1,7 +1,10 @@
 ﻿'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import { Users } from 'lucide-react'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { EmptyState } from '@/components/ui/empty-state'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 type Props = { schoolId: number; refreshKey?: number }
 
@@ -259,6 +262,7 @@ function DuplicatesPanel({
 }
 
 export default function StudentsManagement({ schoolId, refreshKey }: Props) {
+  const { confirm, ConfirmDialog } = useConfirm()
   const [students, setStudents] = useState<Student[]>([])
   const [classes, setClasses] = useState<{ id: number; grade: string; section: string }[]>([])
   const [loading, setLoading] = useState(true)
@@ -409,7 +413,8 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   }
 
   async function handleDelete(student: Student) {
-    if (!confirm(`Remove ${student.name}? They will be marked inactive and can be restored later.`)) return
+    const ok = await confirm(`Remove ${student.name}? They will be marked inactive and can be restored later.`, { title: 'Remove student?', confirmText: 'Remove', destructive: true })
+    if (!ok) return
     try {
       const res = await fetch(`/api/students/${student.id}`, { method: 'DELETE' })
       const data = await res.json()
@@ -495,6 +500,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
 
   return (
     <div className="flex gap-6">
+      {ConfirmDialog}
       {/* Left: List */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-4">
@@ -587,9 +593,12 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
         </div>
 
         {filtered.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 py-12 text-center">
-            <p className="text-gray-400">No students found</p>
-          </div>
+          <EmptyState
+            icon={Users}
+            title="No students found"
+            description="Try adjusting your search or filters."
+            className="bg-white"
+          />
         ) : (
           <div className="space-y-4">
             {Object.entries(grouped).sort(([a], [b]) => sortGroupKey(a, b)).map(([group, members]) => (

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getAnySession, getParentSession } from '@/lib/auth'
+import { getAnySession, getParentSession, schoolHasFeature } from '@/lib/auth'
 import { resolveAcademicYear } from '@/lib/academicYear'
+import { claimIdempotencyKey, saveIdempotentResponse } from '@/lib/idempotency'
 
 // GET /api/parent/fees?school_id=X&student_id=Y&academic_year=2025-26
 export async function GET(req: NextRequest) {
@@ -62,7 +63,7 @@ export async function GET(req: NextRequest) {
 
       const { rows: ledger } = await pool.query(
         `SELECT l.*, fc.name AS category_name, fc.frequency,
-                 (l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid) AS balance
+                 GREATEST(l.amount_due - COALESCE(l.waiver_amount, 0) - l.amount_paid, 0) AS balance
          FROM student_fee_ledger l
          JOIN fee_categories fc ON fc.id = l.fee_category_id
          WHERE l.school_id = $1 AND l.student_id = $2 AND l.academic_year = $3
@@ -142,13 +143,40 @@ export async function GET(req: NextRequest) {
 //
 export async function POST(req: NextRequest) {
   try {
-    if (!await getAnySession()) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const session = await getAnySession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const client = await pool.connect()
     try {
-      const { school_id, student_id, ledger_id, ledger_ids, amount, total_amount, transaction_ref, upi_id } = await req.json()
+      const { school_id, student_id, ledger_id, ledger_ids, amount, total_amount, transaction_ref, upi_id, idempotency_key } = await req.json()
       if (!school_id || !student_id) {
         return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
+      }
+      // getAnySession() only confirms SOME valid login exists — without these
+      // checks (already applied on GET above, but missing here), any logged-in
+      // parent/teacher/student could submit a fabricated payment against ANOTHER
+      // school's student/ledger by supplying its IDs directly, since every query
+      // below trusts school_id/student_id/ledger_id straight from the request body.
+      if (session.schoolId !== Number(school_id)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+      if (session.role === 'parent') {
+        const parent = await getParentSession()
+        const linkRes = await pool.query(
+          'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
+          [student_id, parent?.parentId]
+        )
+        if (linkRes.rowCount === 0) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+        }
+      }
+      // Server-side plan gate — this is the actual write path that creates a
+      // fee_payments row; the QR/upi-id endpoints are gated too, but a caller
+      // could skip straight here. Without this, a school whose plan doesn't
+      // include online-payments could still have parents self-report payments
+      // that land in the admin's verification queue.
+      if (!await schoolHasFeature(Number(school_id), 'online-payments')) {
+        return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
       }
 
       const isMulti = Array.isArray(ledger_ids) && ledger_ids.length > 0
@@ -162,6 +190,16 @@ export async function POST(req: NextRequest) {
       }
 
       await client.query('BEGIN')
+
+      // Duplicate-submission guard — see lib/idempotency.ts. A parent's flaky
+      // mobile connection retrying a submit is exactly the scenario this exists
+      // for; the balance/pending checks below only catch a retry once the
+      // remaining balance has shrunk below the amount, not before.
+      const claim = await claimIdempotencyKey(client, { schoolId: school_id, key: idempotency_key, endpoint: '/api/parent/fees' })
+      if (!claim.proceed) {
+        await client.query('ROLLBACK')
+        return NextResponse.json(claim.body as object, { status: claim.status })
+      }
 
       const { rows: [seq] } = await client.query(`SELECT nextval('receipt_number_seq') AS n`)
       const schoolCode = String(school_id).padStart(3, '0')
@@ -275,14 +313,16 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      await client.query('COMMIT')
-
-      return NextResponse.json({
+      const responseBody = {
         receipt_number,
         total_amount: payAmount,
         entries_count: createdPayments.length,
         message: 'Payment submitted. School will verify and confirm shortly.',
-      }, { status: 201 })
+      }
+      await saveIdempotentResponse(client, { schoolId: school_id, key: idempotency_key, endpoint: '/api/parent/fees', status: 201, body: responseBody })
+      await client.query('COMMIT')
+
+      return NextResponse.json(responseBody, { status: 201 })
     } catch (e) {
       await client.query('ROLLBACK')
       console.error(e)

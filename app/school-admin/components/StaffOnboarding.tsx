@@ -1,9 +1,8 @@
 'use client'
 
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { createPortal } from 'react-dom'
-import { GRADE_SEQUENCE } from '@/lib/grades'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { GradesMultiSelect } from '@/components/ui/grades-multiselect'
 
 type Props = { schoolId: number; onRefresh?: () => void }
 
@@ -25,8 +24,6 @@ const EMPTY_ROW: TeacherRow = {
   teaches_grades: ''
 }
 
-const ALL_GRADES = GRADE_SEQUENCE.filter(g => /^\d+$/.test(g))
-
 function normalizeStaffType(raw: string): string {
   const v = raw.toLowerCase().replace(/[\s\-]/g, '_')
   return v.includes('non') ? 'non_teaching' : 'teaching'
@@ -41,111 +38,6 @@ function downloadExcelTemplate(schoolId: number) {
   a.href = `/api/teachers/template?school_id=${schoolId}`
   a.download = 'staff_template.xlsx'
   a.click()
-}
-
-// Inline grade multi-select for table rows. This is always the last real
-// column before the row's delete button, inside a horizontally-scrolling
-// table — any `absolute`-positioned popover here is still clipped by the
-// table's own overflow-x-auto no matter which edge it's anchored to (grades
-// 9/10 cut off, panel invisible entirely near the right edge). Rendered
-// through a portal to document.body instead, positioned in fixed viewport
-// coordinates computed from the trigger's own rect, so the table's overflow
-// can never clip it.
-function InlineGrades({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [open, setOpen] = useState(false)
-  const [pos, setPos] = useState({ top: 0, left: 0 })
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
-  const selected = value ? value.split(',').map(s => s.trim()).filter(Boolean) : []
-  const PANEL_WIDTH = 240
-
-  const updatePosition = useCallback(() => {
-    const r = triggerRef.current?.getBoundingClientRect()
-    if (!r) return
-    // Right-align the panel to the trigger, but never let it run off the
-    // left edge of the viewport on a narrow screen.
-    const left = Math.max(8, Math.min(r.right - PANEL_WIDTH, window.innerWidth - PANEL_WIDTH - 8))
-    setPos({ top: r.bottom + 6, left })
-  }, [])
-
-  useEffect(() => {
-    if (!open) return
-    updatePosition()
-    function onClickOutside(e: MouseEvent) {
-      if (
-        triggerRef.current && !triggerRef.current.contains(e.target as Node) &&
-        panelRef.current && !panelRef.current.contains(e.target as Node)
-      ) setOpen(false)
-    }
-    function onScrollOrResize() { updatePosition() }
-    document.addEventListener('mousedown', onClickOutside)
-    // capture:true so this also fires for scroll on the table's own
-    // overflow-x-auto container, not just window-level scroll.
-    window.addEventListener('scroll', onScrollOrResize, true)
-    window.addEventListener('resize', onScrollOrResize)
-    return () => {
-      document.removeEventListener('mousedown', onClickOutside)
-      window.removeEventListener('scroll', onScrollOrResize, true)
-      window.removeEventListener('resize', onScrollOrResize)
-    }
-  }, [open, updatePosition])
-
-  function toggle(g: string) {
-    const next = selected.includes(g) ? selected.filter(x => x !== g) : [...selected, g]
-    onChange(next.sort((a, b) => parseInt(a) - parseInt(b)).join(','))
-  }
-
-  const allSelected = selected.length === ALL_GRADES.length
-
-  return (
-    <>
-      <button ref={triggerRef} type="button" onClick={() => setOpen(v => !v)}
-        data-testid="teaches-grades-trigger"
-        className={`w-full border rounded-lg px-2.5 py-1.5 text-xs text-left bg-white transition-colors flex justify-between items-center gap-1.5 min-w-[120px] ${
-          open ? 'border-blue-400 ring-1 ring-blue-300' : 'border-gray-200 hover:border-gray-300'
-        }`}>
-        <span className={`truncate ${selected.length ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>
-          {selected.length === 0 ? 'All grades' : allSelected ? 'All grades (1–10)' : `Grade${selected.length > 1 ? 's' : ''} ${selected.join(', ')}`}
-        </span>
-        <svg className={`w-3.5 h-3.5 text-gray-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      {open && typeof document !== 'undefined' && createPortal(
-        <div ref={panelRef} style={{ position: 'fixed', top: pos.top, left: pos.left, width: PANEL_WIDTH }}
-          className="z-50 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
-          <div className="px-3 py-2 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-            <span className="text-xs font-semibold text-gray-600">Teaches Grades</span>
-            <span className="text-[10px] text-gray-400">{selected.length === 0 ? 'All grades' : `${selected.length} selected`}</span>
-          </div>
-          <div className="p-3">
-            <div className="grid grid-cols-5 gap-1.5">
-              {ALL_GRADES.map(g => (
-                <button key={g} type="button" onClick={() => toggle(g)}
-                  data-testid={`teaches-grade-${g}`}
-                  className={`h-8 rounded-lg text-xs font-semibold transition-colors ${
-                    selected.includes(g) ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}>
-                  {g}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center justify-between px-3 py-2 border-t border-gray-100 bg-gray-50">
-            <div className="flex gap-3">
-              <button type="button" onClick={() => onChange(ALL_GRADES.join(','))}
-                className="text-[11px] text-blue-600 hover:text-blue-800 font-medium">Select all</button>
-              <button type="button" onClick={() => onChange('')}
-                className="text-[11px] text-gray-500 hover:text-gray-700 font-medium">Clear</button>
-            </div>
-            <button type="button" onClick={() => setOpen(false)}
-              className="text-[11px] text-white bg-blue-600 hover:bg-blue-700 font-medium px-3 py-1 rounded-md">Done</button>
-          </div>
-        </div>,
-        document.body
-      )}
-    </>
-  )
 }
 
 function rowErrors(row: TeacherRow): string[] {
@@ -483,7 +375,14 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                       <td className="px-3 py-2">
                         {row.staff_type === 'teaching' ? (
                           <div className="space-y-0.5">
-                            <InlineGrades value={row.teaches_grades} onChange={v => updateRow(i, 'teaches_grades', v)} />
+                            <GradesMultiSelect
+                              value={row.teaches_grades}
+                              onChange={v => updateRow(i, 'teaches_grades', v)}
+                              testIdBase="teaches-grade"
+                              size="sm"
+                              align="end"
+                              panelWidth={240}
+                            />
                             {!row.teaches_grades.trim() && row.name.trim() && (
                               <p className="text-[10px] text-amber-500 leading-tight">
                                 ⚠ No grades = teaches all

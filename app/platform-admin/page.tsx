@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useConfirm } from '@/components/ui/use-confirm'
 
 type School = {
   id: number
@@ -68,6 +69,7 @@ function isNewThisWeek(dateStr: string) {
 }
 
 export default function PlatformAdmin() {
+  const { confirm, ConfirmDialog } = useConfirm()
   const [tab, setTab]                     = useState<Tab>('active')
   const [schools, setSchools]             = useState<School[]>([])
   const [stats, setStats]                 = useState<PlatformStats | null>(null)
@@ -185,7 +187,8 @@ export default function PlatformAdmin() {
   }
 
   async function handleResetAdmin(adminId: number) {
-    if (!confirm('Reset credentials for this admin? A new password will be generated and emailed to them.')) return
+    const ok = await confirm('Reset credentials for this admin? A new password will be generated and emailed to them.', { title: 'Reset credentials?', confirmText: 'Reset', destructive: true })
+    if (!ok) return
     setResettingId(adminId); setResetResult(null)
     try {
       const res  = await fetch(`/api/platform/admins/${adminId}/reset`, { method: 'POST' })
@@ -238,7 +241,8 @@ export default function PlatformAdmin() {
   }
 
   async function handleDelete(id: number, name: string) {
-    if (!confirm(`Delete "${name}"?\n\nThe school will be soft-deleted — all data is preserved and can be restored later.`)) return
+    const ok = await confirm(`Delete "${name}"?\n\nThe school will be soft-deleted — all data is preserved and can be restored later.`, { title: 'Delete school?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     try {
       const res = await fetch(`/api/schools/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
@@ -248,7 +252,8 @@ export default function PlatformAdmin() {
   }
 
   async function handleRestore(id: number, name: string) {
-    if (!confirm(`Restore "${name}"? It will become active again.`)) return
+    const ok = await confirm(`Restore "${name}"? It will become active again.`, { title: 'Restore school?', confirmText: 'Restore' })
+    if (!ok) return
     try {
       const res = await fetch(`/api/schools/${id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -326,6 +331,7 @@ export default function PlatformAdmin() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {ConfirmDialog}
 
       {/* ── Page header ── */}
       <div className="bg-white border-b border-gray-200 px-6 py-3.5 flex items-center justify-between sticky top-0 z-20 shadow-sm">

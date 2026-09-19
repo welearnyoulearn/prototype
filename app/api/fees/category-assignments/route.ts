@@ -1,37 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 
-const ENSURE_TABLE = `
-  CREATE TABLE IF NOT EXISTS student_fee_category_assignments (
-    id               SERIAL PRIMARY KEY,
-    school_id        INTEGER NOT NULL,
-    fee_category_id  INTEGER NOT NULL REFERENCES fee_categories(id) ON DELETE CASCADE,
-    student_id       INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-    academic_year    TEXT    NOT NULL DEFAULT '2025-26',
-    amount           NUMERIC(10,2) NOT NULL DEFAULT 0,
-    created_at       TIMESTAMPTZ DEFAULT NOW()
-  )
-`
-
-const ENSURE_HISTORY = `
-  CREATE TABLE IF NOT EXISTS student_fee_assignment_history (
-    id               SERIAL PRIMARY KEY,
-    school_id        INTEGER NOT NULL,
-    student_id       INTEGER NOT NULL,
-    fee_category_id  INTEGER NOT NULL,
-    academic_year    TEXT    NOT NULL,
-    old_amount       NUMERIC(10,2),
-    new_amount       NUMERIC(10,2),
-    change_type      TEXT    NOT NULL DEFAULT 'update',
-    changed_by       TEXT    NOT NULL DEFAULT 'Admin',
-    changed_at       TIMESTAMPTZ DEFAULT NOW()
-  )
-`
-
+// student_fee_category_assignments / student_fee_assignment_history table
+// creation lives in lib/db.ts's ensureDB() now (single source of truth); this
+// only carries the idempotent column/constraint backfills for databases that
+// created the tables before those existed. Callers must call ensureDB()
+// themselves BEFORE acquiring a pool client — see the POST handler below for
+// why it can't happen here when `client` is an already-checked-out connection.
 async function ensureSchema(client: { query: (sql: string, params?: unknown[]) => Promise<unknown> }) {
-  await client.query(ENSURE_TABLE)
-  await client.query(ENSURE_HISTORY)
   // Add missing columns idempotently
   await client.query(`ALTER TABLE student_fee_category_assignments ADD COLUMN IF NOT EXISTS academic_year TEXT NOT NULL DEFAULT '2025-26'`)
   await client.query(`ALTER TABLE student_fee_category_assignments ADD COLUMN IF NOT EXISTS amount NUMERIC(10,2) NOT NULL DEFAULT 0`)
@@ -74,6 +51,7 @@ export async function GET(req: NextRequest) {
     }
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     try {
+      await ensureDB()
       await ensureSchema(pool)
 
       const [studentsRes, categoriesRes, amountsRes] = await Promise.all([
@@ -117,6 +95,12 @@ export async function GET(req: NextRequest) {
 // Replaces all assignments for the given students+categories and syncs ledger
 export async function POST(req: NextRequest) {
   try {
+    // Must run before pool.connect() below, not after — on Vercel's max:1 pool,
+    // ensureDB()'s own pool.query() calls would otherwise block waiting for a
+    // connection that `client` is already holding, and `client` can't be
+    // released until this call returns: a deadlock resolved only by
+    // connectionTimeoutMillis expiring into an error.
+    await ensureDB()
     const client = await pool.connect()
     try {
       const { school_id, academic_year, assignments, changed_by: clientActor } = await req.json()
@@ -138,7 +122,41 @@ export async function POST(req: NextRequest) {
 
       if (studentIds.length === 0) return NextResponse.json({ upserted: 0, ledgerUpdated: 0 })
 
+      // requireFeeAccess above only verified the CALLER's own school_id — student_id
+      // and fee_category_id inside assignments[] are still client-supplied and were
+      // never checked against that school. Without this, a request could plant
+      // student_fee_category_assignments/student_fee_assignment_history rows (and
+      // UPDATE student_fee_ledger rows below) referencing another school's student
+      // or category, corrupting the FK relationship across tenants.
+      const { rows: ownedStudents } = await client.query(
+        `SELECT id FROM students WHERE id = ANY($1) AND school_id = $2`, [studentIds, school_id]
+      )
+      if (ownedStudents.length !== studentIds.length) {
+        client.release()
+        return NextResponse.json({ error: 'One or more students do not belong to this school' }, { status: 403 })
+      }
+      const { rows: ownedCategories } = await client.query(
+        `SELECT id FROM fee_categories WHERE id = ANY($1) AND school_id = $2`, [categoryIds, school_id]
+      )
+      if (ownedCategories.length !== categoryIds.length) {
+        client.release()
+        return NextResponse.json({ error: 'One or more fee categories do not belong to this school' }, { status: 403 })
+      }
+
       await client.query('BEGIN')
+
+      // Block assignment changes on a closed year — every other mutating fee
+      // route already has this guard; this one writes amount_due directly
+      // onto the ledger (below) just like structures/amend, so it needs it too.
+      const { rows: [closedYear] } = await client.query(
+        `SELECT 1 FROM fee_year_close
+         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
+        [school_id, academic_year]
+      )
+      if (closedYear) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to change variable-fee assignments.' }, { status: 409 })
+      }
 
       // Snapshot existing amounts BEFORE wiping (for audit trail)
       const { rows: existing } = await client.query(
@@ -186,6 +204,33 @@ export async function POST(req: NextRequest) {
              changed_by]
           )
         }
+      }
+
+      // Block a reduction that would leave amount_paid + waiver_amount exceeding the
+      // new amount_due — same guard structures/amend already has for fixed fees; this
+      // path (variable per-student amounts) was missing it, so reducing a student's
+      // assignment below what they'd already paid silently produced amount_due <
+      // amount_paid, an impossible state needing a refund/credit decision the ledger
+      // sync below has no way to make on its own.
+      const { rows: wouldOverpay } = await client.query(
+        `SELECT student_id, fee_category_id, amount_paid, COALESCE(waiver_amount,0) AS waiver_amount
+         FROM student_fee_ledger
+         WHERE school_id = $1 AND academic_year = $2
+           AND student_id = ANY($3) AND fee_category_id = ANY($4)`,
+        [school_id, academic_year, studentIds, categoryIds]
+      )
+      const overpaidMap = new Map(wouldOverpay.map((r: { student_id: number; fee_category_id: number; amount_paid: string; waiver_amount: string }) =>
+        [`${r.student_id}:${r.fee_category_id}`, parseFloat(r.amount_paid) + parseFloat(r.waiver_amount)]
+      ))
+      const overpaidCount = toSave.filter(({ student_id, fee_category_id, amount }: { student_id: number; fee_category_id: number; amount: string }) => {
+        const committed = overpaidMap.get(`${student_id}:${fee_category_id}`)
+        return committed !== undefined && committed > parseFloat(amount) + 0.01
+      }).length
+      if (overpaidCount > 0) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({
+          error: `${overpaidCount} student(s) have already paid or been waived more than the amount you're setting — reducing it this far isn't supported here. Use payment correction/refund or waiver correction for those students first.`,
+        }, { status: 409 })
       }
 
       // Sync existing ledger entries for saved amounts
