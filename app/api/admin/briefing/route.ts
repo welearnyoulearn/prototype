@@ -6,7 +6,6 @@ import pool, { ensureDB } from '@/lib/db'
 // Returns:
 //   date            — today
 //   attendance      — today's school-wide attendance (% present, unmarked classes)
-//   leave_requests  — pending approvals count
 //   uncovered       — uncovered periods today
 //   exams_today     — exams scheduled today
 //   exams_upcoming  — exams in next 7 days
@@ -30,7 +29,6 @@ export async function GET(req: NextRequest) {
 
   const [
     attendanceData,
-    leaveData,
     uncoveredData,
     examsTodayData,
     examsUpcomingData,
@@ -55,15 +53,6 @@ export async function GET(req: NextRequest) {
       `, [sid, today])
       return rows[0]
     }, null),
-
-    // Pending leave requests
-    safe(async () => {
-      const { rows } = await pool.query(
-        `SELECT COUNT(*)::int AS count FROM leave_requests WHERE school_id=$1 AND status='pending'`,
-        [sid]
-      )
-      return rows[0]
-    }, { count: 0 }),
 
     // Uncovered periods today
     safe(async () => {
@@ -188,8 +177,6 @@ export async function GET(req: NextRequest) {
   type Alert = { level: 'critical' | 'warning' | 'info'; message: string; action: string }
   const alerts: Alert[] = []
 
-  if (leaveData.count > 0)
-    alerts.push({ level: 'warning', message: `${leaveData.count} pending leave request${leaveData.count > 1 ? 's' : ''} need approval`, action: 'leave-requests' })
   if (uncoveredData.count > 0)
     alerts.push({ level: 'critical', message: `${uncoveredData.count} period${uncoveredData.count > 1 ? 's' : ''} uncovered today`, action: 'emergency-cover' })
   if (chronicData.count > 0)
@@ -213,7 +200,6 @@ export async function GET(req: NextRequest) {
       unmarked_classes,
       total_classes:   attendanceData?.total_classes ?? 0,
     },
-    leave_pending:       leaveData.count,
     uncovered_periods:   uncoveredData.count,
     exams_today:         examsTodayData,
     exams_upcoming:      examsUpcomingData,

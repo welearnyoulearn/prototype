@@ -6,7 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 
 type Props = { schoolId: number; onNavigate?: (key: string) => void }
 
-type Stats          = { teachers: number; students: number; classes: number; pendingLeaves: number }
+type Stats          = { teachers: number; students: number; classes: number }
 type UncoveredPeriod = { class_id: number; grade: string; section: string; period_number: number; subject_name: string | null; time_from: string; time_to: string; teacher_id: number; teacher_name: string; department: string; leave_request_id: number; leave_type: string }
 type AttendanceSummary = { class_id: number; grade: string; section: string; morning_present: number; morning_absent: number; morning_total: number; morning_marked: boolean }
 type HealthTimetable   = { class_id: number; timetable_exists: boolean; conflict_count: number; no_teacher_count: number; subjects_unassigned: number }
@@ -51,13 +51,12 @@ function StatCardSkeleton() {
 export default function Overview({ schoolId, onNavigate }: Props) {
   // Feature flags — only fetch/render what this plan allows
   const hasAttendance     = useFeature('attendance')
-  const hasLeave          = useFeature('leave-requests')
   const hasCover          = useFeature('emergency-cover')
   const hasTimetable      = useFeature('timetable')
   const hasExams          = useFeature('exam-marks')
   const hasFeeManagement  = useFeature('fee-management')
 
-  const [stats, setStats]                     = useState<Stats>({ teachers: 0, students: 0, classes: 0, pendingLeaves: 0 })
+  const [stats, setStats]                     = useState<Stats>({ teachers: 0, students: 0, classes: 0 })
   const [uncovered, setUncovered]             = useState<UncoveredPeriod[]>([])
   const [attendance, setAttendance]           = useState<AttendanceSummary[]>([])
   const [timetableHealth, setTimetableHealth] = useState<HealthTimetable[]>([])
@@ -74,7 +73,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
 
     // Build features list for batched API — only request what's enabled
     const featuresList = [
-      hasLeave       && 'leave',
       hasCover       && 'cover',
       hasAttendance  && 'attendance',
       hasTimetable   && 'timetable',
@@ -94,7 +92,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
         teachers:     d.core?.teachers     ?? 0,
         students:     d.core?.students     ?? 0,
         classes:      d.core?.classes      ?? 0,
-        pendingLeaves: d.leaves?.count     ?? 0,
       })
 
       // Feature-gated
@@ -109,7 +106,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [schoolId, hasAttendance, hasLeave, hasCover, hasTimetable, hasExams, hasFeeManagement])
+  }, [schoolId, hasAttendance, hasCover, hasTimetable, hasExams, hasFeeManagement])
 
   // Fetch current academic year once, then load overview with it
   useEffect(() => {
@@ -143,7 +140,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
     uncByTeacher.get(p.teacher_id)!.periods.push(p)
   }
 
-  const alertCount = uncovered.length + ttConflicts + (stats.pendingLeaves > 0 ? 1 : 0) + attNotMarked + (hasFeeManagement && feeOverdue > 0 ? 1 : 0)
+  const alertCount = uncovered.length + ttConflicts + attNotMarked + (hasFeeManagement && feeOverdue > 0 ? 1 : 0)
 
   // Count cards (shown at bottom)
   const countCards = [
@@ -160,13 +157,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
       sub: attPct !== null ? `${attPresent} of ${attStudents} present` : 'Not yet marked',
       color: attPct !== null ? (attPct >= 80 ? 'text-emerald-600' : attPct >= 60 ? 'text-amber-600' : 'text-red-600') : 'text-gray-400',
       bg: 'bg-gray-50', border: 'border-gray-200', nav: 'attendance',
-    }] : []),
-    ...(hasLeave ? [{
-      label: 'Pending Leaves', value: stats.pendingLeaves, sub: 'Awaiting approval',
-      color: stats.pendingLeaves > 0 ? 'text-orange-600' : 'text-gray-400',
-      bg: stats.pendingLeaves > 0 ? 'bg-orange-50' : 'bg-gray-50',
-      border: stats.pendingLeaves > 0 ? 'border-orange-200' : 'border-gray-200',
-      nav: 'leave-requests',
     }] : []),
     ...(hasFeeManagement ? [{
       label: 'Fee Outstanding',
@@ -228,18 +218,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
               </button>
             </div>
           )}
-          {hasLeave && stats.pendingLeaves > 0 && (
-            <div className="bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <span className="w-7 h-7 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-sm font-bold flex-shrink-0">{stats.pendingLeaves}</span>
-                <p className="text-sm font-semibold text-orange-800">Leave request{stats.pendingLeaves > 1 ? 's' : ''} awaiting approval</p>
-              </div>
-              <button onClick={() => onNavigate?.('leave-requests')}
-                className="text-xs font-semibold text-orange-600 hover:text-orange-800 border border-orange-200 hover:border-orange-400 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0">
-                Review →
-              </button>
-            </div>
-          )}
           {hasAttendance && attNotMarked > 0 && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
@@ -276,7 +254,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
       {!loading && (() => {
         const quickActions = [
           { label: 'Mark Attendance',  sub: 'Daily register',                 nav: 'attendance',      color: 'bg-blue-600',    show: hasAttendance },
-          { label: 'Review Leaves',    sub: `${stats.pendingLeaves} pending`,  nav: 'leave-requests',  color: 'bg-orange-500',  show: hasLeave },
           { label: 'Timetable',        sub: 'Manage schedules',                nav: 'timetable',       color: 'bg-emerald-600', show: hasTimetable },
           { label: 'Collect Fees',     sub: feeOverdue > 0 ? `${feeOverdue} overdue` : 'Fee management', nav: 'fee-management', color: 'bg-amber-600', show: hasFeeManagement },
         ].filter(a => a.show)
@@ -295,7 +272,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
         )
       })()}
 
-      {/* ── Feature metric cards (attendance %, leaves, fees) ── */}
+      {/* ── Feature metric cards (attendance %, fees) ── */}
       {metricCards.length > 0 && (
         <div className={`grid gap-4 ${metricCards.length === 1 ? 'grid-cols-1' : metricCards.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
           {loading

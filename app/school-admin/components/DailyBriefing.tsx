@@ -13,7 +13,6 @@ type BriefingData = {
     unmarked_classes: number
     total_classes: number
   }
-  leave_pending: number
   uncovered_periods: number
   exams_today: { exam_name: string; grade: string; section: string }[]
   exams_upcoming: { exam_name: string; exam_date: string; grade: string; section: string }[]
@@ -181,15 +180,6 @@ export default function DailyBriefing({
             {/* Ops quick-stats */}
             <div className="col-span-2 grid grid-cols-2 gap-4">
               {[
-                {
-                  label: 'Leave Pending',
-                  value: data.leave_pending,
-                  icon: '📅',
-                  action: 'leave-requests',
-                  urgent: data.leave_pending > 0,
-                  color: data.leave_pending > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-white',
-                  valueColor: data.leave_pending > 0 ? 'text-amber-600' : 'text-gray-400',
-                },
                 {
                   label: 'Uncovered Periods',
                   value: data.uncovered_periods,

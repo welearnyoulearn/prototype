@@ -31,7 +31,6 @@ function ModuleSkeleton() {
 // Turbopack requires inline object literals for next/dynamic options
 const ClassView      = dynamic(() => import('./components/ClassView'),      { loading: () => <ModuleSkeleton /> })
 const FullTimetable  = dynamic(() => import('./components/FullTimetable'),  { loading: () => <ModuleSkeleton /> })
-const TeacherLeave   = dynamic(() => import('./components/TeacherLeave'),   { loading: () => <ModuleSkeleton /> })
 const TeacherProfile = dynamic(() => import('./components/TeacherProfile'), { loading: () => <ModuleSkeleton /> })
 const Attendance     = dynamic(() => import('./components/Attendance'),     { loading: () => <ModuleSkeleton /> })
 const MyStudents     = dynamic(() => import('./components/MyStudents'),     { loading: () => <ModuleSkeleton /> })
@@ -71,7 +70,6 @@ const NAV_KEY_TO_FEATURE: Record<string, string> = {
   timetable: 'timetable',
   attendance: 'attendance',
   library: 'library',
-  leave: 'leave-requests',
   syllabus: 'curriculum',
 }
 
@@ -97,7 +95,6 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'MY ACCOUNT',
     items: [
       { key: 'profile', label: 'My Profile', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg> },
-      { key: 'leave', label: 'Teacher Attend.', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> },
     ],
   },
 ]
@@ -356,7 +353,6 @@ export default function TeacherPortal() {
           {visitedNav.has('class-view') && selectedClass && <div hidden={activeNav !== 'class-view'}><ClassView key={selectedClass.id} classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section} schoolId={teacher.school_id} teacherName={teacher.name} teacherId={teacher.id} isClassTeacher={teacher.class_teacher_grade === selectedClass.grade && teacher.class_teacher_section === selectedClass.section} teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} onBack={() => navigateTo('snapshot')} initialTab={classViewInitialTab} openExamId={classViewOpenExamId} /></div>}
           {visitedNav.has('timetable')      && <div hidden={activeNav !== 'timetable'}><FullTimetable teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('attendance')     && <div hidden={activeNav !== 'attendance'}><Attendance teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
-          {visitedNav.has('leave')          && <div hidden={activeNav !== 'leave'}><TeacherLeave teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('profile')        && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher as (t: unknown) => void} availableYears={availableYears} selectedAcademicYear={selectedAcademicYear} schoolCurrentYear={schoolCurrentYear} onSelectYear={setSelectedAcademicYear} /></div>}
           {visitedNav.has('my-classes')     && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} onGoToSyllabus={cls => handleNavigate('class-view', { classId: cls.id, tab: 'Syllabus' })} /></div>}
           {visitedNav.has('my-students')    && <div hidden={activeNav !== 'my-students'}><MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}

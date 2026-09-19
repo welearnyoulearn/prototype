@@ -20,7 +20,6 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
 
   // ── Scheduling ───────────────────────────────────────────────────────────────
   { key: 'attendance',         label: 'Attendance Tracking',             category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },
-  { key: 'leave-requests',     label: 'Leave Requests',                  category: 'Scheduling', portals: ['school-admin', 'teacher'] },
   { key: 'emergency-cover',    label: 'Emergency Cover',                 category: 'Scheduling', portals: ['school-admin'] },
   // Standalone, independently-sellable main feature (own tier row, and
   // per-school overridable the same as any other feature). Class Management

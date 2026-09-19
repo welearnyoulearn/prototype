@@ -14,9 +14,6 @@ type Notification = {
 }
 
 const TYPE_META: Record<string, { icon: string; color: string; label: string }> = {
-  leave_request:       { icon: '📅', color: 'bg-blue-100 text-blue-700',   label: 'Leave Request' },
-  leave_approved:      { icon: '✅', color: 'bg-green-100 text-green-700', label: 'Leave Approved' },
-  leave_rejected:      { icon: '❌', color: 'bg-red-100 text-red-700',     label: 'Leave Rejected' },
   substitute_assigned: { icon: '🔄', color: 'bg-amber-100 text-amber-700', label: 'Substitute' },
   exam_scheduled:      { icon: '📝', color: 'bg-purple-100 text-purple-700',label: 'Exam Scheduled' },
   marks_entry_required:{ icon: '📊', color: 'bg-orange-100 text-orange-700',label: 'Marks Entry' },

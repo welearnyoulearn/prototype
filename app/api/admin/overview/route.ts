@@ -24,14 +24,6 @@ export async function GET(req: NextRequest) {
         (SELECT COUNT(*) FROM classes  WHERE school_id=$1)::int                     AS classes
     `, [school_id])
 
-    // ── 2. Pending leaves ─────────────────────────────────────────────────────
-    const leavesQ = features.has('leave')
-      ? pool.query(
-          `SELECT COUNT(*)::int AS count FROM leave_requests WHERE school_id=$1 AND status='pending'`,
-          [school_id]
-        )
-      : null
-
     // ── 3. Uncovered periods today (approved leave with no substitute) ────────
     const coverQ = features.has('cover')
       ? pool.query(`
@@ -144,9 +136,8 @@ export async function GET(req: NextRequest) {
       : null
 
     try {
-      const [core, leaves, cover, att, tt, exams, fees] = await Promise.all([
+      const [core, cover, att, tt, exams, fees] = await Promise.all([
         coreQ,
-        leavesQ    ?? Promise.resolve(null),
         coverQ     ?? Promise.resolve(null),
         attQ       ?? Promise.resolve(null),
         ttQ        ?? Promise.resolve(null),
@@ -156,7 +147,6 @@ export async function GET(req: NextRequest) {
 
       return NextResponse.json({
         core:       core?.rows?.[0]  ?? { teachers: 0, students: 0, classes: 0 },
-        leaves:     leaves           ? { count: leaves.rows[0]?.count ?? 0 } : null,
         uncovered:  cover            ? cover.rows  : null,
         attendance: att              ? att.rows    : null,
         timetable:  tt               ? tt.rows     : null,

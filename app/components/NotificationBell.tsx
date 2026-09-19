@@ -22,9 +22,6 @@ type Props =
   | { parentId: number; teacherId?: never; schoolId?: never; studentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
 
 const TYPE_ICONS: Record<string, string> = {
-  leave_request: '📋',
-  leave_approved: '✅',
-  leave_rejected: '❌',
   period_delay: '⏰',
   substitute_needed: '🔄',
   substitute_assigned: '👤',
@@ -40,9 +37,6 @@ const TYPE_ICONS: Record<string, string> = {
 }
 
 const TYPE_COLORS: Record<string, string> = {
-  leave_request: 'text-blue-600 bg-blue-50',
-  leave_approved: 'text-green-600 bg-green-50',
-  leave_rejected: 'text-red-600 bg-red-50',
   period_delay: 'text-amber-600 bg-amber-50',
   substitute_needed: 'text-orange-600 bg-orange-50',
   substitute_assigned: 'text-teal-600 bg-teal-50',
@@ -58,9 +52,6 @@ const TYPE_COLORS: Record<string, string> = {
 }
 
 const TYPE_NAV: Record<string, string> = {
-  leave_request: 'leave-requests',
-  leave_approved: 'leave',
-  leave_rejected: 'leave',
   marks_entry_required: 'class-view',  // teacher: open class's marks tab
   marks_submitted: 'class-view',        // class teacher: see marks submission
   marks_published: 'my-marks',          // student: go to marks page
