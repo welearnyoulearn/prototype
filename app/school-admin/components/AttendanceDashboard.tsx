@@ -13,6 +13,12 @@ type ChronicAbsentee = {
 type WeeklyTrend = { week_start: string; present: number; total: number }
 type ClassSummary  = { class_id: number; grade: string; section: string; present: number; total: number; pct: number | null }
 
+// Month/Year view types
+type DayStat   = { date: string; present: number; total: number; pct: number | null }
+type MonthStat = { month: string; present: number; total: number; pct: number | null }
+type MonthData = { month: string; days: DayStat[]; classes: ClassSummary[] }
+type YearData  = { year: string; months: MonthStat[]; classes: ClassSummary[] }
+
 type SubstituteRecord = {
   id: number
   period_number: number
@@ -61,6 +67,32 @@ function fmt(t: string | null) {
 function pct(present: number | null, total: number | null) {
   if (!total || !present) return null
   return Math.round((present / total) * 100)
+}
+
+// Consistent green/amber/red color coding for an attendance % used across every
+// view (day heatmap, month calendar, class tables, year trend).
+const GOOD_THRESHOLD = 85
+const WARN_THRESHOLD = 70
+function pctBand(p: number | null): 'good' | 'warn' | 'poor' | 'none' {
+  if (p === null) return 'none'
+  if (p >= GOOD_THRESHOLD) return 'good'
+  if (p >= WARN_THRESHOLD) return 'warn'
+  return 'poor'
+}
+const BAND_HEX: Record<'good' | 'warn' | 'poor' | 'none', string> = {
+  good: '#10b981', warn: '#f59e0b', poor: '#ef4444', none: '#e5e7eb',
+}
+const BAND_TEXT: Record<'good' | 'warn' | 'poor' | 'none', string> = {
+  good: 'text-emerald-600', warn: 'text-amber-500', poor: 'text-red-500', none: 'text-gray-300',
+}
+const BAND_BG: Record<'good' | 'warn' | 'poor' | 'none', string> = {
+  good: 'bg-emerald-50 border-emerald-200', warn: 'bg-amber-50 border-amber-200',
+  poor: 'bg-red-50 border-red-200', none: 'bg-gray-50 border-gray-200',
+}
+
+function monthLabel(ym: string) {
+  const [y, m] = ym.split('-').map(Number)
+  return new Date(y, m - 1, 1).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })
 }
 
 function SessionCell({ total, present, absent, late, markedBy, markedAt, session }: {
@@ -119,7 +151,7 @@ function SessionCell({ total, present, absent, late, markedBy, markedAt, session
 
 export default function AttendanceDashboard({ schoolId }: Props) {
   const { isOnline, queue, retryFailed } = useOfflineAttendance()
-  const [tab, setTab]           = useState<'daily' | 'analytics'>('daily')
+  const [tab, setTab]           = useState<'daily' | 'month' | 'year' | 'analytics'>('daily')
   const [date, setDate]         = useState(new Date().toISOString().split('T')[0])
   const [data, setData]         = useState<ClassAttendance[]>([])
   const [loading, setLoading]   = useState(true)
@@ -129,6 +161,14 @@ export default function AttendanceDashboard({ schoolId }: Props) {
   const [analyticsDays, setAnalyticsDays]   = useState(30)
   const [analytics, setAnalytics]           = useState<{ chronic_absentees: ChronicAbsentee[]; weekly_trend: WeeklyTrend[]; class_summary: ClassSummary[] } | null>(null)
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
+  // Month view state
+  const [monthStr, setMonthStr]         = useState(new Date().toISOString().slice(0, 7))
+  const [monthData, setMonthData]       = useState<MonthData | null>(null)
+  const [monthLoading, setMonthLoading] = useState(false)
+  // Year view state
+  const [yearStr, setYearStr]         = useState(String(new Date().getFullYear()))
+  const [yearData, setYearData]       = useState<YearData | null>(null)
+  const [yearLoading, setYearLoading] = useState(false)
   // Class detail modal
   const [modalClass, setModalClass]         = useState<ClassAttendance | null>(null)
   const [modalRecords, setModalRecords]     = useState<StudentRecord[]>([])
@@ -163,6 +203,22 @@ export default function AttendanceDashboard({ schoolId }: Props) {
       if (data.chronic_absentees) setAnalytics(data)
     } finally { setAnalyticsLoading(false) }
   }
+
+  const loadMonth = useCallback(async (month: string) => {
+    setMonthLoading(true); setMonthData(null)
+    try {
+      const data = await fetch(`/api/attendance/analytics?school_id=${schoolId}&view=month&month=${month}`).then(r => r.json())
+      if (data.days) setMonthData(data)
+    } finally { setMonthLoading(false) }
+  }, [schoolId])
+
+  const loadYear = useCallback(async (year: string) => {
+    setYearLoading(true); setYearData(null)
+    try {
+      const data = await fetch(`/api/attendance/analytics?school_id=${schoolId}&view=year&year=${year}`).then(r => r.json())
+      if (data.months) setYearData(data)
+    } finally { setYearLoading(false) }
+  }, [schoolId])
 
   async function openClassDetail(cls: ClassAttendance) {
     setModalClass(cls)
@@ -217,7 +273,7 @@ export default function AttendanceDashboard({ schoolId }: Props) {
             </div>
           </div>
           {queue.some(q => q.status === 'failed') && (
-            <button onClick={retryFailed} className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg">Retry Failed</button>
+            <button onClick={retryFailed} data-testid="attendance-retry-failed-btn" className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg">Retry Failed</button>
           )}
         </div>
       )}
@@ -232,15 +288,32 @@ export default function AttendanceDashboard({ schoolId }: Props) {
           {tab === 'daily' && (
             <>
               <input type="date" value={date} max={new Date().toISOString().split('T')[0]}
+                data-testid="attendance-date-input"
                 onChange={e => setDate(e.target.value)}
                 className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
-              <button onClick={() => load(date)} className="text-sm text-blue-600 border border-blue-200 px-3 py-2 rounded-lg hover:bg-blue-50">Refresh</button>
+              <button onClick={() => load(date)} data-testid="attendance-refresh-btn" className="text-sm text-blue-600 border border-blue-200 px-3 py-2 rounded-lg hover:bg-blue-50">Refresh</button>
             </>
+          )}
+          {tab === 'month' && (
+            <input type="month" value={monthStr} max={new Date().toISOString().slice(0, 7)}
+              data-testid="attendance-month-input"
+              onChange={e => { setMonthStr(e.target.value); loadMonth(e.target.value) }}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+          )}
+          {tab === 'year' && (
+            <select value={yearStr} data-testid="attendance-year-select"
+              onChange={e => { setYearStr(e.target.value); loadYear(e.target.value) }}
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
+              {Array.from({ length: 5 }, (_, i) => String(new Date().getFullYear() - i)).map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
           )}
           {tab === 'analytics' && (
             <div className="flex gap-1">
               {[7, 30, 90].map(d => (
                 <button key={d} onClick={() => { setAnalyticsDays(d); loadAnalytics(d) }}
+                  data-testid={`attendance-insights-range-${d}`}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${analyticsDays === d ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
                   {d}d
                 </button>
@@ -248,10 +321,16 @@ export default function AttendanceDashboard({ schoolId }: Props) {
             </div>
           )}
           <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-            {(['daily', 'analytics'] as const).map(t => (
-              <button key={t} onClick={() => { setTab(t); if (t === 'analytics' && !analytics) loadAnalytics(analyticsDays) }}
+            {(['daily', 'month', 'year', 'analytics'] as const).map(t => (
+              <button key={t} data-testid={`attendance-tab-${t}`}
+                onClick={() => {
+                  setTab(t)
+                  if (t === 'analytics' && !analytics) loadAnalytics(analyticsDays)
+                  if (t === 'month' && !monthData) loadMonth(monthStr)
+                  if (t === 'year' && !yearData) loadYear(yearStr)
+                }}
                 className={`px-3 py-1.5 rounded-md text-xs font-semibold capitalize transition-colors ${tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-                {t === 'daily' ? 'Daily View' : 'Analytics'}
+                {t === 'daily' ? 'Day' : t === 'month' ? 'Month' : t === 'year' ? 'Year' : 'Insights'}
               </button>
             ))}
           </div>
@@ -268,12 +347,20 @@ export default function AttendanceDashboard({ schoolId }: Props) {
         />
       )}
 
+      {tab === 'month' && (
+        <AttendanceMonthView data={monthData} loading={monthLoading} month={monthStr} />
+      )}
+
+      {tab === 'year' && (
+        <AttendanceYearView data={yearData} loading={yearLoading} year={yearStr} />
+      )}
+
       {/* ── Class Detail Full Page View ── */}
       {tab === 'daily' && modalClass && (
         <div>
           {/* Back header */}
           <div className="flex items-center gap-3 mb-5">
-            <button onClick={() => setModalClass(null)}
+            <button onClick={() => setModalClass(null)} data-testid="attendance-class-back-btn"
               className="flex items-center justify-center w-9 h-9 rounded-xl bg-gray-100 hover:bg-gray-200 transition-colors text-gray-600">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -422,7 +509,7 @@ export default function AttendanceDashboard({ schoolId }: Props) {
       )}
 
       {/* Summary stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5" data-testid="attendance-day-stats">
         <div className="bg-white border border-gray-200 rounded-xl px-4 py-3">
           <p className="text-2xl font-bold text-gray-900">{totalClasses}</p>
           <p className="text-xs text-gray-400 mt-0.5">Total Classes</p>
@@ -513,7 +600,7 @@ export default function AttendanceDashboard({ schoolId }: Props) {
             const bothMarked = !!cls.morning_total && !!cls.afternoon_total
             const noneMarked = !cls.morning_total && !cls.afternoon_total
             return (
-              <button key={cls.id} onClick={() => openClassDetail(cls)}
+              <button key={cls.id} onClick={() => openClassDetail(cls)} data-testid={`attendance-class-card-${cls.id}`}
                 className={`text-left bg-white rounded-xl border p-4 hover:shadow-md transition-all cursor-pointer w-full ${
                   bothMarked ? 'border-green-200 hover:border-green-400' :
                   noneMarked ? 'border-red-200 hover:border-red-400' :
@@ -568,7 +655,6 @@ function AttendanceAnalyticsPanel({
   )
 
   const { chronic_absentees, weekly_trend, class_summary } = analytics
-  const maxPresent = Math.max(...weekly_trend.map(w => w.total), 1)
   const classesWithData = class_summary.filter(c => c.total > 0)
   const worstClasses = [...classesWithData].sort((a, b) => (a.pct ?? 100) - (b.pct ?? 100)).slice(0, 5)
   const bestClasses  = [...classesWithData].sort((a, b) => (b.pct ?? 0) - (a.pct ?? 0)).slice(0, 5)
@@ -688,6 +774,215 @@ function AttendanceAnalyticsPanel({
                     <span className="text-xs text-red-300 font-bold w-4">#{i+1}</span>
                     <span className="text-sm font-semibold text-gray-800">Grade {c.grade} – Sec {c.section}</span>
                   </div>
+                  <span className="text-sm font-black text-red-500">{c.pct}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Shared stat tile ─────────────────────────────────────────────────────────
+function StatTile({ label, value, band, testid }: { label: string; value: string; band: 'good' | 'warn' | 'poor' | 'none'; testid: string }) {
+  return (
+    <div className={`rounded-xl border px-4 py-3 ${BAND_BG[band]}`} data-testid={testid}>
+      <p className={`text-2xl font-black ${BAND_TEXT[band]}`}>{value}</p>
+      <p className="text-xs text-gray-500 mt-0.5">{label}</p>
+    </div>
+  )
+}
+
+// ─── Shared sortable class-wise table (Month & Year views) ────────────────────
+function ClassWiseTable({ rows, testidPrefix }: { rows: ClassSummary[]; testidPrefix: string }) {
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const withData = rows.filter(r => r.total > 0)
+  const sorted = [...withData].sort((a, b) => sortDir === 'desc' ? (b.pct ?? 0) - (a.pct ?? 0) : (a.pct ?? 0) - (b.pct ?? 0))
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden" data-testid={`${testidPrefix}-class-table`}>
+      <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+        <p className="font-bold text-gray-800 text-sm">Class-wise Attendance</p>
+        <button
+          onClick={() => setSortDir(d => d === 'desc' ? 'asc' : 'desc')}
+          data-testid={`${testidPrefix}-class-table-sort`}
+          className="text-xs text-blue-600 border border-blue-200 rounded-lg px-2.5 py-1 hover:bg-blue-50">
+          Sort: {sortDir === 'desc' ? 'High → Low' : 'Low → High'}
+        </button>
+      </div>
+      {sorted.length === 0 ? (
+        <p className="text-xs text-gray-400 text-center py-8">No attendance recorded for this period.</p>
+      ) : (
+        <div className="divide-y divide-gray-50">
+          {sorted.map(c => {
+            const band = pctBand(c.pct)
+            return (
+              <div key={c.class_id} className="flex items-center gap-3 px-4 py-2.5" data-testid={`${testidPrefix}-class-row-${c.class_id}`}>
+                <span className="text-xs font-semibold text-gray-600 w-20 flex-shrink-0">Gr.{c.grade}-{c.section}</span>
+                <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all" style={{ width: `${c.pct ?? 0}%`, backgroundColor: BAND_HEX[band] }} />
+                </div>
+                <span className={`text-xs font-bold w-10 text-right flex-shrink-0 ${BAND_TEXT[band]}`}>{c.pct ?? 0}%</span>
+                <span className="text-[10px] text-gray-400 w-16 text-right flex-shrink-0">{c.present}/{c.total}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Month View ───────────────────────────────────────────────────────────────
+function AttendanceMonthView({ data, loading, month }: { data: MonthData | null; loading: boolean; month: string }) {
+  if (loading) return (
+    <div className="py-20 text-center" data-testid="attendance-month-loading">
+      <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto" />
+    </div>
+  )
+  if (!data) return <div className="py-16 text-center text-gray-400 text-sm">No attendance data for this month.</div>
+
+  const daysWithData = data.days.filter(d => d.total > 0)
+  const avgPct = daysWithData.length > 0
+    ? Math.round(daysWithData.reduce((s, d) => s + (d.pct ?? 0), 0) / daysWithData.length)
+    : null
+  const best = daysWithData.length > 0 ? daysWithData.reduce((a, b) => (b.pct ?? 0) > (a.pct ?? 0) ? b : a) : null
+  const worst = daysWithData.length > 0 ? daysWithData.reduce((a, b) => (b.pct ?? 0) < (a.pct ?? 0) ? b : a) : null
+
+  // Build a calendar grid (Sun-Sat) for the month
+  const [y, m] = month.split('-').map(Number)
+  const firstDay = new Date(y, m - 1, 1)
+  const daysInMonth = new Date(y, m, 0).getDate()
+  const startOffset = firstDay.getDay() // 0=Sun
+  const dayMap = new Map(data.days.map(d => [d.date, d]))
+  const cells: (DayStat | null)[] = [...Array(startOffset).fill(null)]
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+    cells.push(dayMap.get(dateStr) ?? { date: dateStr, present: 0, total: 0, pct: null })
+  }
+
+  return (
+    <div className="space-y-5" data-testid="attendance-month-view">
+      <div className="grid grid-cols-3 gap-3">
+        <StatTile label={`Avg attendance — ${monthLabel(month)}`} value={avgPct !== null ? `${avgPct}%` : '—'} band={pctBand(avgPct)} testid="attendance-month-avg" />
+        <StatTile label={best ? `Best day — ${new Date(best.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : 'Best day'} value={best?.pct !== null && best?.pct !== undefined ? `${best.pct}%` : '—'} band={pctBand(best?.pct ?? null)} testid="attendance-month-best-day" />
+        <StatTile label={worst ? `Lowest day — ${new Date(worst.date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : 'Lowest day'} value={worst?.pct !== null && worst?.pct !== undefined ? `${worst.pct}%` : '—'} band={pctBand(worst?.pct ?? null)} testid="attendance-month-worst-day" />
+      </div>
+
+      {/* Calendar heatmap */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5" data-testid="attendance-month-heatmap">
+        <p className="font-bold text-gray-800 text-sm mb-4">Daily Attendance Heatmap</p>
+        <div className="grid grid-cols-7 gap-1.5 text-center mb-1">
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+            <span key={d} className="text-[10px] font-semibold text-gray-400">{d}</span>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-1.5">
+          {cells.map((cell, i) => {
+            if (!cell) return <div key={`blank-${i}`} />
+            const band = cell.total > 0 ? pctBand(cell.pct) : 'none'
+            const dayNum = Number(cell.date.slice(-2))
+            return (
+              <div key={cell.date} title={cell.total > 0 ? `${cell.date}: ${cell.pct}% (${cell.present}/${cell.total})` : `${cell.date}: no attendance marked`}
+                data-testid={`attendance-month-day-${cell.date}`}
+                className="aspect-square rounded-md flex items-center justify-center text-[10px] font-semibold"
+                style={{
+                  backgroundColor: cell.total > 0 ? BAND_HEX[band] : '#f3f4f6',
+                  color: cell.total > 0 ? 'white' : '#9ca3af',
+                }}>
+                {dayNum}
+              </div>
+            )
+          })}
+        </div>
+        <div className="flex items-center gap-4 mt-4 text-[10px] text-gray-500">
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: BAND_HEX.good }} />≥{GOOD_THRESHOLD}%</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: BAND_HEX.warn }} />{WARN_THRESHOLD}–{GOOD_THRESHOLD - 1}%</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ backgroundColor: BAND_HEX.poor }} />&lt;{WARN_THRESHOLD}%</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm inline-block bg-gray-100 border border-gray-200" />Not marked</span>
+        </div>
+      </div>
+
+      <ClassWiseTable rows={data.classes} testidPrefix="attendance-month" />
+    </div>
+  )
+}
+
+// ─── Year View ────────────────────────────────────────────────────────────────
+function AttendanceYearView({ data, loading, year }: { data: YearData | null; loading: boolean; year: string }) {
+  if (loading) return (
+    <div className="py-20 text-center" data-testid="attendance-year-loading">
+      <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto" />
+    </div>
+  )
+  if (!data) return <div className="py-16 text-center text-gray-400 text-sm">No attendance data for this year.</div>
+
+  const monthsWithData = data.months.filter(m => m.total > 0)
+  const avgPct = monthsWithData.length > 0
+    ? Math.round(monthsWithData.reduce((s, m) => s + (m.pct ?? 0), 0) / monthsWithData.length)
+    : null
+  const bestMonth = monthsWithData.length > 0 ? monthsWithData.reduce((a, b) => (b.pct ?? 0) > (a.pct ?? 0) ? b : a) : null
+  const worstMonth = monthsWithData.length > 0 ? monthsWithData.reduce((a, b) => (b.pct ?? 0) < (a.pct ?? 0) ? b : a) : null
+
+  const classesWithData = data.classes.filter(c => c.total > 0)
+  const bestClasses = [...classesWithData].sort((a, b) => (b.pct ?? 0) - (a.pct ?? 0)).slice(0, 3)
+  const worstClasses = [...classesWithData].sort((a, b) => (a.pct ?? 100) - (b.pct ?? 100)).slice(0, 3)
+
+  return (
+    <div className="space-y-5" data-testid="attendance-year-view">
+      <div className="grid grid-cols-3 gap-3">
+        <StatTile label={`Avg attendance — ${year}`} value={avgPct !== null ? `${avgPct}%` : '—'} band={pctBand(avgPct)} testid="attendance-year-avg" />
+        <StatTile label={bestMonth ? `Best month — ${monthLabel(bestMonth.month)}` : 'Best month'} value={bestMonth ? `${bestMonth.pct}%` : '—'} band={pctBand(bestMonth?.pct ?? null)} testid="attendance-year-best-month" />
+        <StatTile label={worstMonth ? `Lowest month — ${monthLabel(worstMonth.month)}` : 'Lowest month'} value={worstMonth ? `${worstMonth.pct}%` : '—'} band={pctBand(worstMonth?.pct ?? null)} testid="attendance-year-worst-month" />
+      </div>
+
+      {/* Month-over-month trend */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5" data-testid="attendance-year-trend-chart">
+        <p className="font-bold text-gray-800 text-sm mb-4">Month-over-Month Trend — {year}</p>
+        {data.months.length === 0 ? (
+          <p className="text-xs text-gray-400 text-center py-6">No attendance recorded this year.</p>
+        ) : (
+          <div className="flex items-end gap-2 h-32">
+            {data.months.map(m => {
+              const band = m.total > 0 ? pctBand(m.pct) : 'none'
+              const h = m.total > 0 ? Math.max(4, Math.round(((m.pct ?? 0) / 100) * 110)) : 4
+              return (
+                <div key={m.month} className="flex-1 flex flex-col items-center gap-1">
+                  <span className="text-[10px] font-semibold text-gray-500">{m.total > 0 ? `${m.pct}%` : ''}</span>
+                  <div className="w-full flex items-end justify-center h-28">
+                    <div className="w-full max-w-[36px] rounded-t-md transition-all" style={{ height: `${h}px`, backgroundColor: BAND_HEX[band] }} />
+                  </div>
+                  <span className="text-[9px] text-gray-400 whitespace-nowrap">{monthLabel(m.month).split(' ')[0]}</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      <ClassWiseTable rows={data.classes} testidPrefix="attendance-year" />
+
+      {classesWithData.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div className="bg-emerald-50 rounded-xl border border-emerald-200 p-4" data-testid="attendance-year-best-classes">
+            <p className="text-xs font-bold text-emerald-700 mb-3">Best Attendance Classes — {year}</p>
+            <div className="space-y-2">
+              {bestClasses.map((c, i) => (
+                <div key={c.class_id} className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-gray-800">#{i + 1} Grade {c.grade} – Sec {c.section}</span>
+                  <span className="text-sm font-black text-emerald-600">{c.pct}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="bg-red-50 rounded-xl border border-red-200 p-4" data-testid="attendance-year-worst-classes">
+            <p className="text-xs font-bold text-red-600 mb-3">Needs Attention — {year}</p>
+            <div className="space-y-2">
+              {worstClasses.map((c, i) => (
+                <div key={c.class_id} className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-gray-800">#{i + 1} Grade {c.grade} – Sec {c.section}</span>
                   <span className="text-sm font-black text-red-500">{c.pct}%</span>
                 </div>
               ))}

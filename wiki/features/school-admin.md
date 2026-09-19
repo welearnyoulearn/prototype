@@ -35,7 +35,7 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 | Feature | Status | Description |
 |---------|--------|-------------|
 | Timetable Management | Built | Generate, view conflicts, swap periods, lock/publish. Master/slave sync. Version control (draft → published). Teacher unavailability constraints. Schedule templates |
-| Attendance Dashboard | Built | School-wide view per day. Mark per class per session. Offline support via service worker |
+| Attendance Dashboard | Built | Day/Month/Year tabs. Day: school-wide per-class cards (morning+afternoon), class-detail drilldown, substitute coverage, offline queue via service worker. Month: attendance % calendar heatmap + sortable class-wise table. Year: month-over-month trend chart, best/worst month, best/worst classes. Insights tab: rolling 7/30/90-day trend + chronic-absentee list (3+ absences). All views green/amber/red color-coded (≥85% / 70-84% / <70%). Backed by `GET /api/attendance/analytics` (`view=month\|year`, defaults to rolling window) |
 | Leave Requests | Built | List all pending/approved/rejected leaves. Approve/reject. Shows substitute coverage status |
 | Emergency Cover | Built | View uncovered periods from approved leaves. Assign substitute teachers. Shows availability |
 | Exam Schedule | Built | Create exams, add subjects, track marks entry status, publish marks, exam calendar |
@@ -93,7 +93,8 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 | `GET/POST /api/classes` | Class CRUD |
 | `POST /api/class-timetable/generate` | Timetable generation |
 | `POST /api/class-timetable/circulate` | Publish timetable |
-| `GET/POST /api/attendance` | Attendance marking |
+| `GET/POST /api/attendance` | Attendance marking + daily/monthly reads |
+| `GET /api/attendance/analytics` | Rolling-window, month, and year attendance analytics (dashboard) |
 | `GET/POST/PUT /api/leave-requests` | Leave management |
 | `GET/POST /api/substitutes` | Substitute assignments |
 | `GET/POST /api/exams` | Exam CRUD |

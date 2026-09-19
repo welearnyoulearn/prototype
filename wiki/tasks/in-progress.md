@@ -6,6 +6,24 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 
 <!-- Add new entries at the top -->
 
+### Attendance Tracking — school-admin visualization dashboard (#135)
+**Type:** Feature + Bug Fix
+**Portal:** School Admin
+**Branch:** feature/135-attendance-dashboard
+**Started:** 2026-09-20
+**Summary:** Audited the existing Attendance Tracking feature end-to-end and rebuilt `AttendanceDashboard.tsx`'s reporting side with Day/Month/Year tabs — a school-wide snapshot, a class-wise sortable table, a calendar heatmap for the month, and a month-over-month trend chart for the year, all using consistent green/amber/red (≥85%/70-84%/<70%) color coding instead of raw numbers. Also fixed a real cross-tenant data leak: `GET /api/attendance/analytics` had no auth check at all (no `getAnySession`, no school-id ownership check), so any caller who knew a `school_id` could read another school's chronic-absentee list (student names included), weekly trend, and per-class %. Existing daily register (class cards, class-detail drilldown, substitute coverage, offline queue) kept as-is, now under a "Day" tab; the old flat "Analytics" panel kept as "Insights" (rolling 7/30/90-day trend + chronic absentees).
+**Progress:**
+- [x] Audit: read `AttendanceDashboard.tsx`, `app/api/attendance/route.ts`, `app/api/attendance/analytics/route.ts`, `lib/db.ts` attendance schema — data model is 2-session-per-day (morning/afternoon) per student, `attendance(school_id, class_id, student_id, date, session, status)`
+- [x] **Bug fixed:** added `getAnySession()` + tenant (`school_id`) check to `/api/attendance/analytics` — it previously had none
+- [x] `/api/attendance/analytics` extended with `view=month&month=YYYY-MM` and `view=year&year=YYYY`, in addition to the existing rolling-window default
+- [x] New Month tab: avg/best/worst-day stat tiles, day-by-day calendar heatmap, sortable class-wise table
+- [x] New Year tab: avg/best/worst-month stat tiles, 12-month trend chart, sortable class-wise table, best/worst 3 classes for the year
+- [x] `data-testid` added throughout (tabs, date/month/year pickers, class cards, sort buttons, stat tiles, heatmap cells) — the component had none before
+- [x] Playwright: un-skipped and extended `e2e/workflow-school-admin.spec.ts` test 7 to cover Day/Month/Year/Insights tab switching, sorting, and class drilldown
+- [x] `npm run lint` / `tsc --noEmit` clean on all changed files (2 pre-existing, unrelated issues confirmed via git-stash diff, left alone)
+- [ ] **Not run against a live database** — this worktree has no `DATABASE_URL`/Supabase credentials, so the new API branches and the Playwright spec are verified by code review + type-check only, not by an actual `npm run dev` + `test:e2e` pass. Needs a real run before merge.
+- [ ] PR review and merge
+
 ### Teacher Syllabus — add chapters in Telugu & Hindi without an extension (#116)
 **Type:** Feature + Bug Fix
 **Portal:** Teacher
