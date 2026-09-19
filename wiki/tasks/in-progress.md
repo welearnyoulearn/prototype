@@ -6,6 +6,17 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 
 <!-- Add new entries at the top -->
 
+### Extract Emergency Cover out of dev into its own branch (#140)
+**Type:** Refactor / Extraction
+**Portal:** School Admin
+**Branch:** feature/140-remove-emergency-cover
+**Started:** 2026-09-20
+**Summary:** Emergency Cover (`emergency-cover` feature key) is being pulled out of `dev` and preserved on this dedicated branch, the last of 5 extractions (#136-#139). This branch is the preservation snapshot; [EXTRACTION-140.md](../../EXTRACTION-140.md) lists the removal plan — `lib/features.ts` entry, `substitute_assignments` table, `/api/substitutes` route, `EmergencyCover.tsx`, and surgical edits to Overview/DailyBriefing/admin-overview/admin-briefing/CommandBar which surface "uncovered periods" as one metric among many. Flags a hard FK dependency (`substitute_assignments.leave_request_id`) on Leave Requests (#139) — the two should be removed from dev together or in the right order.
+**Progress:**
+- [x] Located every file touching the `emergency-cover` feature key
+- [x] `EXTRACTION-140.md` written with file/line-level removal plan, including the #139 coupling
+- [ ] Actual removal from `dev` (separate follow-up, not done on this branch)
+
 ### Teacher Syllabus — add chapters in Telugu & Hindi without an extension (#116)
 **Type:** Feature + Bug Fix
 **Portal:** Teacher
