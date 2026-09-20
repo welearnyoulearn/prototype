@@ -208,7 +208,7 @@ test.describe.serial('School Admin Workflow', () => {
     }
   })
 
-  test.skip('7. School Admin — view Attendance section', async ({ page }) => {
+  test('7. School Admin — view Attendance section', async ({ page }) => {
     await page.goto('/login?role=school')
     await page.getByPlaceholder('you@school.com').fill(adminEmail)
     await page.getByPlaceholder('Enter your password').fill(schoolPass)
@@ -231,6 +231,42 @@ test.describe.serial('School Admin Workflow', () => {
       await attendanceBtn.click()
       await page.waitForTimeout(1000)
       await expect(page.getByText(/attendance|present|absent|class/i).first()).toBeVisible({ timeout: 5000 })
+
+      // ── Day view (default): today's snapshot + class cards ──
+      await expect(page.getByTestId('attendance-tab-daily')).toBeVisible()
+      await expect(page.getByTestId('attendance-day-stats')).toBeVisible()
+
+      // ── Month view: month picker, heatmap, class-wise table ──
+      await page.getByTestId('attendance-tab-month').click()
+      await expect(page.getByTestId('attendance-month-input')).toBeVisible()
+      await expect(page.getByTestId('attendance-month-view')).toBeVisible({ timeout: 10000 })
+      await expect(page.getByTestId('attendance-month-heatmap')).toBeVisible()
+      await expect(page.getByTestId('attendance-month-class-table')).toBeVisible()
+      // Sorting toggles the direction label
+      const monthSortBtn = page.getByTestId('attendance-month-class-table-sort')
+      const initialLabel = await monthSortBtn.textContent()
+      await monthSortBtn.click()
+      await expect(monthSortBtn).not.toHaveText(initialLabel || '')
+
+      // ── Year view: year selector, trend chart, class-wise table ──
+      await page.getByTestId('attendance-tab-year').click()
+      await expect(page.getByTestId('attendance-year-select')).toBeVisible()
+      await expect(page.getByTestId('attendance-year-view')).toBeVisible({ timeout: 10000 })
+      await expect(page.getByTestId('attendance-year-trend-chart')).toBeVisible()
+      await expect(page.getByTestId('attendance-year-class-table')).toBeVisible()
+
+      // ── Insights (rolling analytics) view still reachable ──
+      await page.getByTestId('attendance-tab-analytics').click()
+      await expect(page.getByTestId('attendance-insights-range-30')).toBeVisible()
+
+      // ── Back to Day view, drill into a class card if one is present ──
+      await page.getByTestId('attendance-tab-daily').click()
+      const firstClassCard = page.locator('[data-testid^="attendance-class-card-"]').first()
+      if (await firstClassCard.isVisible().catch(() => false)) {
+        await firstClassCard.click()
+        await expect(page.getByTestId('attendance-class-back-btn')).toBeVisible({ timeout: 5000 })
+        await page.getByTestId('attendance-class-back-btn').click()
+      }
     }
   })
 

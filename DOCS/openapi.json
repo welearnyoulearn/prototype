@@ -26001,7 +26001,7 @@
           "Fee setup"
         ],
         "summary": "Save variable fee assignments",
-        "description": "Replaces variable fee assignments for the given student/category pairs in a transaction. Amounts > 0 are saved and existing ledger bills for that student/category/year are re-priced with recomputed status; zero amounts remove the assignment and delete unpaid pending/overdue ledger bills. Every change is logged to student_fee_assignment_history.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id) is checked before body validation. Student and category ids are not individually verified; all writes are scoped by school_id.",
+        "description": "Replaces variable fee assignments for the given student/category pairs in a transaction. Amounts > 0 are saved and existing ledger bills for that student/category/year are re-priced with recomputed status; zero amounts remove the assignment and delete unpaid pending/overdue ledger bills. Every change is logged to student_fee_assignment_history. Refused for closed academic years, and refused if any reduction would leave amount_paid + waiver_amount exceeding the new amount.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id) is checked before body validation. Every student_id and fee_category_id inside assignments[] is then verified to belong to that same school_id before any write.",
         "operationId": "postFeesCategoryAssignments",
         "security": [
           {
@@ -26034,7 +26034,10 @@
             "description": "school_id, academic_year, assignments required"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "Forbidden, or one or more students/fee categories do not belong to this school"
+          },
+          "409": {
+            "description": "Academic year is closed, or a reduction would leave amount_paid + waiver_amount exceeding the new amount for one or more students"
           },
           "500": {
             "description": "Failed to save assignments"
@@ -26214,7 +26217,7 @@
           "Fee setup"
         ],
         "summary": "Generate fee bills for a year",
-        "description": "Creates ledger bills for active students: fixed categories from fee_structures (per grade) and variable categories from per-student assignments, one bill per period derived from the category frequency (monthly, quarterly, half_yearly, else annual), all due on the academic year's end_date. Existing bills are skipped, but unpaid/partial bills pointing at another grade's structure are re-synced. Afterwards marks pending bills overdue if the year has ended and auto-locks the year's fee structure (fee_structure_locks).\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
+        "description": "Creates ledger bills for active students: fixed categories from fee_structures (per grade) and variable categories from per-student assignments, one bill per period derived from the category frequency (monthly, quarterly, half_yearly, else annual), all due on the academic year's end_date. Existing bills are skipped, but unpaid/partial bills pointing at another grade's structure are re-synced. Refused for closed academic years. Afterwards marks pending bills overdue if the year has ended and auto-locks the year's fee structure (fee_structure_locks).\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
         "operationId": "postFeesGenerate",
         "security": [
           {
@@ -26254,6 +26257,9 @@
           },
           "403": {
             "description": "Forbidden"
+          },
+          "409": {
+            "description": "This academic year is closed"
           },
           "500": {
             "description": "Failed to generate ledger"
@@ -26690,7 +26696,7 @@
           "Fee setup"
         ],
         "summary": "Amend locked fee structure amount",
-        "description": "Changes a fee structure amount with an audit trail: records a fee_structure_amendments row, updates fee_structures, re-prices every pending/overdue/partial bill linked to that structure (recomputing status), and writes a student_fee_ledger_edits row per affected bill. Refused if any affected student has already paid more than the new amount.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id), checked before body validation. changed_by from the body is honoured if present.",
+        "description": "Changes a fee structure amount with an audit trail: records a fee_structure_amendments row, updates fee_structures, re-prices every pending/overdue/partial bill linked to that structure (recomputing status), and writes a student_fee_ledger_edits row per affected bill actually updated. Refused for closed academic years, or if any affected student's amount_paid + waiver_amount would exceed the new amount.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id), checked before body validation. changed_by from the body is honoured if present.",
         "operationId": "postFeesStructuresAmend",
         "security": [
           {
@@ -26758,7 +26764,7 @@
             "description": "Fee structure not found"
           },
           "409": {
-            "description": "Some students already paid more than the new amount"
+            "description": "Academic year is closed, or some students already paid/waived more than the new amount"
           },
           "500": {
             "description": "Failed to amend structure"
@@ -27575,7 +27581,7 @@
             }
           },
           "400": {
-            "description": "school_id, date required"
+            "description": "school_id, date required; or actual_cash must be a number"
           },
           "403": {
             "description": "Forbidden"
@@ -27638,7 +27644,7 @@
           "Ledger & payments"
         ],
         "summary": "List fee ledger bills",
-        "description": "Lists ledger bills with student, parent and category details, confirmed paid total, balance, days overdue and whether the bill was edited. First re-syncs pending/overdue statuses for the year against the academic year end_date (a DB write). academic_year defaults to the school's current year. Pagination is opt-in: with limit/offset the response is wrapped as {data, limit, offset, total}; otherwise a bare array.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
+        "description": "Lists ledger bills with student, parent and category details, balance and days overdue. First re-syncs pending/overdue statuses for the year against the academic year end_date (a DB write). academic_year defaults to the school's current year. Pagination is opt-in: with limit/offset the response is wrapped as {data, limit, offset, total}; otherwise a bare array.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
         "operationId": "getFeesLedger",
         "security": [
           {
@@ -27766,10 +27772,6 @@
                           "frequency": {
                             "type": "string"
                           },
-                          "total_paid_confirmed": {
-                            "type": "string",
-                            "description": "NUMERIC as decimal string"
-                          },
                           "balance": {
                             "type": "string",
                             "description": "NUMERIC as decimal string"
@@ -27777,9 +27779,6 @@
                           "days_overdue": {
                             "type": "integer",
                             "nullable": true
-                          },
-                          "has_edits": {
-                            "type": "boolean"
                           }
                         },
                         "additionalProperties": true
@@ -27899,10 +27898,6 @@
                               "frequency": {
                                 "type": "string"
                               },
-                              "total_paid_confirmed": {
-                                "type": "string",
-                                "description": "NUMERIC as decimal string"
-                              },
                               "balance": {
                                 "type": "string",
                                 "description": "NUMERIC as decimal string"
@@ -27910,9 +27905,6 @@
                               "days_overdue": {
                                 "type": "integer",
                                 "nullable": true
-                              },
-                              "has_edits": {
-                                "type": "boolean"
                               }
                             },
                             "additionalProperties": true
@@ -28119,7 +28111,7 @@
           "Ledger & payments"
         ],
         "summary": "Delete unpaid ledger entry",
-        "description": "Deletes one ledger bill. Refused if the bill is paid or waived, or has any amount_paid.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id); bill must belong to that school_id.",
+        "description": "Deletes one ledger bill inside a transaction (row locked FOR UPDATE). Refused if the academic year is closed, the bill is paid or waived, has any amount_paid, or has a waiver recorded (revoke the waiver first).\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id); bill must belong to that school_id.",
         "operationId": "deleteFeesLedgerId",
         "security": [
           {
@@ -28146,13 +28138,16 @@
             }
           },
           "400": {
-            "description": "school_id required; cannot delete a paid/waived entry; or payments recorded"
+            "description": "school_id required; cannot delete a paid/waived entry; payments recorded; or a waiver is recorded on the entry"
           },
           "403": {
             "description": "Forbidden"
           },
           "404": {
             "description": "Not found"
+          },
+          "409": {
+            "description": "This academic year is closed"
           },
           "500": {
             "description": "Failed"
@@ -29388,7 +29383,7 @@
           "Ledger & payments"
         ],
         "summary": "Record fee payment",
-        "description": "Records a payment against one bill (single mode: ledger_id + amount) or allocates total_amount across several unpaid bills oldest-due first (multi mode: ledger_ids + total_amount), all sharing one generated receipt number RCP-{school}-{year}-{seq}. Rows are locked FOR UPDATE and amounts above the remaining balance are rejected. When payment_status is 'completed' the ledger amount_paid and status are updated. Refused for closed academic years.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id), checked before body validation. Bills must belong to school_id; student_id is not cross-checked against the bill.",
+        "description": "Records a payment against one bill (single mode: ledger_id + amount) or allocates total_amount across several unpaid bills oldest-due first (multi mode: ledger_ids + total_amount), all sharing one generated receipt number RCP-{school}-{year}-{seq}. Rows are locked FOR UPDATE and amounts above the remaining balance are rejected. When payment_status is 'completed' the ledger amount_paid and status are updated. Refused for closed academic years. An optional idempotency_key deduplicates retries/double-clicks — a repeat call with the same key replays the original response instead of recording a second payment.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id), checked before body validation. Bills must belong to school_id; student_id is not cross-checked against the bill.",
         "operationId": "postFeesPayments",
         "security": [
           {
@@ -29553,7 +29548,7 @@
             }
           },
           "400": {
-            "description": "Missing fields, invalid paid_date, amount <= 0, amount exceeds balance, or already paid"
+            "description": "Missing fields, collected_by_name blank, payment_mode not in the allowed list, invalid paid_date, amount <= 0, amount exceeds balance, or already paid"
           },
           "403": {
             "description": "Forbidden"
@@ -29613,7 +29608,14 @@
                   },
                   "payment_mode": {
                     "type": "string",
-                    "description": "e.g. cash | cheque | dd | online | upi (not validated)"
+                    "enum": [
+                      "cash",
+                      "cheque",
+                      "dd",
+                      "upi",
+                      "online"
+                    ],
+                    "description": "Validated against this whitelist"
                   },
                   "transaction_ref": {
                     "type": "string",
@@ -29621,7 +29623,7 @@
                   },
                   "collected_by_name": {
                     "type": "string",
-                    "description": "Defaults to session actor"
+                    "description": "Required, non-empty — not defaulted to the session actor, since staff often share one admin login at the collection counter"
                   },
                   "notes": {
                     "type": "string",
@@ -29636,12 +29638,18 @@
                   "payment_status": {
                     "type": "string",
                     "description": "Default 'completed'; ledger is only updated when 'completed' (not validated)"
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Optional client-generated key; a retried request with the same key replays the original stored response instead of recording a duplicate payment"
                   }
                 },
                 "required": [
                   "school_id",
                   "student_id",
-                  "payment_mode"
+                  "payment_mode",
+                  "collected_by_name"
                 ]
               }
             }
@@ -29700,7 +29708,7 @@
             }
           },
           "400": {
-            "description": "payment_id, reason required; corrected amount <= 0 or exceeds remaining balance"
+            "description": "payment_id, reason required; corrected amount <= 0 or exceeds remaining balance; or new_payment_mode not in the allowed list"
           },
           "403": {
             "description": "Forbidden"
@@ -29753,7 +29761,14 @@
                   },
                   "new_payment_mode": {
                     "type": "string",
-                    "description": "correct only"
+                    "enum": [
+                      "cash",
+                      "cheque",
+                      "dd",
+                      "upi",
+                      "online"
+                    ],
+                    "description": "correct only; validated against this whitelist"
                   },
                   "new_transaction_ref": {
                     "type": "string",
@@ -29951,7 +29966,7 @@
           "Ledger & payments"
         ],
         "summary": "Approve or reject pending payment",
-        "description": "Approves a pending_verification payment (marks completed, applies it to the ledger bill) or rejects it (marks rejected with reason). Sends a confirmation or rejection email to the parent's email, fire-and-forget.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** School resolved from the payment row; requireFeeAccess(payment.school_id).",
+        "description": "Approves a pending_verification payment (marks completed, applies it to the ledger bill) or rejects it (marks rejected with reason). The payment row is locked FOR UPDATE so a double-click can't double-apply the ledger credit. Approve additionally requires the school's plan to include online-payments and refuses to credit a closed academic year's ledger; reject touches neither the ledger nor the plan gate, so it stays available even for a school that has since lost online-payments or whose year is closed. Sends a confirmation or rejection email to the parent's email, fire-and-forget.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** School resolved from the payment row; requireFeeAccess(payment.school_id). Approve also checks schoolHasFeature(school_id, 'online-payments').",
         "operationId": "postFeesPaymentsVerify",
         "security": [
           {
@@ -29999,10 +30014,13 @@
             "description": "payment_id, action required; or action must be approve or reject"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "Forbidden, or (approve only) online payments is not enabled for this school"
           },
           "404": {
             "description": "Payment not found or already processed"
+          },
+          "409": {
+            "description": "(approve only) academic year is closed"
           },
           "500": {
             "description": "Failed to process verification"
@@ -30521,7 +30539,7 @@
           "Waivers"
         ],
         "summary": "Grant fee waiver",
-        "description": "Grants a waiver on one bill, computed on the remaining balance: full (entire remaining), percentage (waiver_value % of remaining) or fixed_amount (capped at remaining). Adds it to the bill's waiver_amount (not amount_paid) and sets status waived/partial. Refused for closed academic years; carry_forward is not accepted.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id), checked before body validation. Bill must belong to school_id; student_id is not cross-checked against the bill.",
+        "description": "Grants a waiver on one bill, computed on the remaining balance: full (entire remaining), percentage (waiver_value % of remaining, capped at remaining) or fixed_amount (capped at remaining). Adds it to the bill's waiver_amount (not amount_paid) and sets status waived/partial. Refused for closed academic years; carry_forward is not accepted. An optional idempotency_key deduplicates retries/double-clicks — a repeat call with the same key replays the original response instead of granting a second waiver.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id), checked before body validation. Bill must belong to school_id; student_id is not cross-checked against the bill.",
         "operationId": "postFeesWaivers",
         "security": [
           {
@@ -30598,7 +30616,7 @@
             }
           },
           "400": {
-            "description": "Missing fields, invalid waiver_type, or nothing to waive"
+            "description": "Missing fields, invalid waiver_type, waiver_value not a number, or nothing to waive"
           },
           "403": {
             "description": "Forbidden"
@@ -30658,6 +30676,11 @@
                   "granted_by_name": {
                     "type": "string",
                     "description": "Defaults to session actor"
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Optional client-generated key; a retried request with the same key replays the original stored response instead of granting a duplicate waiver"
                   }
                 },
                 "required": [
@@ -30677,7 +30700,7 @@
           "Waivers"
         ],
         "summary": "Correct a fee waiver amount",
-        "description": "Corrects a waiver by soft-revoking it and inserting a new fixed_amount waiver with the new amount, then adjusts the bill's waiver_amount by the difference and recomputes status. Refused for carry_forward (year-end) waivers or if the new waiver plus payments would exceed the bill.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** School resolved from the waiver row; requireFeeAccess(waiver.school_id). Actor is always the session actor.",
+        "description": "Corrects a waiver by soft-revoking it and inserting a new fixed_amount waiver with the new amount, then adjusts the bill's waiver_amount by the difference and recomputes status. Refused for carry_forward (year-end) waivers, for closed academic years, or if the new waiver plus payments would exceed the bill.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** School resolved from the waiver row; requireFeeAccess(waiver.school_id). Actor is always the session actor.",
         "operationId": "patchFeesWaivers",
         "security": [
           {
@@ -30763,7 +30786,7 @@
             "description": "Waiver not found or already revoked"
           },
           "409": {
-            "description": "carry_forward waiver cannot be corrected here"
+            "description": "carry_forward waiver cannot be corrected here, or the academic year is closed"
           },
           "500": {
             "description": "Failed to correct waiver"
@@ -30814,7 +30837,7 @@
           "Waivers"
         ],
         "summary": "Revoke a fee waiver",
-        "description": "Soft-revokes a waiver (is_revoked with actor, time and reason) and recalculates the bill: waiver_amount becomes the sum of remaining active waivers, amount_paid the sum of completed payments, and status is recomputed. carry_forward (year-end) waivers cannot be revoked here.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** School resolved from the waiver row; requireFeeAccess(waiver.school_id). Actor is always the session actor.",
+        "description": "Soft-revokes a waiver (is_revoked with actor, time and reason) and recalculates the bill: waiver_amount becomes the sum of remaining active waivers, amount_paid the sum of completed payments, and status is recomputed. carry_forward (year-end) waivers cannot be revoked here, nor can a waiver on a closed academic year.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** School resolved from the waiver row; requireFeeAccess(waiver.school_id). Actor is always the session actor.",
         "operationId": "deleteFeesWaivers",
         "security": [
           {
@@ -30850,7 +30873,7 @@
             "description": "Waiver not found or already revoked"
           },
           "409": {
-            "description": "carry_forward waiver cannot be revoked here"
+            "description": "carry_forward waiver cannot be revoked here, or the academic year is closed"
           },
           "500": {
             "description": "Failed to revoke waiver"
@@ -30895,7 +30918,7 @@
           "UPI payments"
         ],
         "summary": "Get school UPI ID",
-        "description": "Returns the school's configured UPI ID (empty string if none) and whether it is locked (locked once a value is saved).\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
+        "description": "Returns the school's configured UPI ID (empty string if none) and whether it is locked (locked once a value is saved). Refused if the school's plan does not include online-payments.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school. Also requires schoolHasFeature(school_id, 'online-payments').",
         "operationId": "getFeesUpiId",
         "security": [
           {
@@ -30928,7 +30951,7 @@
             "description": "school_id required"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "Forbidden, or online payments is not enabled for this school"
           },
           "500": {
             "description": "Internal server error"
@@ -30962,7 +30985,7 @@
           "UPI payments"
         ],
         "summary": "Set or change school UPI ID",
-        "description": "Sets schools.upi_id (or clears it with an empty value). The first save needs no token; once a UPI ID exists, changing or clearing it requires a valid unlockToken from POST /api/fees/upi-id/verify (purpose 'upi-id-unlock', same school, 3-minute expiry). Value must look like a VPA (name@handle).\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id). If a UPI ID is already set, an unlockToken JWT scoped to this school_id is also required.",
+        "description": "Sets schools.upi_id (or clears it with an empty value). The first save needs no token; once a UPI ID exists, changing or clearing it requires a valid unlockToken from POST /api/fees/upi-id/verify (purpose 'upi-id-unlock', same school, 3-minute expiry). Value must look like a VPA (name@handle). Refused if the school's plan does not include online-payments.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id) and schoolHasFeature(school_id, 'online-payments'). If a UPI ID is already set, an unlockToken JWT scoped to this school_id is also required.",
         "operationId": "putFeesUpiId",
         "security": [
           {
@@ -30998,7 +31021,7 @@
             "description": "school_id required, or invalid UPI ID format"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "Forbidden, or online payments is not enabled for this school"
           },
           "423": {
             "description": "Locked: unlock token missing, invalid or expired",
@@ -31067,7 +31090,7 @@
           "UPI payments"
         ],
         "summary": "Verify password to unlock UPI ID",
-        "description": "Re-checks the signed-in admin's own current password and, if correct, returns a short-lived (3 minute) JWT unlock token scoped to this user, school and purpose 'upi-id-unlock', used by PUT /api/fees/upi-id.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id); password is verified against users.password_hash for the session's userId.",
+        "description": "Re-checks the signed-in admin's own current password and, if correct, returns a short-lived (3 minute) JWT unlock token scoped to this user, school and purpose 'upi-id-unlock', used by PUT /api/fees/upi-id. Refused if the school's plan does not include online-payments.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id) and schoolHasFeature(school_id, 'online-payments'); password is verified against users.password_hash for the session's userId.",
         "operationId": "postFeesUpiIdVerify",
         "security": [
           {
@@ -31103,7 +31126,7 @@
             "description": "Incorrect password"
           },
           "403": {
-            "description": "Forbidden, or account not found"
+            "description": "Forbidden, account not found, or online payments is not enabled for this school"
           },
           "500": {
             "description": "Internal server error"
@@ -31151,7 +31174,7 @@
           "UPI payments"
         ],
         "summary": "Get UPI payment QR code",
-        "description": "Generates a PNG QR code for a upi://pay deep link to the school's UPI ID with the given amount and optional transaction reference. Refuses if the school has no valid UPI ID configured.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession() (teacher, student, parent, or wlyl-auth staff cookie with a schoolId); school_id must equal the session's schoolId. Platform admin cookie is not accepted.",
+        "description": "Generates a PNG QR code for a upi://pay deep link to the school's UPI ID with the given amount and optional transaction reference. Refuses if the school has no valid UPI ID configured, or if the school's plan does not include online-payments.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession() (teacher, student, parent, or wlyl-auth staff cookie with a schoolId); school_id must equal the session's schoolId; schoolHasFeature(school_id, 'online-payments'). Platform admin cookie is not accepted.",
         "operationId": "getFeesUpiQr",
         "security": [
           {
@@ -31201,7 +31224,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden (school_id is not the session's school)"
+            "description": "Forbidden (school_id is not the session's school), or online payments is not enabled for this school"
           },
           "500": {
             "description": "QR generation failed"
@@ -31263,7 +31286,7 @@
           "UPI payments"
         ],
         "summary": "Get school UPI ID and name",
-        "description": "Returns the school's UPI ID (empty string if none) and name as JSON, for showing the UPI ID as copyable text beside the payment QR.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession() (teacher, student, parent, or wlyl-auth staff cookie with a schoolId); school_id must equal the session's schoolId. Platform admin cookie is not accepted.",
+        "description": "Returns the school's UPI ID (empty string if none) and name as JSON, for showing the UPI ID as copyable text beside the payment QR. Refused if the school's plan does not include online-payments.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession() (teacher, student, parent, or wlyl-auth staff cookie with a schoolId); school_id must equal the session's schoolId; schoolHasFeature(school_id, 'online-payments'). Platform admin cookie is not accepted.",
         "operationId": "getFeesUpiQrInfo",
         "security": [
           {
@@ -31305,7 +31328,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden (school_id is not the session's school)"
+            "description": "Forbidden (school_id is not the session's school), or online payments is not enabled for this school"
           },
           "500": {
             "description": "Internal server error"
@@ -31938,7 +31961,7 @@
           "Fee reports & audit"
         ],
         "summary": "Download fee audit report as Excel",
-        "description": "Builds the fee audit report (same builder as the JSON route) and streams it as a multi-sheet .xlsx. Bulk scope yields Summary, By Fee Type, Change Log, Class-wise and Student-wise sheets; with student_id it yields a single individual student sheet.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
+        "description": "Builds the fee audit report (same builder as the JSON route) and streams it as a multi-sheet .xlsx. Bulk scope yields Summary (with a Waiver Breakdown of discretionary/carried-forward/written-off amounts and a plain-language \"How To Read This Report\" section), By Fee Type, Change Log, Class-wise and Student-wise sheets — the latter three each end with a GRAND TOTAL row matching the Summary sheet's Total Fee row; with student_id it yields a single individual student sheet.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
         "operationId": "getFeesAuditReportExcel",
         "security": [
           {
@@ -33284,7 +33307,7 @@
           "Fee year-end"
         ],
         "summary": "Roll fee books over to next year",
-        "description": "One-shot rollover of from_year: if active students have unpaid dues and confirmed is not true, returns a confirmation prompt instead. Otherwise, in one transaction, claims the year close in fee_year_close, gets or creates the 'Previous Year Dues' fee head, creates the next academic year (April-March) and sets it current, carries each active non-final-grade student's unpaid balance into one bill in the new year, and closes the old bills with carry_forward waivers. Does not promote grades.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id). done_by is always the session actor.",
+        "description": "One-shot rollover of from_year (must be in \"YYYY-YY\" format): if active students have unpaid dues and confirmed is not true, returns a confirmation prompt instead. Otherwise, in one transaction (serialized against year-end's apply/close for the same year), claims the year close in fee_year_close, gets or creates the 'Previous Year Dues' fee head, creates the next academic year (April-March) and sets it current, carries each active non-final-grade student's unpaid balance into one bill in the new year (propagating the true origin year across multi-year carries), and closes the old bills with carry_forward waivers. Does not promote grades.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id). done_by is always the session actor.",
         "operationId": "postFeesYearRollover",
         "security": [
           {
@@ -33344,7 +33367,7 @@
             }
           },
           "400": {
-            "description": "school_id and from_year required"
+            "description": "school_id and from_year required, or from_year is not in \"YYYY-YY\" format"
           },
           "403": {
             "description": "Forbidden"
@@ -41233,6 +41256,245 @@
             }
           }
         }
+      }
+    },
+    "/api/fees/archive": {
+      "get": {
+        "tags": [
+          "Fee reports & audit"
+        ],
+        "summary": "Get past-years archive overview",
+        "description": "Read-only landing list for the \"past records\" archive: every academic year the school has ever had, each with its financial headline (billed/collected/waived/discretionary-waived/unpaid — same shape as GET /api/fees/reports's balance summary) and its fee_year_close state (closed / reopened / never closed). It is a join over academic_years, fee_year_close and an aggregate over student_fee_ledger — nothing here is a new source of truth. Per-year line-item drill-down stays on GET /api/fees/ledger and GET /api/fees/reports (both already accept academic_year); this route only answers \"which years exist and what's their one-line summary\".\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
+        "operationId": "getFeesArchive",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Academic years newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "years": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "academic_year": {
+                            "type": "string"
+                          },
+                          "start_date": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "end_date": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "is_current": {
+                            "type": "boolean"
+                          },
+                          "student_count": {
+                            "type": "integer"
+                          },
+                          "summary": {
+                            "type": "object",
+                            "properties": {
+                              "total_billed": {
+                                "type": "number"
+                              },
+                              "total_collected": {
+                                "type": "number"
+                              },
+                              "total_waived": {
+                                "type": "number"
+                              },
+                              "discretionary_waived": {
+                                "type": "number"
+                              },
+                              "total_unpaid": {
+                                "type": "number"
+                              }
+                            }
+                          },
+                          "close_status": {
+                            "type": "object",
+                            "nullable": true,
+                            "description": "null if the year has never been closed",
+                            "properties": {
+                              "closed_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "closed_by": {
+                                "type": "string"
+                              },
+                              "is_reopened": {
+                                "type": "boolean"
+                              },
+                              "carried": {
+                                "type": "object",
+                                "properties": {
+                                  "count": {
+                                    "type": "integer"
+                                  },
+                                  "total": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "writeoff": {
+                                "type": "object",
+                                "properties": {
+                                  "count": {
+                                    "type": "integer"
+                                  },
+                                  "total": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "open": {
+                                "type": "object",
+                                "properties": {
+                                  "count": {
+                                    "type": "integer"
+                                  },
+                                  "total": {
+                                    "type": "number"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "school_id required"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/fees/archive/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/fees/setup-status": {
+      "get": {
+        "tags": [
+          "Fee setup"
+        ],
+        "summary": "Get fee setup completeness flags",
+        "description": "Lightweight companion to GET /api/fees/categories + /structures + /structures/lock + /students?grades_only=1 — returns just the 3 booleans the Overview tab's setup wizard banner needs (has_categories, amounts_complete, is_locked) instead of the full category/structure/lock/grade payloads those routes return. has_categories is true when any active, non-system category exists; amounts_complete checks every active fixed (non-variable, non-system) category has a positive fee_structures amount for every enrolled grade (or every grade in the standard sequence if none are enrolled yet — same rule as fixedAmountsComplete()/feeHasAmounts() in FeeManagement.tsx); is_locked reflects fee_structure_locks. Unlike GET /api/fees/categories, this skips the ledger-count join, since that figure is only needed by the Setup tab's own delete-eligibility check.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
+        "operationId": "getFeesSetupStatus",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Setup completeness flags",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "has_categories": {
+                      "type": "boolean"
+                    },
+                    "amounts_complete": {
+                      "type": "boolean"
+                    },
+                    "is_locked": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "school_id and academic_year required"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Failed, or internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/fees/setup-status/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "description": "Academic year, e.g. 2025-26",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     }
   },
