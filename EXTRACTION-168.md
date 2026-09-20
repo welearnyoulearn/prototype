@@ -11,7 +11,7 @@ The screens are not reachable from any menu, and the API routes they call do not
 - app/api/weekly-test/route.ts  (serve / submit a test)
 - app/api/cron/weekly-test/route.ts  (Sunday job that generates each class's test) + its entry in `vercel.json` (`30 1 * * 0`)
 - app/api/students/[id]/rewards/route.ts — the `weekly_tests` statistics block and query.
-- app/student/components/StudentRewards.tsx — the weekly-test stats and the `weekly_test*` action labels.
+- app/student/components/StudentRewards.tsx — the whole unreachable rewards screen (it also showed weekly-test stats); removed from dev in full with #165.
 
 ## 2. API routes it uses
 - `GET/POST /api/weekly-test`, `GET /api/cron/weekly-test` (exist on dev today)
