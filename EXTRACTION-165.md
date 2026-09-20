@@ -8,7 +8,7 @@ The screens are not reachable from any menu, and the API routes they call do not
 ## 1. Files that belong to this feature
 - app/parent/components/ParentMarketplace.tsx  (parent view / orders)
 - app/school-admin/components/MarketplaceOrders.tsx  (admin: approve/deliver orders)
-- app/student/components/StudentRewards.tsx  — the **Marketplace tab** (items, balance, order dialog). The rest of this file (points, badges, streak) stays on dev.
+- app/student/components/StudentRewards.tsx  — the **whole screen** (points wallet, marketplace tab, hub/test activity). It was unreachable and built entirely on hub/test/marketplace points, so it was removed from dev in full.
 - app/api/students/[id]/rewards/route.ts — the `marketplace_balance` / `marketplace_earned` figures and the `marketplace_orders` query.
 - app/parent/translations.ts — the `marketplace` label (en/te).
 - lib/rewards.ts — the `points_type: "marketplace"` option of `awardPoints`.
@@ -21,7 +21,7 @@ The screens are not reachable from any menu, and the API routes they call do not
 - **Database:** tables are intentionally NOT dropped by the removal (schema history is never rewritten; migrations only add). They remain in `lib/db.ts` and simply have no UI/API on dev.
 
 ## 4. Shared code that was touched by the removal
-- `StudentRewards.tsx`, the rewards API and `lib/rewards.ts` are shared with the (kept) points/badges/streak features — only the marketplace parts are cut.
+- The rewards API (`GET /api/students/{id}/rewards`) and `lib/rewards.ts` are shared with the kept points/badges/streak data (used by the admin's student panel) — only the marketplace parts were cut from them.
 
 ## 5. Platform-Admin feature config
 - **Not a Platform-Admin feature.** Student-independent; do NOT add it to `lib/features.ts` when restored.
