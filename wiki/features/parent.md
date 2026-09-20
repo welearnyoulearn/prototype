@@ -35,3 +35,10 @@ The Parent portal provides read-only visibility into a child's school life at `/
 | `GET /api/parent/activity` | Learning activity |
 | `GET /api/parent/timetable` | Class timetable |
 | `POST /api/exams/[id]/acknowledge` | Acknowledge marks |
+
+---
+
+## Attendance & School Calendar (#153)
+
+- **Attendance:** for the selected child only — colour-coded month calendar (present / late / absent / half day / holiday / weekly off / not marked), this month and year-to-date %, six-month trend, upcoming holidays, a plain-language message under 75%. Tap a day for Morning/Afternoon.
+- **School Calendar:** read-only (staff-only entries are hidden). Numbers match the teacher and student views exactly.

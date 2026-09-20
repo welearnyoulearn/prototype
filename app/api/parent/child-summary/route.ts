@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAccess, parentOwnsStudent } from '@/lib/examsAuth'
+import { buildStudentAttendanceView } from '@/lib/attendanceStudentView'
 
 export async function GET(req: NextRequest) {
   try {
@@ -127,17 +128,10 @@ export async function GET(req: NextRequest) {
     }
 
     try {
-      const now = new Date()
-      const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-      const { rows } = await pool.query(`
-        SELECT
-          COUNT(*) FILTER (WHERE status = 'present')::int AS present_days,
-          COUNT(DISTINCT date)::int AS total_days
-        FROM attendance
-        WHERE student_id = $1 AND school_id = $2 AND date >= $3 AND session = 'morning'
-      `, [sid, scid, monthStart])
-      const r = rows[0]
-      attendance_pct = (r && r.total_days > 0) ? Math.round((r.present_days / r.total_days) * 100) : null
+      // This month's attendance from the same builder the Attendance tab uses — one formula
+      // (present + late ÷ marked sessions, holidays excluded), so the two screens always agree.
+      const view = await buildStudentAttendanceView(scid, sid)
+      attendance_pct = view?.month.summary.pct ?? null
     } catch (_) {
       attendance_pct = null
     }

@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 31
+const SCHEMA_VERSION = 33
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3242,4 +3242,88 @@ async function runIncrementalMigrations() {
        AND COALESCE(s.email, '') <> ''
        AND NOT EXISTS (SELECT 1 FROM users x WHERE LOWER(x.email) = LOWER(s.email))
   `)
+
+  // ── Attendance: session locking, mistake reports, Academic Calendar (#153) ───────────
+  // One row per (class, date, session). Its UNIQUE key IS the lock: the first teacher to
+  // insert wins, everyone else is told who marked it. attendance keeps the per-student rows.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS attendance_sessions (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      session VARCHAR(20) NOT NULL CHECK (session IN ('morning', 'afternoon')),
+      marked_by_teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      marked_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      marked_by_name VARCHAR(255) NOT NULL,
+      marked_by_role VARCHAR(20) NOT NULL,
+      marked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_edited_at TIMESTAMPTZ,
+      last_edited_by_name VARCHAR(255),
+      edit_count INTEGER NOT NULL DEFAULT 0,
+      UNIQUE (class_id, date, session)
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_sessions_school_date ON attendance_sessions(school_id, date)`)
+  // Days marked before session locking existed count as already marked (by whoever marked last).
+  await pool.query(`
+    INSERT INTO attendance_sessions (school_id, class_id, date, session, marked_by_teacher_id, marked_by_name, marked_by_role, marked_at)
+    SELECT DISTINCT ON (a.class_id, a.date, a.session)
+           a.school_id, a.class_id, a.date, a.session, a.marked_by_teacher_id,
+           COALESCE(t.name, 'a teacher'), 'teacher', COALESCE(a.marked_at, NOW())
+    FROM attendance a
+    LEFT JOIN teachers t ON t.id = a.marked_by_teacher_id
+    WHERE a.school_id IS NOT NULL AND a.class_id IS NOT NULL AND a.session IN ('morning', 'afternoon')
+    ORDER BY a.class_id, a.date, a.session, a.marked_at DESC NULLS LAST
+    ON CONFLICT (class_id, date, session) DO NOTHING
+  `)
+
+  // A teacher who spots a wrong record on a locked session tells the admin instead of overwriting it.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS attendance_issue_reports (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      class_id INTEGER NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+      date DATE NOT NULL,
+      session VARCHAR(20) NOT NULL CHECK (session IN ('morning', 'afternoon')),
+      reported_by_teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL,
+      reported_by_name VARCHAR(255) NOT NULL,
+      note TEXT NOT NULL,
+      status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
+      resolved_by_name VARCHAR(255),
+      resolved_at TIMESTAMPTZ,
+      resolution_note TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_attendance_reports_school ON attendance_issue_reports(school_id, status, created_at DESC)`)
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_reports_open
+      ON attendance_issue_reports(class_id, date, session, reported_by_teacher_id) WHERE status = 'open'
+  `)
+
+  // Academic Calendar: who can see an entry, who created it, and sane date ranges.
+  await pool.query(`ALTER TABLE school_calendar ADD COLUMN IF NOT EXISTS audience VARCHAR(20) NOT NULL DEFAULT 'everyone'`)
+  await pool.query(`ALTER TABLE school_calendar ADD COLUMN IF NOT EXISTS created_by_name VARCHAR(255)`)
+  await pool.query(`ALTER TABLE school_calendar ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_school_calendar_range ON school_calendar(school_id, event_date, end_date)`)
+  // NOT VALID: enforced for new/changed rows without failing on any old bad row.
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'school_calendar_range_chk') THEN
+        ALTER TABLE school_calendar ADD CONSTRAINT school_calendar_range_chk
+          CHECK (end_date IS NULL OR end_date >= event_date) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'school_calendar_audience_chk') THEN
+        ALTER TABLE school_calendar ADD CONSTRAINT school_calendar_audience_chk
+          CHECK (audience IN ('everyone', 'staff')) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attendance_status_chk') THEN
+        ALTER TABLE attendance ADD CONSTRAINT attendance_status_chk
+          CHECK (status IN ('present', 'absent', 'late')) NOT VALID;
+      END IF;
+    END $$
+  `)
+  // 0 = Sunday … 6 = Saturday. Weekly-off days are not working days (no marking, not counted).
+  await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS weekly_off_days SMALLINT[] NOT NULL DEFAULT '{0}'`)
 }

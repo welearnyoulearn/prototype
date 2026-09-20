@@ -234,7 +234,8 @@ test.describe.serial('School Admin Workflow', () => {
 
       // ── Day view (default): today's snapshot + class cards ──
       await expect(page.getByTestId('attendance-tab-daily')).toBeVisible()
-      await expect(page.getByTestId('attendance-day-stats')).toBeVisible()
+      // A working day shows the stats; a holiday / weekly off (e.g. a Sunday) shows the holiday banner instead.
+      await expect(page.getByTestId('attendance-day-stats').or(page.getByTestId('attendance-holiday-banner'))).toBeVisible()
 
       // ── Month view: month picker, heatmap, class-wise table ──
       await page.getByTestId('attendance-tab-month').click()

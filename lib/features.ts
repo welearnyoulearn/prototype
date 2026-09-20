@@ -52,7 +52,8 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'expenses',           label: 'Expense Tracking',                category: 'Finance', portals: ['school-admin'] },
 
   // ── Administration ───────────────────────────────────────────────────────────
-  { key: 'calendar',           label: 'Academic Calendar',               category: 'Administration', portals: ['school-admin'] },
+  // The school admin manages it; teachers, students and parents see it read-only (all governed by this one toggle).
+  { key: 'calendar',           label: 'Academic Calendar',               category: 'Administration', portals: ['school-admin', 'teacher', 'student', 'parent'] },
   { key: 'leaderboard',        label: 'Student Leaderboard',             category: 'Administration', portals: ['school-admin'] },
   { key: 'export',             label: 'Export & Reports',                category: 'Administration', portals: ['school-admin'] },
   { key: 'settings',           label: 'School Settings',                 category: 'Administration', portals: ['school-admin'] },
@@ -81,4 +82,5 @@ export const PORTAL_NAV_KEY_ALIASES: Record<string, string> = {
   'results': 'exam-marks',            // parent portal's results nav key
   'exams': 'exam-marks',              // parent portal's exam-calendar nav key
   'fees': 'fee-management',           // parent portal's fees nav key for the same capability
+  'academic-calendar': 'calendar',    // school-admin's nav key for the Academic Calendar feature
 }

@@ -32,6 +32,7 @@ function ModuleSkeleton() {
 }
 // Turbopack requires inline object literals for next/dynamic options
 const AttendanceDashboard   = dynamic(() => import('./components/AttendanceDashboard'),   { loading: () => <ModuleSkeleton /> })
+const AcademicCalendar      = dynamic(() => import('./components/AcademicCalendar'),      { loading: () => <ModuleSkeleton /> })
 const StaffOnboarding       = dynamic(() => import('./components/StaffOnboarding'),        { loading: () => <ModuleSkeleton /> })
 const StudentOnboarding     = dynamic(() => import('./components/StudentOnboarding'),      { loading: () => <ModuleSkeleton /> })
 const ClassManagement       = dynamic(() => import('./components/ClassManagement'),        { loading: () => <ModuleSkeleton /> })
@@ -76,7 +77,7 @@ const NAV_SECTIONS = [
   { label: 'OVERVIEW',      keys: ['overview'] },
   { label: 'PEOPLE',        keys: ['staff', 'students', 'class-management'] },
   { label: 'MANAGEMENT',    keys: ['fee-management'] },
-  { label: 'SCHEDULING',    keys: ['timetable', 'curriculum', 'library', 'attendance', 'exam-schedule'] },
+  { label: 'SCHEDULING',    keys: ['timetable', 'curriculum', 'library', 'attendance', 'academic-calendar', 'exam-schedule'] },
   { label: 'COMMUNICATION', keys: ['announcements', 'feedback-management'] },
   { label: 'TOOLS',         keys: ['export', 'settings', 'year-rollover'] },
 ]
@@ -99,6 +100,16 @@ const NAV_ITEMS: NavItem[] = [
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+      </svg>
+    ),
+  },
+  {
+    key: 'academic-calendar',
+    label: 'Academic Calendar',
+    tier: ['basic', 'standard', 'premium'],
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
       </svg>
     ),
   },
@@ -390,9 +401,11 @@ function SchoolAdmin() {
     return !feature || feature.portals.includes('school-admin')
   }
 
+  const navEnabled = (key: string) => enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[key] ?? key)
+
   const enabledNavItems = NAV_ITEMS.filter(item =>
     tier !== 'none' &&
-    enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[item.key] ?? item.key) &&
+    navEnabled(item.key) &&
     isSchoolAdminScoped(item.key) &&
     !(isStaffAccount && item.key === 'settings')
   )
@@ -606,10 +619,10 @@ function SchoolAdmin() {
                   })()}
 
                   {/* Locked features */}
-                  {NAV_ITEMS.filter(item => isSchoolAdminScoped(item.key) && !enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[item.key] ?? item.key)).length > 0 && (
+                  {NAV_ITEMS.filter(item => isSchoolAdminScoped(item.key) && !navEnabled(item.key)).length > 0 && (
                     <div className="mt-3 pt-3 border-t border-slate-800">
                       <p className="px-4 pb-1.5 text-[9px] font-bold text-slate-600 uppercase tracking-[0.15em]">Upgrade to Unlock</p>
-                      {NAV_ITEMS.filter(item => isSchoolAdminScoped(item.key) && !enabledFeatures.has(PORTAL_NAV_KEY_ALIASES[item.key] ?? item.key)).map(item => (
+                      {NAV_ITEMS.filter(item => isSchoolAdminScoped(item.key) && !navEnabled(item.key)).map(item => (
                         <div key={item.key} className="flex items-center gap-3 px-4 py-1.5 text-sm text-slate-600 cursor-not-allowed select-none">
                           <svg className="w-4 h-4 flex-shrink-0 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -678,7 +691,8 @@ function SchoolAdmin() {
             ) : (
               <FeaturesProvider value={enabledFeatures}>
                 {visited.has('overview')         && <div hidden={activeNav !== 'overview'}><Overview schoolId={selectedSchool.id} onNavigate={navigateTo} /></div>}
-                {visited.has('attendance')       && <div hidden={activeNav !== 'attendance'}><AttendanceDashboard schoolId={selectedSchool.id} /></div>}
+                {visited.has('attendance')       && <div hidden={activeNav !== 'attendance'}><AttendanceDashboard schoolId={selectedSchool.id} onNavigate={navigateTo} /></div>}
+                {visited.has('academic-calendar') && <div hidden={activeNav !== 'academic-calendar'}><AcademicCalendar schoolId={selectedSchool.id} /></div>}
                 {/* ── Staff Hub: Directory + Onboarding combined ── */}
                 {visited.has('staff') && (
                   <div hidden={activeNav !== 'staff'}>

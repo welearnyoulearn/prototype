@@ -5,6 +5,30 @@ Current bugs and workarounds for the WLYL School prototype.
 <!-- 
 ## Active Issues
 
+### [#153] No direct LEAP (AP govt attendance app) integration
+- **Severity:** Low (manual route exists)
+- **Detail:** LEAP has no public API or bulk import that we could find. Attendance still has to be keyed into LEAP by the school.
+- **Workaround:** Admin → Attendance → export the **daily absentee list** (`/api/export/attendance?mode=absentees&date=`); LEAP marks everyone present by default, so only absentees need entering.
+- **Status:** Ask the LEAP/CSE helpdesk whether an import or API exists for private schools; build a connector if so.
+
+### [#153] Holidays are whole-school and whole-day
+- **Severity:** Low
+- **Detail:** No class/grade-specific closures (e.g. Grade 10 study leave) and no half-day holidays.
+- **Workaround:** None — add the entry as a holiday only when the whole school is closed.
+- **Status:** Follow-up if schools ask.
+
+### [#153] Attendance and Academic Calendar screens follow the platform plan features
+- **Severity:** Low
+- **Detail:** The portals hide plan-gated tabs: no Attendance tab without the `attendance` feature, no calendar screens without the `calendar` (Academic Calendar) feature.
+- **Workaround:** Platform admin → plan features → enable Attendance and Academic Calendar for the tier.
+- **Status:** As designed.
+
+### [#153] `workflow-school-admin.spec.ts` step 7 fails in a brand-new database
+- **Severity:** Low (test only)
+- **Detail:** It fails at the school-admin profile-setup step (`Step 1 of 2`), before reaching attendance.
+- **Status:** Existing; needs its own look.
+
+
 ### [#issue-number] Short description
 - **Severity:** Critical / High / Medium / Low
 - **Workaround:** Description of workaround
