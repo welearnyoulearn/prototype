@@ -1,3 +1,4 @@
+import { headers } from 'next/headers'
 import pool from './db'
 import { getSession, getTeacherSession, getStudentSession, getParentSession } from './auth'
 
@@ -15,8 +16,22 @@ export type StaffActor = Extract<AttendanceActor, { kind: 'admin' | 'teacher' }>
 
 const SCHOOL_STAFF_ROLES = ['school_admin', 'principal', 'vice_principal']
 
-// Same precedence as getAnySession(): teacher, student, parent, then school staff.
+/** True when the request came from a school-admin page — used to pick the right login if a browser holds several. */
+async function fromAdminPortal(): Promise<boolean> {
+  try {
+    const referer = (await headers()).get('referer')
+    return !!referer && new URL(referer).pathname.startsWith('/school-admin')
+  } catch { return false }
+}
+
+// One browser can hold several logins at once (e.g. a teacher AND a school admin). Which one is acting is decided by
+// the portal the request came from: the school-admin pages act as the admin, everything else as before
+// (teacher, student, parent, then school staff — the same precedence as getAnySession()).
 export async function getAttendanceActor(): Promise<AttendanceActor | null> {
+  if (await fromAdminPortal()) {
+    const admin = await getAdminActor()
+    if (admin) return admin
+  }
   const teacher = await getTeacherSession()
   if (teacher) return { kind: 'teacher', schoolId: teacher.schoolId, teacherId: teacher.teacherId }
   const student = await getStudentSession()
