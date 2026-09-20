@@ -12,7 +12,8 @@ export async function GET(req: NextRequest) {
     const teacher = await getTeacherSession()
     const student = teacher ? null : await getStudentSession()
     const parent  = teacher || student ? null : await getParentSession()
-    const admin   = teacher || student || parent ? null : await getSession()
+    // passive: NotificationBell polls every 30s — that must not count as user activity.
+    const admin   = teacher || student || parent ? null : await getSession({ passive: true })
 
     let recipientColumn: string
     let recipientId: number

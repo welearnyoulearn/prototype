@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 28
+const SCHEMA_VERSION = 31
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3211,4 +3211,35 @@ async function runIncrementalMigrations() {
     )
   `).catch(() => {})
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_birthday_wishes_post ON birthday_wishes(birthday_post_id)`).catch(() => {})
+
+  // ── Server-side sessions for school staff (revocable logout, idle timeout) ──
+  // One row per login. The JWT carries the id (`sid`); getSession() rejects a token
+  // whose row is revoked, idle or past expires_at, so logout/deactivation take effect
+  // immediately instead of waiting for the JWT to expire.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS user_sessions (
+      id UUID PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ,
+      user_agent VARCHAR(300)
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id) WHERE revoked_at IS NULL`)
+
+  // School ID is no longer a login credential, so every onboarding admin needs an email.
+  // Older schools were created with the school's contact email optional — backfill the
+  // owner account from it where that is unambiguous (skips addresses already used by
+  // another user). Owners still without an email need one set by the platform admin.
+  await pool.query(`
+    UPDATE users u SET email = LOWER(s.email)
+      FROM schools s
+     WHERE u.school_id = s.id
+       AND u.role = 'school_admin' AND u.school_code IS NOT NULL
+       AND COALESCE(u.email, '') = ''
+       AND COALESCE(s.email, '') <> ''
+       AND NOT EXISTS (SELECT 1 FROM users x WHERE LOWER(x.email) = LOWER(s.email))
+  `)
 }

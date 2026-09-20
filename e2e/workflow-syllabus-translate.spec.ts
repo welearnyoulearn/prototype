@@ -54,7 +54,7 @@ test.describe.serial('Syllabus — Telugu/Hindi Translate (#116)', () => {
     schoolId = school.id
     await setSubscription(platformCookie, schoolId, 'premium')
 
-    const login = await api('/api/auth/login', 'POST', { identifier: school.school_code, password: school.temp_password })
+    const login = await api('/api/auth/login', 'POST', { email: school.email, password: school.temp_password })
     adminCookie = login.cookies
     expect(adminCookie, 'school admin login').toContain('wlyl-auth=')
 

@@ -407,7 +407,7 @@
           "Admin sign-in"
         ],
         "summary": "Log in to school or platform admin",
-        "description": "Authenticates a users row (email or school_code) with role school_admin/principal/vice_principal/platform_admin. Sets wlyl-platform cookie for platform_admin, else wlyl-auth; updates last_login_at and inserts a usage_sessions row.\n\n**Who can call:** anyone, no sign-in check.",
+        "description": "Authenticates a users row by email (the School ID is not a login) with role school_admin/principal/vice_principal/platform_admin. Sets wlyl-platform cookie for platform_admin; for school staff creates a server-side user_sessions row (20 min idle / 12 h max), ends any previous session in the same browser, and sets the wlyl-auth session cookie. Updates last_login_at and inserts a usage_sessions row.\n\n**Who can call:** anyone, no sign-in check.",
         "operationId": "postAuthLogin",
         "security": [],
         "responses": {
@@ -450,7 +450,7 @@
             }
           },
           "400": {
-            "description": "identifier or password missing"
+            "description": "email or password missing"
           },
           "401": {
             "description": "Invalid credentials (unknown user, non-school role, or wrong password)"
@@ -476,16 +476,16 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "identifier": {
+                  "email": {
                     "type": "string",
-                    "description": "Email (platform admin) or school code (school admin)"
+                    "description": "The user's own email address (platform admin, school admin, principal or vice principal)"
                   },
                   "password": {
                     "type": "string"
                   }
                 },
                 "required": [
-                  "identifier",
+                  "email",
                   "password"
                 ]
               }
@@ -2814,7 +2814,7 @@
             }
           },
           "400": {
-            "description": "identifier or password missing"
+            "description": "email or password missing"
           },
           "401": {
             "description": "Invalid email/phone or password"

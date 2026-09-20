@@ -1,15 +1,39 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useMemo, useSyncExternalStore, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import AuthShell, { THEMES, AuthError, AuthInput, AuthButton, PasswordField } from '@/app/components/AuthShell'
-import { setUsageSessionId, getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
+import { setUsageSessionId } from '@/lib/usageSession'
+
+type LastAccount = { name: string; email: string; role: string }
+const LAST_ACCOUNT_KEY = 'wlyl_last_staff_account'
+
+function parseLastAccount(raw: string | null): LastAccount | null {
+  if (!raw) return null
+  try {
+    const v = JSON.parse(raw) as Partial<LastAccount>
+    return typeof v.name === 'string' && typeof v.email === 'string'
+      ? { name: v.name, email: v.email, role: typeof v.role === 'string' ? v.role : '' }
+      : null
+  } catch { return null }
+}
+
+function readLastAccountRaw(): string | null {
+  try { return localStorage.getItem(LAST_ACCOUNT_KEY) } catch { return null }
+}
+
+const noopSubscribe = () => () => {}
+
+function writeLastAccount(a: LastAccount) {
+  try { localStorage.setItem(LAST_ACCOUNT_KEY, JSON.stringify({ name: a.name, email: a.email, role: a.role })) } catch { /* private mode */ }
+}
 
 function LoginForm() {
   const router = useRouter()
   const params = useSearchParams()
   const role = params.get('role')
+  const timedOut = params.get('reason') === 'timeout'
 
   const isPlatform = role === 'platform'
   const theme = isPlatform ? THEMES.platform : THEMES.admin
@@ -19,30 +43,30 @@ function LoginForm() {
   const [loading, setLoading]       = useState(false)
   const [error, setError]           = useState('')
 
-  // Landing here (e.g. via the browser's Back button from the dashboard)
-  // doesn't actually end the session — the auth cookie is untouched — so an
-  // empty login form would be misleading. Check for a still-valid session and
-  // surface it instead of silently pretending the user needs to sign in again.
-  const [existingSession, setExistingSession] = useState<{ role: string; name: string } | null>(null)
-  useEffect(() => {
-    fetch('/api/auth/me')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => setExistingSession(d ? { role: d.role, name: d.full_name || d.email } : null))
-      .catch(() => {})
-  }, [])
+  // "Last used" account on this browser (name + email only — never a password or a
+  // session). Clicking it only pre-fills the email; the password is always required.
+  // Landing here never signs anyone in, so a colleague opening this page on a shared
+  // computer can't step into the previous person's account.
+  const storedRaw = useSyncExternalStore(noopSubscribe, readLastAccountRaw, () => null)
+  const stored = useMemo(() => parseLastAccount(storedRaw), [storedRaw])
+  const [dismissedLast, setDismissedLast] = useState(false)
+  const [pickedLast, setPickedLast]       = useState(false)
+  const lastAccount = !isPlatform && !dismissedLast ? stored : null
 
-  function continueToDashboard() {
-    if (existingSession?.role === 'platform_admin') window.location.href = '/platform-admin'
-    else router.push('/school-admin')
+  const showLastCard = !isPlatform && !!lastAccount && !pickedLast && identifier === ''
+
+  function pickLastAccount() {
+    if (!lastAccount) return
+    setIdentifier(lastAccount.email)
+    setPickedLast(true)
   }
 
-  async function logOutExistingSession() {
-    await fetch('/api/auth/logout', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ usageSessionId: getUsageSessionId() }),
-    })
-    clearUsageSessionId()
-    setExistingSession(null)
+  function useDifferentAccount() {
+    setPickedLast(false)
+    setDismissedLast(true)
+    setIdentifier('')
+    setPassword('')
+    setError('')
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -52,7 +76,7 @@ function LoginForm() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: identifier.trim(), password }),
+        body: JSON.stringify({ email: identifier.trim(), password }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Invalid credentials'); return }
@@ -62,6 +86,7 @@ function LoginForm() {
       if (data.role === 'platform_admin') {
         window.location.href = '/platform-admin'
       } else if (['school_admin', 'principal', 'vice_principal'].includes(data.role)) {
+        if (data.account) writeLastAccount(data.account)
         if (data.firstLogin) router.push('/change-password?first=1')
         else if (!data.profileCompleted) router.push('/profile-setup')
         else router.push('/school-admin')
@@ -76,38 +101,58 @@ function LoginForm() {
   }
 
   const title    = isPlatform ? 'Welcome Back' : 'School Portal Login'
-  const subtitle = isPlatform ? 'Sign in to your admin account' : 'Enter your School ID or email to continue'
+  const subtitle = isPlatform ? 'Sign in to your admin account' : 'Sign in with your own email address'
 
   return (
     <AuthShell theme={theme} title={title} subtitle={subtitle}>
-      {existingSession && (
-        <div data-testid="existing-session-notice" className="mb-5 bg-blue-50 border border-blue-200 text-blue-800 text-sm px-4 py-3 rounded-xl space-y-2.5">
-          <p>
-            You&apos;re still signed in as <strong>{existingSession.name}</strong> — going back here doesn&apos;t log you out.
-          </p>
-          <div className="flex gap-2">
-            <button type="button" data-testid="btn-continue-to-dashboard" onClick={continueToDashboard}
-              className="text-xs font-semibold bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700">
-              Continue to Dashboard
-            </button>
-            <button type="button" data-testid="btn-logout-existing-session" onClick={logOutExistingSession}
-              className="text-xs font-semibold text-blue-700 border border-blue-300 px-3 py-1.5 rounded-lg hover:bg-blue-100">
-              Log out instead
-            </button>
-          </div>
+      {timedOut && !error && (
+        <div data-testid="session-timeout-notice" className="mb-5 bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3 rounded-xl">
+          You were signed out because your session ended. Please sign in again.
+        </div>
+      )}
+      {showLastCard && lastAccount && (
+        <div className="mb-5 space-y-3">
+          <button type="button" data-testid="btn-last-used-account" onClick={pickLastAccount}
+            className="w-full text-left flex items-center gap-3 border border-stone-200 hover:border-blue-400 hover:bg-blue-50/50 rounded-xl px-4 py-3 transition">
+            <span className="w-10 h-10 shrink-0 rounded-full bg-blue-600 text-white font-semibold flex items-center justify-center">
+              {lastAccount.name.trim().charAt(0).toUpperCase() || '?'}
+            </span>
+            <span className="min-w-0">
+              <span className="block text-xs text-stone-400">Last used</span>
+              <span data-testid="last-used-name" className="block text-sm font-semibold text-stone-800 truncate">{lastAccount.name}</span>
+              <span data-testid="last-used-email" className="block text-xs text-stone-500 truncate">{lastAccount.email}</span>
+            </span>
+          </button>
+          <button type="button" data-testid="btn-use-different-account" onClick={useDifferentAccount}
+            className="text-sm text-stone-400 hover:text-stone-600 transition">
+            Use a different account
+          </button>
         </div>
       )}
       <AuthError message={error} />
+      {!showLastCard && (
       <form onSubmit={handleSubmit} data-testid="login-form" className="space-y-4">
-        <AuthInput
-          label={isPlatform ? 'Email Address' : 'School ID or Email'}
-          value={identifier}
-          onChange={setIdentifier}
-          placeholder={isPlatform ? 'admin@welearnyoulearn.com' : 'School ID or email'}
-          hint={!isPlatform ? 'School admins use School ID · Principal/VP use email' : undefined}
-          autoComplete={isPlatform ? 'email' : 'username'}
-          ring={theme.ring}
-        />
+        {pickedLast && lastAccount ? (
+          <div className="flex items-center justify-between gap-3 bg-stone-50 border border-stone-200 rounded-xl px-4 py-3">
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-stone-800 truncate">{lastAccount.name}</span>
+              <span className="block text-xs text-stone-500 truncate">{lastAccount.email}</span>
+            </span>
+            <button type="button" data-testid="btn-switch-account" onClick={useDifferentAccount}
+              className="shrink-0 text-xs font-semibold text-blue-700 hover:text-blue-900">
+              Switch
+            </button>
+          </div>
+        ) : (
+          <AuthInput
+            label="Email Address"
+            value={identifier}
+            onChange={setIdentifier}
+            placeholder={isPlatform ? 'admin@welearnyoulearn.com' : 'you@school.com'}
+            autoComplete="email"
+            ring={theme.ring}
+          />
+        )}
         <PasswordField
           label="Password"
           value={password}
@@ -123,6 +168,7 @@ function LoginForm() {
         </div>
         <AuthButton loading={loading} label={`Sign In`} gradient={theme.btnGradient} />
       </form>
+      )}
       <div className="mt-5 pt-5 border-t border-stone-200 text-center">
         <Link href="/" className="text-sm text-stone-400 hover:text-stone-600 transition">← Back to portal selection</Link>
       </div>
