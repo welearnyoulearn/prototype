@@ -1,0 +1,75 @@
+# Feature: Fee Management
+
+**Portal:** School Admin (primary) / Parent (read-only view via `/api/parent/fees`)
+**Status:** Built (v2 rebuild in progress — see Known issues)
+**Last updated:** 2026-09-14
+
+---
+
+## What it does
+
+Single tool for a school's whole fee lifecycle: define fee categories/structures per grade, generate bills, collect payments (cash/cheque/DD/UPI/online), grant waivers, reconcile cash at day-close, review year-end outstanding dues, roll over to the next academic year, and browse every past academic year's financial headline.
+
+## How it works
+
+1. **Setup** — school admin creates fee categories (fixed = same amount per grade, variable = per-student), sets amounts per grade, generates ledger bills for all active students, then locks the plan (further changes need an audited amendment).
+2. **Collect** — daily counter view groups students with outstanding dues; admin collects a payment (full or partial, FIFO across selected bills), can grant a waiver, and reconciles the day's cash at Day Close. Online (UPI) payments land as pending and need admin verification before they post to the ledger.
+3. **Year-End** — at year end, the admin reviews every student with an unpaid balance and decides per-student: carry forward (creates one "Previous Year Dues" bill in the next year), write off, move to the always-open passout ledger (leavers/graduates), or leave open. Closing the year locks it; reopening requires a reason (logged).
+4. **Year Rollover** — a one-shot action that creates the next academic year, auto-carries all remaining unpaid dues for continuing students, and closes the source year — an alternative to the per-student Year-End flow for a school that wants a single "roll everything forward" action.
+5. **Past Records** — a read-only tab listing every academic year the school has had, each with its billed/collected/waived/unpaid headline and close status; "View Report"/"View Ledger" jump into the existing Reports/Ledger tabs scoped to that year.
+
+## Key files
+
+| File | Purpose |
+|------|---------|
+| `app/school-admin/components/FeeManagement.tsx` | Thin shell (1,329 lines, down from 6,478) — owns cross-tab state (academic year, categories/structures/lock, stats, passout) and lazy-mount routing; all 8 tabs (Overview, Fee Plan/Setup, Collect, Student Passbook, Reports, Year-End, Past Records, Leavers & Dues) live under `app/school-admin/components/fee-management/` |
+| `lib/feeRollover.ts` | Shared rollover primitives: get-or-create a system fee category, close out a bill (settled/waived + `fee_waivers` row), upsert a carry-forward bill, race-safe year-close claim, remaining-open-balance aggregate |
+| `app/api/fees/year-end/route.ts` | Per-student year-end review + apply (carry/writeoff/passout/open) + close/reopen |
+| `app/api/fees/year-rollover/route.ts` | One-shot bulk rollover — new year + auto-carry + close, race-safe via an atomic claim on `fee_year_close` |
+| `app/api/fees/generate/route.ts` | Idempotent ledger generation from fee structures + variable assignments |
+| `app/api/fees/archive/route.ts` | Read-only: every academic year's headline + close status, for the Past Records tab |
+| `lib/auth.ts` (`requireFeeAccess`) | Tenant-isolation guard used by every fee API route |
+
+## API endpoints
+
+Fee routes live under `/api/fees/*` (structures, categories, generate, ledger, payments, waivers, day-close, passbook, year-end, year-rollover, archive, reports, stats, export, audit-log, and the online-payments/UPI sub-routes). `/api/parent/fees` is the parent-portal read view.
+
+## Database tables
+
+| Table | Role |
+|-------|------|
+| `fee_categories` | Fee heads (fixed/variable), including system categories `Previous Year Dues` / `Passout Dues` |
+| `fee_structures` | Per-grade amount for a category in an academic year |
+| `fee_structure_locks` / `fee_structure_amendments` | Plan lock + audited post-lock changes |
+| `student_fee_ledger` | Core per-student billing rows; `source_academic_year`/`source_ledger_id` trace carry-forward/passout bills back to their origin |
+| `fee_payments` | Payment transactions (cash/cheque/DD/UPI/online), FIFO-allocated across selected bills |
+| `fee_waivers` | Waiver/close-out records — `waiver_type` distinguishes discretionary waivers from `carry_forward` bookkeeping entries |
+| `fee_year_close` | Per-year close state: closed_by/at, is_reopened, carried/writeoff/open counts+totals |
+| `passout_students` | Registry of students moved to the always-open passout ledger |
+| `academic_years` | Per-school academic years, `is_current` marks the active one |
+
+## Status history
+
+| Date | Change | Issue |
+|------|--------|-------|
+| 2026-09-14 | v2 rebuild started: consolidated duplicated rollover logic into `lib/feeRollover.ts`, fixed a real concurrency gap in year-end apply (no claim lock, unlike year-rollover), added the Past Records archive endpoint + tab | #119 |
+| 2026-09-14 | Multi-angle code review of the above found 4 confirmed gaps, all fixed same day: year-rollover's own claim didn't coordinate with year-end's new lock (cross-route race), an `array_agg` zip without `ORDER BY` that could misalign a bill's balance with a different bill's amount_paid, no format validation on `from_year` before computing the next year's label, and archive's "Waived" figure not excluding carry-forward bookkeeping waivers (diverged from Reports/Year-End/Passbook) | #119 |
+| 2026-09-14 | Completed the 8-tab split of `FeeManagement.tsx` (6,478 → 1,329 lines), one tab at a time with `tsc`/`eslint`/`/code-review` verification between each. Along the way: fixed a real Reports-staleness bug (Year-End actions weren't bumping the reports refresh signal), a duplicated advisory-lock key string, a lost tab-revisit refetch on the Passbook student directory, a duplicate-`data-testid` collision in the shared `LoadErrorBanner` (first tab to render two banners at once), and dropped a large confirmed-dead subsystem in Setup (category delete/deactivate, amendment-request form, assignment-history/changelog panels — none reachable in the live app) | #119 |
+
+## Known issues
+
+- [ ] Archive's billed/collected/waived/unpaid aggregate is a third independent copy of the same formula that already exists in `reports/route.ts` and `lib/feeRollover.ts`'s `getRemainingOpenSummary` — flagged by code review as reuse debt, not fixed in this pass (the one place it had actually drifted — the Waived figure — was fixed; the duplication itself remains). Worth a shared `getYearFinancialSummary()` helper.
+- [x] ~~Full split of `FeeManagement.tsx`~~ — done, per #119: all 8 tabs (Archive, Leavers, Reports, Year-End, Collect, Student Passbook, Overview, Fee Plan/Setup+Applicability) extracted to `app/school-admin/components/fee-management/`. Parent file 6,478 → 1,329 lines (79.5% reduction). Passbook's payment cancel/correct and waiver revoke/correct stay parent-owned (also used by the Passbook Modal Collect opens directly) and are passed down as `CancelCorrectBundle`/`WaiverCorrectBundle` from `types.ts`. Setup's fee-head-amount predicates (`gradesToValidate`/`feeHasAmounts`/`fixedFeeHeads`/`fixedAmountsComplete`) exist in both the parent (needed by the cross-tab "Setup Wizard" banner) and `FeeSetupTab.tsx` (duplicated, same convention as the per-tab `fmt`/`pct` helpers below) — the rest of that predicate chain moved out entirely since the wizard didn't need it.
+- [ ] `fmt()`/`fmtDate()`/`pct()`/`sanitizeMoney()`/`blockNonNumericKeys()` are copy-pasted into every extracted tab file instead of a shared `fee-management/format.ts` — flagged independently by three review angles across the split. `RemovedStudent` (in `FeeLeaversTab.tsx`) also breaks the "cross-tab types live in `types.ts`" convention the rest of the split follows. Low risk, mechanical — now that all 8 tabs are extracted and the full duplication surface is known, this is ready to do as a single follow-up pass.
+- [ ] Fee Plan / Setup extraction dropped a large confirmed-dead subsystem found while mapping the tab's real dependencies: category delete/deactivate/reactivate, an amendment-request form, and assignment-history/changelog panels — none reachable in the live app (each had exactly one occurrence, its own declaration, before removal). None of this was replaced with working equivalents; if any of that functionality is actually wanted (e.g. a real "delete/deactivate a fee category" action), it needs building fresh, not restoring.
+- [ ] `lib/stores/feeStore.ts`'s per-field version counters (`reportsVersion`/`bumpReports`, etc.) and the two one-shot request channels (`pendingCollectRequest`, `requestedCollectionView`) are each a small hand-written pattern repeated per use case. Considered generalizing (a `versions: Record<string, number>` map, a unified `pendingIntent` channel) but kept explicit per-field for now — named fields are greppable and type-checked in a way a string-keyed generic API isn't, and there are only 2-3 instances of each pattern so far. Revisit if a 4th instance shows up.
+- [ ] Archive and Leavers don't auto-refresh after a Year-End action closes/carries/writes off a year (both fetch once on mount with no store subscription) — lower priority than Reports' equivalent gap (which was fixed) since both are read-only history/roster views with their own manual Refresh button, not screens an admin is likely to have open mid-year-end-workflow.
+- [ ] `closeOutBill`/`upsertCarryForwardBill` in `lib/feeRollover.ts` do 1-2 sequential queries per bill inside `year-end` apply's and `year-rollover`'s decision loops (an N+1 pattern, pre-existing before the consolidation, not introduced by it) — acceptable for now since these are rare, admin-only, roughly-once-a-year operations, but worth batching (`WHERE id = ANY($ids)` + multi-row INSERT) if a school's scale ever makes the transaction length (and the advisory lock's hold time) a problem.
+- [ ] The e2e suite (`e2e/workflow-fee-management.spec.ts`, 109 cases) was not run in this environment during the v2 rebuild work — it requires `E2E_PLATFORM_ADMIN_EMAIL`/`E2E_PLATFORM_ADMIN_PASSWORD` for a platform admin that already exists in the shared dev DB, which weren't available locally. Verified instead via `tsc --noEmit` (clean) and `eslint` (no new problem categories vs. the pre-existing baseline). Should be run before merging.
+- [ ] Online-payments (Cashfree) and WhatsApp reminder panels were left untouched in this pass, per the project rule against changing that code without separate explicit approval.
+
+## Notes
+
+- Historical/"past records" data was already fully modeled before this rebuild (`source_academic_year`/`source_ledger_id` on `student_fee_ledger`, `academic_years`, `fee_year_close`) — it just had no dedicated browsing UI. The archive endpoint and tab are a thin read layer over existing data, not a new source of truth.
+- `year-end`'s apply action is now serialized per `(school_id, academic_year)` via `pg_advisory_xact_lock` rather than a row-based claim like `year-rollover` uses — apply is resumable (an admin can apply decisions for a few students today, more tomorrow, before closing), so it can't use rollover's single-shot "claim the row once" pattern.
+- `generate/route.ts` was surveyed for the same duplication but doesn't share it — its concern (idempotent ledger generation, grade-resync-on-conflict) is genuinely different from the carry-forward/close-out logic in the other two routes.

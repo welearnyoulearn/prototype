@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { ClipboardList } from 'lucide-react'
 import { useOfflineAttendance } from '../hooks/useOfflineAttendance'
+import { EmptyState } from '@/components/ui/empty-state'
 
 type Props = { schoolId: number }
 
@@ -591,9 +593,11 @@ export default function AttendanceDashboard({ schoolId }: Props) {
       {loading ? (
         <div className="bg-white border border-gray-200 rounded-xl py-16 text-center text-gray-400">Loading...</div>
       ) : data.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-xl py-16 text-center">
-          <p className="text-gray-400">No classes found for this school</p>
-        </div>
+        <EmptyState
+          icon={ClipboardList}
+          title="No classes found for this school"
+          className="bg-white py-16"
+        />
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {data.map(cls => {

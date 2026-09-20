@@ -122,7 +122,6 @@ function getNowMins() {
   return now.getHours() * 60 + now.getMinutes()
 }
 
-type LeaveRecord = { id: number; leave_type: string; start_date: string; end_date: string; status: string }
 type AnnouncementItem = { id: number; title: string; content: string; announcement_type: string; target_audience: string; priority: string; created_by_name: string; expires_at: string | null; created_at: string }
 
 export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewClass }: Props) {
@@ -137,7 +136,6 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
   const [nowMins, setNowMins] = useState(getNowMins())
   const [substituteDuties, setSubstituteDuties] = useState<SubstituteDuty[]>([])
   const [upcomingSubDuties, setUpcomingSubDuties] = useState<SubstituteDuty[]>([])
-  const [todayLeave, setTodayLeave] = useState<LeaveRecord | null>(null)
   const [announcements, setAnnouncements] = useState<AnnouncementItem[]>([])
   const [annExpanded, setAnnExpanded] = useState<number | null>(null)
 
@@ -177,10 +175,8 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
       fetch(`/api/teachers/${teacher.id}/class-subjects`).then(r => r.json()).catch(() => []),
       // Fetch all duties — we'll split into today vs upcoming client-side
       fetch(`/api/substitutes?school_id=${schoolId}&substitute_teacher_id=${teacher.id}`).then(r => r.json()).catch(() => []),
-      // active_date lets SQL do the date comparison server-side (avoids timezone issues)
-      fetch(`/api/leave-requests?teacher_id=${teacher.id}&school_id=${schoolId}&status=approved&active_date=${todayStr}`).then(r => r.json()).catch(() => []),
       fetch(`/api/announcements?school_id=${schoolId}&audience=teachers`).then(r => r.json()).catch(() => []),
-    ]).then(([tt, cls, classSubs, subs, leaves, ann]) => {
+    ]).then(([tt, cls, classSubs, subs, ann]) => {
       setTimetable(Array.isArray(tt) ? tt : [])
       setClasses(Array.isArray(cls) ? cls : [])
       setClassSubjects(Array.isArray(classSubs) ? classSubs : [])
@@ -191,8 +187,6 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
         .filter(s => s.date && s.date.slice(0, 10) > todayStr)
         .sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : a.period_number - b.period_number))
       setUpcomingSubDuties(upcoming)
-      // API already filters to leaves active on todayStr — first result (if any) is today's leave
-      setTodayLeave(Array.isArray(leaves) && leaves.length > 0 ? leaves[0] : null)
       setAnnouncements(Array.isArray(ann) ? ann : [])
     }).finally(() => setLoading(false))
   }, [teacher.id, schoolId])
@@ -297,24 +291,6 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
 
   return (
     <div className="space-y-6">
-
-      {/* ── On approved leave today banner ── */}
-      {todayLeave && !loading && (
-        <div className="rounded-2xl border-2 border-indigo-200 bg-indigo-50 px-5 py-4 flex items-start gap-4">
-          <div className="w-9 h-9 rounded-full bg-indigo-200 flex items-center justify-center flex-shrink-0 mt-0.5">
-            <svg className="w-5 h-5 text-indigo-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-bold text-indigo-900 text-sm">You are on approved {todayLeave.leave_type} leave today</p>
-            <p className="text-indigo-600 text-xs mt-0.5">
-              {todayLeave.start_date.slice(0, 10)} → {todayLeave.end_date.slice(0, 10)} · Your classes are being covered by substitutes
-            </p>
-          </div>
-          <span className="text-[10px] font-semibold bg-indigo-200 text-indigo-800 px-2.5 py-1 rounded-full flex-shrink-0">ON LEAVE</span>
-        </div>
-      )}
 
       {/* ── Substitute duty banner ── show prominently at top when duties exist today ── */}
       {substituteDuties.length > 0 && today && !loading && (() => {

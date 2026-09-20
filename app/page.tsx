@@ -21,7 +21,7 @@ const roles = [
   },
   {
     title: 'Teacher',
-    description: 'Mark attendance, assign homework, answer student doubts',
+    description: 'Mark attendance, enter marks, manage the class',
     href: '/teacher/login',
     testid: 'teacher',
     photo: 'https://images.unsplash.com/photo-1589206946274-929e4da3996b?w=800&auto=format&fit=crop&q=70',
@@ -34,7 +34,7 @@ const roles = [
   },
   {
     title: 'Student',
-    description: 'View timetable, submit homework, check marks & doubts',
+    description: 'View timetable, check marks & results',
     href: '/student/login',
     testid: 'student',
     photo: 'https://images.unsplash.com/photo-1581726690015-c9861fa5057f?w=800&auto=format&fit=crop&q=70',

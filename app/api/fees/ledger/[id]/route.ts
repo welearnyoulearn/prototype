@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 
 // Verify a ledger entry belongs to the caller's school. Returns the entry's school_id or null.
@@ -31,26 +31,66 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 // DELETE /api/fees/ledger/[id]?school_id=X — delete a ledger entry
-// Only allowed when amount_paid = 0 and status is not paid/waived
+// Only allowed when amount_paid = 0, waiver_amount = 0, and status is not paid/waived
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
     if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const client = await pool.connect()
     try {
-      const { rows: [entry] } = await pool.query(
-        `SELECT * FROM student_fee_ledger WHERE id = $1 AND school_id = $2`,
+      await client.query('BEGIN')
+      // FOR UPDATE closes the gap between this check and the DELETE below — without
+      // it, a payment or waiver could land on this exact row between the read and
+      // the delete (a parent's online payment, another admin's cash collection),
+      // and fee_payments/fee_waivers' ON DELETE CASCADE would silently destroy that
+      // real payment/waiver record along with the bill.
+      const { rows: [entry] } = await client.query(
+        `SELECT * FROM student_fee_ledger WHERE id = $1 AND school_id = $2 FOR UPDATE`,
         [id, school_id]
       )
-      if (!entry) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-      if (entry.status === 'paid' || entry.status === 'waived')
+      if (!entry) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      }
+      // Block deletes on a closed academic year — PATCH on this same route
+      // already enforces this; DELETE didn't, letting a pending bill in a
+      // closed year be permanently removed (no audit trail) without
+      // reopening the year first.
+      const { rows: [locked] } = await client.query(
+        `SELECT 1 FROM fee_year_close
+         WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
+        [school_id, entry.academic_year]
+      )
+      if (locked) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'This academic year is closed. Reopen it to delete entries.' }, { status: 409 })
+      }
+      if (entry.status === 'paid' || entry.status === 'waived') {
+        await client.query('ROLLBACK')
         return NextResponse.json({ error: `Cannot delete a ${entry.status} entry` }, { status: 400 })
-      if (Number(entry.amount_paid) > 0)
+      }
+      if (Number(entry.amount_paid) > 0) {
+        await client.query('ROLLBACK')
         return NextResponse.json({ error: 'Cannot delete an entry with payments recorded' }, { status: 400 })
-      await pool.query(`DELETE FROM student_fee_ledger WHERE id = $1`, [id])
+      }
+      // A partially-waived (but never paid) bill sits at status='partial' with
+      // amount_paid=0 — it passed both checks above and was deleted outright,
+      // cascade-deleting the fee_waivers row and erasing the record a waiver was
+      // ever granted.
+      if (Number(entry.waiver_amount || 0) > 0) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Cannot delete an entry with a waiver recorded — revoke the waiver first' }, { status: 400 })
+      }
+      await client.query(`DELETE FROM student_fee_ledger WHERE id = $1`, [id])
+      await client.query('COMMIT')
       return NextResponse.json({ deleted: true })
-    } catch (e) { console.error(e); return NextResponse.json({ error: 'Failed' }, { status: 500 }) }
+    } catch (e) {
+      await client.query('ROLLBACK')
+      console.error(e)
+      return NextResponse.json({ error: 'Failed' }, { status: 500 })
+    } finally { client.release() }
 } catch (err: unknown) {
     console.error('[API]', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -69,6 +109,12 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
+    // Must run before pool.connect() below, not after — on Vercel's max:1 pool,
+    // ensureDB()'s own pool.query() calls would otherwise block waiting for a
+    // connection that `client` is already holding, and `client` can't be
+    // released until this call returns: a deadlock resolved only by
+    // connectionTimeoutMillis expiring into an error.
+    await ensureDB()
     const client = await pool.connect()
     try {
       const { new_amount, reason, changed_by: clientActor, school_id } = await req.json()
@@ -82,21 +128,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (Number(new_amount) <= 0) {
         return NextResponse.json({ error: 'Amount must be greater than 0' }, { status: 400 })
       }
-
-      // Ensure audit table exists (idempotent)
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS student_fee_ledger_edits (
-          id         SERIAL PRIMARY KEY,
-          ledger_id  INTEGER NOT NULL REFERENCES student_fee_ledger(id) ON DELETE CASCADE,
-          school_id  INTEGER NOT NULL,
-          student_id INTEGER NOT NULL,
-          old_amount NUMERIC(10,2) NOT NULL,
-          new_amount NUMERIC(10,2) NOT NULL,
-          reason     TEXT NOT NULL,
-          changed_by TEXT NOT NULL,
-          changed_at TIMESTAMPTZ DEFAULT NOW()
-        )
-      `)
 
       await client.query('BEGIN')
 

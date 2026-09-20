@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { BarChart3 } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 
 type Props = { schoolId: number }
 
@@ -104,9 +106,7 @@ export default function ClassAnalytics({ schoolId }: Props) {
 
   if (loading) return <div className="py-16 text-center text-gray-400 text-sm">Loading classes...</div>
   if (classes.length === 0) return (
-    <div className="py-16 text-center text-gray-400">
-      <p className="text-sm">No classes configured yet.</p>
-    </div>
+    <EmptyState icon={BarChart3} title="No classes configured yet." className="py-16" />
   )
 
   const h = selected ? health[selected.id] : null
@@ -184,9 +184,11 @@ export default function ClassAnalytics({ schoolId }: Props) {
                 <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto" />
               </div>
             ) : !perf ? (
-              <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
-                <p className="text-gray-400 text-sm">No performance data available for this class yet.</p>
-              </div>
+              <EmptyState
+                icon={BarChart3}
+                title="No performance data available for this class yet."
+                className="bg-white py-16"
+              />
             ) : view === 'overview' ? (
               <>
                 {/* ── Avg KPI row ── */}

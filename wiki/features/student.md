@@ -7,7 +7,7 @@
 
 ## Overview
 
-The Student portal is the learning interface at `/student`. It covers tasks, doubts, syllabus progress, exam marks, rewards, and daily knowledge content.
+The Student portal is the learning interface at `/student`. It covers syllabus progress, exam marks, rewards, and daily knowledge content. (My Tasks / Homework and My Doubts / Ask a Doubt were pulled out for rework — see below.)
 
 ---
 
@@ -17,16 +17,16 @@ The Student portal is the learning interface at `/student`. It covers tasks, dou
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Dashboard | Built | Published tasks, recent exam marks, open doubts, announcements (filtered to students). Quick navigation |
+| Dashboard | Built | Recent exam marks, announcements (filtered to students). Quick navigation — published-tasks and open-doubts tiles removed with #136/#137 |
 | My Timetable | Built | Class weekly schedule with period times, subjects, teachers, rooms |
 
 ### Learning
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| My Tasks | Built | View assigned tasks. Submit text or upload files (via Cloudinary). View score and feedback. Resubmit if requested |
+| My Tasks | Removed | Pulled out of `dev` for rework — full code + removal notes on `feature/136-remove-homework-tasks` (issue #136) |
 | Syllabus | Built | Chapter/topic coverage progress per subject. See what teacher has marked as covered |
-| My Doubts | Built | Ask doubts (link to task optionally). Chat with teacher. View peer FAQs (anonymised). Upvote relevant doubts |
+| My Doubts | Removed | Pulled out of `dev` for rework — full code + removal notes on `feature/137-remove-ask-a-doubt` (issue #137) |
 | Daily Knowledge | Built | AI-curated article + quiz. Points: +1 reading, +2 correct answer, -1 wrong answer |
 
 ### Academic
@@ -50,10 +50,6 @@ The Student portal is the learning interface at `/student`. It covers tasks, dou
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /api/tasks` | Assigned tasks |
-| `POST /api/tasks/[id]/submissions` | Submit work |
-| `GET/POST /api/doubts` | Ask doubts |
-| `GET /api/doubts/peers` | View peer FAQs |
 | `GET /api/exams/[id]/marks` | View marks |
 | `GET /api/students/[id]/rewards` | Rewards data |
 | `GET /api/newspapers/today` | Daily knowledge |

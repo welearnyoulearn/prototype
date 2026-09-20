@@ -13,11 +13,8 @@ type BriefingData = {
     unmarked_classes: number
     total_classes: number
   }
-  leave_pending: number
-  uncovered_periods: number
   exams_today: { exam_name: string; grade: string; section: string }[]
   exams_upcoming: { exam_name: string; exam_date: string; grade: string; section: string }[]
-  overdue_tasks: number
   chronic_absentees: number
   active_announcements: number
   low_syllabus_classes: number
@@ -180,26 +177,8 @@ export default function DailyBriefing({
             </div>
 
             {/* Ops quick-stats */}
-            <div className="col-span-2 grid grid-cols-2 gap-4">
+            <div className="col-span-2 grid grid-cols-1 gap-4">
               {[
-                {
-                  label: 'Leave Pending',
-                  value: data.leave_pending,
-                  icon: '📅',
-                  action: 'leave-requests',
-                  urgent: data.leave_pending > 0,
-                  color: data.leave_pending > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-white',
-                  valueColor: data.leave_pending > 0 ? 'text-amber-600' : 'text-gray-400',
-                },
-                {
-                  label: 'Uncovered Periods',
-                  value: data.uncovered_periods,
-                  icon: '🚨',
-                  action: 'emergency-cover',
-                  urgent: data.uncovered_periods > 0,
-                  color: data.uncovered_periods > 0 ? 'border-red-200 bg-red-50' : 'border-gray-100 bg-white',
-                  valueColor: data.uncovered_periods > 0 ? 'text-red-600' : 'text-gray-400',
-                },
                 {
                   label: 'Chronic Absentees',
                   value: data.chronic_absentees,
@@ -208,15 +187,6 @@ export default function DailyBriefing({
                   urgent: data.chronic_absentees > 0,
                   color: data.chronic_absentees > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-100 bg-white',
                   valueColor: data.chronic_absentees > 0 ? 'text-amber-600' : 'text-gray-400',
-                },
-                {
-                  label: 'Overdue Tasks',
-                  value: data.overdue_tasks,
-                  icon: '📋',
-                  action: 'academic-analytics',
-                  urgent: data.overdue_tasks > 0,
-                  color: data.overdue_tasks > 0 ? 'border-orange-200 bg-orange-50' : 'border-gray-100 bg-white',
-                  valueColor: data.overdue_tasks > 0 ? 'text-orange-600' : 'text-gray-400',
                 },
               ].map(k => (
                 <div key={k.label}

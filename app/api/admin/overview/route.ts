@@ -24,41 +24,6 @@ export async function GET(req: NextRequest) {
         (SELECT COUNT(*) FROM classes  WHERE school_id=$1)::int                     AS classes
     `, [school_id])
 
-    // ── 2. Pending leaves ─────────────────────────────────────────────────────
-    const leavesQ = features.has('leave')
-      ? pool.query(
-          `SELECT COUNT(*)::int AS count FROM leave_requests WHERE school_id=$1 AND status='pending'`,
-          [school_id]
-        )
-      : null
-
-    // ── 3. Uncovered periods today (approved leave with no substitute) ────────
-    const coverQ = features.has('cover')
-      ? pool.query(`
-          SELECT
-            lr.id AS leave_request_id,
-            t.id  AS teacher_id, t.name AS teacher_name,
-            c.id  AS class_id, c.grade, c.section,
-            ct.period_number, ct.subject_name, ct.time_from, ct.time_to
-          FROM leave_requests lr
-          JOIN teachers t ON t.id = lr.teacher_id
-          JOIN class_timetable ct ON ct.teacher_id = t.id AND ct.school_id = $1 AND ct.is_break = false
-          JOIN classes c ON c.id = ct.class_id
-          WHERE lr.school_id = $1
-            AND lr.status = 'approved'
-            AND $2::date BETWEEN lr.start_date AND lr.end_date
-            AND ct.day_of_week = trim(to_char($2::date, 'Day'))
-            AND NOT EXISTS (
-              SELECT 1 FROM substitute_assignments sa
-              WHERE sa.class_id = c.id
-                AND sa.period_number = ct.period_number
-                AND sa.date = $2::date
-                AND sa.school_id = $1
-            )
-          ORDER BY ct.period_number
-        `, [school_id, date])
-      : null
-
     // ── 4. Attendance today ───────────────────────────────────────────────────
     const attQ = features.has('attendance')
       ? pool.query(`
@@ -137,17 +102,15 @@ export async function GET(req: NextRequest) {
       ? pool.query(`
           SELECT
             COUNT(*) FILTER (WHERE status='overdue')::int AS overdue_count,
-            COALESCE(SUM(amount_due - amount_paid - COALESCE(waiver_amount, 0)) FILTER (WHERE status IN ('pending','overdue','partial')), 0) AS total_outstanding
+            COALESCE(SUM(GREATEST(amount_due - amount_paid - COALESCE(waiver_amount, 0), 0)) FILTER (WHERE status IN ('pending','overdue','partial')), 0) AS total_outstanding
           FROM student_fee_ledger
           WHERE school_id=$1 AND academic_year=$2
         `, [school_id, year])
       : null
 
     try {
-      const [core, leaves, cover, att, tt, exams, fees] = await Promise.all([
+      const [core, att, tt, exams, fees] = await Promise.all([
         coreQ,
-        leavesQ    ?? Promise.resolve(null),
-        coverQ     ?? Promise.resolve(null),
         attQ       ?? Promise.resolve(null),
         ttQ        ?? Promise.resolve(null),
         examsQ     ?? Promise.resolve(null),
@@ -156,8 +119,6 @@ export async function GET(req: NextRequest) {
 
       return NextResponse.json({
         core:       core?.rows?.[0]  ?? { teachers: 0, students: 0, classes: 0 },
-        leaves:     leaves           ? { count: leaves.rows[0]?.count ?? 0 } : null,
-        uncovered:  cover            ? cover.rows  : null,
         attendance: att              ? att.rows    : null,
         timetable:  tt               ? tt.rows     : null,
         exams:      exams            ? exams.rows  : null,

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { FullPageLoader } from '@/components/loaders'
@@ -8,8 +8,7 @@ import { FeaturesProvider } from '@/lib/features-context'
 import NotificationBell from '../components/NotificationBell'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
-import { useNavHistory } from '@/lib/useNavHistory'
-import NavBackForward from '../components/NavBackForward'
+import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
@@ -31,7 +30,6 @@ function ModuleSkeleton() {
 // Turbopack requires inline object literals for next/dynamic options
 const ClassView      = dynamic(() => import('./components/ClassView'),      { loading: () => <ModuleSkeleton /> })
 const FullTimetable  = dynamic(() => import('./components/FullTimetable'),  { loading: () => <ModuleSkeleton /> })
-const TeacherLeave   = dynamic(() => import('./components/TeacherLeave'),   { loading: () => <ModuleSkeleton /> })
 const TeacherProfile = dynamic(() => import('./components/TeacherProfile'), { loading: () => <ModuleSkeleton /> })
 const Attendance     = dynamic(() => import('./components/Attendance'),     { loading: () => <ModuleSkeleton /> })
 const MyStudents     = dynamic(() => import('./components/MyStudents'),     { loading: () => <ModuleSkeleton /> })
@@ -71,7 +69,6 @@ const NAV_KEY_TO_FEATURE: Record<string, string> = {
   timetable: 'timetable',
   attendance: 'attendance',
   library: 'library',
-  leave: 'leave-requests',
   syllabus: 'curriculum',
 }
 
@@ -97,18 +94,21 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'MY ACCOUNT',
     items: [
       { key: 'profile', label: 'My Profile', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg> },
-      { key: 'leave', label: 'Teacher Attend.', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg> },
     ],
   },
 ]
 
-export default function TeacherPortal() {
+function TeacherPortal() {
   const router = useRouter()
   const [teacher, setTeacher]     = useState<Teacher | null>(null)
   const [loading, setLoading]     = useState(true)
-  // In-app Back/Forward for the sidebar nav — see NavBackForward in the topbar below.
-  const { current: activeNav, navigate: setActiveNav, goBack: navGoBack, goForward: navGoForward, canGoBack: navCanGoBack, canGoForward: navCanGoForward } = useNavHistory<string>('snapshot')
-  const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set(['snapshot']))
+  // Sidebar section nav lives in the URL's `tab` param — real navigation, so
+  // the browser/phone Back button moves through the portal's own screens.
+  const { current: activeNav, navigate: navigateSection } = useSectionNav<string>('snapshot')
+  const [visitedNav, setVisitedNav] = useState<Set<string>>(new Set([activeNav]))
+  useEffect(() => {
+    setVisitedNav(prev => (prev.has(activeNav) ? prev : new Set([...prev, activeNav])))
+  }, [activeNav])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [selectedClass, setSelectedClass] = useState<{ id: number; grade: string; section: string; class_teacher_name: string | null } | null>(null)
   const [classViewInitialTab, setClassViewInitialTab] = useState<string | undefined>(undefined)
@@ -117,9 +117,8 @@ export default function TeacherPortal() {
   const trackOpen = useFeatureTracking('teacher')
 
   function navigateTo(key: string) {
-    setActiveNav(key)
-    setVisitedNav(prev => new Set([...prev, key]))
     setSidebarOpen(false)
+    navigateSection(key)
     trackOpen(key)
   }
 
@@ -152,7 +151,7 @@ export default function TeacherPortal() {
       body: JSON.stringify({ usageSessionId }),
     })
     clearUsageSessionId()
-    router.push('/teacher/login')
+    router.replace('/teacher/login')
   }, [router])
 
   // null = still loading (show everything so the sidebar doesn't flash
@@ -178,14 +177,14 @@ export default function TeacherPortal() {
   useEffect(() => {
     fetch('/api/teacher/auth/me')
       .then(async r => {
-        if (r.status === 401) { router.push('/teacher/login'); return null }
+        if (r.status === 401) { router.replace('/teacher/login'); return null }
         return r.json()
       })
       .then(data => {
         if (!data) return
         setTeacher(data)
       })
-      .catch(() => router.push('/teacher/login'))
+      .catch(() => router.replace('/teacher/login'))
       .finally(() => setLoading(false))
   }, [router])
 
@@ -265,7 +264,6 @@ export default function TeacherPortal() {
           </nav>
         </div>
         <div className="flex items-center gap-2 sm:gap-3">
-          <NavBackForward canGoBack={navCanGoBack} canGoForward={navCanGoForward} onBack={navGoBack} onForward={navGoForward} />
           {(selectedAcademicYear || academicYear) && (
             <span
               data-testid="academic-year-badge"
@@ -356,7 +354,6 @@ export default function TeacherPortal() {
           {visitedNav.has('class-view') && selectedClass && <div hidden={activeNav !== 'class-view'}><ClassView key={selectedClass.id} classId={selectedClass.id} grade={selectedClass.grade} section={selectedClass.section} schoolId={teacher.school_id} teacherName={teacher.name} teacherId={teacher.id} isClassTeacher={teacher.class_teacher_grade === selectedClass.grade && teacher.class_teacher_section === selectedClass.section} teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} onBack={() => navigateTo('snapshot')} initialTab={classViewInitialTab} openExamId={classViewOpenExamId} /></div>}
           {visitedNav.has('timetable')      && <div hidden={activeNav !== 'timetable'}><FullTimetable teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('attendance')     && <div hidden={activeNav !== 'attendance'}><Attendance teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
-          {visitedNav.has('leave')          && <div hidden={activeNav !== 'leave'}><TeacherLeave teacherId={teacher.id} schoolId={teacher.school_id} /></div>}
           {visitedNav.has('profile')        && <div hidden={activeNav !== 'profile'}><TeacherProfile teacher={teacher} onUpdate={setTeacher as (t: unknown) => void} availableYears={availableYears} selectedAcademicYear={selectedAcademicYear} schoolCurrentYear={schoolCurrentYear} onSelectYear={setSelectedAcademicYear} /></div>}
           {visitedNav.has('my-classes')     && <div hidden={activeNav !== 'my-classes'}><MyClasses teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} onViewClass={cls => { setSelectedClass(cls); navigateTo('class-view') }} onGoToSyllabus={cls => handleNavigate('class-view', { classId: cls.id, tab: 'Syllabus' })} /></div>}
           {visitedNav.has('my-students')    && <div hidden={activeNav !== 'my-students'}><MyStudents teacher={{ id: teacher.id, name: teacher.name, subject: teacher.subject, department: teacher.department, class_teacher_grade: teacher.class_teacher_grade, class_teacher_section: teacher.class_teacher_section }} schoolId={teacher.school_id} /></div>}
@@ -366,5 +363,13 @@ export default function TeacherPortal() {
       </div>
     </div>
     </FeaturesProvider>
+  )
+}
+
+export default function TeacherPortalPage() {
+  return (
+    <Suspense>
+      <TeacherPortal />
+    </Suspense>
   )
 }

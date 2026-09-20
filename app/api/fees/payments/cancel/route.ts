@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
 
@@ -20,6 +20,7 @@ async function handlePOST(req: NextRequest) {
       return NextResponse.json({ error: 'payment_id, reason required' }, { status: 400 })
     }
 
+    await ensureDB()
     const client = await pool.connect()
     try {
       // Fetch the payment (no lock yet — just to resolve school_id for the access check)
@@ -97,23 +98,6 @@ async function handlePOST(req: NextRequest) {
       }
 
       // 3. Record audit row in a dedicated correction log
-      await client.query(`
-        CREATE TABLE IF NOT EXISTS fee_payment_corrections (
-          id SERIAL PRIMARY KEY,
-          school_id INTEGER NOT NULL,
-          payment_id INTEGER NOT NULL,
-          ledger_id INTEGER NOT NULL,
-          student_id INTEGER NOT NULL,
-          action TEXT NOT NULL,                 -- cancel | correct
-          old_amount NUMERIC(10,2),
-          new_amount NUMERIC(10,2),
-          old_mode TEXT, new_mode TEXT,
-          reason TEXT NOT NULL,
-          done_by TEXT NOT NULL,
-          new_receipt_number TEXT,
-          created_at TIMESTAMPTZ DEFAULT NOW()
-        )`)
-
       let newReceipt: string | null = null
       let newPaymentId: number | null = null
 
@@ -126,6 +110,13 @@ async function handlePOST(req: NextRequest) {
         if (!(newAmount > 0)) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: 'Corrected amount must be greater than 0' }, { status: 400 })
+        }
+        // Same whitelist as payments POST — day-close's cash reconciliation only
+        // ever reads modeMap['cash'], so a non-canonical mode here would silently
+        // fall out of that total the same way an uncorrected one would.
+        if (!['cash', 'cheque', 'dd', 'upi', 'online'].includes(newMode)) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'new_payment_mode must be one of: cash, cheque, dd, upi, online' }, { status: 400 })
         }
 
         // Current ledger state (after the reversal above)

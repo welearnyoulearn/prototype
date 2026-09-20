@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
+import { Trophy } from 'lucide-react'
+import { EmptyState } from '@/components/ui/empty-state'
 
 type LeaderboardEntry = {
   rank: number
@@ -169,7 +171,7 @@ export default function StudentLeaderboard({ schoolId }: { schoolId: number }) {
         {loading ? (
           <div className="text-center py-12 text-gray-400 text-sm">Loading leaderboard…</div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-12 text-gray-400 text-sm">No students found</div>
+          <EmptyState icon={Trophy} title="No students found" className="border-0 py-12" />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

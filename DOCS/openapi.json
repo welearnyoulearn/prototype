@@ -93,14 +93,6 @@
       "description": "Exam schedule, marks entry, review, release and parent sign-off."
     },
     {
-      "name": "Homework",
-      "description": "Tasks, submissions and review."
-    },
-    {
-      "name": "Doubts",
-      "description": "Student questions, answers and class FAQ."
-    },
-    {
       "name": "Weekly test",
       "description": "AI-generated weekly tests."
     },
@@ -151,10 +143,6 @@
     {
       "name": "School calendar",
       "description": "School events and holidays."
-    },
-    {
-      "name": "Teacher leave",
-      "description": "Teacher leave requests and approvals."
     },
     {
       "name": "Feedback form",
@@ -896,11 +884,11 @@
           "409": {
             "description": "Platform admin already exists"
           },
-          "503": {
-            "description": "SETUP_SECRET not configured"
-          },
           "500": {
             "description": "Failed to create admin"
+          },
+          "503": {
+            "description": "SETUP_SECRET not configured"
           }
         },
         "x-badges": [
@@ -12745,166 +12733,6 @@
             }
           }
         ]
-      },
-      "post": {
-        "tags": [
-          "Timetable & substitutes"
-        ],
-        "summary": "Save substitute assignments",
-        "description": "Upserts one substitute_assignments row per assignment with a substitute_teacher_id (keyed by class/date/period), then inserts notifications for each substitute teacher and each affected class teacher. No leave_request_id means an emergency cover.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all; any caller can write substitute assignments and notifications for any school_id.",
-        "operationId": "postSubstitutes",
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Saved count",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "saved": {
-                      "type": "integer"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id, original_teacher_id, assignments required"
-          },
-          "500": {
-            "description": "Failed to save substitutes"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Public",
-            "color": "#dc2626"
-          }
-        ],
-        "x-source-file": "app/api/substitutes/route.ts",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "school_id",
-                  "original_teacher_id",
-                  "assignments"
-                ],
-                "properties": {
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "leave_request_id": {
-                    "type": "integer",
-                    "nullable": true,
-                    "description": "Null for emergency cover"
-                  },
-                  "original_teacher_id": {
-                    "type": "integer"
-                  },
-                  "assignments": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "substitute_teacher_id": {
-                          "type": "integer",
-                          "description": "Entries without it are skipped"
-                        },
-                        "class_id": {
-                          "type": "integer"
-                        },
-                        "date": {
-                          "type": "string",
-                          "format": "date"
-                        },
-                        "day_of_week": {
-                          "type": "string"
-                        },
-                        "period_number": {
-                          "type": "integer"
-                        },
-                        "subject_name": {
-                          "type": "string"
-                        },
-                        "time_from": {
-                          "type": "string"
-                        },
-                        "time_to": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Timetable & substitutes"
-        ],
-        "summary": "Delete substitutes for a leave request",
-        "description": "Deletes all substitute_assignments for the leave request in the school.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all; any caller can delete assignments for any school_id.",
-        "operationId": "deleteSubstitutes",
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Deleted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "leave_request_id and school_id required"
-          },
-          "500": {
-            "description": "Failed to delete substitutes / Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Public",
-            "color": "#dc2626"
-          }
-        ],
-        "x-source-file": "app/api/substitutes/route.ts",
-        "parameters": [
-          {
-            "name": "leave_request_id",
-            "in": "query",
-            "required": true,
-            "description": "Leave request id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "school_id",
-            "in": "query",
-            "required": true,
-            "description": "School id",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ]
       }
     },
     "/api/timetable": {
@@ -14726,149 +14554,6 @@
                   },
                   "book_name": {
                     "type": "string"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/school/tasks/{id}": {
-      "patch": {
-        "tags": [
-          "School curriculum"
-        ],
-        "summary": "Update school task or toggle active",
-        "description": "For custom tasks, updates any provided fields. For board tasks, only is_active can be changed, and mandatory tasks cannot be deactivated.\n\n**Who can call:** Platform admin, School admin, Teacher.\n\n**Checks:** requireSyllabusWriteAccess(owner school of the task's chapter). Students and parents are refused.",
-        "operationId": "patchSchoolTasksId",
-        "security": [
-          {
-            "platformAdmin": []
-          },
-          {
-            "schoolAdmin": []
-          },
-          {
-            "teacher": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Updated task",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "task": {
-                      "type": "object",
-                      "additionalProperties": true,
-                      "properties": {
-                        "id": {
-                          "type": "integer"
-                        },
-                        "school_chapter_id": {
-                          "type": "integer"
-                        },
-                        "school_topic_id": {
-                          "type": "integer",
-                          "nullable": true
-                        },
-                        "title": {
-                          "type": "string"
-                        },
-                        "instructions": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "task_type": {
-                          "type": "string"
-                        },
-                        "max_marks": {
-                          "type": "integer"
-                        },
-                        "is_mandatory": {
-                          "type": "boolean"
-                        },
-                        "is_active": {
-                          "type": "boolean"
-                        },
-                        "is_custom": {
-                          "type": "boolean"
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Forbidden, cannot deactivate mandatory task, or cannot modify board task details"
-          },
-          "404": {
-            "description": "Task not found"
-          },
-          "500": {
-            "description": "Failed to update task"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Platform admin",
-            "color": "#6d28d9"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
-          },
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          }
-        ],
-        "x-source-file": "app/api/school/tasks/[id]/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "school_tasks id",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "is_active": {
-                    "type": "boolean"
-                  },
-                  "title": {
-                    "type": "string",
-                    "description": "Custom tasks only"
-                  },
-                  "instructions": {
-                    "type": "string",
-                    "description": "Custom tasks only"
-                  },
-                  "task_type": {
-                    "type": "string",
-                    "description": "Custom tasks only"
-                  },
-                  "max_marks": {
-                    "type": "integer",
-                    "description": "Custom tasks only"
-                  },
-                  "school_topic_id": {
-                    "type": "integer",
-                    "description": "Custom tasks only"
                   }
                 }
               }
@@ -17990,177 +17675,6 @@
             "in": "query",
             "required": false,
             "description": "When present, the class leaderboard is included",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ]
-      }
-    },
-    "/api/students/{id}/submissions": {
-      "get": {
-        "tags": [
-          "Students"
-        ],
-        "summary": "List student task submissions",
-        "description": "Returns all task submissions for a student within a school, optionally filtered to one class, joined with task and class details.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check: any caller can read any student's submissions given the student id and school_id.",
-        "operationId": "getStudentsIdSubmissions",
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Submissions",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "submission_id": {
-                        "type": "integer"
-                      },
-                      "task_id": {
-                        "type": "integer"
-                      },
-                      "submission_status": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "score": {
-                        "type": "number",
-                        "nullable": true
-                      },
-                      "feedback": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "resubmission_requested": {
-                        "type": "boolean",
-                        "nullable": true
-                      },
-                      "file_url": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "file_name": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "submitted_at": {
-                        "type": "string",
-                        "nullable": true,
-                        "format": "date-time"
-                      },
-                      "reviewed_at": {
-                        "type": "string",
-                        "nullable": true,
-                        "format": "date-time"
-                      },
-                      "task_title": {
-                        "type": "string"
-                      },
-                      "subject": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "description": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "due_date": {
-                        "type": "string",
-                        "nullable": true,
-                        "format": "date"
-                      },
-                      "max_marks": {
-                        "type": "number",
-                        "nullable": true
-                      },
-                      "task_status": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "class_id": {
-                        "type": "integer"
-                      },
-                      "teacher_id": {
-                        "type": "integer",
-                        "nullable": true
-                      },
-                      "grade": {
-                        "type": "string"
-                      },
-                      "section": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Public",
-            "color": "#dc2626"
-          }
-        ],
-        "x-source-file": "app/api/students/[id]/submissions/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Student id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "school_id",
-            "in": "query",
-            "required": true,
-            "description": "School id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "class_id",
-            "in": "query",
-            "required": false,
-            "description": "Filter to tasks of this class",
             "schema": {
               "type": "integer"
             }
@@ -24810,3357 +24324,6 @@
         }
       }
     },
-    "/api/tasks": {
-      "get": {
-        "tags": [
-          "Homework"
-        ],
-        "summary": "List tasks",
-        "description": "Lists tasks in the school with teacher name, class label, submission counts, class size and last reminder time; published first, then by due date.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession(); school_id must equal the session's school. class_id/teacher_id/status are filters with no ownership check (students see drafts if they filter for them).",
-        "operationId": "getTasks",
-        "security": [
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
-            "parent": []
-          },
-          {
-            "schoolAdmin": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Tasks",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "integer"
-                      },
-                      "school_id": {
-                        "type": "integer"
-                      },
-                      "class_id": {
-                        "type": "integer"
-                      },
-                      "teacher_id": {
-                        "type": "integer"
-                      },
-                      "title": {
-                        "type": "string"
-                      },
-                      "subject": {
-                        "type": "string"
-                      },
-                      "task_type": {
-                        "type": "string",
-                        "enum": [
-                          "practice",
-                          "homework",
-                          "test"
-                        ]
-                      },
-                      "max_marks": {
-                        "type": "integer"
-                      },
-                      "instructions": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "assigned_to": {
-                        "type": "string"
-                      },
-                      "status": {
-                        "type": "string",
-                        "enum": [
-                          "draft",
-                          "published"
-                        ]
-                      },
-                      "due_date": {
-                        "type": "string",
-                        "format": "date",
-                        "nullable": true
-                      },
-                      "due_time": {
-                        "type": "string",
-                        "description": "HH24:MI"
-                      },
-                      "created_at": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "updated_at": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "class_label": {
-                        "type": "string"
-                      },
-                      "teacher_name": {
-                        "type": "string"
-                      },
-                      "submitted_count": {
-                        "type": "integer"
-                      },
-                      "reviewed_count": {
-                        "type": "integer"
-                      },
-                      "pending_count": {
-                        "type": "integer"
-                      },
-                      "total_students": {
-                        "type": "integer"
-                      },
-                      "last_reminder_at": {
-                        "type": "string",
-                        "format": "date-time",
-                        "nullable": true
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id required"
-          },
-          "401": {
-            "description": "No session"
-          },
-          "403": {
-            "description": "school_id does not match session"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
-            "name": "Parent",
-            "color": "#be185d"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
-          }
-        ],
-        "x-source-file": "app/api/tasks/route.ts",
-        "parameters": [
-          {
-            "name": "school_id",
-            "in": "query",
-            "required": true,
-            "description": "Must match the session's school",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "class_id",
-            "in": "query",
-            "required": false,
-            "description": "Filter by class",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "teacher_id",
-            "in": "query",
-            "required": false,
-            "description": "Filter by teacher",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "description": "Filter by status, e.g. published or draft",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "Homework"
-        ],
-        "summary": "Create a task",
-        "description": "Creates a homework/practice/test task for a class. Publishing requires a due date; due_time defaults to 23:59.\n\n**Who can call:** Teacher.\n\n**Checks:** getAnySession() with role 'teacher'. school_id/teacher_id come from the body; only checked that teacher_id belongs to school_id, not that either matches the session.",
-        "operationId": "postTasks",
-        "security": [
-          {
-            "teacher": []
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "Created task",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "school_id": {
-                      "type": "integer"
-                    },
-                    "class_id": {
-                      "type": "integer"
-                    },
-                    "teacher_id": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "subject": {
-                      "type": "string"
-                    },
-                    "task_type": {
-                      "type": "string",
-                      "enum": [
-                        "practice",
-                        "homework",
-                        "test"
-                      ]
-                    },
-                    "max_marks": {
-                      "type": "integer"
-                    },
-                    "instructions": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "assigned_to": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "draft",
-                        "published"
-                      ]
-                    },
-                    "due_date": {
-                      "type": "string",
-                      "format": "date",
-                      "nullable": true
-                    },
-                    "due_time": {
-                      "type": "string",
-                      "description": "HH24:MI"
-                    },
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "updated_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  },
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing/invalid fields"
-          },
-          "401": {
-            "description": "No teacher session"
-          },
-          "404": {
-            "description": "Teacher not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          }
-        ],
-        "x-source-file": "app/api/tasks/route.ts",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "class_id": {
-                    "type": "integer"
-                  },
-                  "teacher_id": {
-                    "type": "integer"
-                  },
-                  "title": {
-                    "type": "string"
-                  },
-                  "subject": {
-                    "type": "string"
-                  },
-                  "task_type": {
-                    "type": "string",
-                    "enum": [
-                      "practice",
-                      "homework",
-                      "test"
-                    ],
-                    "default": "homework"
-                  },
-                  "max_marks": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 1000,
-                    "default": 10
-                  },
-                  "instructions": {
-                    "type": "string",
-                    "nullable": true
-                  },
-                  "assigned_to": {
-                    "type": "string",
-                    "default": "all"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "draft",
-                      "published"
-                    ],
-                    "default": "draft"
-                  },
-                  "due_date": {
-                    "type": "string",
-                    "format": "date",
-                    "description": "Required when status is published"
-                  },
-                  "due_time": {
-                    "type": "string",
-                    "description": "HH:MM, default 23:59"
-                  }
-                },
-                "required": [
-                  "school_id",
-                  "class_id",
-                  "teacher_id",
-                  "title",
-                  "subject"
-                ]
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}": {
-      "get": {
-        "tags": [
-          "Homework"
-        ],
-        "summary": "Get one task",
-        "description": "Returns a task with teacher name, class grade/section, submission counts, class size and last reminder time.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession(); school_id must match the session's school.",
-        "operationId": "getTasksId",
-        "security": [
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
-            "parent": []
-          },
-          {
-            "schoolAdmin": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Task",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "school_id": {
-                      "type": "integer"
-                    },
-                    "class_id": {
-                      "type": "integer"
-                    },
-                    "teacher_id": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "subject": {
-                      "type": "string"
-                    },
-                    "task_type": {
-                      "type": "string",
-                      "enum": [
-                        "practice",
-                        "homework",
-                        "test"
-                      ]
-                    },
-                    "max_marks": {
-                      "type": "integer"
-                    },
-                    "instructions": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "assigned_to": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "draft",
-                        "published"
-                      ]
-                    },
-                    "due_date": {
-                      "type": "string",
-                      "format": "date",
-                      "nullable": true
-                    },
-                    "due_time": {
-                      "type": "string",
-                      "description": "HH24:MI"
-                    },
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "updated_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "grade": {
-                      "type": "string"
-                    },
-                    "section": {
-                      "type": "string"
-                    },
-                    "teacher_name": {
-                      "type": "string"
-                    },
-                    "submitted_count": {
-                      "type": "integer"
-                    },
-                    "reviewed_count": {
-                      "type": "integer"
-                    },
-                    "pending_count": {
-                      "type": "integer"
-                    },
-                    "total_students": {
-                      "type": "integer"
-                    },
-                    "last_reminder_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id required"
-          },
-          "401": {
-            "description": "No session"
-          },
-          "403": {
-            "description": "school_id does not match session"
-          },
-          "404": {
-            "description": "Task not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
-            "name": "Parent",
-            "color": "#be185d"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
-          }
-        ],
-        "x-source-file": "app/api/tasks/[id]/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Task id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "school_id",
-            "in": "query",
-            "required": true,
-            "description": "Must match the session's school",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ]
-      },
-      "put": {
-        "tags": [
-          "Homework"
-        ],
-        "summary": "Update a task",
-        "description": "Updates any provided task fields. Publishing requires a due date on the body or task.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); school_id must match. Ownership only checked if body teacher_id is given (must equal task.teacher_id); otherwise any teacher in the school can edit.",
-        "operationId": "putTasksId",
-        "security": [
-          {
-            "teacher": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Updated task",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "school_id": {
-                      "type": "integer"
-                    },
-                    "class_id": {
-                      "type": "integer"
-                    },
-                    "teacher_id": {
-                      "type": "integer"
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "subject": {
-                      "type": "string"
-                    },
-                    "task_type": {
-                      "type": "string",
-                      "enum": [
-                        "practice",
-                        "homework",
-                        "test"
-                      ]
-                    },
-                    "max_marks": {
-                      "type": "integer"
-                    },
-                    "instructions": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "assigned_to": {
-                      "type": "string"
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "draft",
-                        "published"
-                      ]
-                    },
-                    "due_date": {
-                      "type": "string",
-                      "format": "date",
-                      "nullable": true
-                    },
-                    "due_time": {
-                      "type": "string",
-                      "description": "HH24:MI"
-                    },
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "updated_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  },
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id missing, or due date required when publishing"
-          },
-          "401": {
-            "description": "No teacher session"
-          },
-          "403": {
-            "description": "school_id mismatch or teacher_id is not the owner"
-          },
-          "404": {
-            "description": "Task not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          }
-        ],
-        "x-source-file": "app/api/tasks/[id]/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Task id",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "teacher_id": {
-                    "type": "integer"
-                  },
-                  "title": {
-                    "type": "string"
-                  },
-                  "subject": {
-                    "type": "string"
-                  },
-                  "task_type": {
-                    "type": "string",
-                    "enum": [
-                      "practice",
-                      "homework",
-                      "test"
-                    ]
-                  },
-                  "max_marks": {
-                    "type": "integer"
-                  },
-                  "instructions": {
-                    "type": "string"
-                  },
-                  "assigned_to": {
-                    "type": "string"
-                  },
-                  "status": {
-                    "type": "string"
-                  },
-                  "due_date": {
-                    "type": "string",
-                    "format": "date"
-                  },
-                  "due_time": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "school_id"
-                ]
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Homework"
-        ],
-        "summary": "Delete a task",
-        "description": "Destroys submission files in Cloudinary, then deletes the task.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); school_id must match. Ownership only checked if teacher_id query is given.",
-        "operationId": "deleteTasksId",
-        "security": [
-          {
-            "teacher": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Deleted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id required"
-          },
-          "401": {
-            "description": "No teacher session"
-          },
-          "403": {
-            "description": "school_id mismatch or teacher_id is not the owner"
-          },
-          "404": {
-            "description": "Task not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          }
-        ],
-        "x-source-file": "app/api/tasks/[id]/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Task id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "school_id",
-            "in": "query",
-            "required": true,
-            "description": "Must match the session's school",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "teacher_id",
-            "in": "query",
-            "required": false,
-            "description": "If given, must be the task owner",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ]
-      }
-    },
-    "/api/tasks/{id}/remind": {
-      "post": {
-        "tags": [
-          "Homework"
-        ],
-        "summary": "Record task reminder",
-        "description": "Resolves target students (given student_ids for 'specific', else all class students without a submission) and records a task_reminders row. No notifications are sent.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession() only; school_id is not compared to the session's school. Sender is body teacher_id or the task owner.",
-        "operationId": "postTasksIdRemind",
-        "security": [
-          {
-            "teacher": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Reminder recorded (or none needed)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "type": "string"
-                    },
-                    "count": {
-                      "type": "integer"
-                    },
-                    "students": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id required"
-          },
-          "401": {
-            "description": "No teacher session"
-          },
-          "404": {
-            "description": "Task or teacher not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          }
-        ],
-        "x-source-file": "app/api/tasks/[id]/remind/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Task id",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "teacher_id": {
-                    "type": "integer"
-                  },
-                  "student_ids": {
-                    "type": "array",
-                    "items": {
-                      "type": "integer"
-                    }
-                  },
-                  "target_type": {
-                    "type": "string",
-                    "default": "all",
-                    "description": "'specific' uses student_ids; anything else targets non-submitters"
-                  }
-                },
-                "required": [
-                  "school_id"
-                ]
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/submissions": {
-      "get": {
-        "tags": [
-          "Homework"
-        ],
-        "summary": "List task submissions",
-        "description": "Returns every student in the task's class (or one student) with their submission fields, reviewer name and count of missing published tasks in the class.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession(); school_id must match. student_id is an optional filter with no ownership check, so any session in the school can read all submissions.",
-        "operationId": "getTasksIdSubmissions",
-        "security": [
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
-            "parent": []
-          },
-          {
-            "schoolAdmin": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Roster with submissions",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "student_id": {
-                        "type": "integer"
-                      },
-                      "student_name": {
-                        "type": "string"
-                      },
-                      "roll_number": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "submission_id": {
-                        "type": "integer",
-                        "nullable": true
-                      },
-                      "submitted_at": {
-                        "type": "string",
-                        "format": "date-time",
-                        "nullable": true
-                      },
-                      "submission_text": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "file_url": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "file_name": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "file_size_kb": {
-                        "type": "number",
-                        "nullable": true
-                      },
-                      "score": {
-                        "type": "number",
-                        "nullable": true
-                      },
-                      "feedback": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "status": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "resubmission_requested": {
-                        "type": "boolean",
-                        "nullable": true
-                      },
-                      "reviewed_at": {
-                        "type": "string",
-                        "format": "date-time",
-                        "nullable": true
-                      },
-                      "reviewed_by_name": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "missing_task_count": {
-                        "type": "integer"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id required"
-          },
-          "401": {
-            "description": "No session"
-          },
-          "403": {
-            "description": "school_id does not match session"
-          },
-          "404": {
-            "description": "Task not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
-            "name": "Parent",
-            "color": "#be185d"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
-          }
-        ],
-        "x-source-file": "app/api/tasks/[id]/submissions/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Task id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "school_id",
-            "in": "query",
-            "required": true,
-            "description": "Must match the session's school",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "student_id",
-            "in": "query",
-            "required": false,
-            "description": "Restrict to one student",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "Homework"
-        ],
-        "summary": "Submit or resubmit a task",
-        "description": "Upserts the student's task_submissions row (resubmitting as pending clears review data and the resubmission flag). On a pending submission awards 'task_submitted' points (if no teacher_id) and notifies the class teacher.\n\n**Who can call:** Student.\n\n**Checks:** getAnySession() with role 'student'; school_id must match. student_id comes from the body and is not compared to the session's student. Body may set status 'reviewed', score and feedback.",
-        "operationId": "postTasksIdSubmissions",
-        "security": [
-          {
-            "student": []
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "Submission row",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "task_id": {
-                      "type": "integer"
-                    },
-                    "student_id": {
-                      "type": "integer"
-                    },
-                    "school_id": {
-                      "type": "integer"
-                    },
-                    "submitted_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "submission_text": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "file_url": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "file_name": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "file_public_id": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "file_size_kb": {
-                      "type": "number",
-                      "nullable": true
-                    },
-                    "score": {
-                      "type": "number",
-                      "nullable": true
-                    },
-                    "feedback": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "pending",
-                        "reviewed"
-                      ]
-                    },
-                    "resubmission_requested": {
-                      "type": "boolean"
-                    },
-                    "reviewed_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "reviewed_by": {
-                      "type": "integer",
-                      "nullable": true
-                    }
-                  },
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing ids, invalid status, or score out of range"
-          },
-          "401": {
-            "description": "No student session"
-          },
-          "403": {
-            "description": "school_id does not match session"
-          },
-          "404": {
-            "description": "Task not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Student",
-            "color": "#047857"
-          }
-        ],
-        "x-source-file": "app/api/tasks/[id]/submissions/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Task id",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "student_id": {
-                    "type": "integer"
-                  },
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "teacher_id": {
-                    "type": "integer"
-                  },
-                  "submitted_at": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "submission_text": {
-                    "type": "string"
-                  },
-                  "file_url": {
-                    "type": "string"
-                  },
-                  "file_name": {
-                    "type": "string"
-                  },
-                  "file_public_id": {
-                    "type": "string"
-                  },
-                  "file_size_kb": {
-                    "type": "number"
-                  },
-                  "score": {
-                    "type": "number",
-                    "description": "0..task max_marks"
-                  },
-                  "feedback": {
-                    "type": "string"
-                  },
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "pending",
-                      "reviewed"
-                    ],
-                    "default": "pending"
-                  }
-                },
-                "required": [
-                  "student_id",
-                  "school_id"
-                ]
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/tasks/{id}/submissions/{sid}": {
-      "put": {
-        "tags": [
-          "Homework"
-        ],
-        "summary": "Review a task submission",
-        "description": "Updates score, feedback, status, resubmission flag and file fields; replacing a file destroys the old Cloudinary asset. On first move to reviewed, notifies the student (task_reviewed) and awards 'task_scored_high' points at 80% or more.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession() only; school_id is not compared to the session's school. Ownership only checked if body teacher_id is given (must be task owner).",
-        "operationId": "putTasksIdSubmissionsSid",
-        "security": [
-          {
-            "teacher": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Updated submission",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "task_id": {
-                      "type": "integer"
-                    },
-                    "student_id": {
-                      "type": "integer"
-                    },
-                    "school_id": {
-                      "type": "integer"
-                    },
-                    "submitted_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "submission_text": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "file_url": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "file_name": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "file_public_id": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "file_size_kb": {
-                      "type": "number",
-                      "nullable": true
-                    },
-                    "score": {
-                      "type": "number",
-                      "nullable": true
-                    },
-                    "feedback": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "pending",
-                        "reviewed"
-                      ]
-                    },
-                    "resubmission_requested": {
-                      "type": "boolean"
-                    },
-                    "reviewed_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "reviewed_by": {
-                      "type": "integer",
-                      "nullable": true
-                    }
-                  },
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id missing or score out of range"
-          },
-          "401": {
-            "description": "No teacher session"
-          },
-          "403": {
-            "description": "teacher_id is not the task owner"
-          },
-          "404": {
-            "description": "Task or submission not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          }
-        ],
-        "x-source-file": "app/api/tasks/[id]/submissions/[sid]/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Task id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "sid",
-            "in": "path",
-            "required": true,
-            "description": "Submission id",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "teacher_id": {
-                    "type": "integer"
-                  },
-                  "score": {
-                    "type": "number",
-                    "nullable": true
-                  },
-                  "feedback": {
-                    "type": "string"
-                  },
-                  "status": {
-                    "type": "string"
-                  },
-                  "resubmission_requested": {
-                    "type": "boolean"
-                  },
-                  "file_url": {
-                    "type": "string"
-                  },
-                  "file_name": {
-                    "type": "string"
-                  },
-                  "file_public_id": {
-                    "type": "string"
-                  },
-                  "file_size_kb": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "school_id"
-                ]
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Homework"
-        ],
-        "summary": "Delete a task submission",
-        "description": "Destroys the submission's Cloudinary file (if any) and deletes the submission row.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all. Ownership only checked if teacher_id query is given (must be the task owner).",
-        "operationId": "deleteTasksIdSubmissionsSid",
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Deleted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id required"
-          },
-          "403": {
-            "description": "teacher_id is not the task owner"
-          },
-          "404": {
-            "description": "Not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Public",
-            "color": "#dc2626"
-          }
-        ],
-        "x-source-file": "app/api/tasks/[id]/submissions/[sid]/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Task id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "sid",
-            "in": "path",
-            "required": true,
-            "description": "Submission id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "school_id",
-            "in": "query",
-            "required": true,
-            "description": "Task's school",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "teacher_id",
-            "in": "query",
-            "required": false,
-            "description": "If given, must be the task owner",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ]
-      }
-    },
-    "/api/doubts": {
-      "get": {
-        "tags": [
-          "Doubts"
-        ],
-        "summary": "List doubts for a school",
-        "description": "Lists doubts in the session's school with student/class/answerer/task info, optionally filtered. Ordered open, in_progress, resolved then by last activity. Pagination is opt-in: passing limit or offset switches the response to an envelope with a total count.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession(); school_id must equal the session's school (403 otherwise). No per-student or per-teacher ownership check on the student_id/teacher_id filters.",
-        "operationId": "getDoubts",
-        "security": [
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
-            "parent": []
-          },
-          {
-            "schoolAdmin": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Array of doubts when unpaginated; {data, limit, offset, total} when limit/offset given",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "integer"
-                          },
-                          "school_id": {
-                            "type": "integer"
-                          },
-                          "class_id": {
-                            "type": "integer"
-                          },
-                          "student_id": {
-                            "type": "integer"
-                          },
-                          "subject": {
-                            "type": "string"
-                          },
-                          "question": {
-                            "type": "string"
-                          },
-                          "task_id": {
-                            "type": "integer",
-                            "nullable": true
-                          },
-                          "ai_answer": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "teacher_answer": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "answered_by": {
-                            "type": "integer",
-                            "nullable": true
-                          },
-                          "answered_at": {
-                            "type": "string",
-                            "format": "date-time",
-                            "nullable": true
-                          },
-                          "status": {
-                            "type": "string",
-                            "description": "open | in_progress | resolved"
-                          },
-                          "created_at": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "last_message_at": {
-                            "type": "string",
-                            "format": "date-time",
-                            "nullable": true
-                          },
-                          "message_count": {
-                            "type": "integer",
-                            "nullable": true
-                          },
-                          "resolved_at": {
-                            "type": "string",
-                            "format": "date-time",
-                            "nullable": true
-                          },
-                          "closed_by_teacher": {
-                            "type": "boolean",
-                            "nullable": true
-                          },
-                          "is_class_faq": {
-                            "type": "boolean",
-                            "nullable": true
-                          },
-                          "faq_set_by": {
-                            "type": "integer",
-                            "nullable": true
-                          },
-                          "student_name": {
-                            "type": "string"
-                          },
-                          "roll_number": {
-                            "type": "string"
-                          },
-                          "grade": {
-                            "type": "string"
-                          },
-                          "section": {
-                            "type": "string"
-                          },
-                          "answered_by_name": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "task_title": {
-                            "type": "string",
-                            "nullable": true
-                          }
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "data": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "id": {
-                                "type": "integer"
-                              },
-                              "school_id": {
-                                "type": "integer"
-                              },
-                              "class_id": {
-                                "type": "integer"
-                              },
-                              "student_id": {
-                                "type": "integer"
-                              },
-                              "subject": {
-                                "type": "string"
-                              },
-                              "question": {
-                                "type": "string"
-                              },
-                              "task_id": {
-                                "type": "integer",
-                                "nullable": true
-                              },
-                              "ai_answer": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "teacher_answer": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "answered_by": {
-                                "type": "integer",
-                                "nullable": true
-                              },
-                              "answered_at": {
-                                "type": "string",
-                                "format": "date-time",
-                                "nullable": true
-                              },
-                              "status": {
-                                "type": "string",
-                                "description": "open | in_progress | resolved"
-                              },
-                              "created_at": {
-                                "type": "string",
-                                "format": "date-time"
-                              },
-                              "last_message_at": {
-                                "type": "string",
-                                "format": "date-time",
-                                "nullable": true
-                              },
-                              "message_count": {
-                                "type": "integer",
-                                "nullable": true
-                              },
-                              "resolved_at": {
-                                "type": "string",
-                                "format": "date-time",
-                                "nullable": true
-                              },
-                              "closed_by_teacher": {
-                                "type": "boolean",
-                                "nullable": true
-                              },
-                              "is_class_faq": {
-                                "type": "boolean",
-                                "nullable": true
-                              },
-                              "faq_set_by": {
-                                "type": "integer",
-                                "nullable": true
-                              },
-                              "student_name": {
-                                "type": "string"
-                              },
-                              "roll_number": {
-                                "type": "string"
-                              },
-                              "grade": {
-                                "type": "string"
-                              },
-                              "section": {
-                                "type": "string"
-                              },
-                              "answered_by_name": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "task_title": {
-                                "type": "string",
-                                "nullable": true
-                              }
-                            }
-                          }
-                        },
-                        "limit": {
-                          "type": "integer"
-                        },
-                        "offset": {
-                          "type": "integer"
-                        },
-                        "total": {
-                          "type": "integer"
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id missing, or limit/offset not non-negative integers"
-          },
-          "401": {
-            "description": "No session"
-          },
-          "403": {
-            "description": "school_id does not match session"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
-            "name": "Parent",
-            "color": "#be185d"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
-          }
-        ],
-        "x-source-file": "app/api/doubts/route.ts",
-        "parameters": [
-          {
-            "name": "school_id",
-            "in": "query",
-            "required": true,
-            "description": "Must match the session's school",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "class_id",
-            "in": "query",
-            "required": false,
-            "description": "Filter by class",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "student_id",
-            "in": "query",
-            "required": false,
-            "description": "Filter by student",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "teacher_id",
-            "in": "query",
-            "required": false,
-            "description": "When class_id is absent: restrict to classes this teacher teaches (class_timetable) or is class teacher of",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "description": "Filter by status (open, in_progress, resolved)",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "subject",
-            "in": "query",
-            "required": false,
-            "description": "Filter by subject",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "is_faq",
-            "in": "query",
-            "required": false,
-            "description": "'true' to return only class FAQs",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "description": "Page size (max 500); presence enables pagination",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "description": "Row offset; presence enables pagination",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "Doubts"
-        ],
-        "summary": "Raise a new doubt",
-        "description": "Student creates a doubt after checking the student belongs to the class. Notifies the class teacher (new_doubt), asynchronously generates an AI answer (Groq, if GROQ_API_KEY set) using textbook context and writes it to ai_answer, and sends a doubt_pattern notification when exactly 3 distinct students ask about the same subject in the class within 7 days.\n\n**Who can call:** Student.\n\n**Checks:** getAnySession() with role 'student' only. school_id/student_id come from the body and are not compared to the session's school or student id.",
-        "operationId": "postDoubts",
-        "security": [
-          {
-            "student": []
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "Created doubt row",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "school_id": {
-                      "type": "integer"
-                    },
-                    "class_id": {
-                      "type": "integer"
-                    },
-                    "student_id": {
-                      "type": "integer"
-                    },
-                    "subject": {
-                      "type": "string"
-                    },
-                    "question": {
-                      "type": "string"
-                    },
-                    "task_id": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "ai_answer": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "teacher_answer": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "answered_by": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "answered_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "status": {
-                      "type": "string",
-                      "description": "open | in_progress | resolved"
-                    },
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "last_message_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "message_count": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "resolved_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "closed_by_teacher": {
-                      "type": "boolean",
-                      "nullable": true
-                    },
-                    "is_class_faq": {
-                      "type": "boolean",
-                      "nullable": true
-                    },
-                    "faq_set_by": {
-                      "type": "integer",
-                      "nullable": true
-                    }
-                  },
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing ids, subject or question, or question shorter than 10 characters"
-          },
-          "401": {
-            "description": "No student session"
-          },
-          "404": {
-            "description": "Student not found in this class"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Student",
-            "color": "#047857"
-          }
-        ],
-        "x-source-file": "app/api/doubts/route.ts",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "class_id": {
-                    "type": "integer"
-                  },
-                  "student_id": {
-                    "type": "integer"
-                  },
-                  "subject": {
-                    "type": "string"
-                  },
-                  "question": {
-                    "type": "string",
-                    "minLength": 10,
-                    "description": "Trimmed; at least 10 characters"
-                  },
-                  "task_id": {
-                    "type": "integer",
-                    "nullable": true
-                  }
-                },
-                "required": [
-                  "school_id",
-                  "class_id",
-                  "student_id",
-                  "subject",
-                  "question"
-                ]
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/doubts/peers": {
-      "get": {
-        "tags": [
-          "Doubts"
-        ],
-        "summary": "List anonymized classmate doubts",
-        "description": "Returns open/in_progress doubts in a class, anonymized (display_name 'You' or 'Anonymous'), with is_mine and has_upvoted flags for the given student. Ordered by upvotes then recency.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all; school_id/class_id/student_id are trusted from the query.",
-        "operationId": "getDoubtsPeers",
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Anonymized doubts",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "integer"
-                      },
-                      "subject": {
-                        "type": "string"
-                      },
-                      "question": {
-                        "type": "string"
-                      },
-                      "status": {
-                        "type": "string"
-                      },
-                      "created_at": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "last_message_at": {
-                        "type": "string",
-                        "format": "date-time",
-                        "nullable": true
-                      },
-                      "message_count": {
-                        "type": "integer",
-                        "nullable": true
-                      },
-                      "upvote_count": {
-                        "type": "integer"
-                      },
-                      "task_title": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "is_mine": {
-                        "type": "boolean"
-                      },
-                      "has_upvoted": {
-                        "type": "boolean"
-                      },
-                      "display_name": {
-                        "type": "string",
-                        "enum": [
-                          "You",
-                          "Anonymous"
-                        ]
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id, class_id and student_id required"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Public",
-            "color": "#dc2626"
-          }
-        ],
-        "x-source-file": "app/api/doubts/peers/route.ts",
-        "parameters": [
-          {
-            "name": "school_id",
-            "in": "query",
-            "required": true,
-            "description": "School id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "class_id",
-            "in": "query",
-            "required": true,
-            "description": "Class id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "student_id",
-            "in": "query",
-            "required": true,
-            "description": "Requesting student (for is_mine/has_upvoted)",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ]
-      }
-    },
-    "/api/doubts/{id}": {
-      "get": {
-        "tags": [
-          "Doubts"
-        ],
-        "summary": "Get one doubt",
-        "description": "Returns a doubt with student name/roll, class grade/section, answering teacher name and linked task title.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession(); school_id must match the session's school.",
-        "operationId": "getDoubtsId",
-        "security": [
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
-            "parent": []
-          },
-          {
-            "schoolAdmin": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Doubt row with joined fields",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "school_id": {
-                      "type": "integer"
-                    },
-                    "class_id": {
-                      "type": "integer"
-                    },
-                    "student_id": {
-                      "type": "integer"
-                    },
-                    "subject": {
-                      "type": "string"
-                    },
-                    "question": {
-                      "type": "string"
-                    },
-                    "task_id": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "ai_answer": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "teacher_answer": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "answered_by": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "answered_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "status": {
-                      "type": "string",
-                      "description": "open | in_progress | resolved"
-                    },
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "last_message_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "message_count": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "resolved_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "closed_by_teacher": {
-                      "type": "boolean",
-                      "nullable": true
-                    },
-                    "is_class_faq": {
-                      "type": "boolean",
-                      "nullable": true
-                    },
-                    "faq_set_by": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "student_name": {
-                      "type": "string"
-                    },
-                    "roll_number": {
-                      "type": "string"
-                    },
-                    "grade": {
-                      "type": "string"
-                    },
-                    "section": {
-                      "type": "string"
-                    },
-                    "answered_by_name": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "task_title": {
-                      "type": "string",
-                      "nullable": true
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id missing"
-          },
-          "401": {
-            "description": "No session"
-          },
-          "403": {
-            "description": "school_id does not match session"
-          },
-          "404": {
-            "description": "Doubt not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
-            "name": "Parent",
-            "color": "#be185d"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
-          }
-        ],
-        "x-source-file": "app/api/doubts/[id]/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Doubt id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "school_id",
-            "in": "query",
-            "required": true,
-            "description": "Must match the session's school",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ]
-      },
-      "put": {
-        "tags": [
-          "Doubts"
-        ],
-        "summary": "Answer or update a doubt",
-        "description": "Teacher sets teacher_answer and/or status. If an answer is given, answered_by/answered_at are set and status defaults to in_progress; if the doubt was open, a doubt_answered notification is sent to the student.\n\n**Who can call:** Teacher.\n\n**Checks:** getTeacherSession(); school_id must match. answered_by is taken from body teacher_id, not the session.",
-        "operationId": "putDoubtsId",
-        "security": [
-          {
-            "teacher": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Updated doubt row",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "school_id": {
-                      "type": "integer"
-                    },
-                    "class_id": {
-                      "type": "integer"
-                    },
-                    "student_id": {
-                      "type": "integer"
-                    },
-                    "subject": {
-                      "type": "string"
-                    },
-                    "question": {
-                      "type": "string"
-                    },
-                    "task_id": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "ai_answer": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "teacher_answer": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "answered_by": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "answered_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "status": {
-                      "type": "string",
-                      "description": "open | in_progress | resolved"
-                    },
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "last_message_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "message_count": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "resolved_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "closed_by_teacher": {
-                      "type": "boolean",
-                      "nullable": true
-                    },
-                    "is_class_faq": {
-                      "type": "boolean",
-                      "nullable": true
-                    },
-                    "faq_set_by": {
-                      "type": "integer",
-                      "nullable": true
-                    }
-                  },
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id missing"
-          },
-          "401": {
-            "description": "No teacher session"
-          },
-          "403": {
-            "description": "school_id does not match session"
-          },
-          "404": {
-            "description": "Doubt not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          }
-        ],
-        "x-source-file": "app/api/doubts/[id]/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Doubt id",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "teacher_id": {
-                    "type": "integer"
-                  },
-                  "teacher_answer": {
-                    "type": "string"
-                  },
-                  "status": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "school_id"
-                ]
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "Doubts"
-        ],
-        "summary": "Toggle doubt class-FAQ flag",
-        "description": "Sets is_class_faq (true only when body value is exactly true) and faq_set_by to teacher_id when enabling, NULL when disabling.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession() only; commented as teacher-only but no role check. school_id must match session; teacher_id is taken from the body.",
-        "operationId": "patchDoubtsId",
-        "security": [
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
-            "parent": []
-          },
-          {
-            "schoolAdmin": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Updated doubt row",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "school_id": {
-                      "type": "integer"
-                    },
-                    "class_id": {
-                      "type": "integer"
-                    },
-                    "student_id": {
-                      "type": "integer"
-                    },
-                    "subject": {
-                      "type": "string"
-                    },
-                    "question": {
-                      "type": "string"
-                    },
-                    "task_id": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "ai_answer": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "teacher_answer": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "answered_by": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "answered_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "status": {
-                      "type": "string",
-                      "description": "open | in_progress | resolved"
-                    },
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "last_message_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "message_count": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "resolved_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "closed_by_teacher": {
-                      "type": "boolean",
-                      "nullable": true
-                    },
-                    "is_class_faq": {
-                      "type": "boolean",
-                      "nullable": true
-                    },
-                    "faq_set_by": {
-                      "type": "integer",
-                      "nullable": true
-                    }
-                  },
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id or teacher_id missing"
-          },
-          "401": {
-            "description": "No session"
-          },
-          "403": {
-            "description": "school_id does not match session"
-          },
-          "404": {
-            "description": "Doubt not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
-            "name": "Parent",
-            "color": "#be185d"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
-          }
-        ],
-        "x-source-file": "app/api/doubts/[id]/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Doubt id",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "teacher_id": {
-                    "type": "integer"
-                  },
-                  "is_class_faq": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "school_id",
-                  "teacher_id"
-                ]
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Doubts"
-        ],
-        "summary": "Delete a doubt",
-        "description": "Hard-deletes the doubt row.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession(); school_id must match. If student_id query is passed it must equal the doubt's student_id; if omitted, any session in the school can delete.",
-        "operationId": "deleteDoubtsId",
-        "security": [
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
-            "parent": []
-          },
-          {
-            "schoolAdmin": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Deleted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id missing"
-          },
-          "401": {
-            "description": "No session"
-          },
-          "403": {
-            "description": "school_id mismatch or student_id is not the owner"
-          },
-          "404": {
-            "description": "Not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
-            "name": "Parent",
-            "color": "#be185d"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
-          }
-        ],
-        "x-source-file": "app/api/doubts/[id]/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Doubt id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "school_id",
-            "in": "query",
-            "required": true,
-            "description": "Must match the session's school",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "student_id",
-            "in": "query",
-            "required": false,
-            "description": "If given, must be the doubt's owner",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ]
-      }
-    },
-    "/api/doubts/{id}/messages": {
-      "get": {
-        "tags": [
-          "Doubts"
-        ],
-        "summary": "List doubt thread messages",
-        "description": "Returns all doubt_messages for the doubt, oldest first.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession(); school_id must match the session's school and the doubt must belong to it.",
-        "operationId": "getDoubtsIdMessages",
-        "security": [
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
-            "parent": []
-          },
-          {
-            "schoolAdmin": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Messages",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "integer"
-                      },
-                      "doubt_id": {
-                        "type": "integer"
-                      },
-                      "school_id": {
-                        "type": "integer"
-                      },
-                      "sender_type": {
-                        "type": "string",
-                        "enum": [
-                          "student",
-                          "teacher"
-                        ]
-                      },
-                      "sender_id": {
-                        "type": "integer"
-                      },
-                      "sender_name": {
-                        "type": "string"
-                      },
-                      "message": {
-                        "type": "string"
-                      },
-                      "is_final_answer": {
-                        "type": "boolean"
-                      },
-                      "created_at": {
-                        "type": "string",
-                        "format": "date-time"
-                      }
-                    },
-                    "additionalProperties": true
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id missing"
-          },
-          "401": {
-            "description": "No session"
-          },
-          "403": {
-            "description": "school_id does not match session"
-          },
-          "404": {
-            "description": "Doubt not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
-            "name": "Parent",
-            "color": "#be185d"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
-          }
-        ],
-        "x-source-file": "app/api/doubts/[id]/messages/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Doubt id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "school_id",
-            "in": "query",
-            "required": true,
-            "description": "Must match the session's school",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "Doubts"
-        ],
-        "summary": "Post a doubt thread message",
-        "description": "Adds a message to a non-resolved doubt, bumps last_message_at/message_count, moves open to in_progress on a teacher reply and records answered_by. Notifies the student (teacher reply) or the answering/class teacher (student message).\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession(); school_id must match. sender_type/sender_id/sender_name are taken from the body and not checked against the session. is_final_answer only honoured for sender_type teacher.",
-        "operationId": "postDoubtsIdMessages",
-        "security": [
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
-            "parent": []
-          },
-          {
-            "schoolAdmin": []
-          }
-        ],
-        "responses": {
-          "201": {
-            "description": "Created message row",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "doubt_id": {
-                      "type": "integer"
-                    },
-                    "school_id": {
-                      "type": "integer"
-                    },
-                    "sender_type": {
-                      "type": "string",
-                      "enum": [
-                        "student",
-                        "teacher"
-                      ]
-                    },
-                    "sender_id": {
-                      "type": "integer"
-                    },
-                    "sender_name": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "is_final_answer": {
-                      "type": "boolean"
-                    },
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  },
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing fields, invalid sender_type, or doubt already resolved"
-          },
-          "401": {
-            "description": "No session"
-          },
-          "403": {
-            "description": "school_id does not match session"
-          },
-          "404": {
-            "description": "Doubt not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
-            "name": "Parent",
-            "color": "#be185d"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
-          }
-        ],
-        "x-source-file": "app/api/doubts/[id]/messages/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Doubt id",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "sender_type": {
-                    "type": "string",
-                    "enum": [
-                      "student",
-                      "teacher"
-                    ]
-                  },
-                  "sender_id": {
-                    "type": "integer"
-                  },
-                  "sender_name": {
-                    "type": "string"
-                  },
-                  "message": {
-                    "type": "string"
-                  },
-                  "is_final_answer": {
-                    "type": "boolean",
-                    "default": false
-                  }
-                },
-                "required": [
-                  "school_id",
-                  "sender_type",
-                  "sender_id",
-                  "sender_name",
-                  "message"
-                ]
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "Doubts"
-        ],
-        "summary": "Close, reopen, or resolve a doubt",
-        "description": "action 'teacher_close' resolves with closed_by_teacher=true and notifies the student; action 'reopen' moves a resolved doubt back to in_progress and notifies the answering teacher; any other/absent action marks it resolved by the student, awards 'doubt_resolved' reward points and notifies the answering teacher.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession(); school_id must match. Ownership checks use body student_id (reopen requires it to equal the doubt's student; resolve checks it only if provided). teacher_close only requires a body teacher_id; no role check.",
-        "operationId": "patchDoubtsIdMessages",
-        "security": [
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
-            "parent": []
-          },
-          {
-            "schoolAdmin": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Updated doubt row",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "school_id": {
-                      "type": "integer"
-                    },
-                    "class_id": {
-                      "type": "integer"
-                    },
-                    "student_id": {
-                      "type": "integer"
-                    },
-                    "subject": {
-                      "type": "string"
-                    },
-                    "question": {
-                      "type": "string"
-                    },
-                    "task_id": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "ai_answer": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "teacher_answer": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "answered_by": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "answered_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "status": {
-                      "type": "string",
-                      "description": "open | in_progress | resolved"
-                    },
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "last_message_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "message_count": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "resolved_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "closed_by_teacher": {
-                      "type": "boolean",
-                      "nullable": true
-                    },
-                    "is_class_faq": {
-                      "type": "boolean",
-                      "nullable": true
-                    },
-                    "faq_set_by": {
-                      "type": "integer",
-                      "nullable": true
-                    }
-                  },
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id/teacher_id/student_id missing, already resolved, or not resolved (reopen)"
-          },
-          "401": {
-            "description": "No session"
-          },
-          "403": {
-            "description": "school_id mismatch, or student_id is not the doubt's owner"
-          },
-          "404": {
-            "description": "Not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
-            "name": "Parent",
-            "color": "#be185d"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
-          }
-        ],
-        "x-source-file": "app/api/doubts/[id]/messages/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Doubt id",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "action": {
-                    "type": "string",
-                    "enum": [
-                      "teacher_close",
-                      "reopen"
-                    ],
-                    "description": "Omit to resolve as student"
-                  },
-                  "student_id": {
-                    "type": "integer"
-                  },
-                  "student_name": {
-                    "type": "string"
-                  },
-                  "teacher_id": {
-                    "type": "integer"
-                  },
-                  "teacher_name": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "school_id"
-                ]
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/doubts/{id}/upvote": {
-      "post": {
-        "tags": [
-          "Doubts"
-        ],
-        "summary": "Toggle upvote on a doubt",
-        "description": "Adds an upvote (doubt_upvotes row, upvote_count+1) if the student has not upvoted, otherwise removes it. Students cannot upvote their own doubt.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all; school_id and student_id are trusted from the body.",
-        "operationId": "postDoubtsIdUpvote",
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "New upvote state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "upvoted": {
-                      "type": "boolean"
-                    },
-                    "upvote_count": {
-                      "type": "integer"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing school_id/student_id, or upvoting own doubt"
-          },
-          "404": {
-            "description": "Doubt not found"
-          },
-          "500": {
-            "description": "Internal server error"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Public",
-            "color": "#dc2626"
-          }
-        ],
-        "x-source-file": "app/api/doubts/[id]/upvote/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Doubt id",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "student_id": {
-                    "type": "integer"
-                  }
-                },
-                "required": [
-                  "school_id",
-                  "student_id"
-                ]
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/weekly-test": {
       "get": {
         "tags": [
@@ -29838,7 +26001,7 @@
           "Fee setup"
         ],
         "summary": "Save variable fee assignments",
-        "description": "Replaces variable fee assignments for the given student/category pairs in a transaction. Amounts > 0 are saved and existing ledger bills for that student/category/year are re-priced with recomputed status; zero amounts remove the assignment and delete unpaid pending/overdue ledger bills. Every change is logged to student_fee_assignment_history.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id) is checked before body validation. Student and category ids are not individually verified; all writes are scoped by school_id.",
+        "description": "Replaces variable fee assignments for the given student/category pairs in a transaction. Amounts > 0 are saved and existing ledger bills for that student/category/year are re-priced with recomputed status; zero amounts remove the assignment and delete unpaid pending/overdue ledger bills. Every change is logged to student_fee_assignment_history. Refused for closed academic years, and refused if any reduction would leave amount_paid + waiver_amount exceeding the new amount.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id) is checked before body validation. Every student_id and fee_category_id inside assignments[] is then verified to belong to that same school_id before any write.",
         "operationId": "postFeesCategoryAssignments",
         "security": [
           {
@@ -29871,7 +26034,10 @@
             "description": "school_id, academic_year, assignments required"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "Forbidden, or one or more students/fee categories do not belong to this school"
+          },
+          "409": {
+            "description": "Academic year is closed, or a reduction would leave amount_paid + waiver_amount exceeding the new amount for one or more students"
           },
           "500": {
             "description": "Failed to save assignments"
@@ -30051,7 +26217,7 @@
           "Fee setup"
         ],
         "summary": "Generate fee bills for a year",
-        "description": "Creates ledger bills for active students: fixed categories from fee_structures (per grade) and variable categories from per-student assignments, one bill per period derived from the category frequency (monthly, quarterly, half_yearly, else annual), all due on the academic year's end_date. Existing bills are skipped, but unpaid/partial bills pointing at another grade's structure are re-synced. Afterwards marks pending bills overdue if the year has ended and auto-locks the year's fee structure (fee_structure_locks).\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
+        "description": "Creates ledger bills for active students: fixed categories from fee_structures (per grade) and variable categories from per-student assignments, one bill per period derived from the category frequency (monthly, quarterly, half_yearly, else annual), all due on the academic year's end_date. Existing bills are skipped, but unpaid/partial bills pointing at another grade's structure are re-synced. Refused for closed academic years. Afterwards marks pending bills overdue if the year has ended and auto-locks the year's fee structure (fee_structure_locks).\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
         "operationId": "postFeesGenerate",
         "security": [
           {
@@ -30091,6 +26257,9 @@
           },
           "403": {
             "description": "Forbidden"
+          },
+          "409": {
+            "description": "This academic year is closed"
           },
           "500": {
             "description": "Failed to generate ledger"
@@ -30527,7 +26696,7 @@
           "Fee setup"
         ],
         "summary": "Amend locked fee structure amount",
-        "description": "Changes a fee structure amount with an audit trail: records a fee_structure_amendments row, updates fee_structures, re-prices every pending/overdue/partial bill linked to that structure (recomputing status), and writes a student_fee_ledger_edits row per affected bill. Refused if any affected student has already paid more than the new amount.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id), checked before body validation. changed_by from the body is honoured if present.",
+        "description": "Changes a fee structure amount with an audit trail: records a fee_structure_amendments row, updates fee_structures, re-prices every pending/overdue/partial bill linked to that structure (recomputing status), and writes a student_fee_ledger_edits row per affected bill actually updated. Refused for closed academic years, or if any affected student's amount_paid + waiver_amount would exceed the new amount.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id), checked before body validation. changed_by from the body is honoured if present.",
         "operationId": "postFeesStructuresAmend",
         "security": [
           {
@@ -30595,7 +26764,7 @@
             "description": "Fee structure not found"
           },
           "409": {
-            "description": "Some students already paid more than the new amount"
+            "description": "Academic year is closed, or some students already paid/waived more than the new amount"
           },
           "500": {
             "description": "Failed to amend structure"
@@ -31412,7 +27581,7 @@
             }
           },
           "400": {
-            "description": "school_id, date required"
+            "description": "school_id, date required; or actual_cash must be a number"
           },
           "403": {
             "description": "Forbidden"
@@ -31475,7 +27644,7 @@
           "Ledger & payments"
         ],
         "summary": "List fee ledger bills",
-        "description": "Lists ledger bills with student, parent and category details, confirmed paid total, balance, days overdue and whether the bill was edited. First re-syncs pending/overdue statuses for the year against the academic year end_date (a DB write). academic_year defaults to the school's current year. Pagination is opt-in: with limit/offset the response is wrapped as {data, limit, offset, total}; otherwise a bare array.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
+        "description": "Lists ledger bills with student, parent and category details, balance and days overdue. First re-syncs pending/overdue statuses for the year against the academic year end_date (a DB write). academic_year defaults to the school's current year. Pagination is opt-in: with limit/offset the response is wrapped as {data, limit, offset, total}; otherwise a bare array.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
         "operationId": "getFeesLedger",
         "security": [
           {
@@ -31603,10 +27772,6 @@
                           "frequency": {
                             "type": "string"
                           },
-                          "total_paid_confirmed": {
-                            "type": "string",
-                            "description": "NUMERIC as decimal string"
-                          },
                           "balance": {
                             "type": "string",
                             "description": "NUMERIC as decimal string"
@@ -31614,9 +27779,6 @@
                           "days_overdue": {
                             "type": "integer",
                             "nullable": true
-                          },
-                          "has_edits": {
-                            "type": "boolean"
                           }
                         },
                         "additionalProperties": true
@@ -31736,10 +27898,6 @@
                               "frequency": {
                                 "type": "string"
                               },
-                              "total_paid_confirmed": {
-                                "type": "string",
-                                "description": "NUMERIC as decimal string"
-                              },
                               "balance": {
                                 "type": "string",
                                 "description": "NUMERIC as decimal string"
@@ -31747,9 +27905,6 @@
                               "days_overdue": {
                                 "type": "integer",
                                 "nullable": true
-                              },
-                              "has_edits": {
-                                "type": "boolean"
                               }
                             },
                             "additionalProperties": true
@@ -31956,7 +28111,7 @@
           "Ledger & payments"
         ],
         "summary": "Delete unpaid ledger entry",
-        "description": "Deletes one ledger bill. Refused if the bill is paid or waived, or has any amount_paid.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id); bill must belong to that school_id.",
+        "description": "Deletes one ledger bill inside a transaction (row locked FOR UPDATE). Refused if the academic year is closed, the bill is paid or waived, has any amount_paid, or has a waiver recorded (revoke the waiver first).\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id); bill must belong to that school_id.",
         "operationId": "deleteFeesLedgerId",
         "security": [
           {
@@ -31983,13 +28138,16 @@
             }
           },
           "400": {
-            "description": "school_id required; cannot delete a paid/waived entry; or payments recorded"
+            "description": "school_id required; cannot delete a paid/waived entry; payments recorded; or a waiver is recorded on the entry"
           },
           "403": {
             "description": "Forbidden"
           },
           "404": {
             "description": "Not found"
+          },
+          "409": {
+            "description": "This academic year is closed"
           },
           "500": {
             "description": "Failed"
@@ -33225,7 +29383,7 @@
           "Ledger & payments"
         ],
         "summary": "Record fee payment",
-        "description": "Records a payment against one bill (single mode: ledger_id + amount) or allocates total_amount across several unpaid bills oldest-due first (multi mode: ledger_ids + total_amount), all sharing one generated receipt number RCP-{school}-{year}-{seq}. Rows are locked FOR UPDATE and amounts above the remaining balance are rejected. When payment_status is 'completed' the ledger amount_paid and status are updated. Refused for closed academic years.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id), checked before body validation. Bills must belong to school_id; student_id is not cross-checked against the bill.",
+        "description": "Records a payment against one bill (single mode: ledger_id + amount) or allocates total_amount across several unpaid bills oldest-due first (multi mode: ledger_ids + total_amount), all sharing one generated receipt number RCP-{school}-{year}-{seq}. Rows are locked FOR UPDATE and amounts above the remaining balance are rejected. When payment_status is 'completed' the ledger amount_paid and status are updated. Refused for closed academic years. An optional idempotency_key deduplicates retries/double-clicks — a repeat call with the same key replays the original response instead of recording a second payment.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id), checked before body validation. Bills must belong to school_id; student_id is not cross-checked against the bill.",
         "operationId": "postFeesPayments",
         "security": [
           {
@@ -33390,7 +29548,7 @@
             }
           },
           "400": {
-            "description": "Missing fields, invalid paid_date, amount <= 0, amount exceeds balance, or already paid"
+            "description": "Missing fields, collected_by_name blank, payment_mode not in the allowed list, invalid paid_date, amount <= 0, amount exceeds balance, or already paid"
           },
           "403": {
             "description": "Forbidden"
@@ -33450,7 +29608,14 @@
                   },
                   "payment_mode": {
                     "type": "string",
-                    "description": "e.g. cash | cheque | dd | online | upi (not validated)"
+                    "enum": [
+                      "cash",
+                      "cheque",
+                      "dd",
+                      "upi",
+                      "online"
+                    ],
+                    "description": "Validated against this whitelist"
                   },
                   "transaction_ref": {
                     "type": "string",
@@ -33458,7 +29623,7 @@
                   },
                   "collected_by_name": {
                     "type": "string",
-                    "description": "Defaults to session actor"
+                    "description": "Required, non-empty — not defaulted to the session actor, since staff often share one admin login at the collection counter"
                   },
                   "notes": {
                     "type": "string",
@@ -33473,12 +29638,18 @@
                   "payment_status": {
                     "type": "string",
                     "description": "Default 'completed'; ledger is only updated when 'completed' (not validated)"
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Optional client-generated key; a retried request with the same key replays the original stored response instead of recording a duplicate payment"
                   }
                 },
                 "required": [
                   "school_id",
                   "student_id",
-                  "payment_mode"
+                  "payment_mode",
+                  "collected_by_name"
                 ]
               }
             }
@@ -33537,7 +29708,7 @@
             }
           },
           "400": {
-            "description": "payment_id, reason required; corrected amount <= 0 or exceeds remaining balance"
+            "description": "payment_id, reason required; corrected amount <= 0 or exceeds remaining balance; or new_payment_mode not in the allowed list"
           },
           "403": {
             "description": "Forbidden"
@@ -33590,7 +29761,14 @@
                   },
                   "new_payment_mode": {
                     "type": "string",
-                    "description": "correct only"
+                    "enum": [
+                      "cash",
+                      "cheque",
+                      "dd",
+                      "upi",
+                      "online"
+                    ],
+                    "description": "correct only; validated against this whitelist"
                   },
                   "new_transaction_ref": {
                     "type": "string",
@@ -33788,7 +29966,7 @@
           "Ledger & payments"
         ],
         "summary": "Approve or reject pending payment",
-        "description": "Approves a pending_verification payment (marks completed, applies it to the ledger bill) or rejects it (marks rejected with reason). Sends a confirmation or rejection email to the parent's email, fire-and-forget.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** School resolved from the payment row; requireFeeAccess(payment.school_id).",
+        "description": "Approves a pending_verification payment (marks completed, applies it to the ledger bill) or rejects it (marks rejected with reason). The payment row is locked FOR UPDATE so a double-click can't double-apply the ledger credit. Approve additionally requires the school's plan to include online-payments and refuses to credit a closed academic year's ledger; reject touches neither the ledger nor the plan gate, so it stays available even for a school that has since lost online-payments or whose year is closed. Sends a confirmation or rejection email to the parent's email, fire-and-forget.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** School resolved from the payment row; requireFeeAccess(payment.school_id). Approve also checks schoolHasFeature(school_id, 'online-payments').",
         "operationId": "postFeesPaymentsVerify",
         "security": [
           {
@@ -33836,10 +30014,13 @@
             "description": "payment_id, action required; or action must be approve or reject"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "Forbidden, or (approve only) online payments is not enabled for this school"
           },
           "404": {
             "description": "Payment not found or already processed"
+          },
+          "409": {
+            "description": "(approve only) academic year is closed"
           },
           "500": {
             "description": "Failed to process verification"
@@ -34358,7 +30539,7 @@
           "Waivers"
         ],
         "summary": "Grant fee waiver",
-        "description": "Grants a waiver on one bill, computed on the remaining balance: full (entire remaining), percentage (waiver_value % of remaining) or fixed_amount (capped at remaining). Adds it to the bill's waiver_amount (not amount_paid) and sets status waived/partial. Refused for closed academic years; carry_forward is not accepted.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id), checked before body validation. Bill must belong to school_id; student_id is not cross-checked against the bill.",
+        "description": "Grants a waiver on one bill, computed on the remaining balance: full (entire remaining), percentage (waiver_value % of remaining, capped at remaining) or fixed_amount (capped at remaining). Adds it to the bill's waiver_amount (not amount_paid) and sets status waived/partial. Refused for closed academic years; carry_forward is not accepted. An optional idempotency_key deduplicates retries/double-clicks — a repeat call with the same key replays the original response instead of granting a second waiver.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id), checked before body validation. Bill must belong to school_id; student_id is not cross-checked against the bill.",
         "operationId": "postFeesWaivers",
         "security": [
           {
@@ -34435,7 +30616,7 @@
             }
           },
           "400": {
-            "description": "Missing fields, invalid waiver_type, or nothing to waive"
+            "description": "Missing fields, invalid waiver_type, waiver_value not a number, or nothing to waive"
           },
           "403": {
             "description": "Forbidden"
@@ -34495,6 +30676,11 @@
                   "granted_by_name": {
                     "type": "string",
                     "description": "Defaults to session actor"
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Optional client-generated key; a retried request with the same key replays the original stored response instead of granting a duplicate waiver"
                   }
                 },
                 "required": [
@@ -34514,7 +30700,7 @@
           "Waivers"
         ],
         "summary": "Correct a fee waiver amount",
-        "description": "Corrects a waiver by soft-revoking it and inserting a new fixed_amount waiver with the new amount, then adjusts the bill's waiver_amount by the difference and recomputes status. Refused for carry_forward (year-end) waivers or if the new waiver plus payments would exceed the bill.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** School resolved from the waiver row; requireFeeAccess(waiver.school_id). Actor is always the session actor.",
+        "description": "Corrects a waiver by soft-revoking it and inserting a new fixed_amount waiver with the new amount, then adjusts the bill's waiver_amount by the difference and recomputes status. Refused for carry_forward (year-end) waivers, for closed academic years, or if the new waiver plus payments would exceed the bill.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** School resolved from the waiver row; requireFeeAccess(waiver.school_id). Actor is always the session actor.",
         "operationId": "patchFeesWaivers",
         "security": [
           {
@@ -34600,7 +30786,7 @@
             "description": "Waiver not found or already revoked"
           },
           "409": {
-            "description": "carry_forward waiver cannot be corrected here"
+            "description": "carry_forward waiver cannot be corrected here, or the academic year is closed"
           },
           "500": {
             "description": "Failed to correct waiver"
@@ -34651,7 +30837,7 @@
           "Waivers"
         ],
         "summary": "Revoke a fee waiver",
-        "description": "Soft-revokes a waiver (is_revoked with actor, time and reason) and recalculates the bill: waiver_amount becomes the sum of remaining active waivers, amount_paid the sum of completed payments, and status is recomputed. carry_forward (year-end) waivers cannot be revoked here.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** School resolved from the waiver row; requireFeeAccess(waiver.school_id). Actor is always the session actor.",
+        "description": "Soft-revokes a waiver (is_revoked with actor, time and reason) and recalculates the bill: waiver_amount becomes the sum of remaining active waivers, amount_paid the sum of completed payments, and status is recomputed. carry_forward (year-end) waivers cannot be revoked here, nor can a waiver on a closed academic year.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** School resolved from the waiver row; requireFeeAccess(waiver.school_id). Actor is always the session actor.",
         "operationId": "deleteFeesWaivers",
         "security": [
           {
@@ -34687,7 +30873,7 @@
             "description": "Waiver not found or already revoked"
           },
           "409": {
-            "description": "carry_forward waiver cannot be revoked here"
+            "description": "carry_forward waiver cannot be revoked here, or the academic year is closed"
           },
           "500": {
             "description": "Failed to revoke waiver"
@@ -34732,7 +30918,7 @@
           "UPI payments"
         ],
         "summary": "Get school UPI ID",
-        "description": "Returns the school's configured UPI ID (empty string if none) and whether it is locked (locked once a value is saved).\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
+        "description": "Returns the school's configured UPI ID (empty string if none) and whether it is locked (locked once a value is saved). Refused if the school's plan does not include online-payments.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school. Also requires schoolHasFeature(school_id, 'online-payments').",
         "operationId": "getFeesUpiId",
         "security": [
           {
@@ -34765,7 +30951,7 @@
             "description": "school_id required"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "Forbidden, or online payments is not enabled for this school"
           },
           "500": {
             "description": "Internal server error"
@@ -34799,7 +30985,7 @@
           "UPI payments"
         ],
         "summary": "Set or change school UPI ID",
-        "description": "Sets schools.upi_id (or clears it with an empty value). The first save needs no token; once a UPI ID exists, changing or clearing it requires a valid unlockToken from POST /api/fees/upi-id/verify (purpose 'upi-id-unlock', same school, 3-minute expiry). Value must look like a VPA (name@handle).\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id). If a UPI ID is already set, an unlockToken JWT scoped to this school_id is also required.",
+        "description": "Sets schools.upi_id (or clears it with an empty value). The first save needs no token; once a UPI ID exists, changing or clearing it requires a valid unlockToken from POST /api/fees/upi-id/verify (purpose 'upi-id-unlock', same school, 3-minute expiry). Value must look like a VPA (name@handle). Refused if the school's plan does not include online-payments.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id) and schoolHasFeature(school_id, 'online-payments'). If a UPI ID is already set, an unlockToken JWT scoped to this school_id is also required.",
         "operationId": "putFeesUpiId",
         "security": [
           {
@@ -34835,7 +31021,7 @@
             "description": "school_id required, or invalid UPI ID format"
           },
           "403": {
-            "description": "Forbidden"
+            "description": "Forbidden, or online payments is not enabled for this school"
           },
           "423": {
             "description": "Locked: unlock token missing, invalid or expired",
@@ -34904,7 +31090,7 @@
           "UPI payments"
         ],
         "summary": "Verify password to unlock UPI ID",
-        "description": "Re-checks the signed-in admin's own current password and, if correct, returns a short-lived (3 minute) JWT unlock token scoped to this user, school and purpose 'upi-id-unlock', used by PUT /api/fees/upi-id.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id); password is verified against users.password_hash for the session's userId.",
+        "description": "Re-checks the signed-in admin's own current password and, if correct, returns a short-lived (3 minute) JWT unlock token scoped to this user, school and purpose 'upi-id-unlock', used by PUT /api/fees/upi-id. Refused if the school's plan does not include online-payments.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id) and schoolHasFeature(school_id, 'online-payments'); password is verified against users.password_hash for the session's userId.",
         "operationId": "postFeesUpiIdVerify",
         "security": [
           {
@@ -34940,7 +31126,7 @@
             "description": "Incorrect password"
           },
           "403": {
-            "description": "Forbidden, or account not found"
+            "description": "Forbidden, account not found, or online payments is not enabled for this school"
           },
           "500": {
             "description": "Internal server error"
@@ -34988,7 +31174,7 @@
           "UPI payments"
         ],
         "summary": "Get UPI payment QR code",
-        "description": "Generates a PNG QR code for a upi://pay deep link to the school's UPI ID with the given amount and optional transaction reference. Refuses if the school has no valid UPI ID configured.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession() (teacher, student, parent, or wlyl-auth staff cookie with a schoolId); school_id must equal the session's schoolId. Platform admin cookie is not accepted.",
+        "description": "Generates a PNG QR code for a upi://pay deep link to the school's UPI ID with the given amount and optional transaction reference. Refuses if the school has no valid UPI ID configured, or if the school's plan does not include online-payments.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession() (teacher, student, parent, or wlyl-auth staff cookie with a schoolId); school_id must equal the session's schoolId; schoolHasFeature(school_id, 'online-payments'). Platform admin cookie is not accepted.",
         "operationId": "getFeesUpiQr",
         "security": [
           {
@@ -35038,7 +31224,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden (school_id is not the session's school)"
+            "description": "Forbidden (school_id is not the session's school), or online payments is not enabled for this school"
           },
           "500": {
             "description": "QR generation failed"
@@ -35100,7 +31286,7 @@
           "UPI payments"
         ],
         "summary": "Get school UPI ID and name",
-        "description": "Returns the school's UPI ID (empty string if none) and name as JSON, for showing the UPI ID as copyable text beside the payment QR.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession() (teacher, student, parent, or wlyl-auth staff cookie with a schoolId); school_id must equal the session's schoolId. Platform admin cookie is not accepted.",
+        "description": "Returns the school's UPI ID (empty string if none) and name as JSON, for showing the UPI ID as copyable text beside the payment QR. Refused if the school's plan does not include online-payments.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession() (teacher, student, parent, or wlyl-auth staff cookie with a schoolId); school_id must equal the session's schoolId; schoolHasFeature(school_id, 'online-payments'). Platform admin cookie is not accepted.",
         "operationId": "getFeesUpiQrInfo",
         "security": [
           {
@@ -35142,7 +31328,7 @@
             "description": "Unauthorized"
           },
           "403": {
-            "description": "Forbidden (school_id is not the session's school)"
+            "description": "Forbidden (school_id is not the session's school), or online payments is not enabled for this school"
           },
           "500": {
             "description": "Internal server error"
@@ -35775,7 +31961,7 @@
           "Fee reports & audit"
         ],
         "summary": "Download fee audit report as Excel",
-        "description": "Builds the fee audit report (same builder as the JSON route) and streams it as a multi-sheet .xlsx. Bulk scope yields Summary, By Fee Type, Change Log, Class-wise and Student-wise sheets; with student_id it yields a single individual student sheet.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
+        "description": "Builds the fee audit report (same builder as the JSON route) and streams it as a multi-sheet .xlsx. Bulk scope yields Summary (with a Waiver Breakdown of discretionary/carried-forward/written-off amounts and a plain-language \"How To Read This Report\" section), By Fee Type, Change Log, Class-wise and Student-wise sheets — the latter three each end with a GRAND TOTAL row matching the Summary sheet's Total Fee row; with student_id it yields a single individual student sheet.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
         "operationId": "getFeesAuditReportExcel",
         "security": [
           {
@@ -37121,7 +33307,7 @@
           "Fee year-end"
         ],
         "summary": "Roll fee books over to next year",
-        "description": "One-shot rollover of from_year: if active students have unpaid dues and confirmed is not true, returns a confirmation prompt instead. Otherwise, in one transaction, claims the year close in fee_year_close, gets or creates the 'Previous Year Dues' fee head, creates the next academic year (April-March) and sets it current, carries each active non-final-grade student's unpaid balance into one bill in the new year, and closes the old bills with carry_forward waivers. Does not promote grades.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id). done_by is always the session actor.",
+        "description": "One-shot rollover of from_year (must be in \"YYYY-YY\" format): if active students have unpaid dues and confirmed is not true, returns a confirmation prompt instead. Otherwise, in one transaction (serialized against year-end's apply/close for the same year), claims the year close in fee_year_close, gets or creates the 'Previous Year Dues' fee head, creates the next academic year (April-March) and sets it current, carries each active non-final-grade student's unpaid balance into one bill in the new year (propagating the true origin year across multi-year carries), and closes the old bills with carry_forward waivers. Does not promote grades.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id). done_by is always the session actor.",
         "operationId": "postFeesYearRollover",
         "security": [
           {
@@ -37181,7 +33367,7 @@
             }
           },
           "400": {
-            "description": "school_id and from_year required"
+            "description": "school_id and from_year required, or from_year is not in \"YYYY-YY\" format"
           },
           "403": {
             "description": "Forbidden"
@@ -40333,455 +36519,6 @@
             "in": "path",
             "required": true,
             "description": "school_calendar id",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ]
-      }
-    },
-    "/api/leave-requests": {
-      "get": {
-        "tags": [
-          "Teacher leave"
-        ],
-        "summary": "List leave requests",
-        "description": "Lists leave requests for the session's school with teacher name, employee_id and department, newest first.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** Uses getAnySession(); always scoped to the session's school; school_id, if passed, must match (403). teacher_id filter is not restricted to the caller.",
-        "operationId": "getLeaveRequests",
-        "security": [
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
-            "parent": []
-          },
-          {
-            "schoolAdmin": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Leave requests",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "integer"
-                      },
-                      "teacher_id": {
-                        "type": "integer"
-                      },
-                      "school_id": {
-                        "type": "integer"
-                      },
-                      "leave_type": {
-                        "type": "string"
-                      },
-                      "start_date": {
-                        "type": "string",
-                        "format": "date"
-                      },
-                      "end_date": {
-                        "type": "string",
-                        "format": "date"
-                      },
-                      "reason": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "status": {
-                        "type": "string",
-                        "enum": [
-                          "pending",
-                          "approved",
-                          "rejected"
-                        ]
-                      },
-                      "reviewed_at": {
-                        "type": "string",
-                        "nullable": true,
-                        "format": "date-time"
-                      },
-                      "created_at": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "teacher_name": {
-                        "type": "string"
-                      },
-                      "employee_id": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "department": {
-                        "type": "string",
-                        "nullable": true
-                      }
-                    },
-                    "additionalProperties": true
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "school_id does not match session"
-          },
-          "500": {
-            "description": "Failed to fetch leave requests"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
-            "name": "Parent",
-            "color": "#be185d"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
-          }
-        ],
-        "x-source-file": "app/api/leave-requests/route.ts",
-        "parameters": [
-          {
-            "name": "school_id",
-            "in": "query",
-            "required": false,
-            "description": "Must match the session's school if given",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "teacher_id",
-            "in": "query",
-            "required": false,
-            "description": "Filter by teacher",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "description": "Filter by status",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "pending",
-                "approved",
-                "rejected"
-              ]
-            }
-          },
-          {
-            "name": "active_date",
-            "in": "query",
-            "required": false,
-            "description": "Only leaves covering this date",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "Teacher leave"
-        ],
-        "summary": "Submit a leave request",
-        "description": "Creates a pending leave request after rejecting overlaps with the teacher's pending/approved leaves, and inserts a 'leave_request' notification for the school admin.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all; teacher_id and school_id are taken from the body unverified.",
-        "operationId": "postLeaveRequests",
-        "security": [],
-        "responses": {
-          "201": {
-            "description": "Created leave request row",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "teacher_id": {
-                      "type": "integer"
-                    },
-                    "school_id": {
-                      "type": "integer"
-                    },
-                    "leave_type": {
-                      "type": "string"
-                    },
-                    "start_date": {
-                      "type": "string",
-                      "format": "date"
-                    },
-                    "end_date": {
-                      "type": "string",
-                      "format": "date"
-                    },
-                    "reason": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "pending",
-                        "approved",
-                        "rejected"
-                      ]
-                    },
-                    "reviewed_at": {
-                      "type": "string",
-                      "nullable": true,
-                      "format": "date-time"
-                    },
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  },
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing required fields"
-          },
-          "409": {
-            "description": "Overlapping pending/approved leave exists"
-          },
-          "500": {
-            "description": "Failed to create leave request"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Public",
-            "color": "#dc2626"
-          }
-        ],
-        "x-source-file": "app/api/leave-requests/route.ts",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "teacher_id": {
-                    "type": "integer"
-                  },
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "leave_type": {
-                    "type": "string"
-                  },
-                  "start_date": {
-                    "type": "string",
-                    "format": "date"
-                  },
-                  "end_date": {
-                    "type": "string",
-                    "format": "date"
-                  },
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "teacher_id",
-                  "school_id",
-                  "leave_type",
-                  "start_date",
-                  "end_date"
-                ]
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/leave-requests/{id}": {
-      "put": {
-        "tags": [
-          "Teacher leave"
-        ],
-        "summary": "Review a leave request",
-        "description": "Sets a leave request's status and reviewed_at. Moving away from 'approved' deletes its substitute_assignments; approving or rejecting inserts a notification for the teacher.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all; any caller can approve/reject any leave request by id.",
-        "operationId": "putLeaveRequestsId",
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Updated leave request row",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "teacher_id": {
-                      "type": "integer"
-                    },
-                    "school_id": {
-                      "type": "integer"
-                    },
-                    "leave_type": {
-                      "type": "string"
-                    },
-                    "start_date": {
-                      "type": "string",
-                      "format": "date"
-                    },
-                    "end_date": {
-                      "type": "string",
-                      "format": "date"
-                    },
-                    "reason": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "pending",
-                        "approved",
-                        "rejected"
-                      ]
-                    },
-                    "reviewed_at": {
-                      "type": "string",
-                      "nullable": true,
-                      "format": "date-time"
-                    },
-                    "created_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  },
-                  "additionalProperties": true
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid status"
-          },
-          "404": {
-            "description": "Not found"
-          },
-          "500": {
-            "description": "Failed to update leave request"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Public",
-            "color": "#dc2626"
-          }
-        ],
-        "x-source-file": "app/api/leave-requests/[id]/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Leave request id",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "status": {
-                    "type": "string",
-                    "enum": [
-                      "pending",
-                      "approved",
-                      "rejected"
-                    ]
-                  }
-                },
-                "required": [
-                  "status"
-                ]
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Teacher leave"
-        ],
-        "summary": "Delete a leave request",
-        "description": "Hard-deletes a leave request by id; succeeds even if the id does not exist.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all.",
-        "operationId": "deleteLeaveRequestsId",
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Deleted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Failed to delete leave request"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Public",
-            "color": "#dc2626"
-          }
-        ],
-        "x-source-file": "app/api/leave-requests/[id]/route.ts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "description": "Leave request id",
             "schema": {
               "type": "integer"
             }
@@ -43982,11 +39719,11 @@
           "401": {
             "description": "Bad or missing bearer token"
           },
-          "503": {
-            "description": "CRON_SECRET or R2 not configured"
-          },
           "500": {
             "description": "Backup failed ({ok:false, error})"
+          },
+          "503": {
+            "description": "CRON_SECRET or R2 not configured"
           }
         },
         "x-badges": [
@@ -44047,11 +39784,11 @@
           "401": {
             "description": "Bad or missing bearer token"
           },
-          "503": {
-            "description": "CRON_SECRET or R2 not configured"
-          },
           "500": {
             "description": "Backup failed ({ok:false, error})"
+          },
+          "503": {
+            "description": "CRON_SECRET or R2 not configured"
           }
         },
         "x-badges": [
@@ -45485,11 +41222,11 @@
           "401": {
             "description": "Bad or missing bearer token"
           },
-          "503": {
-            "description": "CRON_SECRET or R2 not configured"
-          },
           "500": {
             "description": "Restore failed ({ok:false, error})"
+          },
+          "503": {
+            "description": "CRON_SECRET or R2 not configured"
           }
         },
         "x-badges": [
@@ -45519,6 +41256,245 @@
             }
           }
         }
+      }
+    },
+    "/api/fees/archive": {
+      "get": {
+        "tags": [
+          "Fee reports & audit"
+        ],
+        "summary": "Get past-years archive overview",
+        "description": "Read-only landing list for the \"past records\" archive: every academic year the school has ever had, each with its financial headline (billed/collected/waived/discretionary-waived/unpaid — same shape as GET /api/fees/reports's balance summary) and its fee_year_close state (closed / reopened / never closed). It is a join over academic_years, fee_year_close and an aggregate over student_fee_ledger — nothing here is a new source of truth. Per-year line-item drill-down stays on GET /api/fees/ledger and GET /api/fees/reports (both already accept academic_year); this route only answers \"which years exist and what's their one-line summary\".\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
+        "operationId": "getFeesArchive",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Academic years newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "years": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "academic_year": {
+                            "type": "string"
+                          },
+                          "start_date": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "end_date": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "is_current": {
+                            "type": "boolean"
+                          },
+                          "student_count": {
+                            "type": "integer"
+                          },
+                          "summary": {
+                            "type": "object",
+                            "properties": {
+                              "total_billed": {
+                                "type": "number"
+                              },
+                              "total_collected": {
+                                "type": "number"
+                              },
+                              "total_waived": {
+                                "type": "number"
+                              },
+                              "discretionary_waived": {
+                                "type": "number"
+                              },
+                              "total_unpaid": {
+                                "type": "number"
+                              }
+                            }
+                          },
+                          "close_status": {
+                            "type": "object",
+                            "nullable": true,
+                            "description": "null if the year has never been closed",
+                            "properties": {
+                              "closed_at": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "closed_by": {
+                                "type": "string"
+                              },
+                              "is_reopened": {
+                                "type": "boolean"
+                              },
+                              "carried": {
+                                "type": "object",
+                                "properties": {
+                                  "count": {
+                                    "type": "integer"
+                                  },
+                                  "total": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "writeoff": {
+                                "type": "object",
+                                "properties": {
+                                  "count": {
+                                    "type": "integer"
+                                  },
+                                  "total": {
+                                    "type": "number"
+                                  }
+                                }
+                              },
+                              "open": {
+                                "type": "object",
+                                "properties": {
+                                  "count": {
+                                    "type": "integer"
+                                  },
+                                  "total": {
+                                    "type": "number"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "school_id required"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/fees/archive/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/fees/setup-status": {
+      "get": {
+        "tags": [
+          "Fee setup"
+        ],
+        "summary": "Get fee setup completeness flags",
+        "description": "Lightweight companion to GET /api/fees/categories + /structures + /structures/lock + /students?grades_only=1 — returns just the 3 booleans the Overview tab's setup wizard banner needs (has_categories, amounts_complete, is_locked) instead of the full category/structure/lock/grade payloads those routes return. has_categories is true when any active, non-system category exists; amounts_complete checks every active fixed (non-variable, non-system) category has a positive fee_structures amount for every enrolled grade (or every grade in the standard sequence if none are enrolled yet — same rule as fixedAmountsComplete()/feeHasAmounts() in FeeManagement.tsx); is_locked reflects fee_structure_locks. Unlike GET /api/fees/categories, this skips the ledger-count join, since that figure is only needed by the Setup tab's own delete-eligibility check.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
+        "operationId": "getFeesSetupStatus",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Setup completeness flags",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "has_categories": {
+                      "type": "boolean"
+                    },
+                    "amounts_complete": {
+                      "type": "boolean"
+                    },
+                    "is_locked": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "school_id and academic_year required"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Failed, or internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/fees/setup-status/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "academic_year",
+            "in": "query",
+            "required": true,
+            "description": "Academic year, e.g. 2025-26",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     }
   },

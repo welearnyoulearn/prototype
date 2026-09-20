@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react'
-import { createPortal } from 'react-dom'
-import { GRADE_SEQUENCE } from '@/lib/grades'
+import { useEffect, useState, useMemo } from 'react'
+import { Users } from 'lucide-react'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { EmptyState } from '@/components/ui/empty-state'
+import { GradesMultiSelect } from '@/components/ui/grades-multiselect'
 
 type Props = { schoolId: number; refreshKey?: number }
 
@@ -60,104 +61,6 @@ function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg'
   )
 }
 
-const ALL_GRADES = GRADE_SEQUENCE.filter(g => /^\d+$/.test(g))
-
-// Multi-select grades dropdown. Rendered through a portal (see the matching
-// InlineGrades in StaffOnboarding.tsx) so it's never at risk of being
-// clipped by this panel's own overflow-y-auto when opened near the bottom
-// of a long scrolled form.
-function GradesDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [open, setOpen] = useState(false)
-  const [pos, setPos] = useState({ top: 0, left: 0, width: 260 })
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const panelRef = useRef<HTMLDivElement>(null)
-  const selected = value ? value.split(',').map(s => s.trim()).filter(Boolean) : []
-
-  const updatePosition = useCallback(() => {
-    const r = triggerRef.current?.getBoundingClientRect()
-    if (!r) return
-    const width = Math.max(r.width, 260)
-    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8))
-    setPos({ top: r.bottom + 6, left, width })
-  }, [])
-
-  useEffect(() => {
-    if (!open) return
-    updatePosition()
-    function onClickOutside(e: MouseEvent) {
-      if (
-        triggerRef.current && !triggerRef.current.contains(e.target as Node) &&
-        panelRef.current && !panelRef.current.contains(e.target as Node)
-      ) setOpen(false)
-    }
-    function onScrollOrResize() { updatePosition() }
-    document.addEventListener('mousedown', onClickOutside)
-    window.addEventListener('scroll', onScrollOrResize, true)
-    window.addEventListener('resize', onScrollOrResize)
-    return () => {
-      document.removeEventListener('mousedown', onClickOutside)
-      window.removeEventListener('scroll', onScrollOrResize, true)
-      window.removeEventListener('resize', onScrollOrResize)
-    }
-  }, [open, updatePosition])
-
-  function toggle(g: string) {
-    const next = selected.includes(g) ? selected.filter(x => x !== g) : [...selected, g]
-    onChange(next.sort((a, b) => parseInt(a) - parseInt(b)).join(','))
-  }
-
-  const allSelected = selected.length === ALL_GRADES.length
-
-  return (
-    <>
-      <button ref={triggerRef} type="button" onClick={() => setOpen(v => !v)}
-        data-testid="teacher-grades-trigger"
-        className={`w-full border rounded-lg px-3 py-2 text-sm text-left bg-white transition-colors flex justify-between items-center gap-2 ${
-          open ? 'border-blue-400 ring-2 ring-blue-100' : 'border-gray-200 hover:border-gray-300'
-        }`}>
-        <span className={`truncate ${selected.length ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>
-          {selected.length === 0 ? 'All grades (no restriction)' : allSelected ? 'All grades (1–10)' : `Grade${selected.length > 1 ? 's' : ''}: ${selected.join(', ')}`}
-        </span>
-        <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      {open && typeof document !== 'undefined' && createPortal(
-        <div ref={panelRef} style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}
-          className="z-50 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
-          <div className="px-3 py-2 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-            <span className="text-xs font-semibold text-gray-600">Teaches Grades</span>
-            <span className="text-[11px] text-gray-400">{selected.length === 0 ? 'All grades' : `${selected.length} selected`}</span>
-          </div>
-          <div className="p-3">
-            <div className="grid grid-cols-5 gap-1.5">
-              {ALL_GRADES.map(g => (
-                <button key={g} type="button" onClick={() => toggle(g)}
-                  data-testid={`teacher-grade-${g}`}
-                  className={`h-9 rounded-lg text-sm font-semibold transition-colors ${
-                    selected.includes(g) ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}>
-                  {g}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center justify-between px-3 py-2 border-t border-gray-100 bg-gray-50">
-            <div className="flex gap-3">
-              <button type="button" onClick={() => onChange(ALL_GRADES.join(','))}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium">Select all</button>
-              <button type="button" onClick={() => onChange('')}
-                className="text-xs text-gray-500 hover:text-gray-700 font-medium">Clear</button>
-            </div>
-            <button type="button" onClick={() => setOpen(false)}
-              className="text-xs text-white bg-blue-600 hover:bg-blue-700 font-medium px-3 py-1 rounded-md">Done</button>
-          </div>
-        </div>,
-        document.body
-      )}
-    </>
-  )
-}
 
 export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   const [teachers, setTeachers] = useState<Teacher[]>([])
@@ -177,7 +80,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   const [timetableLoading, setTimetableLoading] = useState(false)
   const [detailTab, setDetailTab] = useState<'info' | 'analytics'>('info')
   const [teacherAnalytics, setTeacherAnalytics] = useState<{
-    taskCount: number; pendingLeaves: number; totalLeaves: number; subDutyCount: number; periodsPerWeek: number
+    subDutyCount: number; periodsPerWeek: number
   } | null>(null)
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [showRemoveDialog, setShowRemoveDialog] = useState(false)
@@ -311,19 +214,9 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   async function loadTeacherAnalytics(teacherId: number) {
     setAnalyticsLoading(true); setTeacherAnalytics(null)
     try {
-      const [tasks, leaves, tt] = await Promise.all([
-        fetch(`/api/tasks?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
-        fetch(`/api/leave-requests?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
-        fetch(`/api/timetable?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
-      ])
-      const taskArr = Array.isArray(tasks) ? tasks : []
-      const leaveArr = Array.isArray(leaves) ? leaves : []
+      const tt = await fetch(`/api/timetable?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()).catch(() => [])
       const ttArr = Array.isArray(tt) ? tt : []
-      const pendingLeaves = leaveArr.filter((l: { status: string }) => l.status === 'pending').length
       setTeacherAnalytics({
-        taskCount: taskArr.length,
-        pendingLeaves,
-        totalLeaves: leaveArr.length,
         subDutyCount: teacherSubDuties.length,
         periodsPerWeek: ttArr.length,
       })
@@ -491,14 +384,18 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       </div>
 
       {filtered.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 py-12 text-center">
-          <p className="text-gray-400">No {statusFilter !== 'all' ? statusFilter + ' ' : ''}{tab === 'teaching' ? 'teaching' : 'non-teaching'} staff found</p>
-          {(statusFilter === 'inactive' || statusFilter === 'removed') && (
-            <button onClick={() => setStatusFilter('active')} className="text-blue-500 text-sm mt-2 hover:underline">
-              Switch to active staff
-            </button>
-          )}
-        </div>
+        <EmptyState
+          icon={Users}
+          title={`No ${statusFilter !== 'all' ? statusFilter + ' ' : ''}${tab === 'teaching' ? 'teaching' : 'non-teaching'} staff found`}
+          className="bg-white"
+          action={
+            (statusFilter === 'inactive' || statusFilter === 'removed') && (
+              <button onClick={() => setStatusFilter('active')} className="text-blue-500 text-sm hover:underline">
+                Switch to active staff
+              </button>
+            )
+          }
+        />
       ) : tab === 'teaching' ? (
         <div className="space-y-5">
           {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([dept, members]) => (
@@ -654,9 +551,13 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                       </div>
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Teaches Grades</label>
-                        <GradesDropdown
+                        <GradesMultiSelect
                           value={editForm.teaches_grades ?? selected.teaches_grades ?? ''}
                           onChange={v => setEditForm(f => ({ ...f, teaches_grades: v }))}
+                          testIdBase="teacher-grade"
+                          emptyLabel="All grades (no restriction)"
+                          labelSeparator=": "
+                          panelWidth={260}
                         />
                       </div>
                     </div>
@@ -694,12 +595,9 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                   </div>
                 ) : !teacherAnalytics ? null : (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-4 gap-3">
+                    <div className="grid grid-cols-1 gap-3">
                       {[
                         { label: 'Periods/Week', value: teacherAnalytics.periodsPerWeek, color: 'text-blue-600', bg: 'bg-blue-50' },
-                        { label: 'Tasks Assigned', value: teacherAnalytics.taskCount, color: 'text-violet-600', bg: 'bg-violet-50' },
-                        { label: 'Total Leaves', value: teacherAnalytics.totalLeaves, color: 'text-orange-600', bg: 'bg-orange-50' },
-                        { label: 'Pending Leaves', value: teacherAnalytics.pendingLeaves, color: 'text-red-600', bg: 'bg-red-50' },
                       ].map(({ label, value, color, bg }) => (
                         <div key={label} className={`${bg} rounded-xl p-4 text-center`}>
                           <p className={`text-3xl font-black ${color}`}>{value}</p>

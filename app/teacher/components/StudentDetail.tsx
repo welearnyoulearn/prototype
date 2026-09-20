@@ -22,33 +22,15 @@ type AttendanceRecord = {
   status: 'present' | 'absent' | 'late'
 }
 
-type Task = {
-  id: number
-  title: string
-  subject: string
-  status: string
-  max_marks: number
-  due_date: string | null
-}
-
-type Submission = {
-  submission_id: number
-  task_id: number
-  submitted_at: string | null
-  score: number | null
-  submission_status: string | null
-  feedback: string | null
-}
-
 function getMonthStr() {
   const n = new Date()
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
 }
 
-// Per-student drill-down (attendance history, task submissions, engagement
-// score) — shared between My Students (class-teacher's own class) and the
-// per-class Students tab in ClassView (any teacher assigned to that class),
-// so both reach the identical view when a student is clicked.
+// Per-student drill-down (attendance history, engagement score) — shared
+// between My Students (class-teacher's own class) and the per-class
+// Students tab in ClassView (any teacher assigned to that class), so both
+// reach the identical view when a student is clicked.
 export default function StudentDetail({
   student, classId, schoolId, backLabel, onBack,
 }: {
@@ -59,8 +41,6 @@ export default function StudentDetail({
   onBack: () => void
 }) {
   const [attRecords, setAttRecords] = useState<AttendanceRecord[]>([])
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [submissions, setSubmissions] = useState<Submission[]>([])
   const [engagementScore, setEngagementScore] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -69,25 +49,13 @@ export default function StudentDetail({
     setLoading(true)
     setEngagementScore(null)
     const month = getMonthStr()
-    Promise.all([
-      fetch(`/api/attendance?school_id=${schoolId}&class_id=${classId}&month=${month}`)
-        .then(r => r.json()).catch(() => []),
-      fetch(`/api/tasks?school_id=${schoolId}&class_id=${classId}`)
-        .then(r => r.json()).catch(() => []),
-      fetch(`/api/students/${student.id}/submissions?school_id=${schoolId}&class_id=${classId}`)
-        .then(r => r.json()).catch(() => []),
-    ]).then(([attData, taskData, subData]) => {
+    fetch(`/api/attendance?school_id=${schoolId}&class_id=${classId}&month=${month}`)
+      .then(r => r.json()).catch(() => [])
+      .then((attData) => {
       if (cancelled) return
       const allAtt: AttendanceRecord[] = Array.isArray(attData) ? attData : []
       const myAtt = allAtt.filter(a => a.student_id === student.id)
       setAttRecords(myAtt)
-
-      const allTasks: Task[] = Array.isArray(taskData) ? taskData : []
-      const pubTasks = allTasks.filter(t => t.status === 'published')
-      setTasks(pubTasks)
-
-      const subs: Submission[] = Array.isArray(subData) ? subData : []
-      setSubmissions(subs)
 
       const attByDate = new Map<string, boolean>()
       myAtt.forEach(a => {
@@ -97,8 +65,7 @@ export default function StudentDetail({
       const totalAttDays = attByDate.size
       const presentDays = Array.from(attByDate.values()).filter(Boolean).length
       const attPct = totalAttDays > 0 ? (presentDays / totalAttDays) * 100 : 0
-      const taskPct = pubTasks.length > 0 ? (subs.filter((s: Submission) => s.submitted_at).length / pubTasks.length) * 100 : 0
-      setEngagementScore(Math.round(attPct * 0.5 + taskPct * 0.5))
+      setEngagementScore(Math.round(attPct))
     }).finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [student.id, classId, schoolId])
@@ -113,12 +80,6 @@ export default function StudentDetail({
   const totalDays = attDays.length
   const presentDays = attDays.filter(([, v]) => v.morning === 'present' || v.afternoon === 'present').length
   const absentDays = attDays.filter(([, v]) => v.morning === 'absent' && v.afternoon !== 'present').length
-
-  const submitted = submissions.filter(s => s.submitted_at).length
-  const reviewed = submissions.filter(s => s.submission_status === 'reviewed').length
-  const avgScore = reviewed > 0
-    ? submissions.filter(s => s.score !== null).reduce((acc, s) => acc + (s.score || 0), 0) / reviewed
-    : null
 
   return (
     <div className="flex flex-col gap-4">
@@ -176,7 +137,7 @@ export default function StudentDetail({
                       <div className={`h-full rounded-full transition-all ${engagementScore >= 70 ? 'bg-green-500' : engagementScore >= 40 ? 'bg-amber-400' : 'bg-red-400'}`}
                         style={{ width: `${engagementScore}%` }} />
                     </div>
-                    <p className="text-[10px] text-gray-400 mt-1">Attendance 50% + Tasks 50%</p>
+                    <p className="text-[10px] text-gray-400 mt-1">Based on attendance</p>
                   </div>
                 </div>
               </div>
@@ -257,61 +218,6 @@ export default function StudentDetail({
                       </div>
                     </div>
                   )}
-                </>
-              )}
-            </div>
-
-            {/* Task performance */}
-            <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
-                <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                </svg>
-                Task Performance
-              </h3>
-
-              {tasks.length === 0 ? (
-                <p className="text-sm text-gray-400">No published tasks for this class</p>
-              ) : (
-                <>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-                    {[
-                      { label: 'Assigned', val: tasks.length, cls: 'text-gray-700' },
-                      { label: 'Submitted', val: submitted, cls: 'text-blue-600' },
-                      { label: 'Reviewed', val: reviewed, cls: 'text-green-600' },
-                      { label: 'Avg Score', val: avgScore !== null ? `${avgScore.toFixed(1)}` : '—', cls: 'text-purple-600' },
-                    ].map(item => (
-                      <div key={item.label} className="bg-gray-50 rounded-lg p-3 text-center">
-                        <p className={`text-xl font-bold ${item.cls}`}>{item.val}</p>
-                        <p className="text-[10px] text-gray-400">{item.label}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="space-y-2">
-                    {tasks.map(t => {
-                      const sub = submissions.find(s => s.task_id === t.id)
-                      return (
-                        <div key={t.id} className="flex items-center justify-between text-xs py-2 border-b border-gray-50 last:border-0">
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-gray-800 truncate">{t.title}</p>
-                            <p className="text-gray-400">{t.subject}{t.due_date ? ` · Due ${t.due_date}` : ''}</p>
-                          </div>
-                          <div className="flex-shrink-0 ml-3">
-                            {!sub?.submitted_at ? (
-                              <span className="bg-red-50 text-red-500 px-2 py-0.5 rounded-full">Not Submitted</span>
-                            ) : sub.submission_status === 'reviewed' ? (
-                              <span className="bg-green-50 text-green-600 px-2 py-0.5 rounded-full">
-                                {sub.score !== null ? `${sub.score}/${t.max_marks}` : 'Reviewed'}
-                              </span>
-                            ) : (
-                              <span className="bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full">Submitted</span>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
                 </>
               )}
             </div>
