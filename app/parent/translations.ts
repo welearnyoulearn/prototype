@@ -40,7 +40,6 @@ const en = {
     'weekly-tests': 'Weekly Tests',
     activity:     'Activity Log',
     'ai-chats':   'AI Chat History',
-    marketplace:  'Marketplace',
     profile:      'Profile',
   },
 
@@ -194,7 +193,6 @@ const te: typeof en = {
     'weekly-tests': 'వారపు పరీక్షలు',
     activity:     'కార్యకలాప నమోదు',
     'ai-chats':   'AI చాట్ చరిత్ర',
-    marketplace:  'మార్కెట్‌ప్లేస్',
     profile:      'ప్రొఫైల్',
   },
 

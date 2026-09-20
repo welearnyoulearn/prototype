@@ -18,6 +18,12 @@ All finished features and bug fixes. Most recent first.
 
 ---
 
+### 2026-09-21 — Removed unstable, unreachable features from dev (#163–#168)
+**Type:** Removal
+**Portal:** Student / Parent / School Admin / Teacher / Kiosk
+**Summary:** Deleted the Display/TV kiosk permanently (#163). Extracted five features to their own preservation branches and removed them from `dev`: Student Learning Hub & Daily Knowledge (#164), Rewards Marketplace (#165), Teacher Lesson Planner (#166), Teacher Class Performance (#167), Weekly Test incl. its weekly cron (#168). All were unreachable from any menu and called API routes that do not exist on `dev`. Database tables are untouched.
+**PR:** the chore PR that closes #163–#168
+
 ### 2026-09-20 — Removed Emergency Cover from dev, pending rework (#140)
 **Type:** Removal
 **Portal:** School Admin / Teacher

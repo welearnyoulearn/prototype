@@ -43,7 +43,7 @@ export async function awardPoints(
   reference_id?: number,
   reference_type?: string,
   customPoints?: number,
-  points_type: 'academic' | 'marketplace' = 'academic',
+  points_type: 'academic' = 'academic',
 ): Promise<number> {
   const pts = customPoints ?? POINT_VALUES[action_type] ?? 0
   if (pts <= 0) return 0

@@ -12,6 +12,14 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 -->
 
 
+## 2026-09-21 — Clean dev down to features that work end to end (#163–#168)
+
+**Context:** After an earlier "stripped for production" commit removed many API routes, `dev` still carried screens for features whose backend no longer existed (Display kiosk, Learning Hub, Daily Knowledge, Marketplace, Lesson Planner, Class Performance, Weekly Test). None was reachable from a menu, and calling them returned 404. They confused the docs, the API spec and the product story.
+
+**Decision:** Delete the Display kiosk for good. Move each of the other five to its own preserved feature branch (same pattern as #136–#140: `EXTRACTION-N.md` plan + draft PR) and remove it from `dev`. Learning Hub/Daily Knowledge and the Marketplace are student-independent, so they are **not** Platform-Admin features; Lesson Planner, Class Performance and Weekly Test each become their **own** Platform-Admin feature key when they return. Database tables are never dropped.
+
+**Consequences:** `dev` has fewer half-features; the rewards points/badges/streak data and `GET /api/students/{id}/rewards` stay for the admin's student panel. Screens for other features that still call missing routes (timetable generation, leaderboard, year review, parent engagement, class-analytics panels) are tracked in KNOWN_ISSUES.
+
 ## 2026-09-20 — Attendance: any teacher marks, first submit locks; holidays live in the Academic Calendar (#153)
 
 **Context:** Attendance let any logged-in user (students and parents too) read and write any class, silently overwrote earlier records, and each portal computed its own percentage. The school calendar existed but nothing used it, so a holiday looked like a day nobody marked, and its routes had no authentication.
