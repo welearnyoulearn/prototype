@@ -11,6 +11,17 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 **Consequences:** What trade-offs come with this decision?
 -->
 
+## 2026-09-20 — Per-person school staff login with revocable server-side sessions (#145)
+
+**Context:** School staff logged in with a shared School ID, so actions could not be tied to a person. Logout only cleared a cookie (a stateless 7-day JWT), a deactivated user kept access until the JWT expired, and the login page offered "Continue to Dashboard" for whoever last left a session open, letting the next person on a shared computer walk into that account without a password.
+
+**Decision:** Email + password only, one account per person (all school staff roles keep identical access). A `user_sessions` row per login; the JWT carries its id (`sid`) and `getSession()` rejects revoked, idle (20 min) or expired (12 h) sessions and inactive users. The cookie is a browser-session cookie. Only real user activity extends the idle timer: API calls and a browser heartbeat do, background pollers (`getSession({ passive: true })`, e.g. the notification bell) do not. Invites use the existing `password_reset_tokens` table with a 48 h expiry rather than emailing a password. The login page remembers only name + email of the last account (localStorage) and always asks for the password.
+
+**Alternatives considered:** Keep School ID login for the owner (rejected: shared credential, no attribution); per-role permissions (deferred: all roles have the same access today); NextAuth/DB sessions library (rejected: project rule is custom JWT, and one small table covers the need); opt-in "Remember me" (rejected by the product owner in favour of always showing the last-used account).
+
+**Consequences:** One extra indexed query per authenticated school-admin API call. `proxy.ts` (Edge) can only check the JWT signature and presence of `sid`, so an idle-expired session is caught on the first API call and by the client-side `IdleSessionGuard`, not at page load. Existing school-admin cookies (no `sid`) are invalidated once. Two people on one computer take turns (logging in ends the previous session); simultaneous use needs separate browsers or devices. The last-used card shows the previous person's name and email to anyone opening the login page on that browser, which is a deliberate product choice. Follow-ups: school audit log, login lockout/rate limiting.
+
+
 ## 2026-09-12 — Syllabus "Translate" uses transliteration via a server-side proxy (#116)
 
 **Context:** Telugu and Hindi teachers could not enter chapter names in their language without installing Google Input Tools or changing keyboards. We want an in-app option.

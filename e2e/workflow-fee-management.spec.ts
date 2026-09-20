@@ -22,7 +22,7 @@ async function loginSchoolAdmin(identifier: string, password: string): Promise<s
   const res = await fetch(`${BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identifier, password }),
+    body: JSON.stringify({ email: identifier, password }),
     redirect: 'manual',
   })
   const setCookies = res.headers.getSetCookie?.() ?? []
@@ -55,7 +55,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
 
   // Shared state across tests
   let schoolId: number
-  let schoolCode: string
+  let adminEmail: string
   let schoolPass: string
   let adminCookie: string
 
@@ -95,12 +95,12 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       address: '1 Fee Lane',
     })
     schoolId = s.id
-    schoolCode = s.school_code
+    adminEmail = s.email
     schoolPass = s.temp_password
 
     await setSubscription(platformCookie, schoolId, 'premium')
 
-    adminCookie = await loginSchoolAdmin(schoolCode, schoolPass)
+    adminCookie = await loginSchoolAdmin(adminEmail, schoolPass)
     await api('/api/auth/profile', 'PUT', { full_name: 'Fee Admin', phone: '9000000099' }, adminCookie)
 
     // Enroll students
@@ -482,7 +482,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       email: `nostr${ts}@test.com`, address: '1 Test St',
     })
     const noStrSchool = ns.id
-    const nsCookie = await loginSchoolAdmin(ns.school_code, ns.temp_password)
+    const nsCookie = await loginSchoolAdmin(ns.email, ns.temp_password)
     await api('/api/auth/profile', 'PUT', { full_name: 'Admin', phone: '9000000088' }, nsCookie)
     const { status } = await api('/api/fees/generate', 'POST', {
       school_id: noStrSchool, academic_year: AY,

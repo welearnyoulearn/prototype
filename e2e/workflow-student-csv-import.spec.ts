@@ -9,7 +9,7 @@ import { BASE, platformAdminCookie, createSchool, setSubscription } from './fixt
 
 async function uiLogin(page: Page, identifier: string, password: string): Promise<string> {
   await page.goto('/login?role=school')
-  await page.getByPlaceholder(/School ID or email/i).fill(identifier)
+  await page.getByPlaceholder('you@school.com').fill(identifier)
   await page.getByPlaceholder(/password/i).fill(password)
   await page.getByTestId('auth-submit-btn').click()
   await page.waitForURL(/\/change-password|\/school-admin/, { timeout: 30000 })
@@ -48,7 +48,7 @@ test.describe.serial('Student Onboarding — CSV File Import (UI)', () => {
   const phone = (n: number) => `9${tsSuffix}${String(n).padStart(2, '0')}` // 10 digits
 
   let schoolId: number
-  let schoolCode: string
+  let adminEmail: string
   let schoolPass: string
   let uiPass = ''
   let adminCookie: string
@@ -67,13 +67,13 @@ test.describe.serial('Student Onboarding — CSV File Import (UI)', () => {
       address: '1 Test Lane',
     })
     schoolId   = school.id
-    schoolCode = school.school_code
+    adminEmail = school.email
     schoolPass = school.temp_password
 
     await setSubscription(platformCookie, schoolId, 'premium')
 
     const loginRes = await ctx.post('/api/auth/login', {
-      data: { identifier: schoolCode, password: schoolPass },
+      data: { email: adminEmail, password: schoolPass },
     })
     if (!loginRes.ok()) throw new Error(`Setup login failed — status ${loginRes.status()}`)
     const state = await ctx.storageState()
@@ -99,7 +99,7 @@ test.describe.serial('Student Onboarding — CSV File Import (UI)', () => {
   // ─── 1. Happy path: upload → parsed preview → submit → credentials ──────────
   test('1. Uploading a CSV file populates the row grid and enrolls the students', async ({ page }) => {
     test.setTimeout(60000)
-    uiPass = await uiLogin(page, schoolCode, schoolPass)
+    uiPass = await uiLogin(page, adminEmail, schoolPass)
     await goToOnboarding(page)
 
     const csv = [
@@ -130,7 +130,7 @@ test.describe.serial('Student Onboarding — CSV File Import (UI)', () => {
   // ─── 2. Guard: a Staff CSV uploaded here is rejected, not silently mis-imported ──
   test('2. Uploading a Staff CSV into Student Onboarding is rejected with a warning', async ({ page }) => {
     test.setTimeout(60000)
-    await uiLogin(page, schoolCode, uiPass || schoolPass)
+    await uiLogin(page, adminEmail, uiPass || schoolPass)
     await goToOnboarding(page)
 
     const staffCsv = [

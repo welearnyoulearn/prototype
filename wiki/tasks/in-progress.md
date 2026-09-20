@@ -6,6 +6,25 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 
 <!-- Add new entries at the top -->
 
+### School staff login: per-person email login, server-side sessions, last-used account (#145)
+**Type:** Feature
+**Portal:** School Admin / Auth
+**Assigned to:** Kowsik
+**Branch:** feature/145-staff-login-sessions
+**Started:** 2026-09-20
+**Summary:** Replaces the shared School ID login with one email login per person, revocable server-side sessions (20 min idle, 12 h max), invite-by-link for added staff, and a login page that shows the last-used account but always asks for the password. Detail: `wiki/features/auth.md`; decision in `docs/DECISIONS.md`.
+**Progress:**
+- [x] `user_sessions` table, `getSession()` validation, revocation on logout, deactivation and password reset
+- [x] Email-only login, school creation requires an admin email, owner-email backfill migration
+- [x] Staff invite link (48 h) and resend; platform reset-password limited to the owner account
+- [x] Login page last-used account card; idle guard; `no-store` on school-admin pages
+- [x] Playwright spec `e2e/workflow-staff-sessions.spec.ts`; existing specs moved to email login
+- [ ] Run the e2e suite against a local/test database and a manual browser check
+- [ ] `/code-review`, then PR against `dev`
+- [ ] Follow-ups (separate issues): school audit log, login lockout/rate limiting
+
+---
+
 ### Attendance Tracking — school-admin visualization dashboard (#135)
 **Type:** Feature + Bug Fix
 **Portal:** School Admin

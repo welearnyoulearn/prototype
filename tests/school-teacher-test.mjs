@@ -28,7 +28,8 @@ const issues = []
 
 // Test school/admin data
 let sid = null           // school id
-let schoolCode = null    // school login code
+let schoolCode = null    // school reference code (not a login)
+let adminEmail = null    // school admin login email
 let tempPassword = null  // generated temp password
 let adminCookie = ''     // platform-admin JWT cookie
 let schoolAdminCookie = '' // school-admin JWT cookie
@@ -104,11 +105,11 @@ async function testPlatformAdminAuth() {
   log('GET /api/auth/setup-admin — returns exists flag', typeof r0.data?.exists === 'boolean', `exists=${r0.data?.exists}`)
 
   // Wrong credentials
-  const r1 = await api('POST', '/api/auth/login', { identifier: 'nobody@nowhere.com', password: 'wrongpass' })
+  const r1 = await api('POST', '/api/auth/login', { email: 'nobody@nowhere.com', password: 'wrongpass' })
   log('POST /api/auth/login — wrong credentials → 401', r1.status === 401, `status=${r1.status}`)
 
   // Missing fields
-  const r2 = await api('POST', '/api/auth/login', { identifier: 'test@test.com' })
+  const r2 = await api('POST', '/api/auth/login', { email: 'test@test.com' })
   log('POST /api/auth/login — missing password → 400', r2.status === 400, `status=${r2.status}`)
 
   // Login with no body
@@ -152,6 +153,7 @@ async function testSchoolCreation() {
     city: 'Hyderabad',
     country: 'India',
     phone: '9876543210',
+    email: `sunrise${Date.now()}@test.com`,
     address: '123 School Lane, Hyderabad',
   })
   log('POST /api/schools — create school', r.status === 201 && r.data?.id, `status=${r.status} id=${r.data?.id}`)
@@ -159,6 +161,7 @@ async function testSchoolCreation() {
 
   sid = r.data.id
   schoolCode = r.data.school_code
+  adminEmail = r.data.email
   tempPassword = r.data.temp_password
   log('School has school_code + temp_password', !!(schoolCode && tempPassword), `code=${schoolCode} pass=${tempPassword}`)
 
@@ -195,11 +198,11 @@ async function testSchoolAdminAuth() {
   if (!sid) { log('Skipped — no school', false); return }
 
   // Wrong password
-  const r0 = await api('POST', '/api/auth/login', { identifier: schoolCode, password: 'wrongpassword123' })
+  const r0 = await api('POST', '/api/auth/login', { email: adminEmail, password: 'wrongpassword123' })
   log('POST /api/auth/login — wrong school admin password → 401', r0.status === 401, `status=${r0.status}`)
 
-  // Login with school_code + temp_password
-  const r1 = await api('POST', '/api/auth/login', { identifier: schoolCode, password: tempPassword })
+  // Login with admin email + temp_password
+  const r1 = await api('POST', '/api/auth/login', { email: adminEmail, password: tempPassword })
   log('POST /api/auth/login — school admin login → success', r1.status === 200 && r1.data?.success, `status=${r1.status} firstLogin=${r1.data?.firstLogin}`)
   schoolAdminCookie = extractCookie(r1.setCookie)
   log('Cookie received after login', !!schoolAdminCookie)

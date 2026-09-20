@@ -34,7 +34,7 @@ test.setTimeout(120000)
 
 type Seeded = {
   schoolId: number
-  schoolCode: string
+  adminEmail: string
   schoolAdminPassword: string
   classAId: number
   classBId: number
@@ -105,7 +105,7 @@ async function loginAndGetCookie(identifier: string, password: string, prefix: s
     const res = await fetch(`${BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identifier, password }),
+      body: JSON.stringify({ email: identifier, password }),
       redirect: 'manual',
     })
     const cookies = res.headers.getSetCookie?.() ?? []
@@ -149,12 +149,12 @@ test.beforeAll(async () => {
   expect(schoolStatus, `create school failed: ${JSON.stringify(schoolData)}`).toBeLessThan(300)
 
   const schoolId = schoolData.id
-  const schoolCode = schoolData.school_code
+  const adminEmail = schoolData.email
   let schoolAdminPassword = schoolData.temp_password
 
   await jsonFetch(`/api/schools/${schoolId}/subscription`, { method: 'PUT', body: { tier: 'premium' }, cookie: platformCookie })
 
-  const adminCookie = await loginAndGetCookie(schoolCode, schoolAdminPassword, 'wlyl-auth=')
+  const adminCookie = await loginAndGetCookie(adminEmail, schoolAdminPassword, 'wlyl-auth=')
 
   // 2. Classes 10-A (main) and 10-B (kept with zero syllabus for empty-state case)
   const { data: classA } = await jsonFetch('/api/classes', { body: { school_id: schoolId, grade: '10', section: 'A' }, cookie: adminCookie })
@@ -222,7 +222,7 @@ test.beforeAll(async () => {
   expect(subStatus, `subscribe failed after retries: ${JSON.stringify(subData)}`).toBe(200)
 
   seeded = {
-    schoolId, schoolCode, schoolAdminPassword,
+    schoolId, adminEmail, schoolAdminPassword,
     classAId: classA.id, classBId: classB.id,
     teacherId: teacher.id, teacherEmail: teacher.email, teacherTempPassword: 'Test@1234', // set below via direct password set is not available; use forced first-login flow instead
     studentRollLogin: studentCred.login, studentTempPassword: studentCred.temp_password,
@@ -269,7 +269,7 @@ test.describe('Security — /api/syllabus auth & tenant isolation', () => {
     // assuming topicId lives in chapters[0], since this environment's shared
     // dev DB has other specs' "Mathematics Audit *" subjects that can shift
     // ordering across concurrent/serial runs.
-    const adminCookie = await loginAndGetCookie(seeded.schoolCode, seeded.schoolAdminPassword, 'wlyl-auth=')
+    const adminCookie = await loginAndGetCookie(seeded.adminEmail, seeded.schoolAdminPassword, 'wlyl-auth=')
     const after = await jsonFetch(`/api/syllabus?school_id=${seeded.schoolId}&class_id=${seeded.classAId}`, { cookie: adminCookie })
     expect(after.status, `unexpected confirm-fetch failure: ${JSON.stringify(after.data)}`).toBe(200)
     const allTopics = (after.data?.subjects ?? []).flatMap((s: any) => s.chapters ?? []).flatMap((c: any) => c.topics ?? [])
@@ -290,7 +290,7 @@ test.describe('Security — /api/syllabus auth & tenant isolation', () => {
       cookie: platformCookie,
     })
     expect(createStatus, `create other-tenant school failed: ${JSON.stringify(otherSchoolData)}`).toBeLessThan(300)
-    const otherCookie = await loginAndGetCookie(otherSchoolData.school_code, otherSchoolData.temp_password, 'wlyl-auth=')
+    const otherCookie = await loginAndGetCookie(otherSchoolData.email, otherSchoolData.temp_password, 'wlyl-auth=')
 
     const { status, data } = await jsonFetch(`/api/syllabus?school_id=${seeded.schoolId}&class_id=${seeded.classAId}`, { cookie: otherCookie })
     expect(status).toBe(403)
@@ -313,7 +313,7 @@ test.describe('Security — /api/syllabus auth & tenant isolation', () => {
   })
 
   test('UNAUTH POST /api/school/custom/chapters is now rejected with no cookie', async () => {
-    const adminCookie = await loginAndGetCookie(seeded.schoolCode, seeded.schoolAdminPassword, 'wlyl-auth=')
+    const adminCookie = await loginAndGetCookie(seeded.adminEmail, seeded.schoolAdminPassword, 'wlyl-auth=')
     const { data: subjList } = await jsonFetch(`/api/school/subjects?school_id=${seeded.schoolId}`, { cookie: adminCookie })
     const list = Array.isArray(subjList) ? subjList : subjList.subjects
     const schoolSubject = list.find((s: any) => s.subject_name === seeded.subjectName)
@@ -378,7 +378,7 @@ test.describe('School admin — subscribe & customize', () => {
   let adminCookie: string
 
   test.beforeAll(async () => {
-    adminCookie = await loginAndGetCookie(seeded.schoolCode, seeded.schoolAdminPassword, 'wlyl-auth=')
+    adminCookie = await loginAndGetCookie(seeded.adminEmail, seeded.schoolAdminPassword, 'wlyl-auth=')
   })
 
   test('GET /api/school/subjects lists the subscribed subject with chapters/topics', async () => {
@@ -494,7 +494,7 @@ test.describe('Teacher — syllabus tracking', () => {
   })
 
   test('teacher-equivalent: PATCH /api/syllabus/[id] marks a topic covered and progress % updates (proves the mark-taught mechanism the UI calls)', async () => {
-    const adminCookie = await loginAndGetCookie(seeded.schoolCode, seeded.schoolAdminPassword, 'wlyl-auth=')
+    const adminCookie = await loginAndGetCookie(seeded.adminEmail, seeded.schoolAdminPassword, 'wlyl-auth=')
     const topicId = seeded.topicIds[0]
 
     const before = await jsonFetch(`/api/syllabus?school_id=${seeded.schoolId}&class_id=${seeded.classAId}&subject=${encodeURIComponent(seeded.subjectName)}`, { cookie: adminCookie })
@@ -515,7 +515,7 @@ test.describe('Teacher — syllabus tracking', () => {
   })
 
   test('add a custom topic to a chapter via POST /api/syllabus', async () => {
-    const adminCookie = await loginAndGetCookie(seeded.schoolCode, seeded.schoolAdminPassword, 'wlyl-auth=')
+    const adminCookie = await loginAndGetCookie(seeded.adminEmail, seeded.schoolAdminPassword, 'wlyl-auth=')
     const { status, data } = await jsonFetch('/api/syllabus', {
       method: 'POST',
       body: {
@@ -533,7 +533,7 @@ test.describe('Teacher — syllabus tracking', () => {
   })
 
   test('set target date + delay reason on a pending topic and confirm it persists', async () => {
-    const adminCookie = await loginAndGetCookie(seeded.schoolCode, seeded.schoolAdminPassword, 'wlyl-auth=')
+    const adminCookie = await loginAndGetCookie(seeded.adminEmail, seeded.schoolAdminPassword, 'wlyl-auth=')
     const topicId = seeded.topicIds[1] // still pending
     const targetDate = '2026-09-15'
     const delayReason = 'Waiting on lab equipment'
@@ -560,7 +560,7 @@ test.describe('Teacher — syllabus tracking', () => {
     // the real app always hits the catch block and shows "AI suggestion
     // failed. Use the Homework tab to add manually." — 100% of the time, in
     // every environment, key or no key.
-    const adminCookie = await loginAndGetCookie(seeded.schoolCode, seeded.schoolAdminPassword, 'wlyl-auth=')
+    const adminCookie = await loginAndGetCookie(seeded.adminEmail, seeded.schoolAdminPassword, 'wlyl-auth=')
     const { status, data } = await jsonFetch('/api/ai/suggest-homework', {
       method: 'POST',
       body: { subject: seeded.subjectName, chapter_name: 'Real Numbers', topic_name: 'Euclid Division Lemma', grade: '10' },
@@ -645,7 +645,7 @@ test.describe('Student — syllabus view', () => {
     // devtools/network tab, no exploit required, to read pending-topic quiz
     // answers before the teacher has taught them. Not fixed (out of scope
     // for the tenant-isolation fix); flagged here for follow-up.
-    const adminCookie = await loginAndGetCookie(seeded.schoolCode, seeded.schoolAdminPassword, 'wlyl-auth=')
+    const adminCookie = await loginAndGetCookie(seeded.adminEmail, seeded.schoolAdminPassword, 'wlyl-auth=')
     const raw = await jsonFetch(`/api/syllabus?school_id=${seeded.schoolId}&class_id=${seeded.classAId}&subject=${encodeURIComponent(seeded.subjectName)}`, { cookie: adminCookie })
     const lockedTopic = raw.data.subjects[0].chapters.flatMap((c: any) => c.topics).find((t: any) => t.id === seeded.topicIds[1])
     expect(lockedTopic.status).not.toBe('covered')
@@ -701,7 +701,7 @@ test.describe('Parent — read-only progress view', () => {
 // ─── Cross-portal consistency ───────────────────────────────────────────────
 test.describe('Cross-portal consistency', () => {
   test('teacher analytics, student view (via API), and parent view (via API) agree on coverage %', async () => {
-    const adminCookie = await loginAndGetCookie(seeded.schoolCode, seeded.schoolAdminPassword, 'wlyl-auth=')
+    const adminCookie = await loginAndGetCookie(seeded.adminEmail, seeded.schoolAdminPassword, 'wlyl-auth=')
     const analytics = await jsonFetch(`/api/syllabus/analytics?school_id=${seeded.schoolId}`, { cookie: adminCookie })
     expect(analytics.status).toBe(200)
     const classRow = analytics.data.by_class.find((c: any) => c.class_id === seeded.classAId)
@@ -727,7 +727,7 @@ test.describe('Edge cases', () => {
     // IS subscribed via 10-A's subscribe call, since school_subjects is keyed
     // by school+grade, not by class. So 10-B actually DOES see the syllabus
     // too — demonstrating subscribe is grade-scoped, not class-scoped.)
-    const adminCookie = await loginAndGetCookie(seeded.schoolCode, seeded.schoolAdminPassword, 'wlyl-auth=')
+    const adminCookie = await loginAndGetCookie(seeded.adminEmail, seeded.schoolAdminPassword, 'wlyl-auth=')
     const { data } = await jsonFetch(`/api/syllabus?school_id=${seeded.schoolId}&class_id=${seeded.classBId}`, { cookie: adminCookie })
     // This documents actual behavior: subscribing for grade 10 via one class
     // makes the syllabus visible to EVERY class in grade 10, including ones
@@ -737,7 +737,7 @@ test.describe('Edge cases', () => {
   })
 
   test('a genuinely un-subscribed grade shows "No syllabus loaded yet" — verified via a fresh class in an ungraded/unsubscribed grade', async () => {
-    const adminCookie = await loginAndGetCookie(seeded.schoolCode, seeded.schoolAdminPassword, 'wlyl-auth=')
+    const adminCookie = await loginAndGetCookie(seeded.adminEmail, seeded.schoolAdminPassword, 'wlyl-auth=')
     const { data: classC } = await jsonFetch('/api/classes', { body: { school_id: seeded.schoolId, grade: '11', section: 'A' }, cookie: adminCookie })
     const { status, data } = await jsonFetch(`/api/syllabus?school_id=${seeded.schoolId}&class_id=${classC.id}`, { cookie: adminCookie })
     expect(status).toBe(200)

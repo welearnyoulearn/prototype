@@ -498,7 +498,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     if (!res.ok) { setStaffError(d.error || 'Failed'); setStaffSaving(false); return }
     setStaffList(prev => [...prev, d])
     setStaffForm({ full_name: '', email: '', role: 'principal' })
-    setStaffSuccess(`✓ Account created — login credentials sent to ${d.email}`)
+    setStaffSuccess(`✓ Invite sent to ${d.email} — they set their own password from the email link`)
     setStaffSaving(false)
   }
 
@@ -528,7 +528,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
         body: JSON.stringify({ id }),
       })
       const d = await r.json()
-      if (r.ok) setResendMsg({ id, text: '✓ New credentials sent by email', ok: true })
+      if (r.ok) setResendMsg({ id, text: '✓ New set-password link sent by email', ok: true })
       else setResendMsg({ id, text: d.error || 'Failed to resend', ok: false })
     } finally { setResendingId(null) }
   }
@@ -1246,7 +1246,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-bold text-gray-800">Staff Accounts</h3>
-              <p className="text-sm text-gray-400 mt-0.5">Principal and Vice Principal access — credentials sent by email</p>
+              <p className="text-sm text-gray-400 mt-0.5">Each person gets their own login — an invite link is sent by email</p>
             </div>
             {(() => {
               const limit = subscription?.staff_limit ?? null
@@ -1303,7 +1303,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                         <>
                           <button onClick={() => resendCredentials(s.id)} disabled={resendingId === s.id}
                             className="text-xs border border-indigo-200 text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
-                            {resendingId === s.id ? 'Sending…' : 'Resend Credentials'}
+                            {resendingId === s.id ? 'Sending…' : 'Resend Invite Link'}
                           </button>
                           <button onClick={() => deactivateStaff(s.id)}
                             className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">

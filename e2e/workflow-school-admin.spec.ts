@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { BASE, platformAdminCookie, createSchool, setSubscription } from './fixtures/platform-admin'
 
 test.describe.serial('School Admin Workflow', () => {
-  let schoolCode: string
+  let adminEmail: string
   let schoolPass: string
   let schoolId: number
   let cookie: string
@@ -11,7 +11,7 @@ test.describe.serial('School Admin Workflow', () => {
     // Provisioning a school requires a platform admin session.
     const platformCookie = await platformAdminCookie()
     const school = await createSchool(platformCookie)
-    schoolCode = school.school_code
+    adminEmail = school.email
     schoolPass = school.temp_password
     schoolId = school.id
 
@@ -22,7 +22,7 @@ test.describe.serial('School Admin Workflow', () => {
     await page.goto('/login?role=school')
     await expect(page.getByText('School Portal Login')).toBeVisible()
 
-    await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
+    await page.getByPlaceholder('you@school.com').fill(adminEmail)
     await page.getByPlaceholder('Enter your password').fill(schoolPass)
     await page.getByTestId('auth-submit-btn').click()
 
@@ -33,7 +33,7 @@ test.describe.serial('School Admin Workflow', () => {
   test('2. School Admin — change password on first login', async ({ page }) => {
     // Login
     await page.goto('/login?role=school')
-    await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
+    await page.getByPlaceholder('you@school.com').fill(adminEmail)
     await page.getByPlaceholder('Enter your password').fill(schoolPass)
     await page.getByTestId('auth-submit-btn').click()
     await page.waitForURL(/\/change-password/, { timeout: 10000 })
@@ -55,7 +55,7 @@ test.describe.serial('School Admin Workflow', () => {
 
   test.skip('3. School Admin — complete profile setup and access dashboard', async ({ page }) => {
     await page.goto('/login?role=school')
-    await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
+    await page.getByPlaceholder('you@school.com').fill(adminEmail)
     await page.getByPlaceholder('Enter your password').fill(schoolPass)
     await page.getByTestId('auth-submit-btn').click()
 
@@ -93,7 +93,7 @@ test.describe.serial('School Admin Workflow', () => {
   test.skip('4. School Admin — navigate to Teachers tab and add a teacher', async ({ page }) => {
     // Login and get to dashboard
     await page.goto('/login?role=school')
-    await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
+    await page.getByPlaceholder('you@school.com').fill(adminEmail)
     await page.getByPlaceholder('Enter your password').fill(schoolPass)
     await page.getByTestId('auth-submit-btn').click()
     await page.waitForURL(/\/school-admin|\/profile-setup/, { timeout: 10000 })
@@ -140,7 +140,7 @@ test.describe.serial('School Admin Workflow', () => {
   test.skip('5. School Admin — navigate to Students tab and add a student', async ({ page }) => {
     // Login
     await page.goto('/login?role=school')
-    await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
+    await page.getByPlaceholder('you@school.com').fill(adminEmail)
     await page.getByPlaceholder('Enter your password').fill(schoolPass)
     await page.getByTestId('auth-submit-btn').click()
     await page.waitForURL(/\/school-admin|\/profile-setup/, { timeout: 10000 })
@@ -183,7 +183,7 @@ test.describe.serial('School Admin Workflow', () => {
 
   test.skip('6. School Admin — view Fee Management section', async ({ page }) => {
     await page.goto('/login?role=school')
-    await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
+    await page.getByPlaceholder('you@school.com').fill(adminEmail)
     await page.getByPlaceholder('Enter your password').fill(schoolPass)
     await page.getByTestId('auth-submit-btn').click()
     await page.waitForURL(/\/school-admin|\/profile-setup/, { timeout: 10000 })
@@ -210,7 +210,7 @@ test.describe.serial('School Admin Workflow', () => {
 
   test('7. School Admin — view Attendance section', async ({ page }) => {
     await page.goto('/login?role=school')
-    await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
+    await page.getByPlaceholder('you@school.com').fill(adminEmail)
     await page.getByPlaceholder('Enter your password').fill(schoolPass)
     await page.getByTestId('auth-submit-btn').click()
     await page.waitForURL(/\/school-admin|\/profile-setup/, { timeout: 10000 })
@@ -272,7 +272,7 @@ test.describe.serial('School Admin Workflow', () => {
 
   test.skip('8. School Admin — view Timetable section', async ({ page }) => {
     await page.goto('/login?role=school')
-    await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
+    await page.getByPlaceholder('you@school.com').fill(adminEmail)
     await page.getByPlaceholder('Enter your password').fill(schoolPass)
     await page.getByTestId('auth-submit-btn').click()
     await page.waitForURL(/\/school-admin|\/profile-setup/, { timeout: 10000 })

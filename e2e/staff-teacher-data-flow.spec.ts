@@ -32,7 +32,7 @@ async function loginSchoolAdmin(identifier: string, password: string): Promise<s
   const res = await fetch(`${BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identifier, password }),
+    body: JSON.stringify({ email: identifier, password }),
     redirect: 'manual',
   })
   const setCookies = res.headers.getSetCookie?.() ?? []
@@ -65,13 +65,13 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
 
   // School A — primary school where onboarding + assignment happens
   let schoolAId: number
-  let schoolACode: string
+  let adminAEmail: string
   let schoolAPass: string
   let adminACookie: string
 
   // School B — used only for cross-tenant isolation checks
   let schoolBId: number
-  let schoolBCode: string
+  let adminBEmail: string
   let schoolBPass: string
   let adminBCookie: string
 
@@ -95,9 +95,9 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
       email: `dataflowA${ts}@test.com`,
       address: '1 Flow Lane',
     })
-    schoolAId = schoolA.id; schoolACode = schoolA.school_code; schoolAPass = schoolA.temp_password
+    schoolAId = schoolA.id; adminAEmail = schoolA.email; schoolAPass = schoolA.temp_password
     await setSubscription(platformCookie, schoolAId, 'premium')
-    adminACookie = await loginSchoolAdmin(schoolACode, schoolAPass)
+    adminACookie = await loginSchoolAdmin(adminAEmail, schoolAPass)
 
     const schoolB = await createSchool(platformCookie, {
       name: `Data Flow School B ${ts}`,
@@ -105,9 +105,9 @@ test.describe.serial('Staff Onboarding → Teacher Portal — Data Flow & Constr
       email: `dataflowB${ts}@test.com`,
       address: '2 Flow Lane',
     })
-    schoolBId = schoolB.id; schoolBCode = schoolB.school_code; schoolBPass = schoolB.temp_password
+    schoolBId = schoolB.id; adminBEmail = schoolB.email; schoolBPass = schoolB.temp_password
     await setSubscription(platformCookie, schoolBId, 'premium')
-    adminBCookie = await loginSchoolAdmin(schoolBCode, schoolBPass)
+    adminBCookie = await loginSchoolAdmin(adminBEmail, schoolBPass)
 
     // Create the class BEFORE any teacher exists at this school — POST
     // /api/classes auto-assigns subjects to teachers via fuzzy subject-name

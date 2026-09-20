@@ -11,7 +11,7 @@ export async function GET() {
 
     const result = await pool.query(
       `SELECT u.id, u.email, u.school_code, u.role, u.school_id, u.first_login, u.profile_completed,
-              up.full_name, up.phone, up.designation, up.bio,
+              COALESCE(up.full_name, u.full_name) AS full_name, up.phone, up.designation, up.bio,
               s.name AS school_name
        FROM users u
        LEFT JOIN user_profiles up ON up.user_id = u.id
