@@ -63,6 +63,7 @@ Task, doubt, and leave-request endpoints were removed with #136/#137/#139 — se
 
 ## Attendance (#153)
 
+- **My class** (class teacher only): the class's attendance dashboard — student list with filters, trend, weekday pattern, absent today. Subject teachers do not see it.
 - **Attendance:** pick a date (today or up to 2 days back), a class and Morning/Afternoon. Every class shows whether each session is already marked and by whom. Open → all Present by default → tap Absent/Late → review → submit. If someone already marked it: *"Already marked by <name> at <time>"* (read-only) with **Report a mistake**. The marker can edit their own session the same day.
 - Holidays and weekly-off days: no marking (the screen says why). **History** tab: look back at any class/day. **School Calendar** tab: read-only.
 - Class view / student detail percentages use the shared rule.

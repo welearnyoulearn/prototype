@@ -5,6 +5,8 @@ import { addDays, todayIST, TEACHER_BACKDATE_DAYS } from '@/lib/attendanceRules'
 import ClassPicker from './attendance/ClassPicker'
 import MarkSheet from './attendance/MarkSheet'
 import HistoryView from './attendance/HistoryView'
+import ClassDashboard from '@/app/components/attendance-dashboard/ClassDashboard'
+import { useApi } from '@/app/components/attendance-dashboard/parts'
 import type { Overview, Session } from './attendance/types'
 
 // Teacher attendance. Any teacher can mark any class, Morning or Afternoon:
@@ -22,7 +24,12 @@ export default function Attendance({ teacherId, schoolId }: Props) {
   const today = todayIST()
   const minDate = addDays(today, -TEACHER_BACKDATE_DAYS)
 
-  const [mode, setMode] = useState<'mark' | 'history'>('mark')
+  const [mode, setMode] = useState<'mark' | 'history' | 'mine'>('mark')
+  const [myClassId, setMyClassId] = useState<number | null>(null)
+  // "My class" dashboard: only for a class teacher (subject teachers just mark and look back).
+  const mine = useApi<{ classes: { id: number; grade: string; section: string }[] }>('/api/attendance/dashboard?scope=my-classes')
+  const myClasses = mine.data?.classes ?? []
+  const activeMyClass = myClasses.find(c => c.id === myClassId) ?? myClasses[0] ?? null
   const [date, setDate] = useState(today)
   const [open, setOpen] = useState<{ classId: number; session: Session } | null>(null)
   const [reload, setReload] = useState(0)
@@ -48,7 +55,7 @@ export default function Attendance({ teacherId, schoolId }: Props) {
   const overview = loaded.overview
 
   return (
-    <div className="space-y-5 max-w-4xl" data-testid="teacher-attendance">
+    <div className="space-y-5 max-w-5xl" data-testid="teacher-attendance">
       {!open && (
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
@@ -56,10 +63,10 @@ export default function Attendance({ teacherId, schoolId }: Props) {
             <p className="text-sm text-gray-500 mt-0.5">Choose a class and a session. Once marked, a session is locked for other teachers.</p>
           </div>
           <div className="inline-flex bg-gray-100 rounded-xl p-1" role="tablist" aria-label="Attendance mode">
-            {(['mark', 'history'] as const).map(m => (
+            {(myClasses.length > 0 ? (['mark', 'history', 'mine'] as const) : (['mark', 'history'] as const)).map(m => (
               <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => setMode(m)} data-testid={`att-mode-${m}`}
                 className={`px-4 py-1.5 rounded-lg text-sm font-semibold ${mode === m ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
-                {m === 'mark' ? 'Mark' : 'History'}
+                {m === 'mark' ? 'Mark' : m === 'history' ? 'History' : 'My class'}
               </button>
             ))}
           </div>
@@ -73,6 +80,16 @@ export default function Attendance({ teacherId, schoolId }: Props) {
           onBack={() => { setOpen(null); setReload(r => r + 1) }}
           onChanged={() => setReload(r => r + 1)}
         />
+      ) : mode === 'mine' && activeMyClass ? (
+        <div className="space-y-3">
+          {myClasses.length > 1 && (
+            <select value={activeMyClass.id} onChange={e => setMyClassId(Number(e.target.value))} aria-label="Choose class" data-testid="att-my-class-select"
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm bg-white">
+              {myClasses.map(c => <option key={c.id} value={c.id}>Class {c.grade}-{c.section}</option>)}
+            </select>
+          )}
+          <ClassDashboard key={activeMyClass.id} classId={activeMyClass.id} subtitle="You are the class teacher" />
+        </div>
       ) : mode === 'history' ? (
         <HistoryView classes={overview?.classes ?? []} today={today} />
       ) : (

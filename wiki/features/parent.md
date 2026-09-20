@@ -40,5 +40,5 @@ The Parent portal provides read-only visibility into a child's school life at `/
 
 ## Attendance & School Calendar (#153)
 
-- **Attendance:** for the selected child only — colour-coded month calendar (present / late / absent / half day / holiday / weekly off / not marked), this month and year-to-date %, six-month trend, upcoming holidays, a plain-language message under 75%. Tap a day for Morning/Afternoon.
+- **Attendance:** (now also shows the full-days-in-a-row streak and a trend chart) for the selected child only — colour-coded month calendar (present / late / absent / half day / holiday / weekly off / not marked), this month and year-to-date %, six-month trend, upcoming holidays, a plain-language message under 75%. Tap a day for Morning/Afternoon.
 - **School Calendar:** read-only (staff-only entries are hidden). Numbers match the teacher and student views exactly.

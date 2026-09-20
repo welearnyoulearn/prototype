@@ -232,33 +232,18 @@ test.describe.serial('School Admin Workflow', () => {
       await page.waitForTimeout(1000)
       await expect(page.getByText(/attendance|present|absent|class/i).first()).toBeVisible({ timeout: 5000 })
 
-      // ── Day view (default): today's snapshot + class cards ──
-      await expect(page.getByTestId('attendance-tab-daily')).toBeVisible()
-      // A working day shows the stats; a holiday / weekly off (e.g. a Sunday) shows the holiday banner instead.
+      // ── Overview dashboard (default): KPIs, trend, classes, students needing attention ──
+      await expect(page.getByTestId('attendance-tab-overview')).toBeVisible()
+      await expect(page.getByTestId('att-kpi-school-pct')).toBeVisible({ timeout: 15000 })
+      await expect(page.getByTestId('att-classes-card')).toBeVisible()
+      await page.getByTestId('att-range-year').click()
+      await expect(page.getByTestId('att-kpi-school-pct')).toBeVisible()
+      await page.getByTestId('att-range-week').click()
+      await expect(page.getByTestId('att-kpi-school-pct')).toBeVisible()
+
+      // ── Day register: today's snapshot + class cards ──
+      await page.getByTestId('attendance-tab-daily').click()
       await expect(page.getByTestId('attendance-day-stats').or(page.getByTestId('attendance-holiday-banner'))).toBeVisible()
-
-      // ── Month view: month picker, heatmap, class-wise table ──
-      await page.getByTestId('attendance-tab-month').click()
-      await expect(page.getByTestId('attendance-month-input')).toBeVisible()
-      await expect(page.getByTestId('attendance-month-view')).toBeVisible({ timeout: 10000 })
-      await expect(page.getByTestId('attendance-month-heatmap')).toBeVisible()
-      await expect(page.getByTestId('attendance-month-class-table')).toBeVisible()
-      // Sorting toggles the direction label
-      const monthSortBtn = page.getByTestId('attendance-month-class-table-sort')
-      const initialLabel = await monthSortBtn.textContent()
-      await monthSortBtn.click()
-      await expect(monthSortBtn).not.toHaveText(initialLabel || '')
-
-      // ── Year view: year selector, trend chart, class-wise table ──
-      await page.getByTestId('attendance-tab-year').click()
-      await expect(page.getByTestId('attendance-year-select')).toBeVisible()
-      await expect(page.getByTestId('attendance-year-view')).toBeVisible({ timeout: 10000 })
-      await expect(page.getByTestId('attendance-year-trend-chart')).toBeVisible()
-      await expect(page.getByTestId('attendance-year-class-table')).toBeVisible()
-
-      // ── Insights (rolling analytics) view still reachable ──
-      await page.getByTestId('attendance-tab-analytics').click()
-      await expect(page.getByTestId('attendance-insights-range-30')).toBeVisible()
 
       // ── Back to Day view, drill into a class card if one is present ──
       await page.getByTestId('attendance-tab-daily').click()
