@@ -13,6 +13,8 @@ import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
 import StudentDashboard from './components/StudentDashboard'
+import AttendanceCalendar from '../components/AttendanceCalendar'
+import SchoolCalendarView from '../components/SchoolCalendarView'
 import StudentProfile from './components/StudentProfile'
 
 // Lazy-loaded — only downloaded when first opened
@@ -64,6 +66,8 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'ACADEMIC',
     items: [
       { key: 'my-marks', label: 'My Marks', icon: '📊' },
+      { key: 'attendance', label: 'My Attendance', icon: '✅' },
+      { key: 'calendar', label: 'School Calendar', icon: '📅' },
     ],
   },
   {
@@ -92,7 +96,7 @@ const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
 // 'attendance' has no dedicated nav item — it only gates the Dashboard's
 // engagement-score ring, so isNavItemVisible('attendance') is read directly
 // by StudentDashboard, not used for a sidebar entry.
-const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'timetable', 'my-marks', 'attendance'])
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'timetable', 'my-marks', 'attendance', 'calendar'])
 
 const BOTTOM_NAV = [
   { key: 'dashboard', label: 'Home',    emoji: '🏠' },
@@ -356,6 +360,18 @@ function StudentPortal() {
           <div className="max-w-3xl mx-auto">
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} isNavItemVisible={isNavItemVisible} /></div>}
             {visitedNav.has('class-circle') && <div hidden={activeNav !== 'class-circle'}><StudentClassCircle /></div>}
+            {visitedNav.has('attendance') && isNavItemVisible('attendance') && (
+              <div hidden={activeNav !== 'attendance'}>
+                <h2 className="text-lg font-bold text-gray-900 mb-4">My Attendance</h2>
+                <AttendanceCalendar endpoint="/api/student/attendance" who="student" />
+              </div>
+            )}
+            {visitedNav.has('calendar') && isNavItemVisible('calendar') && (
+              <div hidden={activeNav !== 'calendar'}>
+                <h2 className="text-lg font-bold text-gray-900 mb-4">School Calendar</h2>
+                <SchoolCalendarView />
+              </div>
+            )}
             {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={student.school_id} classId={classId} /></div>}
             {visitedNav.has('timetable')   && <div hidden={activeNav !== 'timetable'}><StudentTimetable classId={classId} schoolId={student.school_id} grade={student.grade} section={student.section} /></div>}
             {visitedNav.has('syllabus') && isNavItemVisible('syllabus') && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={student.school_id} classId={classId} grade={student.grade} /></div>}

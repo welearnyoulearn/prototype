@@ -69,22 +69,13 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
       // nothing meaningful to show at all.
       if (!hasAttendance) return
 
-      const now   = new Date()
-      const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-      fetch(`/api/attendance?school_id=${schoolId}&class_id=${classId}&month=${month}`)
+      // The student's OWN attendance, from the same builder the My Attendance tab and the parent app
+      // use. (This used to download the whole class's month, every classmate's records included.)
+      fetch('/api/student/attendance')
         .then(r => r.json())
-        .then(attData => {
-          const myAtt = Array.isArray(attData)
-            ? attData.filter((a: { student_id: number }) => a.student_id === student.id) : []
-          const byDate = new Map<string, boolean>()
-          myAtt.forEach((a: { date: string; status: string }) => {
-            if (a.status === 'present') byDate.set(a.date, true)
-            else if (!byDate.has(a.date)) byDate.set(a.date, false)
-          })
-          const totalAtt    = byDate.size
-          const presentDays = Array.from(byDate.values()).filter(Boolean).length
-          const attPct  = totalAtt > 0 ? (presentDays / totalAtt) * 100 : 0
-          setEngagementScore(Math.round(attPct))
+        .then(view => {
+          const pct = view?.month?.summary?.pct
+          setEngagementScore(typeof pct === 'number' ? pct : 0)
         }).catch(() => {})
     }).finally(() => setLoading(false))
   }, [student.id, classId, schoolId, hasAttendance])

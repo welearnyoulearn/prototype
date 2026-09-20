@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
+import { getAdminActor } from '@/lib/attendanceAuth'
+import { nonWorkingDaysMap } from '@/lib/attendance'
+import { addDays, attendancePercent, todayIST } from '@/lib/attendanceRules'
 
-// GET /api/admin/briefing?school_id=
+// GET /api/admin/briefing   (school admins only — the school comes from the login)
 // Smart daily briefing — aggregates all key school metrics in a single call.
 // Returns:
 //   date            — today
@@ -12,14 +15,21 @@ import pool, { ensureDB } from '@/lib/db'
 //   announcements   — active announcements count
 //   low_syllabus    — classes with <50% syllabus coverage
 export async function GET(req: NextRequest) {
-
+  await ensureDB()
+  // Before #153 this route had no login check: anyone could read any school's briefing by id.
+  const admin = await getAdminActor()
+  if (!admin) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const school_id = req.nextUrl.searchParams.get('school_id')
-  if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+  if (school_id !== null && Number(school_id) !== admin.schoolId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-  const sid = parseInt(school_id)
-  const today = new Date().toISOString().slice(0, 10)
-  const in7days = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
-  const ago30   = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+  const sid = admin.schoolId
+  const today = todayIST()
+  const in7days = addDays(today, 7)
+  const ago30   = addDays(today, -30)
+  // Holidays and weekly-off days: no "not marked" nagging today, and they don't count as absences.
+  const nonWorking = await nonWorkingDaysMap(sid, ago30, today)
+  const todayOff = nonWorking.get(today) ?? null
+  const nonWorkingDates = [...nonWorking.keys()]
 
   // Run all queries in parallel, each guarded so one failure doesn't kill the whole briefing
   const safe = async <T>(fn: () => Promise<T>, fallback: T): Promise<T> => {
@@ -35,19 +45,18 @@ export async function GET(req: NextRequest) {
     lowSyllabusData,
   ] = await Promise.all([
 
-    // Today's attendance summary (morning session)
+    // Today's attendance: every marked session counts, late counts as attended (lib/attendanceRules.ts)
     safe(async () => {
       const { rows } = await pool.query(`
         SELECT
-          COUNT(DISTINCT a.class_id)::int                                         AS classes_marked,
-          COUNT(DISTINCT c.id)::int                                                AS total_classes,
-          COUNT(*) FILTER (WHERE a.status = 'present')::int                        AS present,
-          COUNT(*) FILTER (WHERE a.status = 'absent')::int                         AS absent,
-          COUNT(*)::int                                                             AS total_marked
-        FROM classes c
-        LEFT JOIN attendance a
-          ON a.class_id = c.id AND a.date = $2 AND a.session = 'morning' AND a.school_id = $1
-        WHERE c.school_id = $1
+          (SELECT COUNT(*)::int FROM classes c WHERE c.school_id = $1 AND c.deleted_at IS NULL) AS total_classes,
+          (SELECT COUNT(DISTINCT k.class_id)::int FROM attendance_sessions k
+             WHERE k.school_id = $1 AND k.date = $2 AND k.session = 'morning')                   AS classes_marked,
+          COUNT(*) FILTER (WHERE a.status = 'present')::int                                       AS present,
+          COUNT(*) FILTER (WHERE a.status = 'late')::int                                          AS late,
+          COUNT(*) FILTER (WHERE a.status = 'absent')::int                                        AS absent
+        FROM attendance a
+        WHERE a.school_id = $1 AND a.date = $2
       `, [sid, today])
       return rows[0]
     }, null),
@@ -82,19 +91,18 @@ export async function GET(req: NextRequest) {
       return rows
     }, []),
 
-    // Chronic absentees (≥3 absences in last 30 days)
+    // Chronic absentees: absent on 3+ working days in the last 30 (same rule as the dashboard)
     safe(async () => {
       const { rows } = await pool.query(`
-        SELECT COUNT(DISTINCT s.id)::int AS count
+        SELECT s.id
         FROM students s
         JOIN attendance a ON a.student_id = s.id AND a.school_id = $1
-        WHERE s.school_id = $1
+        WHERE s.school_id = $1 AND (s.status IS NULL OR s.status = 'active')
           AND a.status = 'absent'
-          AND a.session = 'morning'
-          AND a.date >= $2
+          AND a.date >= $2::date AND a.date <= $3::date AND a.date <> ALL($4::date[])
         GROUP BY s.id
-        HAVING COUNT(a.id) >= 3
-      `, [sid, ago30])
+        HAVING COUNT(DISTINCT a.date) >= 3
+      `, [sid, ago30, today, nonWorkingDates])
       return { count: rows.length }
     }, { count: 0 }),
 
@@ -136,9 +144,9 @@ export async function GET(req: NextRequest) {
   // Compute attendance pct
   let attendance_pct: number | null = null
   let unmarked_classes = 0
-  if (attendanceData) {
-    const total = attendanceData.present + attendanceData.absent
-    attendance_pct = total > 0 ? Math.round((attendanceData.present / total) * 100) : null
+  if (attendanceData && !todayOff) {
+    const marked = attendanceData.present + attendanceData.late + attendanceData.absent
+    attendance_pct = attendancePercent(attendanceData.present + attendanceData.late, marked)
     unmarked_classes = (attendanceData.total_classes ?? 0) - (attendanceData.classes_marked ?? 0)
   }
 
@@ -162,10 +170,12 @@ export async function GET(req: NextRequest) {
     date: today,
     attendance: {
       pct: attendance_pct,
-      present:         attendanceData?.present ?? 0,
+      present:         (attendanceData?.present ?? 0) + (attendanceData?.late ?? 0),   // attended
+      late:            attendanceData?.late    ?? 0,
       absent:          attendanceData?.absent  ?? 0,
       unmarked_classes,
       total_classes:   attendanceData?.total_classes ?? 0,
+      holiday:         todayOff ? { kind: todayOff.kind, title: todayOff.title } : null,
     },
     exams_today:         examsTodayData,
     exams_upcoming:      examsUpcomingData,

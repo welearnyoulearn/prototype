@@ -56,6 +56,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
 
   const [stats, setStats]                     = useState<Stats>({ teachers: 0, students: 0, classes: 0 })
   const [attendance, setAttendance]           = useState<AttendanceSummary[]>([])
+  const [attHoliday, setAttHoliday]           = useState<{ kind: string; title: string } | null>(null)
   const [timetableHealth, setTimetableHealth] = useState<HealthTimetable[]>([])
   const [upcomingExams, setUpcomingExams]     = useState<ExamRow[]>([])
   const [feeOverdue, setFeeOverdue]           = useState(0)
@@ -92,6 +93,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
 
       // Feature-gated
       if (d.attendance !== null) setAttendance(Array.isArray(d.attendance) ? d.attendance : [])
+      setAttHoliday(d.attendance_holiday ?? null)
       if (d.timetable  !== null) setTimetableHealth(Array.isArray(d.timetable) ? d.timetable : [])
       if (d.exams      !== null) setUpcomingExams(Array.isArray(d.exams) ? d.exams : [])
       if (d.fees       !== null) {
@@ -123,7 +125,8 @@ export default function Overview({ schoolId, onNavigate }: Props) {
   const attPresent   = attendance.reduce((s, a) => s + (a.morning_present || 0), 0)
   const attStudents  = attendance.reduce((s, a) => s + (a.morning_total || 0), 0)
   const attPct       = attStudents > 0 ? Math.round((attPresent / attStudents) * 100) : null
-  const attNotMarked = attTotal - attMarked
+  // On a holiday / weekly off nothing is expected, so nothing is "not marked".
+  const attNotMarked = attHoliday ? 0 : attTotal - attMarked
   const ttConflicts  = timetableHealth.filter(h => h.conflict_count > 0).length
   const ttNoTeacher  = timetableHealth.reduce((s, h) => s + h.no_teacher_count, 0)
   const ttNoTimetable = timetableHealth.filter(h => !h.timetable_exists).length
@@ -190,6 +193,14 @@ export default function Overview({ schoolId, onNavigate }: Props) {
                 className="text-xs font-semibold text-amber-600 hover:text-amber-800 border border-amber-200 hover:border-amber-400 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0">
                 Fix Conflicts →
               </button>
+            </div>
+          )}
+          {hasAttendance && attHoliday && (
+            <div data-testid="overview-holiday-banner" className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center gap-3">
+              <span className="text-lg" aria-hidden>🎉</span>
+              <p className="text-sm font-semibold text-red-800">
+                Today is {attHoliday.kind === 'holiday' ? `a holiday — ${attHoliday.title}` : 'a weekly off'}. Attendance is not taken.
+              </p>
             </div>
           )}
           {hasAttendance && attNotMarked > 0 && (

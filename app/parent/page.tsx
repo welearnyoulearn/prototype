@@ -14,6 +14,8 @@ import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 import NotificationBell from '../components/NotificationBell'
+import AttendanceCalendar from '../components/AttendanceCalendar'
+import SchoolCalendarView from '../components/SchoolCalendarView'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Child = { id: number; name: string; grade: string; section: string; roll_number: string; school_id: number }
@@ -43,8 +45,6 @@ type TimetablePeriod = {
   subject_name: string | null; teacher_name: string | null; department: string | null
 }
 
-type AttendanceDay = { date: string; morning: string | null; afternoon: string | null; present: boolean }
-type AttendanceMonth = { month: string; present: number; absent: number; late: number; total: number; pct: number }
 
 type FeeLedger = {
   id: number; category_name: string; period_label: string; frequency: string
@@ -96,6 +96,7 @@ const NAV = [
   { key: 'overview',   label: 'Overview',          icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
   { key: 'today',      label: "Today's Schedule",   icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
   { key: 'attendance', label: 'Attendance',         icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
+  { key: 'calendar',   label: 'School Calendar',    icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
   { key: 'fees',       label: 'Fees',               icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z' },
   { key: 'exams',      label: 'Exam Calendar',      icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
   { key: 'results',    label: 'Results',            icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
@@ -108,7 +109,7 @@ const NAV = [
 // against enabledFeatures — everything else (overview, profile) has always
 // been unconditionally available and stays that way. 'syllabus' and 'today'
 // resolve through PORTAL_NAV_KEY_ALIASES to 'curriculum'/'timetable'.
-const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'today', 'attendance', 'fees', 'exams', 'results'])
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'today', 'attendance', 'fees', 'exams', 'results', 'calendar'])
 
 function fmt(n: number | string) { return `₹${Number(n).toLocaleString('en-IN')}` }
 function timeStr(t: string) { return t ? t.slice(0, 5) : '' }
@@ -164,10 +165,6 @@ function ParentDashboard() {
   const [timetableDay, setTimetableDay] = useState('')
   const [timetableLoading, setTimetableLoading] = useState(false)
 
-  const [attDays, setAttDays] = useState<AttendanceDay[]>([])
-  const [attMonthly, setAttMonthly] = useState<AttendanceMonth[]>([])
-  const [attSummary, setAttSummary] = useState<{ totalDays: number; presentDays: number; absentDays: number; lateDays: number; pct: number | null } | null>(null)
-  const [attLoading, setAttLoading] = useState(false)
 
   const [feeLedger, setFeeLedger] = useState<FeeLedger[]>([])
   const [feePayments, setFeePayments] = useState<FeePayment[]>([])
@@ -248,18 +245,6 @@ function ParentDashboard() {
     setTimetableLoading(false)
   }, [])
 
-  const loadAttendance = useCallback(async (s: Student) => {
-    setAttLoading(true)
-    try {
-      const r = await fetch(`/api/parent/attendance?school_id=${s.school_id}&student_id=${s.id}&months=3`)
-      const d = await r.json()
-      setAttDays(d.days || [])
-      setAttMonthly(d.monthly || [])
-      setAttSummary(d.summary || null)
-    } catch { setAttDays([]); setAttMonthly([]) }
-    setAttLoading(false)
-  }, [])
-
   const loadFees = useCallback(async (s: Student, year: string) => {
     setFeeLoading(true)
     try {
@@ -278,7 +263,6 @@ function ParentDashboard() {
   useEffect(() => {
     if (!student) return
     if (activeNav === 'today' && !timetable.length && !timetableLoading) loadTimetable(student)
-    if (activeNav === 'attendance' && !attDays.length && !attLoading) loadAttendance(student)
     if (activeNav === 'fees' && !feeLedger.length && !feeLoading) loadFees(student, feeAcYear)
   }, [activeNav, student]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -300,7 +284,7 @@ function ParentDashboard() {
     setStudent(s)
     setShowChildPicker(false)
     setSummary(null); setFeeLedger([]); setFeePayments([]); setFeeWaivers([]); setFeeSummary(null)
-    setTimetable([]); setAttDays([]); setAttMonthly([]); setAttSummary(null)
+    setTimetable([])
     resetNav('overview'); setVisited(new Set(['overview']))
 
     await loadSummary(s)
@@ -924,90 +908,21 @@ function ParentDashboard() {
           </div>
           )}
 
-          {/* ── ATTENDANCE ─────────────────────────────────────────────────── */}
+          {/* ── ATTENDANCE ──────────────────────────────────────────────
+              Month calendar, percentages and trend for THIS child only (the API refuses any
+              student who is not linked to the logged-in parent). */}
           {visited.has('attendance') && (
           <div hidden={activeNav !== 'attendance'} className="max-w-3xl space-y-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-gray-800">{T.nav.attendance}</h2>
-              <button onClick={() => loadAttendance(student)} className="text-xs text-pink-600 border border-pink-200 px-3 py-1.5 rounded-lg">{T.refresh}</button>
-            </div>
+            <h2 className="text-base font-bold text-gray-800">{T.nav.attendance}</h2>
+            <AttendanceCalendar key={student.id} endpoint={`/api/parent/attendance?student_id=${student.id}`} who="parent" />
+          </div>
+          )}
 
-            {attLoading ? (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">{[...Array(4)].map((_, i) => (
-                <div key={i} className="bg-white rounded-xl border border-gray-100 p-4 animate-pulse h-20" />
-              ))}</div>
-            ) : attSummary ? (
-              <>
-                {/* Summary cards */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  {[
-                    { label: T.present,      value: attSummary.presentDays, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-100' },
-                    { label: T.absent,       value: attSummary.absentDays,  color: 'text-red-600',   bg: 'bg-red-50',   border: 'border-red-100' },
-                    { label: T.late,         value: attSummary.lateDays,    color: 'text-orange-500', bg: 'bg-orange-50', border: 'border-orange-100' },
-                    { label: T.attendancePct, value: attSummary.pct !== null ? `${attSummary.pct}%` : '—', color: attSummary.pct !== null ? (attSummary.pct >= 75 ? 'text-green-600' : 'text-red-600') : 'text-gray-400', bg: 'bg-white', border: 'border-gray-200' },
-                  ].map(c => (
-                    <div key={c.label} className={`${c.bg} border ${c.border} rounded-xl p-4 text-center`}>
-                      <div className={`text-2xl font-black ${c.color}`}>{c.value}</div>
-                      <div className="text-xs text-gray-500 mt-1">{c.label}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Monthly breakdown */}
-                {attMonthly.length > 0 && (
-                  <div className="bg-white rounded-xl border border-gray-100 p-4">
-                    <p className="text-sm font-bold text-gray-700 mb-3">{T.monthlyBreakdown}</p>
-                    <div className="space-y-3">
-                      {attMonthly.map(m => (
-                        <div key={m.month}>
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="text-sm text-gray-700">{new Date(m.month + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })}</span>
-                            <div className="flex items-center gap-3 text-xs text-gray-500">
-                              <span className="text-green-600 font-semibold">{m.present}P</span>
-                              <span className="text-red-500">{m.absent}A</span>
-                              {m.late > 0 && <span className="text-orange-500">{m.late}L</span>}
-                              <span className="font-bold text-gray-700">{m.pct}%</span>
-                            </div>
-                          </div>
-                          <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full ${m.pct >= 75 ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${m.pct}%` }} />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Day-by-day calendar view */}
-                {attDays.length > 0 && (
-                  <div className="bg-white rounded-xl border border-gray-100 p-4">
-                    <p className="text-sm font-bold text-gray-700 mb-3">{T.recentDays}</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {attDays.slice(0, 60).map(d => (
-                        <div key={d.date} title={`${d.date}: ${d.morning || 'no data'}`}
-                          className={`w-7 h-7 rounded-md flex items-center justify-center text-[10px] font-bold cursor-default ${
-                            d.morning === 'present' ? 'bg-green-500 text-white' :
-                            d.morning === 'absent'  ? 'bg-red-400 text-white' :
-                            d.morning === 'late'    ? 'bg-orange-400 text-white' : 'bg-gray-100 text-gray-400'
-                          }`}>
-                          {new Date(d.date).getDate()}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex gap-3 mt-3 text-xs text-gray-500">
-                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-500" />{T.present}</span>
-                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-400" />{T.absent}</span>
-                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-orange-400" />{T.late}</span>
-                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-gray-100" />{T.noData}</span>
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-                <p className="text-gray-400 text-sm">{T.noAttendance}</p>
-              </div>
-            )}
+          {/* ── SCHOOL CALENDAR (read-only; the school admin manages it) ── */}
+          {visited.has('calendar') && (
+          <div hidden={activeNav !== 'calendar'} className="max-w-3xl space-y-5">
+            <h2 className="text-base font-bold text-gray-800">{T.nav.calendar}</h2>
+            <SchoolCalendarView />
           </div>
           )}
 

@@ -3,9 +3,11 @@
 import { useEffect, useState, useCallback } from 'react'
 import { ClipboardList } from 'lucide-react'
 import { useOfflineAttendance } from '../hooks/useOfflineAttendance'
+import AttendanceTodayPanel, { type AttendanceOverview } from './AttendanceTodayPanel'
+import { todayIST } from '@/lib/attendanceRules'
 import { EmptyState } from '@/components/ui/empty-state'
 
-type Props = { schoolId: number }
+type Props = { schoolId: number; onNavigate?: (key: string) => void }
 
 // Analytics types
 type ChronicAbsentee = {
@@ -151,24 +153,25 @@ function SessionCell({ total, present, absent, late, markedBy, markedAt, session
   )
 }
 
-export default function AttendanceDashboard({ schoolId }: Props) {
-  const { isOnline, queue, retryFailed } = useOfflineAttendance()
+export default function AttendanceDashboard({ schoolId, onNavigate }: Props) {
+  const { isOnline, queue, retryFailed, dismissRejected } = useOfflineAttendance()
   const [tab, setTab]           = useState<'daily' | 'month' | 'year' | 'analytics'>('daily')
-  const [date, setDate]         = useState(new Date().toISOString().split('T')[0])
+  const [date, setDate]         = useState(todayIST())
   const [data, setData]         = useState<ClassAttendance[]>([])
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
   const [substitutes, setSubstitutes] = useState<SubstituteRecord[]>([])
+  const [overview, setOverview] = useState<AttendanceOverview | null>(null)
   // Analytics state
   const [analyticsDays, setAnalyticsDays]   = useState(30)
   const [analytics, setAnalytics]           = useState<{ chronic_absentees: ChronicAbsentee[]; weekly_trend: WeeklyTrend[]; class_summary: ClassSummary[] } | null>(null)
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
   // Month view state
-  const [monthStr, setMonthStr]         = useState(new Date().toISOString().slice(0, 7))
+  const [monthStr, setMonthStr]         = useState(todayIST().slice(0, 7))
   const [monthData, setMonthData]       = useState<MonthData | null>(null)
   const [monthLoading, setMonthLoading] = useState(false)
   // Year view state
-  const [yearStr, setYearStr]         = useState(String(new Date().getFullYear()))
+  const [yearStr, setYearStr]         = useState(todayIST().slice(0, 4))
   const [yearData, setYearData]       = useState<YearData | null>(null)
   const [yearLoading, setYearLoading] = useState(false)
   // Class detail modal
@@ -180,10 +183,12 @@ export default function AttendanceDashboard({ schoolId }: Props) {
     setLoading(true)
     setError('')
     try {
-      const [attRes, subRes] = await Promise.all([
+      const [attRes, subRes, ovRes] = await Promise.all([
         fetch(`/api/attendance?school_id=${schoolId}&date=${d}&view=school`),
         fetch(`/api/substitutes?school_id=${schoolId}&date=${d}`),
+        fetch(`/api/attendance/overview?date=${d}`),
       ])
+      setOverview(ovRes.ok ? await ovRes.json() : null)
       const attJson = await attRes.json()
       if (!attRes.ok) throw new Error(attJson.error)
       setData(Array.isArray(attJson) ? attJson : [])
@@ -274,8 +279,17 @@ export default function AttendanceDashboard({ schoolId }: Props) {
               ))}
             </div>
           </div>
-          {queue.some(q => q.status === 'failed') && (
+          {queue.some(q => q.status === 'failed' && !q.terminal) && (
             <button onClick={retryFailed} data-testid="attendance-retry-failed-btn" className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-lg">Retry Failed</button>
+          )}
+          {queue.some(q => q.terminal) && (
+            <div className="w-full basis-full" data-testid="attendance-rejected-queue">
+              {queue.filter(q => q.terminal).map(q => (
+                <p key={q.id} className="text-xs text-red-700 mt-1">Not saved: {q.reason}</p>
+              ))}
+              <button onClick={dismissRejected} data-testid="attendance-dismiss-rejected-btn"
+                className="mt-2 text-xs border border-red-300 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-50">Dismiss</button>
+            </div>
           )}
         </div>
       )}
@@ -289,7 +303,7 @@ export default function AttendanceDashboard({ schoolId }: Props) {
         <div className="flex items-center gap-2">
           {tab === 'daily' && (
             <>
-              <input type="date" value={date} max={new Date().toISOString().split('T')[0]}
+              <input type="date" value={date} max={todayIST()}
                 data-testid="attendance-date-input"
                 onChange={e => setDate(e.target.value)}
                 className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
@@ -297,7 +311,7 @@ export default function AttendanceDashboard({ schoolId }: Props) {
             </>
           )}
           {tab === 'month' && (
-            <input type="month" value={monthStr} max={new Date().toISOString().slice(0, 7)}
+            <input type="month" value={monthStr} max={todayIST().slice(0, 7)}
               data-testid="attendance-month-input"
               onChange={e => { setMonthStr(e.target.value); loadMonth(e.target.value) }}
               className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
@@ -306,7 +320,7 @@ export default function AttendanceDashboard({ schoolId }: Props) {
             <select value={yearStr} data-testid="attendance-year-select"
               onChange={e => { setYearStr(e.target.value); loadYear(e.target.value) }}
               className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
-              {Array.from({ length: 5 }, (_, i) => String(new Date().getFullYear() - i)).map(y => (
+              {Array.from({ length: 5 }, (_, i) => String(Number(todayIST().slice(0, 4)) - i)).map(y => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
@@ -340,6 +354,10 @@ export default function AttendanceDashboard({ schoolId }: Props) {
       </div>
 
       {tab === 'daily' && !modalClass && <p className="text-sm text-gray-500 mb-4">{dateFormatted}</p>}
+      {tab === 'daily' && !modalClass && (
+        <AttendanceTodayPanel overview={overview} onNavigate={onNavigate}
+          onOpenClass={id => { const c = data.find(x => x.id === id); if (c) void openClassDetail(c) }} />
+      )}
 
       {tab === 'analytics' && (
         <AttendanceAnalyticsPanel
@@ -503,7 +521,7 @@ export default function AttendanceDashboard({ schoolId }: Props) {
         </div>
       )}
 
-      {tab === 'daily' && !modalClass && <>
+      {tab === 'daily' && !modalClass && !overview?.nonWorking && <>
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
           {error}

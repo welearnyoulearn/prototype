@@ -2246,6 +2246,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   const [attMonth, setAttMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
   const [monthlyData, setMonthlyData] = useState<AttendanceRecord[]>([])
   const [monthlyLoading, setMonthlyLoading] = useState(false)
+  const [monthPctByStudent, setMonthPctByStudent] = useState<Record<number, number | null>>({})
 
   // Initial load
   useEffect(() => {
@@ -2331,6 +2332,16 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
       .then(r => r.json())
       .then(data => setMonthlyData(Array.isArray(data) ? data : []))
       .finally(() => setMonthlyLoading(false))
+    // The percentages come from the shared rules (holidays excluded, late = attended) so they match
+    // what the admin, the parent and the student see.
+    fetch(`/api/attendance?view=class-month&class_id=${classId}&month=${attMonth}&school_id=${schoolId}`)
+      .then(r => r.json())
+      .then((d: { students?: { id: number; pct: number | null }[] }) => {
+        const m: Record<number, number | null> = {}
+        for (const s of d.students ?? []) m[s.id] = s.pct
+        setMonthPctByStudent(m)
+      })
+      .catch(() => setMonthPctByStudent({}))
   }, [activeTab, attView, attMonth, classId, schoolId])
 
   // Index monthlyData once per fetch instead of doing a linear .find()/.filter()
@@ -2401,14 +2412,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
 
   // % = (morning_present + afternoon_present + 0.5*late) / total_sessions_taken * 100
   function getStudentMonthPct(studentId: number) {
-    const recs = monthlyByStudent.get(studentId)
-    if (!recs || recs.length === 0) return null
-    const score = recs.reduce((acc, r) => {
-      if (r.status === 'present') return acc + 1
-      if (r.status === 'late')    return acc + 0.5
-      return acc  // absent = 0
-    }, 0)
-    return Math.round((score / recs.length) * 100)
+    return monthPctByStudent[studentId] ?? null
   }
 
   const StatusSymbol = ({ status }: { status: string | null }) => {

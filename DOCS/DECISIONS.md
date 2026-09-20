@@ -11,6 +11,18 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 **Consequences:** What trade-offs come with this decision?
 -->
 
+
+## 2026-09-20 — Attendance: any teacher marks, first submit locks; holidays live in the Academic Calendar (#153)
+
+**Context:** Attendance let any logged-in user (students and parents too) read and write any class, silently overwrote earlier records, and each portal computed its own percentage. The school calendar existed but nothing used it, so a holiday looked like a day nobody marked, and its routes had no authentication.
+
+**Decision:** Every teacher can mark every class (schools rotate cover). The **first submit locks** a class + date + session through a unique key on `attendance_sessions`, so a second teacher — even one submitting at the same instant — is told who marked it and changes nothing. The marker may correct it the same day; the admin any time; others use "Report a mistake". **Holidays are the Academic Calendar's `holiday` entries** (plus a per-school weekly-off list): one source of truth that the calendar screens, the mark sheet, the server, the analytics and the parent/student calendars all read. All percentages come from one module: (present + late) ÷ marked sessions, holidays out, unmarked days are gaps. Identity comes only from the signed session; parents and students get their own narrow endpoints.
+
+**Alternatives considered:** class-teacher-only marking (rejected: real schools rotate/cover); letting the last write win (rejected: silent data loss); a `holiday` flag on the attendance table (rejected: a holiday is a school fact, not a per-record one); per-class holidays and half-days (deferred); per-session vs per-day percentage (per-session chosen: simple to explain, works for one or two sessions a day).
+
+**Consequences:** One extra table and a backfill (existing days count as already marked). A teacher's mistake on a locked session needs the admin — deliberate. A holiday added over marked days ignores those records while it exists and counts them again if it is deleted (the admin is warned both times). `attendance` plan feature still gates the parent/student tabs. Whole-school, whole-day holidays only. No LEAP integration (no public API).
+
+
 ## 2026-09-20 — Per-person school staff login with revocable server-side sessions (#145)
 
 **Context:** School staff logged in with a shared School ID, so actions could not be tied to a person. Logout only cleared a cookie (a stateless 7-day JWT), a deactivated user kept access until the JWT expired, and the login page offered "Continue to Dashboard" for whoever last left a session open, letting the next person on a shared computer walk into that account without a password.

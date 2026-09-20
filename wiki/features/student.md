@@ -54,3 +54,10 @@ The Student portal is the learning interface at `/student`. It covers syllabus p
 | `GET /api/students/[id]/rewards` | Rewards data |
 | `GET /api/newspapers/today` | Daily knowledge |
 | `GET /api/syllabus` | Syllabus progress |
+
+---
+
+## My Attendance & School Calendar (#153)
+
+- **My Attendance:** own calendar, month and year %, trend, upcoming holidays. No classmates' data. The dashboard ring uses the same figure.
+- **School Calendar:** read-only.

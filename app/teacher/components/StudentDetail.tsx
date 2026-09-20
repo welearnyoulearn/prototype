@@ -42,33 +42,35 @@ export default function StudentDetail({
 }) {
   const [attRecords, setAttRecords] = useState<AttendanceRecord[]>([])
   const [engagementScore, setEngagementScore] = useState<number | null>(null)
+  const [attStats, setAttStats] = useState({ total: 0, present: 0, absent: 0 })
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setEngagementScore(null)
-    const month = getMonthStr()
-    fetch(`/api/attendance?school_id=${schoolId}&class_id=${classId}&month=${month}`)
-      .then(r => r.json()).catch(() => [])
-      .then((attData) => {
+    // Same builder as the parent and student apps (lib/attendanceStudentView.ts) — so the percentage a
+    // teacher sees here is exactly what the parent and the student see.
+    fetch(`/api/attendance?view=student&student_id=${student.id}&month=${getMonthStr()}`)
+      .then(r => r.json()).catch(() => null)
+      .then((view: { month?: { days: { date: string; status: string; morning: string | null; afternoon: string | null }[]; summary: { pct: number | null }; daysMarked: number; absentDays: number } } | null) => {
       if (cancelled) return
-      const allAtt: AttendanceRecord[] = Array.isArray(attData) ? attData : []
-      const myAtt = allAtt.filter(a => a.student_id === student.id)
-      setAttRecords(myAtt)
-
-      const attByDate = new Map<string, boolean>()
-      myAtt.forEach(a => {
-        if (a.status === 'present') attByDate.set(a.date, true)
-        else if (!attByDate.has(a.date)) attByDate.set(a.date, false)
+      const days = view?.month?.days ?? []
+      const recs: AttendanceRecord[] = []
+      for (const d of days) {
+        if (d.morning)   recs.push({ student_id: student.id, date: d.date, session: 'morning',   status: d.morning } as AttendanceRecord)
+        if (d.afternoon) recs.push({ student_id: student.id, date: d.date, session: 'afternoon', status: d.afternoon } as AttendanceRecord)
+      }
+      setAttRecords(recs)
+      setAttStats({
+        total: view?.month?.daysMarked ?? 0,
+        present: days.filter(d => d.status === 'present' || d.status === 'late').length,
+        absent: view?.month?.absentDays ?? 0,
       })
-      const totalAttDays = attByDate.size
-      const presentDays = Array.from(attByDate.values()).filter(Boolean).length
-      const attPct = totalAttDays > 0 ? (presentDays / totalAttDays) * 100 : 0
-      setEngagementScore(Math.round(attPct))
+      setEngagementScore(view?.month?.summary.pct ?? 0)
     }).finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [student.id, classId, schoolId])
+  }, [student.id])
 
   const attByDate = new Map<string, { morning?: string; afternoon?: string }>()
   attRecords.forEach(a => {
@@ -77,9 +79,9 @@ export default function StudentDetail({
     attByDate.set(a.date, entry)
   })
   const attDays = Array.from(attByDate.entries()).sort((a, b) => a[0].localeCompare(b[0]))
-  const totalDays = attDays.length
-  const presentDays = attDays.filter(([, v]) => v.morning === 'present' || v.afternoon === 'present').length
-  const absentDays = attDays.filter(([, v]) => v.morning === 'absent' && v.afternoon !== 'present').length
+  const totalDays = attStats.total
+  const presentDays = attStats.present
+  const absentDays = attStats.absent
 
   return (
     <div className="flex flex-col gap-4">

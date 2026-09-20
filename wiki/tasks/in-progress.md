@@ -6,6 +6,24 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 
 <!-- Add new entries at the top -->
 
+### Student attendance across all portals + Academic Calendar (#153, follow-up to #135)
+**Type:** Feature
+**Portal:** School Admin, Teacher, Parent, Student
+**Assigned to:** Kowsik
+**Branch:** feature/135-attendance-dashboard
+**Started:** 2026-09-20
+**Summary:** Session locking (first teacher to submit locks a class's Morning/Afternoon; others see who marked), an admin-run Academic Calendar whose holidays close attendance, one shared rule for every percentage, own-child calendars for parents and students, and closing several open security holes. Detail: `docs/ATTENDANCE.md`.
+**Progress:**
+- [x] Shared rules, migration (`attendance_sessions`, reports, calendar hardening, weekly off), backfill
+- [x] Attendance API rewrite: overview, sheet, claim/save/edit, reports, analytics, exports; parent/student endpoints
+- [x] Academic Calendar API + admin screen; read-only calendar for teacher/student/parent
+- [x] Teacher class picker + mark sheet (locked / holiday / review); admin Today panel; parent & student calendars
+- [x] Tests: rules (17) + end-to-end (27, incl. browser flows) pass on an isolated database
+- [ ] Review the PR, then run `workflow-attendance` once in your own dev/test database
+- [ ] Ask LEAP/CSE about an import/API (see KNOWN_ISSUES)
+
+---
+
 ### School staff login: per-person email login, server-side sessions, last-used account (#145)
 **Type:** Feature
 **Portal:** School Admin / Auth

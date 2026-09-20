@@ -22,6 +22,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- **Academic Calendar** (school admin): a month calendar with holidays, exams, events and meetings (date or range, "everyone" or "staff only"), weekly-off days, and clear warnings. Teachers, students and parents get a read-only **School Calendar** tab. A **holiday closes attendance** for its dates — the screens say why, the server refuses, and those dates are left out of every percentage. (#153)
+- **Attendance session locking**: any teacher can mark any class, Morning or Afternoon; the first submit locks the session and other teachers see "Already marked by <name> at <time>" (no overwriting, including when two submit at the same moment). The marking teacher can correct it the same day; the school admin any time; teachers can "Report a mistake" to the admin. (#153)
+- Admin Attendance page: **Today** panel (classes marked / not marked with the teacher to ask, holiday banner, "Mark today as a holiday", mistake reports); daily absentee list export. (#153)
+- Parent and student apps: a colour-coded **attendance calendar** with month and year percentages, six-month trend and upcoming holidays (a parent sees only their own children, a student only themself). (#153)
+- `docs/ATTENDANCE.md`: the whole flow, rules, API, data model and how to test it.
+
+### Fixed
+- **Security:** any logged-in user (students and parents included) could read every class's attendance and write attendance for any class as any teacher; a parent could read any child's records; the calendar, admin briefing, overview and export routes had no login or school check; one attendance route was open to SQL injection. Identity now comes only from the signed login and every route is scoped to the caller's school. (#153)
+- Admin, teacher, parent and student screens each computed attendance % differently (morning only, late counted as absent, late as half…). They now share one rule, so the same child shows the same numbers everywhere. (#153)
+- Admin "today" used UTC, showing yesterday between 00:00 and 05:30 IST. (#153)
+- Offline attendance replays that the server refuses (already marked, holiday) are shown with the reason instead of retrying forever. (#153)
+- Absence emails now go through the standard sender, after the response, with names HTML-escaped. (#153)
+
+### Changed
+- Attendance percentage everywhere = (present + late) ÷ marked sessions; holidays and weekly-off days are excluded; unmarked days are gaps, not absences. (#153)
+- Schools now have a weekly-off setting (default Sunday). (#153)
+
 ### Changed
 - School staff (school admin, principal, vice principal) now sign in with **their own email + password**. The School ID is no longer a login credential; `POST /api/auth/login` takes `{ email, password }`. Every school must be created with an admin email, and older owner accounts without one are backfilled from the school's contact email. (#145)
 - School staff sessions are now tracked server-side (`user_sessions`): logout, deactivation, password reset and logging in as someone else in the same browser all end the session immediately on the server, not just in the browser. Sessions end after 20 minutes without activity or 12 hours in total, and the cookie is dropped when the browser closes (was a 7-day cookie). (#145)
