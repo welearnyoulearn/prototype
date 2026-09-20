@@ -113,3 +113,107 @@ export async function sendWhatsappMessage(params: WhatsappSendParams): Promise<v
     console.error('[whatsapp] Failed to log message audit row:', err)
   }
 }
+
+// ─── One-time codes (LIVE) ───────────────────────────────────────────────────
+//
+// Unlike the scaffold above, this really sends via Meta's WhatsApp Cloud API. It uses
+// ONE platform-level sender (WLYL's own WhatsApp Business number, paid by WLYL) rather
+// than each school's own account, because a verification code is a platform concern.
+//
+// Template: an Authentication-category template (default name `wlyl_parent_otp`, body
+// "{{1}} is your verification code.", copy-code button). Meta fixes that body text, so
+// the code is passed as the single body parameter AND the copy-code button parameter.
+//
+// Env: WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_ACCESS_TOKEN (required to send)
+//      WHATSAPP_OTP_TEMPLATE (default wlyl_parent_otp), WHATSAPP_OTP_LANG (default en),
+//      WHATSAPP_GRAPH_VERSION (default v21.0)
+// See docs/WHATSAPP-SETUP.md.
+
+export type WhatsappOtpResult =
+  | { ok: true; mode: 'meta' | 'dev-console'; providerMessageId: string | null }
+  | { ok: false; reason: string }
+
+export function isWhatsappOtpConfigured(): boolean {
+  return !!(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_ACCESS_TOKEN)
+}
+
+// The audit row must NEVER hold the code itself — it is a live credential for 5 minutes.
+async function logOtpMessage(params: {
+  schoolId: number | null; to: string; recipientName?: string | null; template: string
+  status: 'queued' | 'sent' | 'failed'; providerMessageId: string | null; failureReason?: string
+}): Promise<void> {
+  if (params.schoolId == null) return // whatsapp_messages.school_id is NOT NULL
+  try {
+    await pool.query(
+      `INSERT INTO whatsapp_messages
+         (school_id, recipient_phone, recipient_name, message_type, template_name,
+          template_params, provider, provider_message_id, status, failure_reason, sent_at)
+       VALUES ($1,$2,$3,'parent_otp',$4,$5,'meta',$6,$7,$8,$9)`,
+      [params.schoolId, params.to, params.recipientName || null, params.template,
+       JSON.stringify({ code: '[redacted]' }), params.providerMessageId, params.status,
+       params.failureReason ? params.failureReason.slice(0, 300) : null,
+       params.status === 'sent' ? new Date() : null]
+    )
+  } catch (err) {
+    console.error('[whatsapp] Failed to log OTP audit row:', err)
+  }
+}
+
+export async function sendWhatsappOtp(params: {
+  to: string            // canonical digits, e.g. 919876543210
+  code: string
+  schoolId: number | null
+  recipientName?: string | null
+}): Promise<WhatsappOtpResult> {
+  const { to, code, schoolId, recipientName } = params
+  const template = process.env.WHATSAPP_OTP_TEMPLATE || 'wlyl_parent_otp'
+
+  if (!isWhatsappOtpConfigured()) {
+    // Never print codes in production. In development this is the "no WhatsApp yet"
+    // path: read the code from the server console.
+    if (process.env.NODE_ENV === 'production') return { ok: false, reason: 'whatsapp_not_configured' }
+    console.log(`[whatsapp:dev] OTP for +${to} is ${code} (WhatsApp not configured — not actually sent)`)
+    await logOtpMessage({ schoolId, to, recipientName, template, status: 'queued', providerMessageId: null })
+    return { ok: true, mode: 'dev-console', providerMessageId: null }
+  }
+
+  const url = `https://graph.facebook.com/${process.env.WHATSAPP_GRAPH_VERSION || 'v21.0'}/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to,
+        type: 'template',
+        template: {
+          name: template,
+          language: { code: process.env.WHATSAPP_OTP_LANG || 'en' },
+          components: [
+            { type: 'body', parameters: [{ type: 'text', text: code }] },
+            { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: code }] },
+          ],
+        },
+      }),
+      signal: AbortSignal.timeout(10_000),
+    })
+    const data = await res.json().catch(() => ({})) as {
+      messages?: { id?: string }[]; error?: { message?: string; code?: number }
+    }
+    if (!res.ok) {
+      const reason = data.error?.message || `HTTP ${res.status}`
+      await logOtpMessage({ schoolId, to, recipientName, template, status: 'failed', providerMessageId: null, failureReason: reason })
+      return { ok: false, reason }
+    }
+    const providerMessageId = data.messages?.[0]?.id ?? null
+    await logOtpMessage({ schoolId, to, recipientName, template, status: 'sent', providerMessageId })
+    return { ok: true, mode: 'meta', providerMessageId }
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : 'send_failed'
+    await logOtpMessage({ schoolId, to, recipientName, template, status: 'failed', providerMessageId: null, failureReason: reason })
+    return { ok: false, reason }
+  }
+}

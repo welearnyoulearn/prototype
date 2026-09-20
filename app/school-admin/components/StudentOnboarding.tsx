@@ -3,6 +3,7 @@
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { parseCSV } from '@/lib/parseCSV'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { normalizeIndianMobile, sanitizeMobileTyping, INDIAN_MOBILE_ERROR } from '@/lib/phone'
 
 type Props = { schoolId: number; onRefresh?: () => void }
 
@@ -192,7 +193,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       grade: cols[4] ?? filterGrade,
       section: cols[5] ?? filterSection,
       parent_name: cols[6] ?? '',
-      parent_phone: cols[7] ?? '',
+      parent_phone: normalizeIndianMobile(cols[7]) ?? (cols[7] ?? ''),
       parent_email: cols[8] ?? '',
       phone: cols[9] ?? '',
     }))
@@ -211,6 +212,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
   function buildStudentsPayload(valid: StudentRow[]) {
     return valid.map(({ last_name, first_name, ...rest }) => ({
       ...rest,
+      parent_phone: normalizeIndianMobile(rest.parent_phone) ?? rest.parent_phone.trim(),
       name: `${last_name} ${first_name}`.trim(),
       school_roll_number: rest.school_roll_number.trim() ? parseInt(rest.school_roll_number.trim()) : undefined,
     }))
@@ -272,6 +274,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       if (!r.parent_name.trim())  missing.push(`Row ${i + 1}: Parent Name is required`)
       else if (!isValidName(r.parent_name)) missing.push(`Row ${i + 1}: Parent Name — ${NAME_INVALID_MESSAGE}`)
       if (!r.parent_phone.trim()) missing.push(`Row ${i + 1}: Parent Phone is required`)
+      else if (!normalizeIndianMobile(r.parent_phone)) missing.push(`Row ${i + 1}: Parent Phone — ${INDIAN_MOBILE_ERROR}`)
       if (!r.school_roll_number.trim()) missing.push(`Row ${i + 1}: Roll No is required`)
       else if (!/^\d+$/.test(r.school_roll_number.trim()) || parseInt(r.school_roll_number.trim()) <= 0)
         missing.push(`Row ${i + 1}: Roll No must be a positive number`)
@@ -807,8 +810,14 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                       <td className="px-3 py-2"><input className={inputCls} placeholder="A" value={row.section} onChange={e => updateRow(i, 'section', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="Parent name" value={row.parent_name} onChange={e => updateRow(i, 'parent_name', e.target.value)} /></td>
                       <td className="px-3 py-2 bg-blue-50/40">
-                        <input className={`${inputCls} ${!row.parent_phone.trim() ? 'border-blue-300' : ''}`}
-                          placeholder="Phone *" value={row.parent_phone} onChange={e => updateRow(i, 'parent_phone', e.target.value)} />
+                        <input
+                          type="tel" inputMode="numeric" autoComplete="off"
+                          data-testid={`student-row-${i}-parent-phone`}
+                          title={INDIAN_MOBILE_ERROR}
+                          aria-invalid={!!row.parent_phone.trim() && !normalizeIndianMobile(row.parent_phone)}
+                          className={`${inputCls} ${!row.parent_phone.trim() ? 'border-blue-300' : row.parent_phone.trim() && !normalizeIndianMobile(row.parent_phone) ? '!border-red-400 !bg-red-50' : ''}`}
+                          placeholder="10-digit mobile *" value={row.parent_phone}
+                          onChange={e => updateRow(i, 'parent_phone', sanitizeMobileTyping(e.target.value))} />
                       </td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="parent@email.com (optional)" type="email" value={row.parent_email} onChange={e => updateRow(i, 'parent_email', e.target.value)} /></td>
                       <td className="px-3 py-2"><input className={inputCls} placeholder="Phone" value={row.phone} onChange={e => updateRow(i, 'phone', e.target.value)} /></td>

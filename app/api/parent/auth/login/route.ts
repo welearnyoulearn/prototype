@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { verifyPassword, setParentAuthCookie, ParentJWTPayload, schoolHasFeature } from '@/lib/auth'
 import { recordSessionStart } from '@/lib/usageTracking'
+import { normalizeIndianMobile, PARENT_PHONE_LAST10_SQL } from '@/lib/phone'
 
 // Login accepts either the parent's email or phone in one field. Matching by
 // phone is only safe because parents now carries a per-school unique index
@@ -71,12 +72,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email or phone, and password, are required' }, { status: 400 })
     }
 
+    // A phone typed in any format ("98765 43210", "+91 98765-43210") matches how the
+    // school stored it, by comparing the last 10 digits.
+    const phoneKey = trimmed.includes('@') ? null : normalizeIndianMobile(trimmed)
     const matches = await pool.query(
       `SELECT p.id, p.name, p.email, p.school_id, p.password_hash, p.password_changed
        FROM parents p
        WHERE p.password_hash IS NOT NULL
-         AND (LOWER(p.email) = LOWER($1) OR p.phone = $1)`,
-      [trimmed]
+         AND (LOWER(p.email) = LOWER($1) OR p.phone = $1
+              OR ($2::text IS NOT NULL AND ${PARENT_PHONE_LAST10_SQL} = $2::text))`,
+      [trimmed, phoneKey]
     )
 
     if (matches.rows.length === 0) {

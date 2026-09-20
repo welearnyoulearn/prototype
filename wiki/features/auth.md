@@ -54,3 +54,7 @@ User enters credentials
 - Adding staff: Settings, Staff Accounts, then name, email and role. An invite link is emailed. "Resend Invite Link" voids earlier links.
 - The login page keeps `wlyl_last_staff_account` (name, email, role) in localStorage. Never a password or a session.
 - Platform "Reset Password" for a school resets only the owner (the account that has a `school_code`).
+
+## Parent password reset by WhatsApp code (#152)
+
+Parent Auth: phone/email + password; forgot-password sends a 6-digit code to the parent's WhatsApp number (Meta Cloud API, Authentication template, one WLYL-owned sender). Code → single-use 10-minute ticket → new password. Tables: `otp_challenges` (HMAC-hashed codes), `password_reset_tokens` (`role = 'parent_otp'`), `whatsapp_messages` (delivery log, never the code). Sender and webhook: `lib/whatsapp.ts` `sendWhatsappOtp()`, `/api/whatsapp/webhook`. See `docs/WHATSAPP-SETUP.md`.

@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 31
+const SCHEMA_VERSION = 34
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3242,4 +3242,27 @@ async function runIncrementalMigrations() {
        AND COALESCE(s.email, '') <> ''
        AND NOT EXISTS (SELECT 1 FROM users x WHERE LOWER(x.email) = LOWER(s.email))
   `)
+
+  // ── One-time-code challenges (parent WhatsApp password reset) ────────────────
+  // One row per code request — including for numbers that match no parent, so rate
+  // limits and timing look identical either way (parent_ids is then empty and nothing
+  // is sent). Only an HMAC of the code is stored, never the code itself.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS otp_challenges (
+      id UUID PRIMARY KEY,
+      purpose VARCHAR(30) NOT NULL,
+      phone VARCHAR(20) NOT NULL,
+      code_hash TEXT NOT NULL,
+      parent_ids INTEGER[] NOT NULL DEFAULT '{}',
+      ip VARCHAR(64),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      send_status VARCHAR(20),
+      send_error TEXT,
+      expires_at TIMESTAMPTZ NOT NULL,
+      consumed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_otp_challenges_phone ON otp_challenges(phone, created_at DESC)`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_otp_challenges_ip ON otp_challenges(ip, created_at DESC)`)
 }

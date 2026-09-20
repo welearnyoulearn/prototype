@@ -21,6 +21,16 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 
 **Consequences:** One extra indexed query per authenticated school-admin API call. `proxy.ts` (Edge) can only check the JWT signature and presence of `sid`, so an idle-expired session is caught on the first API call and by the client-side `IdleSessionGuard`, not at page load. Existing school-admin cookies (no `sid`) are invalidated once. Two people on one computer take turns (logging in ends the previous session); simultaneous use needs separate browsers or devices. The last-used card shows the previous person's name and email to anyone opening the login page on that browser, which is a deliberate product choice. Follow-ups: school audit log, login lockout/rate limiting.
 
+## 2026-09-20 — Parent password reset by WhatsApp one-time code from one platform-owned sender (#152)
+
+**Context:** Many parents have no email, and the existing reset link went by email only (the WhatsApp send was a scaffold that never sent). Parents sign in with a phone number, so a code to that same number is the natural recovery path.
+
+**Decision:** A 6-digit code sent through Meta's WhatsApp Cloud API using an Authentication-category template, from ONE WLYL-owned number paid by WLYL, not per-school accounts. Codes live in `otp_challenges` as an HMAC bound to the phone number (5 min, single use, 5 attempts). A challenge row is written for every request, including unregistered numbers, and the send happens after the response, so limits, body and timing don't reveal who is registered. A correct code is traded for a 10-minute single-use ticket (`password_reset_tokens.role = 'parent_otp'`) used only by `/otp/reset`, which updates every parent account on that number (the same person can have children at several schools). Parent phones are validated as 10-digit Indian mobiles at every entry point and stored as the bare number; lookups compare the last 10 digits so older, differently formatted rows still match.
+
+**Alternatives considered:** SMS OTP (needs DLT registration and costs more per message in India); per-school WhatsApp accounts (each school would need its own verified Meta business; the per-school table stays for fee reminders); a BSP such as AiSensy (monthly fee plus markup for no benefit here); email-only reset (excludes parents without email); revealing "number not registered" (enumeration).
+
+**Consequences:** About ₹0.14 per code (Meta list price plus GST), bounded by per-phone, per-IP and daily caps. Nothing is delivered in production until WhatsApp credentials are set, so production must not ship this before then. Only Indian mobiles are supported; parents stored with other numbers can't use the code flow until a school corrects the number. Resetting a password does not sign out an already-logged-in parent (parent sessions are stateless 7-day cookies). Registered numbers do a few extra queries, so a very fine timing side-channel remains.
+
 
 ## 2026-09-12 — Syllabus "Translate" uses transliteration via a server-side proxy (#116)
 

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Users } from 'lucide-react'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { normalizeIndianMobile, sanitizeMobileTyping, INDIAN_MOBILE_ERROR } from '@/lib/phone'
 import { EmptyState } from '@/components/ui/empty-state'
 import { useConfirm } from '@/components/ui/use-confirm'
 
@@ -383,7 +384,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
     if (!isValidName(name)) return `Student Name: ${NAME_INVALID_MESSAGE}`
     if (parentName && !isValidName(parentName)) return `Parent Name: ${NAME_INVALID_MESSAGE}`
     if (phone && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(phone)) return 'Phone must be 7–15 digits'
-    if (parentPhone && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(parentPhone)) return "Parent's phone must be 7–15 digits"
+    if (parentPhone && !normalizeIndianMobile(parentPhone)) return `Parent phone: ${INDIAN_MOBILE_ERROR}`
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Enter a valid email address'
     return null
   }
@@ -829,8 +830,10 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                     <div key={field}>
                       <label className="block text-xs text-gray-500 mb-1">{label}</label>
                       <input type={type} placeholder={placeholder}
+                        data-testid={`student-edit-${field}-input`}
+                        inputMode={field === 'parent_phone' ? 'numeric' : undefined}
                         value={(editForm as Record<string, unknown>)[field] as string ?? (selected as Record<string, unknown>)[field] as string ?? ''}
-                        onChange={e => setEditForm(f => ({ ...f, [field]: e.target.value }))}
+                        onChange={e => setEditForm(f => ({ ...f, [field]: field === 'parent_phone' ? sanitizeMobileTyping(e.target.value) : e.target.value }))}
                         className={inputCls + ' !text-xs !py-1.5'} />
                     </div>
                   ))}

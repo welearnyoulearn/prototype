@@ -23,6 +23,23 @@ Tasks currently being worked on. Move to [completed.md](completed.md) when done.
 - [ ] `/code-review`, then PR against `dev`
 - [ ] Follow-ups (separate issues): school audit log, login lockout/rate limiting
 
+### Parent portal: WhatsApp OTP forgot/reset password + Indian mobile validation (#152)
+**Type:** Feature
+**Portal:** Parent (and Student onboarding for the phone rules)
+**Assigned to:** Kowsik
+**Branch:** feature/152-parent-whatsapp-otp
+**Started:** 2026-09-20
+**Summary:** Parents reset a forgotten password with a 6-digit code delivered on WhatsApp, and every place a parent phone is entered now requires a proper 10-digit Indian mobile. Detail: `wiki/features/parent.md`, decision in `docs/DECISIONS.md`, setup in `docs/WHATSAPP-SETUP.md`.
+**Progress:**
+- [x] `otp_challenges` table, HMAC-hashed codes, per-phone / per-IP / daily limits, anti-enumeration
+- [x] `/api/parent/auth/otp/{send,verify,reset}`; live `sendWhatsappOtp()` with dev console fallback; signature-verified delivery webhook
+- [x] Three-step mobile-first UI with six-box code entry; parent login input rules and "password updated" notice
+- [x] Indian-mobile validation on single add, bulk import, edit, sign-in, reset; format-insensitive parent matching
+- [x] Tests: logic (32) and UI (12) pass locally; DB-backed `workflow-parent-otp` written
+- [ ] Meta WhatsApp setup by the owner (see `docs/WHATSAPP-SETUP.md`) and a real-device test
+- [ ] Run `workflow-parent-otp` against a local/test database
+- [ ] `/code-review`, PR against `dev`; production merge needs explicit approval (WhatsApp code rule)
+
 ---
 
 ### Attendance Tracking — school-admin visualization dashboard (#135)
