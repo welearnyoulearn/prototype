@@ -8,6 +8,7 @@ import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/
 import { gradeOrderSql } from '@/lib/grades'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
 import { withWatchline } from '@/lib/logger'
+import { parseIndianMobile } from '@/lib/phone'
 
 // Never `SELECT *`: students carries password_hash, which would otherwise be
 // serialised straight to the browser. Enumerate every safe column instead.
@@ -129,14 +130,18 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email, roll_number, school_roll_number } = body
+    const { school_id, name, email, grade, section, phone, parent_name, parent_phone: rawParentPhone, parent_email, roll_number, school_roll_number } = body
     if (!school_id || !name) return NextResponse.json({ error: 'school_id and name are required' }, { status: 400 })
     if (!isValidName(name)) return NextResponse.json({ error: `Name: ${NAME_INVALID_MESSAGE}` }, { status: 400 })
     if (admin.schoolId !== school_id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     if (!section?.trim()) return NextResponse.json({ error: 'Section is required' }, { status: 400 })
     if (!parent_name?.trim()) return NextResponse.json({ error: 'Parent name is required' }, { status: 400 })
     if (!isValidName(parent_name)) return NextResponse.json({ error: `Parent Name: ${NAME_INVALID_MESSAGE}` }, { status: 400 })
-    if (!parent_phone?.trim()) return NextResponse.json({ error: 'Parent phone is required' }, { status: 400 })
+    if (typeof rawParentPhone !== 'string' || !rawParentPhone.trim()) return NextResponse.json({ error: 'Parent phone is required' }, { status: 400 })
+    // Stored (and used for the parent's login / WhatsApp OTP) as the bare 10-digit Indian mobile.
+    const parentPhoneCheck = parseIndianMobile(rawParentPhone)
+    if (!parentPhoneCheck.ok) return NextResponse.json({ error: `Parent phone: ${parentPhoneCheck.error}` }, { status: 400 })
+    const parent_phone = parentPhoneCheck.value
     if (school_roll_number == null || school_roll_number === '') return NextResponse.json({ error: 'Roll number is required' }, { status: 400 })
 
     if (phone?.trim()) {

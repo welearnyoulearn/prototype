@@ -1,7 +1,7 @@
 # Parent Portal
 
 **Status:** 5 Built | 2 Partial
-**Last updated:** 2026-06-18
+**Last updated:** 2026-09-20
 
 ---
 
@@ -35,3 +35,13 @@ The Parent portal provides read-only visibility into a child's school life at `/
 | `GET /api/parent/activity` | Learning activity |
 | `GET /api/parent/timetable` | Class timetable |
 | `POST /api/exams/[id]/acknowledge` | Acknowledge marks |
+
+---
+
+## Sign-in and password reset (#152)
+
+- **Sign in:** email or 10-digit Indian mobile number, plus password. A phone typed as "+91 98765-43210" is cleaned to `9876543210`; anything that isn't a valid Indian mobile is rejected before the request is made.
+- **Forgot password (WhatsApp code):** `/parent/forgot-password` is a three-step page. (1) registered mobile number, (2) six-box 6-digit code sent on WhatsApp, (3) new password + confirm, then back to `/parent/login?reset=1` with a confirmation. Small "Use email instead" link sends the older reset link by email.
+- **Rules:** code valid 5 minutes, single use, 5 attempts; resend after 30 s; 3 codes per number per hour, 10 per IP per hour, daily cap. The response never reveals whether the number is registered.
+- **Phone numbers everywhere:** must be 10-digit Indian mobiles (start 6–9), validated on add, bulk import, edit and sign-in; stored as the bare 10 digits.
+- **Endpoints:** `POST /api/parent/auth/otp/send`, `/otp/verify`, `/otp/reset`. Setup for the WhatsApp sender: `docs/WHATSAPP-SETUP.md`.

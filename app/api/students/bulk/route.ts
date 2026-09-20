@@ -6,6 +6,7 @@ import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsTo
 import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/studentOnboarding'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { parseIndianMobile, PARENT_PHONE_LAST10_SQL } from '@/lib/phone'
 
 export async function POST(req: NextRequest) {
   await ensureDB()
@@ -43,6 +44,9 @@ export async function POST(req: NextRequest) {
       if (!s.parent_name?.trim()) { errors.push({ row: i + 1, message: 'Parent name is required' }); continue }
       if (!isValidName(s.parent_name)) { errors.push({ row: i + 1, message: `Parent Name: ${NAME_INVALID_MESSAGE}` }); continue }
       if (!s.parent_phone?.trim()) { errors.push({ row: i + 1, message: 'Parent phone is required' }); continue }
+      const parentPhoneCheck = parseIndianMobile(s.parent_phone)
+      if (!parentPhoneCheck.ok) { errors.push({ row: i + 1, message: `Parent phone "${String(s.parent_phone).trim()}": ${parentPhoneCheck.error}` }); continue }
+      s.parent_phone = parentPhoneCheck.value // store the clean 10-digit number
 
       const schoolRollRaw = s.school_roll_number ?? s.roll_no
       if (schoolRollRaw === undefined || schoolRollRaw === null || String(schoolRollRaw).trim() === '') {
@@ -94,7 +98,7 @@ export async function POST(req: NextRequest) {
         ? pool.query(`SELECT id, email FROM parents WHERE school_id = $1 AND LOWER(email) = ANY($2)`, [school_id, parentEmails.map(e => e.toLowerCase())])
         : Promise.resolve({ rows: [] }),
       parentPhones.length > 0
-        ? pool.query(`SELECT id, phone FROM parents WHERE school_id = $1 AND phone = ANY($2)`, [school_id, parentPhones])
+        ? pool.query(`SELECT p.id, ${PARENT_PHONE_LAST10_SQL} AS phone FROM parents p WHERE p.school_id = $1 AND ${PARENT_PHONE_LAST10_SQL} = ANY($2)`, [school_id, parentPhones])
         : Promise.resolve({ rows: [] }),
     ])
 

@@ -22,6 +22,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+- Parent portal: **forgot / reset password by WhatsApp code**. Sign in → Forgot password → enter registered mobile number → 6-digit code on WhatsApp ("123456 is your verification code") → new password + confirm → back to sign in. Three-step mobile-first page with six-box code entry (paste and one-time-code autofill supported), resend countdown, and an optional "use email instead". The code is stored only as an HMAC hash, is valid 5 minutes, works once and locks after 5 wrong tries; requests are limited by phone, IP and a daily cap, and the reply is identical for registered and unregistered numbers. New endpoints `POST /api/parent/auth/otp/{send,verify,reset}`, table `otp_challenges`, live Meta Cloud API sender `sendWhatsappOtp()` in `lib/whatsapp.ts`, and a signature-verified delivery-status webhook `/api/whatsapp/webhook`. Without WhatsApp credentials development prints the code to the server console and production sends nothing. Setup: `docs/WHATSAPP-SETUP.md`. (#152)
+
+### Changed
+- Parent phone numbers must now be **10-digit Indian mobile numbers** (start with 6–9). Enforced when adding a student, in bulk import, when editing a student, and at parent sign-in; numbers are stored as the bare 10 digits. "+91", "91", "0" prefixes, spaces and dashes are accepted and cleaned; anything else is rejected with a clear message. Phone inputs show a live error and clean pasted numbers. Older parents stored in other formats can still sign in and are matched to new siblings by their last 10 digits. (#152)
+- `POST /api/parent/auth/forgot-password` is now email-link only; phone resets use the WhatsApp code flow. (#152)
+
 ### Changed
 - School staff (school admin, principal, vice principal) now sign in with **their own email + password**. The School ID is no longer a login credential; `POST /api/auth/login` takes `{ email, password }`. Every school must be created with an admin email, and older owner accounts without one are backfilled from the school's contact email. (#145)
 - School staff sessions are now tracked server-side (`user_sessions`): logout, deactivation, password reset and logging in as someone else in the same browser all end the session immediately on the server, not just in the browser. Sessions end after 20 minutes without activity or 12 hours in total, and the cookie is dropped when the browser closes (was a 7-day cookie). (#145)

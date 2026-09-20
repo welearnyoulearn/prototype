@@ -3,8 +3,12 @@
 import { useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import AuthShell, { THEMES, AuthError, PasswordField } from '@/app/components/AuthShell'
+import AuthShell, { THEMES, AuthError, AuthSuccess, PasswordField } from '@/app/components/AuthShell'
 import { setUsageSessionId } from '@/lib/usageSession'
+import { normalizeIndianMobile, INDIAN_MOBILE_ERROR } from '@/lib/phone'
+
+// Looks like someone is typing a phone number (digits and the usual separators, no letters/@).
+const PHONE_LIKE = /^[\d\s+\-().]+$/
 
 function ParentLoginForm() {
   const router = useRouter()
@@ -15,15 +19,18 @@ function ParentLoginForm() {
   const [password, setPassword] = useState('')
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState(params.get('notice') || '')
+  const justReset = params.get('reset') === '1'
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    const typed = identifier.trim()
+    if (PHONE_LIKE.test(typed) && !normalizeIndianMobile(typed)) { setError(INDIAN_MOBILE_ERROR); return }
     setError(''); setLoading(true)
     try {
       const res = await fetch('/api/parent/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier: identifier.trim(), password }),
+        body: JSON.stringify({ identifier: normalizeIndianMobile(typed) ?? typed, password }),
       })
       const data = await res.json()
       if (!res.ok) { setError(data.error || 'Login failed'); return }
@@ -55,6 +62,7 @@ function ParentLoginForm() {
         ))}
       </div>
 
+      {justReset && !error && <div data-testid="parent-password-updated-notice"><AuthSuccess message="Password updated. Sign in with your new password." /></div>}
       <AuthError message={error} />
 
       <form onSubmit={handleSubmit} data-testid="parent-login-form" className="space-y-4">
@@ -64,13 +72,18 @@ function ParentLoginForm() {
             type="text"
             value={identifier}
             onChange={e => setIdentifier(e.target.value)}
-            placeholder="your@email.com or phone number"
+            // A pasted "+91 98765 43210" becomes the plain 10-digit number; emails are left alone.
+            onBlur={() => { const t = identifier.trim(); if (PHONE_LIKE.test(t)) { const n = normalizeIndianMobile(t); if (n) setIdentifier(n) } }}
+            placeholder="your@email.com or 10-digit mobile number"
             required
             autoComplete="username"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
             data-testid="parent-email-input"
             className={`w-full bg-white border border-stone-300 rounded-xl px-4 py-3 text-sm text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 ${theme.ring} focus:border-transparent transition`}
           />
-          <p className="text-xs text-stone-400 mt-1.5">Use the email or phone number your school has on record</p>
+          <p className="text-xs text-stone-400 mt-1.5">Use the email or 10-digit mobile number your school has on record</p>
         </div>
 
         <PasswordField

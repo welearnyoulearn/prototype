@@ -2,20 +2,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { generateResetToken } from '@/lib/auth'
 import { sendPasswordResetEmail } from '@/lib/email'
-import { sendWhatsappMessage } from '@/lib/whatsapp'
 
 export async function POST(req: NextRequest) {
   try {
-    // Accepts either email or phone in one field, matching the login route
-    // (§01) — a parent who signs in with their phone number needs a way to
-    // trigger a reset too, not just parents who use email.
+    // Email-link reset only. Phone-based resets go through the WhatsApp one-time code
+    // flow (/api/parent/auth/otp/*), so this route no longer matches on phone.
     const body = await req.json()
     const identifier = typeof body.identifier === 'string' ? body.identifier.trim() : (typeof body.email === 'string' ? body.email.trim() : '')
     if (!identifier) return NextResponse.json({ success: true })
 
     const result = await pool.query(
-      `SELECT id, school_id, name, email, phone FROM parents
-       WHERE password_hash IS NOT NULL AND (LOWER(email) = LOWER($1) OR phone = $1)`,
+      `SELECT id, school_id, name, email FROM parents
+       WHERE password_hash IS NOT NULL AND LOWER(email) = LOWER($1)`,
       [identifier]
     )
     if (result.rows.length === 0) return NextResponse.json({ success: true })
@@ -38,12 +36,6 @@ export async function POST(req: NextRequest) {
       const name = parent.name || identifier
       if (parent.email) {
         sendPasswordResetEmail({ to: parent.email, name, resetUrl: url, role: 'parent' }).catch(console.error)
-      }
-      if (parent.phone) {
-        sendWhatsappMessage({
-          schoolId: parent.school_id, to: parent.phone, templateName: 'password_reset', recipientName: name,
-          templateParams: { name, reset_url: url },
-        }).catch(console.error)
       }
     }
 

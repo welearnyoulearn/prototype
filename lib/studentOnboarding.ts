@@ -3,6 +3,7 @@ import pool from './db'
 import { hashPassword, generateTempPassword } from './auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from './email'
 import { sendWhatsappMessage } from './whatsapp'
+import { normalizeIndianMobile, PARENT_PHONE_LAST10_SQL } from './phone'
 
 // The system-generated student login id — random enough for uniqueness
 // (retried on collision by callers), but still readable/greppable in support
@@ -39,19 +40,24 @@ export async function findOrCreateParent(
   createIfMissing: boolean
 ): Promise<ParentMatchResult> {
   const pe = parent.email?.trim() || null
-  const pp = parent.phone?.trim() || null
+  // Store the clean 10-digit number when it is one; keep whatever was given otherwise
+  // (older rows created before phone validation existed).
+  const rawPhone = parent.phone?.trim() || null
+  const pp = rawPhone ? (normalizeIndianMobile(rawPhone) ?? rawPhone) : null
   const pn = parent.name?.trim() || null
   if (!pe && !pp) return null
 
   const batchKey = pe ? `email:${pe.toLowerCase()}` : `phone:${pp}`
   if (batchCache.has(batchKey)) return { parentId: batchCache.get(batchKey)!, wasCreated: false }
 
+  // Phones match by their last 10 digits, so a parent stored years ago as "+91 98765 43210"
+  // is still recognised when a sibling is onboarded with "9876543210" (no duplicate parent).
   const existingRes = await client.query(
-    `SELECT id FROM parents WHERE school_id = $1 AND (
-       ($2::text IS NOT NULL AND LOWER(email) = LOWER($2)) OR
-       ($3::text IS NOT NULL AND phone = $3)
+    `SELECT p.id FROM parents p WHERE p.school_id = $1 AND (
+       ($2::text IS NOT NULL AND LOWER(p.email) = LOWER($2)) OR
+       ($3::text IS NOT NULL AND (p.phone = $3 OR ${PARENT_PHONE_LAST10_SQL} = $4::text))
      ) LIMIT 1`,
-    [schoolId, pe, pp]
+    [schoolId, pe, pp, pp ? normalizeIndianMobile(pp) : null]
   )
   if (existingRes.rows.length > 0) {
     const parentId = existingRes.rows[0].id as number
