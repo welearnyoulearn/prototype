@@ -14,6 +14,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Bug fix description (#issue-number)
 
 ### Changed
+- School-admin Attendance page: the separate Month / Year / Insights tabs are replaced by **Overview** (with a period switch) and **Day register**; their old 85%/70% colour thresholds are gone in favour of the shared 90%/75%. (#153)
 - Change description (#issue-number)
 
 ### Removed
@@ -27,6 +28,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - **Attendance session locking**: any teacher can mark any class, Morning or Afternoon; the first submit locks the session and other teachers see "Already marked by <name> at <time>" (no overwriting, including when two submit at the same moment). The marking teacher can correct it the same day; the school admin any time; teachers can "Report a mistake" to the admin. (#153)
 - Admin Attendance page: **Today** panel (classes marked / not marked with the teacher to ask, holiday banner, "Mark today as a holiday", mistake reports); daily absentee list export. (#153)
 - Parent and student apps: a colour-coded **attendance calendar** with month and year percentages, six-month trend and upcoming holidays (a parent sees only their own children, a student only themself). (#153)
+- **Attendance dashboards for every role**: school admin *Overview* (KPIs, trend, class ranking, students needing attention, student search, drill-down school → class → student); class-teacher *My class* dashboard (student list with filters, weekday pattern, absent today); richer parent/student view (streak, chart). One colour/threshold rule everywhere (90% / 75%). (#153)
 - `docs/ATTENDANCE.md`: the whole flow, rules, API, data model and how to test it.
 
 ### Fixed

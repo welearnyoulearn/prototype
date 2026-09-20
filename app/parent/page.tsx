@@ -539,7 +539,7 @@ function ParentDashboard() {
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3.5 flex items-center justify-between">
         <div className="flex items-center gap-3 sm:gap-4">
-          <button onClick={() => setSidebarOpen(o => !o)} className="lg:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
+          <button onClick={() => setSidebarOpen(o => !o)} aria-label="Open menu" data-testid="parent-menu-toggle" className="lg:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
           <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm hidden sm:inline">{T.home}</Link>

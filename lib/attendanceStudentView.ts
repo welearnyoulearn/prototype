@@ -18,7 +18,7 @@ export type StudentAttendanceView = {
 }
 
 /** Start of the school year: the current academic year if one is set, else 1 April (India). */
-async function schoolYearStart(schoolId: number, today: string): Promise<string> {
+export async function schoolYearStart(schoolId: number, today: string): Promise<string> {
   const { rows: [y] } = await pool.query<{ start_date: string }>(
     `SELECT start_date::text AS start_date FROM academic_years
      WHERE school_id = $1 AND is_current = TRUE ORDER BY start_date DESC LIMIT 1`,
