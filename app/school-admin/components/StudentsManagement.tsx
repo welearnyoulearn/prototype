@@ -1,6 +1,7 @@
 ﻿'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import dynamic from 'next/dynamic'
 import { Users } from 'lucide-react'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -261,6 +262,8 @@ function DuplicatesPanel({
   )
 }
 
+const StudentProfile = dynamic(() => import('./StudentProfile'), { ssr: false })
+
 export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const { confirm, ConfirmDialog } = useConfirm()
   const [students, setStudents] = useState<Student[]>([])
@@ -279,6 +282,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const [dupDeleting, setDupDeleting] = useState(false)
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<Student | null>(null)
+  const [profileId, setProfileId] = useState<number | null>(null)
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState<EditForm>({})
   const [saving, setSaving] = useState(false)
@@ -501,6 +505,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   return (
     <div className="flex gap-6">
       {ConfirmDialog}
+      {profileId !== null && <StudentProfile studentId={profileId} onClose={() => setProfileId(null)} />}
       {/* Left: List */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-4">
@@ -630,7 +635,10 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                         <td className="px-3 py-3 text-center font-semibold text-sm text-amber-700 bg-amber-50/40">
                           {s.school_roll_number ?? <span className="text-gray-300 font-normal text-xs">—</span>}
                         </td>
-                        <td className="px-5 py-3 font-medium text-gray-900">{s.name}</td>
+                        <td className="px-5 py-3 font-medium text-gray-900">
+                          <button type="button" data-testid={`student-name-${s.id}`} aria-label={`Open full profile of ${s.name}`}
+                            onClick={e => { e.stopPropagation(); setProfileId(s.id) }} className="text-left text-violet-700 hover:underline">{s.name}</button>
+                        </td>
                         <td className="px-5 py-3 text-gray-600 text-xs">{s.parent_name || '—'}</td>
                         <td className="px-5 py-3 text-gray-500 text-xs">{s.parent_phone || s.phone || '—'}</td>
                         <td className="px-5 py-3">
@@ -797,6 +805,8 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                   <p className="text-xs text-gray-500 mt-0.5">
                     {selected.grade && selected.section ? `Grade ${selected.grade} – Section ${selected.section}` : ''}
                   </p>
+                  <button type="button" onClick={() => setProfileId(selected.id)} data-testid="student-open-profile"
+                    className="mt-1.5 text-xs font-semibold text-violet-600 border border-violet-200 rounded-lg px-2.5 py-1 hover:bg-violet-50">Open full profile →</button>
                 </div>
               </div>
 

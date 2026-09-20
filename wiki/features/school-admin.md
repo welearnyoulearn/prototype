@@ -106,6 +106,7 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 
 ## Attendance & Academic Calendar (#153)
 
+- **Student profile (360):** click a student's name (Class Management, Student Management, or Attendance → class → student → *Full profile*). Slide-over with talking points for the parent, contacts, attendance, marks, fees, activity; year switcher for past years. Read-only; private to the office.
 - **Attendance → Overview:** KPIs, trend, class ranking, students needing attention, quick student search; tap a class, then a student. **Day register** tab holds the daily class cards.
 - **Attendance → Today panel:** classes marked (Morning/Afternoon), who has NOT marked (with the class teacher to ask), holiday banner, **Mark today as a holiday**, and mistake reports from teachers (resolve when fixed). Day/month/year dashboards use the shared rule and mark holidays.
 - **Academic Calendar:** month grid; add/edit/delete holidays, exams, events, meetings (date or range; audience everyone/staff); weekly-off weekdays. A holiday closes attendance for those dates; warns first if they already have attendance.

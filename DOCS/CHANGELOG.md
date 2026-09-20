@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [version] - YYYY-MM-DD
 
 ### Added
+- **Student 360 profile** (school admin): click a student's name in Class Management or Student Management (or "Full profile" from the attendance dashboard) to open one page with parent contacts, automatic talking points for the parent meeting, attendance, marks (exam-wise, subject-wise, class average, teacher remarks), fees (due/paid/balance, overdue, payments) and learning activity — for any academic year the student was enrolled in. (#158)
 - New feature description (#issue-number)
 
 ### Fixed

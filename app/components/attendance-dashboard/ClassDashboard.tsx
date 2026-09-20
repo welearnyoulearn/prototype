@@ -36,7 +36,10 @@ type Sort = 'lowest' | 'name' | 'absences'
 
 const needsAttention = (s: StudentRow) => (s.band === 'low' && s.marked >= 4) || s.absentStreak >= 3
 
-export default function ClassDashboard({ classId, subtitle, onBack }: { classId: number; subtitle?: string; onBack?: () => void }) {
+export default function ClassDashboard({ classId, subtitle, onBack, onOpenProfile }: {
+  classId: number; subtitle?: string; onBack?: () => void
+  onOpenProfile?: (studentId: number) => void
+}) {
   const currentMonth = todayIST().slice(0, 7)
   const [range, setRange] = useState<RangeKey>('month')
   const [month, setMonth] = useState(currentMonth)
@@ -172,7 +175,7 @@ export default function ClassDashboard({ classId, subtitle, onBack }: { classId:
         </>
       )}
 
-      {open && <StudentAttendanceModal studentId={open.id} name={open.name} onClose={() => setOpen(null)} />}
+      {open && <StudentAttendanceModal studentId={open.id} name={open.name} onClose={() => setOpen(null)} onOpenProfile={onOpenProfile} />}
     </div>
   )
 }
