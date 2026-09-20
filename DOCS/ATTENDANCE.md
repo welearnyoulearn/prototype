@@ -28,10 +28,24 @@ Any teacher can mark **any class**, **Morning** or **Afternoon**. The **first su
 
 | Portal | Screen | Source |
 |---|---|---|
-| Teacher | **Attendance**: class picker (each class shows Morning/Afternoon state and who marked) → mark sheet (review → submit) or read-only locked view; **History**; **School Calendar** | `/api/attendance/overview`, `/api/attendance?view=sheet`, `POST/PUT /api/attendance` |
-| School admin | **Attendance**: *Today* panel (classes marked / not marked with teacher to ask, holiday banner, "Mark today as a holiday", teachers' mistake reports), day/month/year dashboards, exports · **Academic Calendar**: month grid, add/edit/delete, audience, weekly-off days | `/api/attendance/analytics`, `/api/attendance/report`, `/api/school-calendar` |
+| Teacher | **Attendance**: **My class** dashboard (class teacher only) · class picker (each class shows Morning/Afternoon state and who marked) → mark sheet (review → submit) or read-only locked view; **History**; **School Calendar** | `/api/attendance/overview`, `/api/attendance?view=sheet`, `POST/PUT /api/attendance` |
+| School admin | **Attendance → Overview** dashboard (school → class → student) · **Day register**: *Today* panel (classes marked / not marked with teacher to ask, holiday banner, "Mark today as a holiday", teachers' mistake reports), day/month/year dashboards, exports · **Academic Calendar**: month grid, add/edit/delete, audience, weekly-off days | `/api/attendance/analytics`, `/api/attendance/report`, `/api/school-calendar` |
 | Parent | **Attendance** for the selected child only (month calendar, month + year %, six-month trend, upcoming holidays) · **School Calendar** | `/api/parent/attendance` |
 | Student | **My Attendance** (same component) · **School Calendar** · dashboard ring | `/api/student/attendance` |
+
+### The dashboards (what each role sees)
+
+| Role | Question it answers | What is on screen |
+|---|---|---|
+| **School admin** — *Attendance → Overview* | "How is the school doing, and where do I need to act?" | Period switch (last 7 days / month / school year) · KPIs (school %, students below 75%, on track, school days) · today strip (classes marked, who has not, absentee CSV) · "mistake reports waiting" alert · trend chart · students-by-band bar · **class list** (lowest first, tap to open) · **students who need attention** · quick student search |
+| **Admin or class teacher** — a class | "Which students in this class need help?" | Class %, need-attention count, absent today, trend chart, weekday pattern ("Mondays are the problem"), band bar, **student list** (filter: all / need attention / absent today, search, sort) — tap a student for their calendar |
+| **Class teacher** — *Attendance → My class* | Same as above, for their own class only | Only classes where they are the class teacher; subject teachers do not get this tab (they mark and look back) |
+| **Parent** | "How is my child doing?" | Month / year %, days absent, full-days-in-a-row streak, colour calendar (tap a day), trend chart, upcoming holidays, plain-language message |
+| **Student** | Same, for themself | Same screen as the parent's |
+
+Reading rules used by every dashboard: **90%+ green, 75–89% amber, below 75% red**. A student needs **4 marked sessions** before a band is shown ("too early to tell" until then), so one absence on day one is not called an emergency. *Need attention* = below 75% (with enough sessions) **or** absent 3+ school days in a row.
+
+Data: `GET /api/attendance/dashboard?scope=school|class|my-classes|find` (`lib/attendanceDashboard.ts`). School view = school admin only; class view = school admin or *that class's* class teacher; everything is school-scoped.
 
 Parent and student use the same `AttendanceCalendar` component; teacher, student and parent share the read-only `SchoolCalendarView`.
 
@@ -55,7 +69,8 @@ Identity always comes from the signed login, never from the request. Students an
 | `PUT /api/attendance` | marking teacher (same day), admin | correct a session; `403 LOCKED` otherwise |
 | `GET /api/attendance?view=student&student_id` · `?view=class-month` | teacher, admin | the shared numbers (identical to parent/student apps) |
 | `POST /api/attendance/report` · `GET/PATCH` | teacher · admin | "report a mistake" and resolve |
-| `GET /api/attendance/analytics` | admin | rolling / month / year dashboards |
+| `GET /api/attendance/dashboard?scope=…&range=week\|month\|year` | admin (school, class, find) · class teacher (own class) | the dashboards above |
+| `GET /api/attendance/analytics` | admin | older rolling / month / year analytics (kept for reports) |
 | `GET /api/parent/attendance?student_id&month` | parent (own child) | month calendar + summaries |
 | `GET /api/student/attendance?month` | student (self) | same shape |
 | `GET/POST /api/school-calendar`, `PATCH/DELETE /api/school-calendar/[id]`, `PUT /api/school-calendar/settings` | read: all roles · write: admin | Academic Calendar |
@@ -76,7 +91,7 @@ Identity always comes from the signed login, never from the request. Students an
 ## Testing
 
 - `e2e/attendance-rules.spec.ts` — the rules (percentages, holidays, dates). No server needed.
-- `e2e/workflow-attendance.spec.ts` — the whole feature end to end, 27 tests: permissions and isolation, locking incl. a simultaneous-submit race, corrections, reports, calendar security, holidays/weekly off, identical numbers in all four portals, exports, and real-browser checks for teacher, admin, parent and student (phone width too).
+- `e2e/workflow-attendance.spec.ts` — the whole feature end to end, 34 tests: permissions and isolation, locking incl. a simultaneous-submit race, corrections, reports, calendar security, holidays/weekly off, identical numbers in all four portals, exports, and real-browser checks for teacher, admin, parent and student (phone width too), and the dashboards: access rules, that class rows add up to the school figure, and that per-student numbers equal what the parent and student see (34 tests).
 
 That spec creates a school, teachers, students, parents and a second school, and deletes them at the end. **Run it against a throwaway database, not a shared one.** Recommended setup:
 

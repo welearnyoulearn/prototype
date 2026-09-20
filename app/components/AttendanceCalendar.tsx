@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { TrendChart } from './attendance-dashboard/parts'
 import {
   todayIST, weekdayOf, monthBounds, LOW_ATTENDANCE_PCT, GOOD_ATTENDANCE_PCT,
   type AttendanceBand, type CalendarDay, type DayStatus,
@@ -39,12 +40,13 @@ const DAY_STYLE: Record<DayStatus, { cell: string; label: string }> = {
 const BAND_TEXT: Record<AttendanceBand, string> = {
   good: 'text-green-600', watch: 'text-amber-600', low: 'text-red-600', none: 'text-gray-400',
 }
-const BAND_BAR: Record<AttendanceBand, string> = {
-  good: 'bg-green-500', watch: 'bg-amber-400', low: 'bg-red-500', none: 'bg-gray-200',
-}
-
-function bandMessage(pct: number | null, who: 'parent' | 'student'): string {
+function bandMessage(pct: number | null, who: 'parent' | 'student' | 'staff'): string {
   if (pct === null) return 'No attendance has been recorded this month yet.'
+  if (who === 'staff') {
+    if (pct >= GOOD_ATTENDANCE_PCT) return 'Attendance is good this month.'
+    if (pct >= LOW_ATTENDANCE_PCT) return 'Attendance is a little low — keep an eye on it.'
+    return `Attendance is below ${LOW_ATTENDANCE_PCT}% — consider speaking with the family.`
+  }
   if (pct >= GOOD_ATTENDANCE_PCT) return who === 'parent' ? 'Excellent attendance this month. Keep it up!' : 'Excellent attendance this month. Keep it up!'
   if (pct >= LOW_ATTENDANCE_PCT) return who === 'parent' ? 'Attendance is a little low. Try to avoid further absences.' : 'Your attendance is a little low. Try not to miss more days.'
   return who === 'parent'
@@ -70,7 +72,7 @@ const sessionLabel = (s: string | null) => (s ? s.charAt(0).toUpperCase() + s.sl
 export default function AttendanceCalendar({ endpoint, who }: {
   /** e.g. "/api/parent/attendance?student_id=12" or "/api/student/attendance" — `month` is appended. */
   endpoint: string
-  who: 'parent' | 'student'
+  who: 'parent' | 'student' | 'staff'
 }) {
   const currentMonth = todayIST().slice(0, 7)
   const [month, setMonth] = useState(currentMonth)
@@ -106,6 +108,14 @@ export default function AttendanceCalendar({ endpoint, who }: {
 
   const selectedDay = view?.month.days.find(d => d.date === selected) ?? null
 
+  // Days in a row (up to the latest marked day this month) with both sessions present.
+  const streak = (() => {
+    const marked = (view?.month.days ?? []).filter(d => ['present', 'late', 'absent', 'half'].includes(d.status))
+    let n = 0
+    for (let i = marked.length - 1; i >= 0 && marked[i].status === 'present'; i--) n++
+    return n
+  })()
+
   // Leading blanks so the 1st lands on the right weekday.
   const lead = weekdayOf(monthBounds(month).from)
 
@@ -140,7 +150,7 @@ export default function AttendanceCalendar({ endpoint, who }: {
       {view && (
         <>
           {/* Summary */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="bg-white border border-gray-200 rounded-2xl p-4 text-center">
               <p data-testid="att-summary-month-pct" className={`text-3xl font-black ${BAND_TEXT[view.month.summary.band]}`}>
                 {view.month.summary.pct === null ? '—' : `${view.month.summary.pct}%`}
@@ -159,6 +169,11 @@ export default function AttendanceCalendar({ endpoint, who }: {
               <p data-testid="att-summary-absent-days" className={`text-3xl font-black ${view.month.absentDays > 0 ? 'text-red-600' : 'text-gray-800'}`}>{view.month.absentDays}</p>
               <p className="text-xs text-gray-500 mt-1">Days absent</p>
               {view.month.halfDays > 0 && <p className="text-[11px] text-gray-400">+ {view.month.halfDays} half day{view.month.halfDays > 1 ? 's' : ''}</p>}
+            </div>
+            <div className="bg-white border border-gray-200 rounded-2xl p-4 text-center">
+              <p data-testid="att-summary-streak" className={`text-3xl font-black ${streak >= 5 ? 'text-green-600' : 'text-gray-800'}`}>{streak}</p>
+              <p className="text-xs text-gray-500 mt-1">Full days in a row</p>
+              <p className="text-[11px] text-gray-400">{view.month.summary.late > 0 ? `${view.month.summary.late} late this month` : 'no late arrivals'}</p>
             </div>
           </div>
           <p data-testid="att-summary-message" className={`text-sm rounded-xl px-4 py-2.5 border ${
@@ -222,17 +237,10 @@ export default function AttendanceCalendar({ endpoint, who }: {
 
           {/* Trend */}
           {view.trend.length > 1 && (
-            <div className="bg-white border border-gray-200 rounded-2xl p-4">
-              <p className="text-sm font-semibold text-gray-800 mb-3">Last months</p>
-              <div className="flex items-end gap-2 h-28" data-testid="att-trend">
-                {view.trend.map(t => (
-                  <div key={t.month} className="flex-1 flex flex-col items-center justify-end h-full gap-1">
-                    <span className="text-[11px] font-semibold text-gray-600">{t.summary.pct === null ? '—' : `${t.summary.pct}%`}</span>
-                    <div className={`w-full rounded-t-md ${BAND_BAR[t.summary.band]}`} style={{ height: `${Math.max(t.summary.pct ?? 0, 4)}%` }} />
-                    <span className="text-[10px] text-gray-400">{MONTH_NAMES[Number(t.month.slice(5)) - 1].slice(0, 3)}</span>
-                  </div>
-                ))}
-              </div>
+            <div className="bg-white border border-gray-200 rounded-2xl p-4" data-testid="att-trend">
+              <p className="text-sm font-semibold text-gray-800 mb-1">Last months</p>
+              <p className="text-xs text-gray-400 mb-2">Attendance % each month — green line is 90%, red is 75%.</p>
+              <TrendChart bucket="month" points={view.trend.map(t => ({ key: t.month, ...t.summary }))} />
             </div>
           )}
 

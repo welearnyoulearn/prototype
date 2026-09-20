@@ -43,7 +43,7 @@ test.describe.serial('Student attendance — all portals, end to end', () => {
   let platformCookie: string
   let schoolId = 0, schoolBId = 0
   let classA = 0, classB = 0, classC = 0
-  let teacherAName = '', teacherBName = ''
+  let teacherAName = '', teacherBName = '', teacherAId = 0
   let owner: APIRequestContext, ownerB: APIRequestContext
   let teacherA: APIRequestContext, teacherB: APIRequestContext
   let student: APIRequestContext, parent: APIRequestContext, parentOther: APIRequestContext
@@ -108,7 +108,7 @@ test.describe.serial('Student attendance — all portals, end to end', () => {
     expect(bulk.status, JSON.stringify(bulk.body)).toBe(201)
     expect(bulk.body.teachers, JSON.stringify(bulk.body)).toHaveLength(2)
     const tList = bulk.body.teachers as { id: number; name: string }[]
-    teacherAName = tList[0].name; teacherBName = tList[1].name
+    teacherAName = tList[0].name; teacherBName = tList[1].name; teacherAId = tList[0].id
     const teacherLogin = async (t: { id: number }, email: string) => {
       const reset = await call(owner, 'post', `/api/teachers/${t.id}/reset-credentials`)
       expect(reset.status).toBe(200)
@@ -643,6 +643,8 @@ test.describe.serial('Student attendance — all portals, end to end', () => {
 
     // Attendance page: progress, and the mistake report the teacher just sent.
     await page.goto('/school-admin?tab=attendance')
+    await expect(page.getByTestId('att-open-reports')).toBeVisible({ timeout: 60000 })   // Overview flags the waiting report
+    await page.getByTestId('attendance-tab-daily').click()
     await expect(page.getByTestId('attendance-today-panel')).toBeVisible({ timeout: 60000 })
     await expect(page.getByTestId('attendance-reports')).toContainText('Asha was actually present')
 
@@ -692,6 +694,171 @@ test.describe.serial('Student attendance — all portals, end to end', () => {
     expect(await page.locator('body').innerText()).not.toContain('Bala')
     await page.setViewportSize({ width: 375, height: 740 })          // now the same screen on a phone
     await expect(page.getByTestId('att-cal-day-' + today)).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+    await context.close()
+  })
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // Dashboards — school admin (school → class → student) and class teacher
+  // ═════════════════════════════════════════════════════════════════════════
+  const dash = (ctx: APIRequestContext, qs: string) => call(ctx, 'get', `/api/attendance/dashboard?${qs}`)
+
+  test('28. Dashboard access: admin sees the school, only THE class teacher sees a class, everyone else is refused', async () => {
+    const month = today.slice(0, 7)
+    for (const who of [anon.ctx!, student, parent]) expect((await dash(who, 'scope=school&range=month')).status).toBe(401)
+    expect((await dash(owner, 'scope=school&range=bogus')).status).toBe(400)
+    expect((await dash(owner, 'scope=class&range=month')).status).toBe(400)                              // class_id missing
+    expect((await dash(ownerB, `scope=class&class_id=${classA}&range=month`)).status).toBe(404)          // another school's class
+
+    // A teacher who is not the class teacher: no school view, no class view, no search, an empty "my classes".
+    expect((await dash(teacherB, 'scope=school&range=month')).status).toBe(403)
+    expect((await dash(teacherB, 'scope=find&q=Asha')).status).toBe(403)
+    expect((await dash(teacherB, `scope=class&class_id=${classA}&range=month&month=${month}`)).status).toBe(403)
+    expect((await dash(teacherB, 'scope=my-classes')).body.classes).toEqual([])
+
+    // Make Ms Rao the class teacher of 10-A → now she (and only she) can open it.
+    const assign = await call(owner, 'put', `/api/classes/${classA}`, { class_teacher_id: teacherAId })
+    expect(assign.status, JSON.stringify(assign.body)).toBe(200)
+    expect((await dash(teacherA, 'scope=my-classes')).body.classes.map((c: { id: number }) => c.id)).toEqual([classA])
+    expect((await dash(teacherA, `scope=class&class_id=${classA}&range=month`)).status).toBe(200)
+    expect((await dash(teacherA, `scope=class&class_id=${classB}&range=month`)).status).toBe(403)       // not hers
+    expect((await dash(teacherB, `scope=class&class_id=${classA}&range=month`)).status).toBe(403)       // still not Mr Khan's
+    expect((await dash(teacherA, 'scope=school&range=month')).status).toBe(403)
+  })
+
+  test('29. School dashboard: the numbers add up and match every other screen', async () => {
+    const month = today.slice(0, 7)
+    const school = (await dash(owner, `scope=school&range=month&month=${month}`)).body
+    const classRow = school.classes.find((c: { classId: number }) => c.classId === classA)
+    // Same fact as test 19: 10-A attended 4 of 6 sessions = 67%.
+    expect(classRow).toMatchObject({ attended: 4, marked: 6, pct: 67, students: 3, classTeacher: teacherAName })
+    // Every class row adds up to the school figure, every student is in exactly one band.
+    const sum = (k: 'marked' | 'attended') => school.classes.reduce((n: number, c: Record<string, number>) => n + c[k], 0)
+    expect(school.school.marked).toBe(sum('marked'))
+    expect(school.school.attended).toBe(sum('attended'))
+    expect(school.school.pct).toBe(Math.round((school.school.attended / school.school.marked) * 100))
+    const d = school.distribution
+    expect(d.good + d.watch + d.low + d.none).toBe(school.students)
+    expect(school.students).toBe(5)
+    expect(school.trend.length).toBeGreaterThan(0)
+    const todayPoint = school.trend.find((t: { key: string }) => t.key === today)
+    expect(todayPoint.marked).toBeGreaterThanOrEqual(6)
+    // Holidays are excluded: yesterday was declared a holiday and must not appear in the trend.
+    expect(school.trend.map((t: { key: string }) => t.key)).not.toContain(yesterday)
+    // Week and year views answer too, and "year" buckets by month.
+    expect((await dash(owner, 'scope=school&range=week')).status).toBe(200)
+    const year = (await dash(owner, 'scope=school&range=year')).body
+    expect(year.range.bucket).toBe('month')
+    expect(year.school.marked).toBeGreaterThanOrEqual(school.school.marked)
+    // Student search: finds by name, school-scoped, injection-safe.
+    const found = (await dash(owner, 'scope=find&q=Asha')).body.students
+    expect(found.map((s: { id: number }) => s.id)).toEqual([ids.Asha])
+    expect((await dash(ownerB, 'scope=find&q=Asha')).body.students).toEqual([])
+    expect((await dash(owner, `scope=find&q=${encodeURIComponent("a%' OR '1'='1")}`)).status).toBe(200)
+  })
+
+  test('30. Class dashboard: per-student numbers equal what the parent and student see', async () => {
+    const month = today.slice(0, 7)
+    const cls = (await dash(teacherA, `scope=class&class_id=${classA}&range=month&month=${month}`)).body
+    expect(cls.summary).toMatchObject({ attended: 4, marked: 6, pct: 67 })
+    expect(cls.students).toHaveLength(3)
+    const byName = (n: string) => cls.students.find((s: { id: number }) => s.id === ids[n])
+    // The very same summary the parent's screen shows for Asha.
+    const viaParent = (await call(parent, 'get', `/api/parent/attendance?student_id=${ids.Asha}&month=${month}`)).body
+    expect(byName('Asha')).toMatchObject({ present: viaParent.month.summary.present, absent: viaParent.month.summary.absent, marked: viaParent.month.summary.marked, pct: viaParent.month.summary.pct })
+    expect(byName('Bala')).toMatchObject({ pct: 100, late: 1 })
+    expect(byName('Chitra')).toMatchObject({ pct: 50, absentDays: 1 })
+    // Today: Asha and Chitra were absent for one session; Bala only late.
+    expect(byName('Asha').today).toBe('mixed'); expect(byName('Chitra').today).toBe('mixed'); expect(byName('Bala').today).toBe('late')
+    // Only 2 sessions are marked so far — too early to put anyone in a band (needs 4), same rule as the school view.
+    expect(cls.distribution).toMatchObject({ good: 0, watch: 0, low: 0, none: 3 })
+    // Admin sees the identical class view.
+    const viaAdmin = (await dash(owner, `scope=class&class_id=${classA}&range=month&month=${month}`)).body
+    expect(viaAdmin.students).toEqual(cls.students)
+    expect(viaAdmin.summary).toEqual(cls.summary)
+  })
+
+  test('31. A student with too few sessions is not flagged "at risk"; a normal day is not a holiday', async () => {
+    const school = (await dash(owner, `scope=school&range=month&month=${today.slice(0, 7)}`)).body
+    // Asha is at 50% but has only 2 sessions marked — too little to call it a pattern.
+    expect(school.attention.map((s: { id: number }) => s.id)).not.toContain(ids.Asha)
+    const cls = (await dash(owner, `scope=class&class_id=${classA}&range=month`)).body
+    expect(cls.todayNonWorking).toBeNull()
+  })
+
+  test('32. ADMIN (browser): overview → open a class → open a student → back → quick student search', async ({ browser }) => {
+    test.setTimeout(180000)
+    const context = await browserAs(browser, owner)
+    const page = await context.newPage()
+    await page.goto('/school-admin?tab=attendance')
+    await expect(page.getByTestId('att-kpi-school-pct')).toBeVisible({ timeout: 60000 })
+    await expect(page.getByTestId('att-distribution')).toBeVisible()
+
+    await page.getByTestId(`att-class-row-${classA}`).click()
+    await expect(page.getByTestId('att-class-dashboard')).toBeVisible()
+    await expect(page.getByTestId('att-kpi-class-pct')).toHaveText('67%')
+    await expect(page.getByTestId(`att-student-row-${ids.Chitra}`)).toContainText('50%')
+
+    // Filter + search work
+    await page.getByTestId('att-filter-today').click()
+    await expect(page.getByTestId(`att-student-row-${ids.Asha}`)).toBeVisible()
+    await page.getByTestId('att-filter-all').click()
+    await page.getByTestId('att-student-search').fill('Bala')
+    await expect(page.getByTestId(`att-student-row-${ids.Bala}`)).toBeVisible()
+    await expect(page.getByTestId(`att-student-row-${ids.Asha}`)).toHaveCount(0)
+    await page.getByTestId('att-student-search').fill('')
+
+    // Student → their calendar (same component the parent sees); Esc closes
+    await page.getByTestId(`att-student-row-${ids.Asha}`).click()
+    await expect(page.getByTestId('att-student-modal')).toBeVisible()
+    await expect(page.getByTestId('att-summary-month-pct')).toHaveText('50%')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('att-student-modal')).toHaveCount(0)
+
+    await page.getByTestId('att-dash-back').click()
+    await expect(page.getByTestId('att-classes-card')).toBeVisible()
+
+    // Quick search for a student anywhere in the school
+    await page.getByTestId('att-find-student').fill('Esha')
+    await page.getByTestId(`att-find-result-${ids.Esha}`).click()
+    await expect(page.getByTestId('att-student-modal')).toBeVisible()
+    await page.getByTestId('att-student-modal-close').click()
+
+    // The day register is still one click away
+    await page.getByTestId('attendance-tab-daily').click()
+    await expect(page.getByTestId('attendance-day-stats').or(page.getByTestId('attendance-holiday-banner'))).toBeVisible()
+    await context.close()
+  })
+
+  test('33. CLASS TEACHER (browser): "My class" dashboard appears for the class teacher only', async ({ browser }) => {
+    test.setTimeout(180000)
+    const ctxA = await browserAs(browser, teacherA)
+    const pageA = await ctxA.newPage()
+    await pageA.goto('/teacher?tab=attendance')
+    await pageA.getByTestId('att-mode-mine').click()
+    await expect(pageA.getByTestId('att-class-dashboard')).toBeVisible({ timeout: 60000 })
+    await expect(pageA.getByTestId('att-kpi-class-pct')).toHaveText('67%')
+    await expect(pageA.getByTestId('att-student-list')).toBeVisible()
+    await ctxA.close()
+
+    const ctxB = await browserAs(browser, teacherB)
+    const pageB = await ctxB.newPage()
+    await pageB.goto('/teacher?tab=attendance')
+    await expect(pageB.getByTestId('att-mode-history')).toBeVisible({ timeout: 60000 })
+    await expect(pageB.getByTestId('att-mode-mine')).toHaveCount(0)      // subject teacher: no class dashboard
+    await ctxB.close()
+  })
+
+  test('34. PARENT (browser): the richer view — streak and chart — fits a phone', async ({ browser }) => {
+    test.setTimeout(180000)
+    test.skip(!attendanceFeatureOn, 'The attendance plan feature is off in this database (set E2E_ENABLE_PLAN_FEATURES=1 on a throwaway one)')
+    const context = await browser.newContext({ baseURL: BASE, viewport: { width: 375, height: 740 } })
+    await context.addCookies((await parent.storageState()).cookies)
+    const page = await context.newPage()
+    await page.goto('/parent')
+    await page.getByTestId('parent-menu-toggle').click()                 // on a phone the menu is behind the ☰ button
+    await page.getByRole('button', { name: 'Attendance', exact: true }).first().click()
+    await expect(page.getByTestId('att-summary-streak')).toBeVisible({ timeout: 60000 })
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
     await context.close()
   })
