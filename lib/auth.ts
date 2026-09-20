@@ -1,12 +1,16 @@
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
-import { randomInt } from 'crypto'
-import { cookies } from 'next/headers'
+import { randomInt, randomUUID } from 'crypto'
+import { cookies, headers } from 'next/headers'
 import { NextRequest } from 'next/server'
 import pool from './db'
 import { JWT_SECRET, COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from './auth-constants'
 
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 7 // 7 days — teacher/student/parent/platform cookies
+
+// School-staff sessions are short-lived and server-tracked (user_sessions table).
+export const SESSION_IDLE_MINUTES = 20   // no authenticated activity for this long → logged out
+export const SESSION_MAX_HOURS    = 12   // hard cap, however active the user is
 
 // ─── Cookie names ─────────────────────────────────────────────────────────────
 export { COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT }
@@ -14,11 +18,12 @@ export { COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_P
 // ─── JWT Payload types ────────────────────────────────────────────────────────
 export type JWTPayload = {
   userId: number
-  role: 'platform_admin' | 'school_admin'
+  role: 'platform_admin' | 'school_admin' | 'principal' | 'vice_principal'
   schoolId?: number
   schoolCode?: string
   firstLogin: boolean
   profileCompleted: boolean
+  sid?: string  // user_sessions.id — required for school-staff cookies, absent for platform admin
 }
 
 export type TeacherJWTPayload = {
@@ -95,8 +100,8 @@ export function generateSchoolCode(schoolName: string, schoolId: number): string
 }
 
 // ─── Generic JWT helpers ──────────────────────────────────────────────────────
-function sign<T extends object>(payload: T): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' })
+function sign<T extends object>(payload: T, expiresIn: jwt.SignOptions['expiresIn'] = '7d'): string {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn })
 }
 
 function verify<T extends object>(token: string): T | null {
@@ -109,13 +114,14 @@ function verify<T extends object>(token: string): T | null {
   }
 }
 
-async function setCookie(name: string, value: string) {
+// persistent=false writes a session cookie (no maxAge) that the browser drops on close.
+async function setCookie(name: string, value: string, persistent = true) {
   const cookieStore = await cookies()
   cookieStore.set(name, value, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: COOKIE_MAX_AGE,
+    ...(persistent ? { maxAge: COOKIE_MAX_AGE } : {}),
     path: '/',
   })
 }
@@ -126,26 +132,91 @@ async function clearCookie(name: string) {
 }
 
 // ─── Admin / Platform JWT ─────────────────────────────────────────────────────
-export function signToken(payload: JWTPayload): string         { return sign(payload) }
+export function signToken(payload: JWTPayload, expiresIn?: jwt.SignOptions['expiresIn']): string { return sign(payload, expiresIn) }
 export function verifyToken(token: string): JWTPayload | null  { return verify<JWTPayload>(token) }
 // COOKIE_ADMIN is for school-side staff only; Platform Admin uses COOKIE_PLATFORM
 // (see lib/auth-constants.ts) so the two portals can't clobber each other's session.
-export async function setAuthCookie(payload: JWTPayload)       { await setCookie(COOKIE_ADMIN, signToken(payload)) }
+// School-staff cookie: a browser-session cookie carrying a JWT that expires with the
+// absolute session cap. Real validity is decided server-side in getSession().
+export async function setAuthCookie(payload: JWTPayload) {
+  await setCookie(COOKIE_ADMIN, signToken(payload, `${SESSION_MAX_HOURS}h`), false)
+}
 export async function clearAuthCookie()                        { await clearCookie(COOKIE_ADMIN) }
 export async function setPlatformAuthCookie(payload: JWTPayload) { await setCookie(COOKIE_PLATFORM, signToken(payload)) }
 export async function clearPlatformAuthCookie()                  { await clearCookie(COOKIE_PLATFORM) }
 
-export async function getSession(): Promise<JWTPayload | null> {
-  const cookieStore = await cookies()
-  const token = cookieStore.get(COOKIE_ADMIN)?.value
-  if (!token) return null
-  return verifyToken(token)
+// ─── School-staff sessions (server-side, revocable) ───────────────────────────
+export async function createStaffSession(userId: number): Promise<string> {
+  const sid = randomUUID()
+  const userAgent = (await headers()).get('user-agent')?.slice(0, 300) ?? null
+  await pool.query(
+    `INSERT INTO user_sessions (id, user_id, expires_at, user_agent)
+     VALUES ($1, $2, NOW() + make_interval(hours => $3), $4)`,
+    [sid, userId, SESSION_MAX_HOURS, userAgent]
+  )
+  return sid
 }
 
-export function getSessionFromRequest(req: NextRequest): JWTPayload | null {
-  const token = req.cookies.get(COOKIE_ADMIN)?.value
+export async function revokeSession(sid: string): Promise<void> {
+  await pool.query(`UPDATE user_sessions SET revoked_at = NOW() WHERE id = $1 AND revoked_at IS NULL`, [sid])
+}
+
+// Ends every live session of a user (deactivation, password reset). exceptSid keeps
+// the caller's own session alive when they change their own password.
+export async function revokeUserSessions(userId: number, exceptSid?: string): Promise<void> {
+  await pool.query(
+    `UPDATE user_sessions SET revoked_at = NOW()
+     WHERE user_id = $1 AND revoked_at IS NULL AND ($2::uuid IS NULL OR id <> $2::uuid)`,
+    [userId, exceptSid ?? null]
+  )
+}
+
+// Signature-only read of the cookie's session id — used by login/logout to end the
+// previous session even when it has already idled out.
+export async function getSessionIdFromCookie(): Promise<string | null> {
+  const token = (await cookies()).get(COOKIE_ADMIN)?.value
   if (!token) return null
-  return verifyToken(token)
+  return verifyToken(token)?.sid ?? null
+}
+
+async function validateStaffSession(touch: boolean): Promise<JWTPayload | null> {
+  const token = (await cookies()).get(COOKIE_ADMIN)?.value
+  if (!token) return null
+  const payload = verifyToken(token)
+  if (!payload?.sid) return null
+
+  const { rows: [row] } = await pool.query<{ stale: boolean }>(
+    `SELECT (s.last_seen_at < NOW() - INTERVAL '30 seconds') AS stale
+     FROM user_sessions s
+     JOIN users u ON u.id = s.user_id
+     WHERE s.id = $1 AND s.user_id = $2
+       AND s.revoked_at IS NULL
+       AND s.expires_at > NOW()
+       AND s.last_seen_at > NOW() - make_interval(mins => $3)
+       AND COALESCE(u.status, 'active') <> 'inactive'`,
+    [payload.sid, payload.userId, SESSION_IDLE_MINUTES]
+  )
+  if (!row) return null
+
+  if (touch && row.stale) {
+    await pool.query(`UPDATE user_sessions SET last_seen_at = NOW() WHERE id = $1`, [payload.sid])
+  }
+  return payload
+}
+
+// Validates the school-staff session: signed cookie, session row live (not revoked,
+// not idle, not past the absolute cap) and the user still active.
+// A normal call counts as user activity and pushes the idle timer forward. Background
+// pollers (e.g. the notification bell) must pass { passive: true } — otherwise an
+// abandoned tab would keep its session alive forever.
+export async function getSession(opts: { passive?: boolean } = {}): Promise<JWTPayload | null> {
+  return validateStaffSession(!opts.passive)
+}
+
+// Explicit activity ping, used by the browser heartbeat (POST /api/auth/session) for
+// stretches where the user is reading/typing without triggering any API call.
+export async function touchSession(): Promise<JWTPayload | null> {
+  return validateStaffSession(true)
 }
 
 export async function getPlatformSession(): Promise<JWTPayload | null> {

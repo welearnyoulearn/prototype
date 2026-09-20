@@ -12,9 +12,9 @@ async function enableFeedbackManagement(cookie: string, tier: string) {
   if (!res.ok) throw new Error(`Enable feedback-management failed — status ${res.status}: ${await res.text()}`)
 }
 
-async function loginAsSchoolAdmin(page: Page, schoolCode: string, schoolPass: string) {
+async function loginAsSchoolAdmin(page: Page, adminEmail: string, schoolPass: string) {
   await page.goto('/login?role=school')
-  await page.getByPlaceholder(/School ID or email/).fill(schoolCode)
+  await page.getByPlaceholder('you@school.com').fill(adminEmail)
   await page.getByPlaceholder('Enter your password').fill(schoolPass)
   await page.getByTestId('auth-submit-btn').click()
   await page.waitForURL(/\/school-admin|\/profile-setup|\/change-password/, { timeout: 10000 })
@@ -41,7 +41,7 @@ async function loginAsSchoolAdmin(page: Page, schoolCode: string, schoolPass: st
 }
 
 test.describe.serial('Feedback Management Workflow', () => {
-  let schoolCode: string
+  let adminEmail: string
   let schoolPass: string
   let schoolId: number
   let feedbackUrl: string
@@ -49,7 +49,7 @@ test.describe.serial('Feedback Management Workflow', () => {
   test.beforeAll(async () => {
     const platformCookie = await platformAdminCookie()
     const school = await createSchool(platformCookie)
-    schoolCode = school.school_code
+    adminEmail = school.email
     schoolPass = school.temp_password
     schoolId = school.id
 
@@ -58,7 +58,7 @@ test.describe.serial('Feedback Management Workflow', () => {
   })
 
   test('1. School Admin — find the public feedback link in Settings & QR', async ({ page }) => {
-    await loginAsSchoolAdmin(page, schoolCode, schoolPass)
+    await loginAsSchoolAdmin(page, adminEmail, schoolPass)
 
     await page.getByRole('button', { name: /feedback/i }).first().click()
     await expect(page.getByTestId('feedback-tab-settings')).toBeVisible({ timeout: 10000 })
@@ -92,7 +92,7 @@ test.describe.serial('Feedback Management Workflow', () => {
   })
 
   test('3. School Admin — submission appears in Submissions tab', async ({ page }) => {
-    await loginAsSchoolAdmin(page, schoolCode, schoolPass)
+    await loginAsSchoolAdmin(page, adminEmail, schoolPass)
     await page.getByRole('button', { name: /feedback/i }).first().click()
     await page.getByTestId('feedback-tab-submissions').click()
 
@@ -100,7 +100,7 @@ test.describe.serial('Feedback Management Workflow', () => {
   })
 
   test('4. School Admin — low rating appears as an open issue and can be resolved', async ({ page }) => {
-    await loginAsSchoolAdmin(page, schoolCode, schoolPass)
+    await loginAsSchoolAdmin(page, adminEmail, schoolPass)
     await page.getByRole('button', { name: /feedback/i }).first().click()
     await page.getByTestId('feedback-tab-issues').click()
 

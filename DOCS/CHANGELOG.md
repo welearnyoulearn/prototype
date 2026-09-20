@@ -23,6 +23,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Changed
+- School staff (school admin, principal, vice principal) now sign in with **their own email + password**. The School ID is no longer a login credential; `POST /api/auth/login` takes `{ email, password }`. Every school must be created with an admin email, and older owner accounts without one are backfilled from the school's contact email. (#145)
+- School staff sessions are now tracked server-side (`user_sessions`): logout, deactivation, password reset and logging in as someone else in the same browser all end the session immediately on the server, not just in the browser. Sessions end after 20 minutes without activity or 12 hours in total, and the cookie is dropped when the browser closes (was a 7-day cookie). (#145)
+- Adding a staff member now emails a one-time set-password link valid for 48 hours instead of a temporary password; "Resend Credentials" became "Resend Invite Link" and voids earlier links. (#145)
+- The login page no longer offers "You're still signed in as ... / Continue to Dashboard". It always requires a password and instead shows the **last-used account** (name + email) on that browser; clicking it asks only for the password. Authenticated school-admin pages are sent with `Cache-Control: no-store`. (#145)
+- Platform "Reset Password" for a school now resets only the school's owner account (the onboarding admin) instead of every `school_admin` in the school, so other admins added later keep their own passwords. (#145)
 - `DOCS/openapi.json` regenerated from the route handlers: all 247 paths and 362 operations, grouped into 9 sections and 43 subcategories, each with parameters, request body, responses, accepted sessions, in-handler checks, server-side feature flag and source file. (#131)
 - `/api-docs` now uses Scalar instead of Swagger UI: a sidebar of 9 sections and 43 subcategories, coloured badges showing who can call each route, Inter and JetBrains Mono fonts, and a Test Request panel. Scalar telemetry, Ask AI and MCP export are turned off. (#131)
 - `GET /api/openapi` and `/api-docs` stay public (no sign-in), by product decision. The wildcard `Access-Control-Allow-Origin: *` header was removed, so other sites can't read the spec from a browser. (#131)

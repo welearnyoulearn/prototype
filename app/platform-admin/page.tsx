@@ -80,7 +80,7 @@ export default function PlatformAdmin() {
   const [search, setSearch]               = useState('')
   const [filterTier, setFilterTier]       = useState<string>('all')
   const [highlightId, setHighlightId]     = useState<number | null>(null)
-  const [createdSchool, setCreatedSchool] = useState<{ id: number; name: string; code: string; pass: string } | null>(null)
+  const [createdSchool, setCreatedSchool] = useState<{ id: number; name: string; email: string; pass: string } | null>(null)
   const [copiedCode, setCopiedCode]       = useState<number | null>(null)
   const [changingPlanFor, setChangingPlanFor] = useState<number | null>(null)
   const [sort, setSort] = useState<{ col: SortCol; dir: 'asc' | 'desc' }>({ col: 'joined', dir: 'desc' })
@@ -212,7 +212,7 @@ export default function PlatformAdmin() {
       if (!res.ok) throw new Error(data.error)
       setShowModal(false)
       setForm({ name: '', type: 'Private', city: '', country: '', phone: '', email: '', address: '' })
-      setCreatedSchool({ id: data.id, name: data.name, code: data.school_code, pass: data.temp_password })
+      setCreatedSchool({ id: data.id, name: data.name, email: data.email, pass: data.temp_password })
       setTab('active')
       fetchSchools('active')
       fetchStats()
@@ -977,12 +977,12 @@ export default function PlatformAdmin() {
               </p>
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
                 <div>
-                  <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">School ID (Login)</p>
+                  <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">Admin Email (Login)</p>
                   <div className="flex items-center gap-2">
                     <code className="text-sm font-mono text-amber-900 bg-white border border-amber-200 rounded px-3 py-2 flex-1">
-                      {createdSchool.code}
+                      {createdSchool.email}
                     </code>
-                    <button onClick={() => copyCode(-1, createdSchool.code)}
+                    <button onClick={() => copyCode(-1, createdSchool.email)}
                       className="text-amber-600 hover:text-amber-800 border border-amber-200 rounded px-2 py-2 hover:bg-amber-100 transition-colors">
                       {copiedCode === -1
                         ? <span className="text-xs font-bold">✓</span>

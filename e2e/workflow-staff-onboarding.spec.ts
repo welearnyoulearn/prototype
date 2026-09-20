@@ -4,7 +4,7 @@ import { BASE, platformAdminCookie, createSchool, setSubscription } from './fixt
 // ─── UI helpers ─────────────────────────────────────────────────────────────
 async function uiLogin(page: Page, identifier: string, password: string): Promise<string> {
   await page.goto('/login?role=school')
-  await page.getByPlaceholder(/School ID or email/i).fill(identifier)
+  await page.getByPlaceholder('you@school.com').fill(identifier)
   await page.getByPlaceholder(/password/i).fill(password)
   await page.getByTestId('auth-submit-btn').click()
   await page.waitForURL(/\/change-password|\/school-admin/, { timeout: 30000 })
@@ -124,7 +124,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   const phone = (n: number) => `8${tsSuffix}${String(n).padStart(2, '0')}` // 10 digits, distinct range from student spec's 9-prefix
 
   let schoolId: number
-  let schoolCode: string
+  let adminEmail: string
   let schoolPass: string
   let uiPass = ''
   let adminCookie: string
@@ -149,13 +149,13 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
       address: '1 Test Lane',
     })
     schoolId   = school.id
-    schoolCode = school.school_code
+    adminEmail = school.email
     schoolPass = school.temp_password
 
     await setSubscription(platformCookie, schoolId, 'premium')
 
     const loginRes = await ctx.post('/api/auth/login', {
-      data: { identifier: schoolCode, password: schoolPass },
+      data: { email: adminEmail, password: schoolPass },
     })
     if (!loginRes.ok()) throw new Error(`Setup login failed — status ${loginRes.status()}`)
     const state = await ctx.storageState()
@@ -178,7 +178,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 1. Single staff member — required fields only ────────────────────────
   test('1. Onboard single teacher — required fields only', async ({ page }) => {
     test.setTimeout(240000)
-    uiPass = await uiLogin(page, schoolCode, schoolPass)
+    uiPass = await uiLogin(page, adminEmail, schoolPass)
     await goToStaffOnboarding(page)
 
     await fillStaffRow(page, {
@@ -205,7 +205,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 2. Non-teaching staff — subject not required ─────────────────────────
   test('2. Onboard non-teaching staff — subject not required', async ({ page }) => {
     test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToStaffOnboarding(page)
 
     await fillStaffRow(page, { name: 'Suresh Patel', email: `suresh${ts}@staffschool.com` }, 0)
@@ -222,7 +222,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 3. Multiple rows in one submission ───────────────────────────────────
   test('3. Onboard multiple staff in one submission', async ({ page }) => {
     test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToStaffOnboarding(page)
 
     await fillStaffRow(page, { name: 'Raj Kumar', email: `raj${ts}@staffschool.com`, subject: 'Physics' }, 0)
@@ -238,7 +238,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 4. Client-side validation — missing name blocks submit ───────────────
   test('4. Missing name is blocked before submit', async ({ page }) => {
     test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToStaffOnboarding(page)
 
     // Fill everything except name, submit anyway — the row is silently
@@ -257,7 +257,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 5. Client-side validation — invalid email format ─────────────────────
   test('5. Invalid email format is blocked before submit', async ({ page }) => {
     test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToStaffOnboarding(page)
 
     await fillStaffRow(page, { name: 'Bad Email Test', email: 'not-an-email', subject: 'History' })
@@ -272,7 +272,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 6. Client-side validation — teaching staff missing subject ───────────
   test('6. Teaching staff without a subject is blocked before submit', async ({ page }) => {
     test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToStaffOnboarding(page)
 
     await fillStaffRow(page, { name: 'No Subject Test', email: `nosubject${ts}@staffschool.com` })
@@ -287,7 +287,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 7. Duplicate email within the same batch is rejected per-row ─────────
   test('7. Duplicate email within the same upload batch is rejected', async ({ page }) => {
     test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToStaffOnboarding(page)
 
     const dupEmail = `batchdup${ts}@staffschool.com`
@@ -309,7 +309,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 8. Failed rows are retained in the grid for correction ───────────────
   test('8. Failed row stays in the grid after partial-success submit', async ({ page }) => {
     test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToStaffOnboarding(page)
 
     // Row 0 succeeds; row 1 reuses an email already onboarded in test 1
@@ -333,7 +333,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 9. Cross-school email conflict shows the owning school in the error ──
   test('9. Duplicate email already active at another school is rejected with school name', async ({ page }) => {
     test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToStaffOnboarding(page)
 
     // priya@... was onboarded to THIS school in test 1 — reusing it here
@@ -349,7 +349,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 10. Staff Directory shows onboarded staff, filterable by type ────────
   test('10. Staff Directory lists onboarded staff and filters by type', async ({ page }) => {
     test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToStaffDirectory(page)
 
     await expect(page.getByText('Priya Sharma')).toBeVisible({ timeout: 10000 })
@@ -362,7 +362,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 11. Search by name/employee ID ────────────────────────────────────────
   test('11. Staff Directory search filters by name', async ({ page }) => {
     test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToStaffDirectory(page)
 
     await page.getByTestId('staff-search-input').fill('Raj Kumar')
@@ -373,7 +373,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 12. Edit a staff member's details ─────────────────────────────────────
   test('12. Edit staff details updates the record', async ({ page }) => {
     test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToStaffDirectory(page)
 
     await page.getByTestId('staff-search-input').fill('Raj Kumar')
@@ -393,7 +393,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 13. Deactivate then reactivate ────────────────────────────────────────
   test('13. Deactivate and reactivate a staff member', async ({ page }) => {
     test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToStaffDirectory(page)
 
     await page.getByTestId('staff-search-input').fill('Anita Nair')
@@ -412,7 +412,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 14. Remove a staff member (soft-delete) ───────────────────────────────
   test('14. Remove staff member marks them removed, not hard-deleted', async ({ page }) => {
     test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToStaffDirectory(page)
 
     await page.getByTestId('staff-search-input').fill('Anita Nair')
@@ -432,7 +432,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   // ─── 15. Removed staff's email frees up for reuse ──────────────────────────
   test('15. A removed staff member\'s email can be reused for a new hire', async ({ page }) => {
     test.setTimeout(240000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToStaffOnboarding(page)
 
     // Anita Nair (removed in test 14) freed up her email — the partial

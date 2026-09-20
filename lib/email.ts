@@ -72,32 +72,56 @@ function baseTemplate(accentColor: string, content: { header: string; body: stri
 </body></html>`
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
 function template(accentColor: string, header: string, body: string): string {
   return baseTemplate(accentColor, { header, body })
 }
 
 // ─── 1. School Admin onboarding ───────────────────────────────────────────────
 export async function sendOnboardingEmail(params: {
-  to: string; schoolName: string; schoolCode: string; tempPassword: string; loginUrl: string
+  to: string; schoolName: string; tempPassword: string; loginUrl: string
 }) {
   const html = template('#2563eb',
     `<h1>Welcome to WLYL!</h1><p>Your school has been successfully onboarded.</p>`,
-    `<p class="greeting">Hi there! <strong>${params.schoolName}</strong> is now live on the WLYL platform. Use the credentials below to access your school admin dashboard.</p>
+    `<p class="greeting">Hi there! <strong>${escapeHtml(params.schoolName)}</strong> is now live on the WLYL platform. Use the credentials below to access your school admin dashboard.</p>
     <div class="cred-box">
       <div class="cred-title">Your Login Credentials</div>
-      <div class="cred-row"><span class="cred-label">School ID</span><span class="cred-value">${params.schoolCode}</span></div>
+      <div class="cred-row"><span class="cred-label">Email</span><span class="cred-value">${escapeHtml(params.to)}</span></div>
       <div class="cred-row"><span class="cred-label">Temporary Password</span><span class="cred-value">${params.tempPassword}</span></div>
       <div class="cred-row"><span class="cred-label">Login URL</span><span class="cred-value" style="font-size:12px">${params.loginUrl}</span></div>
     </div>
-    <div class="warning-box">⚠️ This is a temporary password. You will be required to set a new password on your first login.</div>
+    <div class="warning-box">⚠️ This is a temporary password. You will be required to set a new password on your first login. You can then add your principal, vice principal and other staff from the dashboard — each gets their own login.</div>
     <a href="${params.loginUrl}" class="btn">Access School Dashboard →</a>
     <ol class="steps">
       <li>Click the button above or visit the login URL</li>
-      <li>Enter your School ID and the temporary password above</li>
+      <li>Enter your email address and the temporary password above</li>
       <li>Set a new secure password when prompted</li>
       <li>Complete your profile setup and start managing your school</li>
     </ol>`)
   return sendMail(params.to, `Welcome to WLYL — ${params.schoolName} Successfully Onboarded!`, html)
+}
+
+// Invite for an additional school staff member (principal, VP, another admin).
+// Carries a one-time set-password link instead of a password, so nothing usable
+// is ever sitting in an inbox.
+export async function sendStaffInviteEmail(params: {
+  to: string; name: string; roleLabel: string; schoolName: string; inviteUrl: string; hours: number
+}) {
+  const html = template('#2563eb',
+    `<h1>You've been added to ${escapeHtml(params.schoolName)}</h1><p>WLYL School Portal</p>`,
+    `<p class="greeting">Hi <strong>${escapeHtml(params.name)}</strong>, you have been added as <strong>${escapeHtml(params.roleLabel)}</strong> of <strong>${escapeHtml(params.schoolName)}</strong>. Set your password to activate your own login — this link works once and is valid for <strong>${params.hours} hours</strong>.</p>
+    <a href="${params.inviteUrl}" class="btn">Set My Password →</a>
+    <div class="cred-box">
+      <div class="cred-title">Your Login</div>
+      <div class="cred-row"><span class="cred-label">Email</span><span class="cred-value">${escapeHtml(params.to)}</span></div>
+    </div>
+    <div class="warning-box">After setting your password, sign in with this email address. Everything you do in the portal is recorded under your name.</div>
+    <div class="divider"></div>
+    <p style="font-size:12px;color:#9ca3af">If the button doesn't work, copy and paste this link into your browser:<br/><span style="color:#6b7280;word-break:break-all">${params.inviteUrl}</span></p>`)
+  return sendMail(params.to, `Your WLYL ${params.roleLabel} access — ${params.schoolName}`, html)
 }
 
 // ─── 2. Teacher welcome ───────────────────────────────────────────────────────

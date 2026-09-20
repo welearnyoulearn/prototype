@@ -68,7 +68,7 @@ export default function SchoolDetailPage() {
 
   // Reset password
   const [resetting, setResetting]   = useState(false)
-  const [resetCreds, setResetCreds] = useState<{ code: string; pass: string } | null>(null)
+  const [resetCreds, setResetCreds] = useState<{ email: string; pass: string } | null>(null)
 
   // Portal access overrides (student-portal / parent-portal)
   const [portalOverrides, setPortalOverrides] = useState<Record<string, boolean>>({})
@@ -224,7 +224,7 @@ export default function SchoolDetailPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setResetCreds({ code: data.school_code, pass: data.temp_password })
+      setResetCreds({ email: data.email, pass: data.temp_password })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to reset password')
     } finally { setResetting(false) }
@@ -430,7 +430,7 @@ export default function SchoolDetailPage() {
           <div className="px-6 py-5">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
               <div>
-                <p className="text-xs text-gray-400 mb-1">Login ID (School Code)</p>
+                <p className="text-xs text-gray-400 mb-1">School ID (reference only — not a login)</p>
                 <code className="text-sm font-mono text-purple-700 bg-purple-50 border border-purple-100 px-2 py-1 rounded block truncate">
                   {school.school_code || '—'}
                 </code>
@@ -618,8 +618,8 @@ export default function SchoolDetailPage() {
             <div className="px-6 py-5">
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
                 <div>
-                  <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">School ID (Login)</p>
-                  <code className="text-sm font-mono text-amber-900 bg-white border border-amber-200 rounded px-3 py-2 block">{resetCreds.code}</code>
+                  <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">Admin Email (Login)</p>
+                  <code className="text-sm font-mono text-amber-900 bg-white border border-amber-200 rounded px-3 py-2 block">{resetCreds.email}</code>
                 </div>
                 <div>
                   <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">New Temporary Password</p>
