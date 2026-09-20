@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useRef, useState, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import StudentSyllabus from '../../student/components/StudentSyllabus'
 import { useFeature } from '@/lib/features-context'
 import { GRADE_SEQUENCE } from '@/lib/grades'
@@ -18,6 +19,8 @@ type Student = { id: number; name: string; roll_number: string; email: string; p
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 // Returns true when teacher has no grade restriction OR their restriction includes this grade
+const StudentProfile = dynamic(() => import('./StudentProfile'), { ssr: false })
+
 function canTeachGrade(teachesGrades: string | null | undefined, grade: string): boolean {
   if (!teachesGrades || !teachesGrades.trim()) return true
   return teachesGrades.split(',').map(g => g.trim()).includes(grade.trim())
@@ -461,6 +464,7 @@ function ClassDetail({
   const [editTeacher, setEditTeacher] = useState('')
   const [students, setStudents] = useState<Student[]>([])
   const [studLoading, setStudLoading] = useState(false)
+  const [profileId, setProfileId] = useState<number | null>(null)
   const [assigningTeacherId, setAssigningTeacherId] = useState<number | null>(null) // subject id being inline-assigned
   const [inlineTeacher, setInlineTeacher] = useState('')
   // Subjects the school has subscribed to via Syllabus Customizer for this
@@ -631,6 +635,7 @@ function ClassDetail({
   return (
     <div className="flex flex-col h-full">
       {ConfirmDialog}
+      {profileId !== null && <StudentProfile studentId={profileId} onClose={() => setProfileId(null)} />}
       {/* Header */}
       <div className="px-6 py-4 border-b border-gray-100">
         <div className="flex items-start justify-between flex-wrap gap-3">
@@ -1112,11 +1117,14 @@ function ClassDetail({
                   {students.map((s, i) => (
                     <div key={s.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50">
                       <span className="text-xs text-gray-300 w-5 flex-shrink-0">{i + 1}</span>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-gray-900 text-sm">{s.name}</p>
+                      <button type="button" onClick={() => setProfileId(s.id)} data-testid={`class-student-${s.id}`}
+                        className="flex-1 min-w-0 text-left" aria-label={`Open full profile of ${s.name}`}>
+                        <p className="font-medium text-violet-700 hover:underline text-sm">{s.name}</p>
                         <p className="text-xs text-gray-400">Roll: {s.roll_number || '—'}</p>
-                      </div>
+                      </button>
                       {s.phone && <span className="text-xs text-gray-400">{s.phone}</span>}
+                      <button type="button" onClick={() => setProfileId(s.id)} data-testid={`class-student-profile-${s.id}`}
+                        className="text-xs font-semibold text-violet-600 border border-violet-200 rounded-lg px-2.5 py-1 hover:bg-violet-50">Profile →</button>
                     </div>
                   ))}
                 </div>

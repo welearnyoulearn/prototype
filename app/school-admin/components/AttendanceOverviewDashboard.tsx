@@ -10,6 +10,7 @@ import {
 } from '@/app/components/attendance-dashboard/parts'
 import StudentAttendanceModal from '@/app/components/attendance-dashboard/StudentModal'
 import type { AttendanceOverview } from './AttendanceTodayPanel'
+import StudentProfile from './StudentProfile'
 
 // The school admin's attendance home: how is the whole school doing → which class needs help →
 // which student. Every row is clickable and leads one level down (school → class → student).
@@ -43,6 +44,7 @@ export default function AttendanceOverviewDashboard({ overview, onOpenRegister }
   const [month, setMonth] = useState(currentMonth)
   const [classId, setClassId] = useState<number | null>(null)
   const [student, setStudent] = useState<{ id: number; name: string } | null>(null)
+  const [profileId, setProfileId] = useState<number | null>(null)
   const [classSort, setClassSort] = useState<'lowest' | 'highest' | 'class'>('lowest')
 
   const { data, error, loading, retry } = useApi<SchoolData>(
@@ -76,8 +78,11 @@ export default function AttendanceOverviewDashboard({ overview, onOpenRegister }
   if (classId) {
     const c = data?.classes.find(x => x.classId === classId)
     return (
-      <ClassDashboard classId={classId} onBack={() => setClassId(null)}
-        subtitle={c?.classTeacher ? `Class teacher: ${c.classTeacher}` : 'No class teacher assigned'} />
+      <>
+        <ClassDashboard classId={classId} onBack={() => setClassId(null)} onOpenProfile={setProfileId}
+          subtitle={c?.classTeacher ? `Class teacher: ${c.classTeacher}` : 'No class teacher assigned'} />
+        {profileId !== null && <StudentProfile studentId={profileId} onClose={() => setProfileId(null)} />}
+      </>
     )
   }
 
@@ -226,7 +231,8 @@ export default function AttendanceOverviewDashboard({ overview, onOpenRegister }
         </>
       )}
 
-      {student && <StudentAttendanceModal studentId={student.id} name={student.name} onClose={() => setStudent(null)} />}
+      {student && <StudentAttendanceModal studentId={student.id} name={student.name} onClose={() => setStudent(null)} onOpenProfile={id => { setStudent(null); setProfileId(id) }} />}
+      {profileId !== null && <StudentProfile studentId={profileId} onClose={() => setProfileId(null)} />}
     </div>
   )
 }

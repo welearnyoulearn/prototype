@@ -49,6 +49,10 @@ Data: `GET /api/attendance/dashboard?scope=school|class|my-classes|find` (`lib/a
 
 Parent and student use the same `AttendanceCalendar` component; teacher, student and parent share the read-only `SchoolCalendarView`.
 
+## Student profile (school admin)
+
+`GET /api/students/:id/profile[?year=<academic_year_id>]` (`lib/studentProfile.ts`) feeds the *Student 360* panel. Attendance uses the same shared rules as every other screen; fees use the fee screens' balance formula (due − waiver − paid). Admin only, school-scoped. Tested in `e2e/workflow-student-profile.spec.ts` (needs `E2E_DATABASE_URL` to plant marks/fees; skipped otherwise).
+
 ## Academic Calendar
 
 Controlled by the platform feature **Academic Calendar** (Platform admin → plan features). It governs the admin's *Academic Calendar* screen **and** the read-only *School Calendar* tab in the teacher, student and parent portals. (Holidays already saved keep closing attendance even if the feature is later switched off.)
