@@ -18,6 +18,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - School-admin Attendance page: the separate Month / Year / Insights tabs are replaced by **Overview** (with a period switch) and **Day register**; their old 85%/70% colour thresholds are gone in favour of the shared 90%/75%. (#153)
 - Change description (#issue-number)
 
+### Changed
+- **Watchline** is now switched per school only (Platform Admin → school → Watchline). It is no longer a row in the plan feature-config matrix, where it controlled nothing. (#195)
+
 ### Removed
 - **All timetable** taken off `dev` (admin, teacher, student and parent screens; class-management tab; overview stats; substitutes panel; `/api/class-timetable`, `/api/timetable`, `/api/parent/timetable`, `/api/substitutes`; the `timetable` feature key). The complete, secured workflow is on `feature/175-timetable-full-workflow` (draft PR #177). Tables are untouched. (#176)
 - Removed feature description (#issue-number)
