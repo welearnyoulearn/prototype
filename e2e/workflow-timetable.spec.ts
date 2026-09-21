@@ -231,15 +231,25 @@ test.describe.serial('Timetable — full workflow', () => {
     expect((await call(ownerB, 'post', '/api/class-timetable/swap', { school_id: schoolBId, class_id: classOther, slot_a: first.id, slot_b: second.id })).status).toBe(404)
   })
 
-  test('7. Manual edit: only school staff can change a slot — not teachers, students or parents', async () => {
-    const slot = (await rows(owner, classA)).find(r => !r.is_break && r.subject_name === 'Science')!
+  test('7. Manual edit: staff can edit any slot; a teacher only their OWN periods; students and parents never', async () => {
+    const slot = (await rows(owner, classA)).find(r => !r.is_break && r.subject_name === 'Science')!      // Mr Khan's period
     const edit = { id: slot.id, school_id: schoolId, class_id: classA, subject_name: slot.subject_name, teacher_id: slot.teacher_id, room: 'Lab 2' }
     expect((await call(owner, 'put', '/api/class-timetable', edit)).status).toBeLessThan(300)
-    for (const [name, who] of [['teacher', teacherKhan], ['student', student], ['parent', parent]] as const) {
+    expect((await rows(owner, classA)).find(r => r.id === slot.id)?.room).toBe('Lab 2')
+
+    // Mr Khan may change the room of his own period …
+    expect((await call(teacherKhan, 'put', '/api/class-timetable', { ...edit, room: 'Lab 3' })).status).toBeLessThan(300)
+    // … but not hand it to someone else, nor touch another teacher's period, nor change many at once
+    expect((await call(teacherKhan, 'put', '/api/class-timetable', { ...edit, teacher_id: tid.Rao })).status).toBe(403)
+    expect((await call(teacherRao, 'put', '/api/class-timetable', { ...edit, teacher_id: tid.Rao })).status).toBe(403)
+    expect((await call(teacherRao, 'put', '/api/class-timetable', { ...edit, teacher_id: tid.Khan, room: 'X' })).status).toBe(403)
+    expect((await call(teacherKhan, 'put', '/api/class-timetable', { ...edit, apply_to_subject: true })).status).toBe(403)
+    expect((await call(teacherKhan, 'delete', `/api/class-timetable?class_id=${classA}&school_id=${schoolId}`)).status).toBe(403)   // whole-class clear is staff only
+    for (const [name, who] of [['student', student], ['parent', parent]] as const) {
       expect((await call(who, 'put', '/api/class-timetable', edit)).status, `${name} must not edit the timetable`).toBe(403)
     }
     expect((await call(student, 'delete', `/api/class-timetable?class_id=${classA}&school_id=${schoolId}`)).status).toBe(403)
-    expect((await rows(owner, classA)).find(r => r.id === slot.id)?.room).toBe('Lab 2')
+    expect((await rows(owner, classA)).find(r => r.id === slot.id)?.room).toBe('Lab 3')
   })
 
   test('8. Publish: circulating stamps the class, and teachers, students and parents can see it', async () => {

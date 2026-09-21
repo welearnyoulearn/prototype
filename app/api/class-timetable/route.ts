@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { notifyTimetableChange } from '@/lib/notifyTimetable'
 import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
-import { getAnySession } from '@/lib/auth'
+import { getAnySession, getTeacherSession } from '@/lib/auth'
 import { TIMETABLE_WRITE_ROLES } from '@/lib/timetableAuth'
 
 export async function GET(req: NextRequest) {
@@ -122,9 +122,22 @@ export async function PUT(req: NextRequest) {
     const authSession = await getAnySession()
     if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     // Reading is for everyone in the school; changing the timetable is for school staff only.
-    if (!TIMETABLE_WRITE_ROLES.includes(authSession.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    // School staff may edit any slot. A TEACHER may schedule or clear only their OWN periods (the class view's
+    // "Schedule Class" action); students and parents never may.
+    let teacherActorId: number | null = null
+    if (!TIMETABLE_WRITE_ROLES.includes(authSession.role)) {
+      const t = authSession.role === 'teacher' ? await getTeacherSession() : null
+      if (!t) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      teacherActorId = t.teacherId
+    }
 
     const body = await req.json()
+
+    if (teacherActorId !== null) {
+      // no bulk changes, and never assign someone else
+      if (body.apply_to_subject) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      if (body.teacher_id != null && Number(body.teacher_id) !== teacherActorId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     let classId = body.class_id
     let schoolId = body.school_id
@@ -179,6 +192,12 @@ export async function PUT(req: NextRequest) {
         if (rows.length > 0) {
           existingSlot = rows[0]
         }
+      }
+
+      // A teacher may only take a free slot or change/clear a slot that is already theirs.
+      if (teacherActorId !== null && existingSlot?.teacher_id && existingSlot.teacher_id !== teacherActorId) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
 
       // 2. Handle apply_to_subject (bulk update teacher for all periods of a subject)
