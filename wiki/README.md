@@ -14,7 +14,6 @@
 | [Student](features/student.md) | Portal overview, all modules | 8 built, 1 partial |
 | [Parent](features/parent.md) | Portal overview, all modules | 5 built, 2 partial |
 | [Platform Admin](features/platform-admin.md) | Portal overview, all modules | 7 built |
-| [Display / Kiosk](features/display.md) | Kiosk mode, tokens | 2 built |
 | [Auth](features/auth.md) | Login flows, JWT, password reset | 3 built, 2 partial |
 | [Backup & Restore](features/backup-restore.md) | Daily R2 backup, gap-fill restore | 1 built |
 

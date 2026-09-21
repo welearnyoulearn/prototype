@@ -55,6 +55,14 @@ rebuilding from scratch.
 
 ---
 
+### Also removed from `dev` on 2026-09-21 (unstable / unreachable — each preserved on its own branch)
+- **Student Learning Hub & Daily Knowledge** (#164) — `feature/164-student-learning-hub-daily-knowledge` (draft PR #169). Student-independent: not a feature-config key.
+- **Rewards Marketplace** — student, parent, admin (#165) — `feature/165-rewards-marketplace` (draft PR #170). Student-independent: not a feature-config key.
+- **Teacher Lesson Planner** (#166) — `feature/166-teacher-lesson-planner` (draft PR #171). Own feature key `lesson-planner` when restored.
+- **Teacher Class Performance** (#167) — `feature/167-teacher-class-performance` (draft PR #172). Own feature key `class-performance` when restored.
+- **Weekly Test** (#168) — `feature/168-weekly-test` (draft PR #173). Own feature key `weekly-test` when restored.
+- **Display / TV kiosk** (#163) — deleted permanently, no branch.
+
 ## Partial Features to Complete
 
 ### Student Auth — Proper Login
@@ -77,6 +85,6 @@ rebuilding from scratch.
 **Portal:** Teacher
 **Description:** Build the performance analytics component. Navigation item exists but flagged `comingSoon`.
 
-### Weekly Test UI
-**Portal:** Student
-**Description:** Surface the AI-generated MCQ weekly test in the student portal. DB table exists.
+### Weekly Test (removed from dev, #168)
+**Portal:** Student / Teacher
+**Branch:** `feature/168-weekly-test` (draft PR #173) — see `EXTRACTION-168.md` there. When restored it becomes its own Platform-Admin feature (`weekly-test`).

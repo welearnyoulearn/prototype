@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "WLYL School Management API",
-    "version": "2026-09-20",
+    "version": "2026-09-21",
     "description": "Every API route in the WLYL platform, generated from the route handlers on the `dev` branch.\n\n## How to read this\n\n- **Sections and subcategories.** The sidebar groups routes by area, such as Fees & finance, then by topic, such as Waivers.\n- **Who can call.** The coloured badges on each route show which signed-in users it accepts. A red **Public** badge means the route has no sign-in check in code.\n- **Checks.** Extra rules inside the route, such as \"parent must own this student\", are listed under Checks.\n- **Feature flag.** Routes that are switched off unless the school's plan includes a feature say which one.\n\n## Signing in\n\nEach portal has its own session cookie: `wlyl-platform`, `wlyl-auth` (school admin), `wlyl-teacher`, `wlyl-student` and `wlyl-parent`. Sign in to the app in this browser, then use **Test Request** on any route. Scheduled jobs take `Authorization: Bearer $CRON_SECRET`."
   },
   "servers": [
@@ -91,10 +91,6 @@
     {
       "name": "Exams & marks",
       "description": "Exam schedule, marks entry, review, release and parent sign-off."
-    },
-    {
-      "name": "Weekly test",
-      "description": "AI-generated weekly tests."
     },
     {
       "name": "Library & files",
@@ -217,7 +213,6 @@
         "Attendance",
         "Syllabus tracking",
         "Exams & marks",
-        "Weekly test",
         "Library & files",
         "Exports"
       ]
@@ -17500,7 +17495,7 @@
           "Students"
         ],
         "summary": "Get student rewards summary",
-        "description": "Returns academic and marketplace points, streak, all badges with earned status, last 15 point transactions, weekly test stats, and (when class_id is given) the top-10 class leaderboard by academic points.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check: any caller can read any student's rewards given the student id and school_id.",
+        "description": "\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check: any caller can read any student's rewards given the student id and school_id.",
         "operationId": "getStudentsIdRewards",
         "security": [],
         "responses": {
@@ -17515,12 +17510,6 @@
                       "type": "integer"
                     },
                     "academic_points": {
-                      "type": "integer"
-                    },
-                    "marketplace_balance": {
-                      "type": "integer"
-                    },
-                    "marketplace_earned": {
                       "type": "integer"
                     },
                     "streak": {
@@ -17615,25 +17604,6 @@
                     "my_rank": {
                       "type": "integer",
                       "nullable": true
-                    },
-                    "weekly_tests": {
-                      "type": "object",
-                      "properties": {
-                        "tests_taken": {
-                          "type": "integer"
-                        },
-                        "avg_pct": {
-                          "type": "integer",
-                          "nullable": true
-                        },
-                        "best_pct": {
-                          "type": "integer",
-                          "nullable": true
-                        },
-                        "excellent_count": {
-                          "type": "integer"
-                        }
-                      }
                     }
                   }
                 }
@@ -25321,258 +25291,6 @@
                 "properties": {
                   "school_id": {
                     "type": "integer"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/weekly-test": {
-      "get": {
-        "tags": [
-          "Weekly test"
-        ],
-        "summary": "Get or generate a student's weekly test",
-        "description": "check_only=true returns the student's weekly test status for this week without generating. Otherwise returns the existing weekly_tests row, or (fallback for missed cron) generates MCQs via AI from topics covered this Mon-Sat plus task/doubt subjects, inserts the row, and stores correct answers in student_answers. Newly generated tests are returned with student_answers null; an existing unsubmitted row is returned as-is via SELECT *, including the stored correct answers.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check in the handler; student_id, school_id and class_id come from the query.",
-        "operationId": "getWeeklyTest",
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Weekly test row; with check_only, either {id, week_start, status, score, max_score, submitted_at} or {status:'not_generated', week_start}",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "properties": {
-                    "id": {
-                      "type": "integer"
-                    },
-                    "school_id": {
-                      "type": "integer"
-                    },
-                    "class_id": {
-                      "type": "integer"
-                    },
-                    "student_id": {
-                      "type": "integer"
-                    },
-                    "week_start": {
-                      "type": "string",
-                      "format": "date"
-                    },
-                    "questions": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "question": {
-                            "type": "string"
-                          },
-                          "options": {
-                            "type": "array",
-                            "items": {
-                              "type": "string"
-                            }
-                          },
-                          "subject": {
-                            "type": "string"
-                          },
-                          "difficulty": {
-                            "type": "string",
-                            "enum": [
-                              "easy",
-                              "medium",
-                              "hard"
-                            ]
-                          }
-                        }
-                      }
-                    },
-                    "student_answers": {
-                      "type": "array",
-                      "nullable": true,
-                      "items": {},
-                      "description": "Correct answers before submission (null on freshly generated response); submitted answers after"
-                    },
-                    "score": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "max_score": {
-                      "type": "integer",
-                      "nullable": true
-                    },
-                    "status": {
-                      "type": "string",
-                      "description": "available, submitted, or not_generated (check_only)"
-                    },
-                    "generated_at": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "submitted_at": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "student_id, school_id, class_id required"
-          },
-          "404": {
-            "description": "No topics covered this week yet"
-          },
-          "500": {
-            "description": "Failed to generate test"
-          },
-          "503": {
-            "description": "AI not configured (GROQ_API_KEY unset)"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Public",
-            "color": "#dc2626"
-          }
-        ],
-        "x-source-file": "app/api/weekly-test/route.ts",
-        "parameters": [
-          {
-            "name": "student_id",
-            "in": "query",
-            "required": true,
-            "description": "Student id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "school_id",
-            "in": "query",
-            "required": true,
-            "description": "School id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "class_id",
-            "in": "query",
-            "required": true,
-            "description": "Class id",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "check_only",
-            "in": "query",
-            "required": false,
-            "description": "Return status only, never generate",
-            "schema": {
-              "type": "string",
-              "enum": [
-                "true"
-              ]
-            }
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "Weekly test"
-        ],
-        "summary": "Submit weekly test answers",
-        "description": "Grades submitted answers against the stored correct answers (case-insensitive), marks the test submitted with the score, awards reward points by score band, and inserts a weekly_test_result notification for the student.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check in the handler; test must belong to the student_id in the body.",
-        "operationId": "postWeeklyTest",
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Graded result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "score": {
-                      "type": "integer"
-                    },
-                    "max_score": {
-                      "type": "integer"
-                    },
-                    "results": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "question": {
-                            "type": "string"
-                          },
-                          "subject": {
-                            "type": "string"
-                          },
-                          "student_answer": {
-                            "type": "string"
-                          },
-                          "correct_answer": {
-                            "type": "string"
-                          },
-                          "is_correct": {
-                            "type": "boolean"
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing fields or already submitted"
-          },
-          "404": {
-            "description": "Test not found"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Public",
-            "color": "#dc2626"
-          }
-        ],
-        "x-source-file": "app/api/weekly-test/route.ts",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "test_id",
-                  "student_id",
-                  "submitted_answers"
-                ],
-                "properties": {
-                  "test_id": {
-                    "type": "integer"
-                  },
-                  "student_id": {
-                    "type": "integer"
-                  },
-                  "submitted_answers": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    },
-                    "description": "One answer per question, in order"
                   }
                 }
               }
@@ -41736,133 +41454,6 @@
           }
         ],
         "x-source-file": "app/api/cron/usage-digest/route.ts"
-      }
-    },
-    "/api/cron/weekly-test": {
-      "get": {
-        "tags": [
-          "Scheduled jobs"
-        ],
-        "summary": "Generate weekly tests for all classes",
-        "description": "For every active school, finds classes with topics covered in the current Mon-Sat window and, if no test exists yet this week, makes one Gemini call per class to generate MCQs, then inserts one weekly_tests row per active student (questions without answers; answers stored separately). Invoked by Vercel Cron.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET, but only enforced when CRON_SECRET is set; if unset the endpoint is open.",
-        "operationId": "getCronWeeklyTest",
-        "security": [
-          {
-            "cron": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Generation result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "week_start": {
-                      "type": "string",
-                      "format": "date"
-                    },
-                    "generated": {
-                      "type": "integer"
-                    },
-                    "skipped": {
-                      "type": "integer"
-                    },
-                    "errors": {
-                      "type": "integer"
-                    },
-                    "error_details": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "description": "Present only when errors occurred"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Bad bearer token"
-          },
-          "500": {
-            "description": "Cron job failed ({error, details})"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Cron",
-            "color": "#475569"
-          }
-        ],
-        "x-source-file": "app/api/cron/weekly-test/route.ts"
-      },
-      "post": {
-        "tags": [
-          "Scheduled jobs"
-        ],
-        "summary": "Trigger weekly test generation manually",
-        "description": "Same as GET: generates this week's AI MCQ tests for every eligible class across all active schools, skipping classes that already have one.\n\n**Who can call:** Cron.\n\n**Checks:** Authorization: Bearer $CRON_SECRET, but only enforced when CRON_SECRET is set; if unset the endpoint is open.",
-        "operationId": "postCronWeeklyTest",
-        "security": [
-          {
-            "cron": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Generation result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "week_start": {
-                      "type": "string",
-                      "format": "date"
-                    },
-                    "generated": {
-                      "type": "integer"
-                    },
-                    "skipped": {
-                      "type": "integer"
-                    },
-                    "errors": {
-                      "type": "integer"
-                    },
-                    "error_details": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Bad bearer token"
-          },
-          "500": {
-            "description": "Cron job failed ({error, details})"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Cron",
-            "color": "#475569"
-          }
-        ],
-        "x-source-file": "app/api/cron/weekly-test/route.ts"
       }
     },
     "/api/usage/heartbeat": {

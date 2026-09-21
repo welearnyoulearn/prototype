@@ -36,7 +36,7 @@ Maintain these files in `docs/`:
 The `wiki/` folder is the living documentation of this project. Read it to understand what exists and what's in progress.
 
 - **[wiki/README.md](wiki/README.md)** — Index of all wiki docs
-- **[wiki/features/](wiki/features/)** — Feature docs per portal (school-admin, teacher, student, parent, platform-admin, display, auth)
+- **[wiki/features/](wiki/features/)** — Feature docs per portal (school-admin, teacher, student, parent, platform-admin, auth)
 - **[wiki/tasks/completed.md](wiki/tasks/completed.md)** — All finished work
 - **[wiki/tasks/in-progress.md](wiki/tasks/in-progress.md)** — Currently active work
 - **[wiki/tasks/planned.md](wiki/tasks/planned.md)** — Upcoming features

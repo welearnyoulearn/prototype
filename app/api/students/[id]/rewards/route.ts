@@ -17,12 +17,11 @@ export async function GET(
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
 
     try {
-      const [pointsRes, badgesRes, streakRes, recentRes, weeklyTestRes, leaderboardRes, marketplaceRes] = await Promise.all([
+      const [pointsRes, badgesRes, streakRes, recentRes, leaderboardRes] = await Promise.all([
         // Academic points (default or explicit 'academic')
         pool.query(
           `SELECT
-             COALESCE(SUM(points) FILTER (WHERE points_type = 'academic' OR points_type IS NULL), 0)::int AS academic,
-             COALESCE(SUM(points) FILTER (WHERE points_type = 'marketplace'), 0)::int AS marketplace_earned
+             COALESCE(SUM(points) FILTER (WHERE points_type = 'academic' OR points_type IS NULL), 0)::int AS academic
            FROM student_points WHERE student_id = $1 AND school_id = $2`,
           [student_id, school_id]
         ),
@@ -47,18 +46,6 @@ export async function GET(
           [student_id, school_id]
         ),
 
-        // Weekly test stats
-        pool.query(
-          `SELECT
-             COUNT(*)::int                              AS tests_taken,
-             ROUND(AVG(score::numeric / max_score * 100))::int AS avg_pct,
-             MAX(ROUND(score::numeric / max_score * 100))::int AS best_pct,
-             COUNT(*) FILTER (WHERE ROUND(score::numeric / max_score * 100) >= 80)::int AS excellent_count
-           FROM weekly_tests
-           WHERE student_id = $1 AND school_id = $2 AND status = 'submitted'`,
-          [student_id, school_id]
-        ),
-
         // Class leaderboard ranked by academic points only
         class_id ? pool.query(
           `SELECT s.id, s.name,
@@ -75,19 +62,9 @@ export async function GET(
           [school_id, student_id]
         ) : Promise.resolve({ rows: [] }),
 
-        // Marketplace points spent (pending/approved/delivered orders)
-        pool.query(
-          `SELECT COALESCE(SUM(points_spent), 0)::int AS spent
-           FROM marketplace_orders
-           WHERE student_id = $1 AND school_id = $2 AND status IN ('pending','approved','delivered')`,
-          [student_id, school_id]
-        ),
       ])
 
       const academicPoints    = pointsRes.rows[0]?.academic ?? 0
-      const marketplaceEarned = pointsRes.rows[0]?.marketplace_earned ?? 0
-      const marketplaceSpent  = marketplaceRes.rows[0]?.spent ?? 0
-      const marketplaceBalance = Math.max(0, marketplaceEarned - marketplaceSpent)
       const totalPoints = academicPoints  // leaderboard & rank use academic only
       const streak = streakRes.rows[0] || { current_streak: 0, longest_streak: 0, last_activity_date: null }
 
@@ -113,13 +90,9 @@ export async function GET(
 
       const myRank = leaderboard.find((r: { is_me: boolean }) => r.is_me)?.rank ?? null
 
-      const wt = weeklyTestRes.rows[0]
-
       return NextResponse.json({
         total_points: totalPoints,
         academic_points: academicPoints,
-        marketplace_balance: marketplaceBalance,
-        marketplace_earned: marketplaceEarned,
         streak: {
           current: parseInt(streak.current_streak) || 0,
           longest: parseInt(streak.longest_streak) || 0,
@@ -129,12 +102,6 @@ export async function GET(
         recent_transactions: recentRes.rows,
         leaderboard,
         my_rank: myRank,
-        weekly_tests: {
-          tests_taken:     wt?.tests_taken     ?? 0,
-          avg_pct:         wt?.avg_pct         ?? null,
-          best_pct:        wt?.best_pct        ?? null,
-          excellent_count: wt?.excellent_count ?? 0,
-        },
       })
     } catch (err) {
       console.error('Rewards API error:', err)
