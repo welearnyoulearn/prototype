@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "WLYL School Management API",
-    "version": "2026-09-20",
+    "version": "2026-09-21",
     "description": "Every API route in the WLYL platform, generated from the route handlers on the `dev` branch.\n\n## How to read this\n\n- **Sections and subcategories.** The sidebar groups routes by area, such as Fees & finance, then by topic, such as Waivers.\n- **Who can call.** The coloured badges on each route show which signed-in users it accepts. A red **Public** badge means the route has no sign-in check in code.\n- **Checks.** Extra rules inside the route, such as \"parent must own this student\", are listed under Checks.\n- **Feature flag.** Routes that are switched off unless the school's plan includes a feature say which one.\n\n## Signing in\n\nEach portal has its own session cookie: `wlyl-platform`, `wlyl-auth` (school admin), `wlyl-teacher`, `wlyl-student` and `wlyl-parent`. Sign in to the app in this browser, then use **Test Request** on any route. Scheduled jobs take `Authorization: Bearer $CRON_SECRET`."
   },
   "servers": [
@@ -12179,18 +12179,9 @@
           "Timetable & substitutes"
         ],
         "summary": "Upsert, clear, or bulk-reassign timetable slot",
-        "description": "Finds a slot by id or by class/day/period/template and upserts it as a manual slot; an empty/'free'/'—' subject deletes it. With apply_to_subject, sets teacher_id on every slot of that subject in the class. If the class timetable was generated, inserts timetable notifications for affected teachers and class students; invalidates timetable caches.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession() only; any logged-in role (including student/parent) passes. body.school_id, or the school of the slot looked up by body.id, must equal the session's school.",
+        "description": "Finds a slot by id or by class/day/period/template and upserts it as a manual slot; an empty/'free'/'—' subject deletes it. With apply_to_subject, sets teacher_id on every slot of that subject in the class. If the class timetable was generated, inserts timetable notifications for affected teachers and class students; invalidates timetable caches.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (403 for teachers, students and parents — before #175 any signed-in user of the school could change the timetable). The school must match the login.",
         "operationId": "putClassTimetable",
         "security": [
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
-            "parent": []
-          },
           {
             "schoolAdmin": []
           }
@@ -12262,18 +12253,6 @@
         },
         "x-badges": [
           {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
-            "name": "Parent",
-            "color": "#be185d"
-          },
-          {
             "name": "School admin",
             "color": "#1d4ed8"
           }
@@ -12338,18 +12317,9 @@
           "Timetable & substitutes"
         ],
         "summary": "Update period timing school-wide",
-        "description": "Sets time_from/time_to on every timetable slot in the school with the given period_number.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession() only; any logged-in role passes. school_id must equal the session's school.",
+        "description": "Sets time_from/time_to on every timetable slot in the school with the given period_number.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (403 for teachers, students and parents — before #175 any signed-in user of the school could change the timetable). The school must match the login.",
         "operationId": "patchClassTimetable",
         "security": [
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
-            "parent": []
-          },
           {
             "schoolAdmin": []
           }
@@ -12394,18 +12364,6 @@
         },
         "x-badges": [
           {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
-            "name": "Parent",
-            "color": "#be185d"
-          },
-          {
             "name": "School admin",
             "color": "#1d4ed8"
           }
@@ -12447,18 +12405,9 @@
           "Timetable & substitutes"
         ],
         "summary": "Delete class or school timetable",
-        "description": "Deletes timetable slots for one class or the whole school, scoped to a template (default = school default). Deleting the default timetable also clears timetable_generated_at/circulated_at on the affected classes; invalidates caches.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** getAnySession() only; any logged-in role passes. school_id must equal the session's school.",
+        "description": "Deletes timetable slots for one class or the whole school, scoped to a template (default = school default). Deleting the default timetable also clears timetable_generated_at/circulated_at on the affected classes; invalidates caches.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (403 for teachers, students and parents — before #175 any signed-in user of the school could change the timetable). The school must match the login.",
         "operationId": "deleteClassTimetable",
         "security": [
-          {
-            "teacher": []
-          },
-          {
-            "student": []
-          },
-          {
-            "parent": []
-          },
           {
             "schoolAdmin": []
           }
@@ -12493,18 +12442,6 @@
           }
         },
         "x-badges": [
-          {
-            "name": "Teacher",
-            "color": "#b45309"
-          },
-          {
-            "name": "Student",
-            "color": "#047857"
-          },
-          {
-            "name": "Parent",
-            "color": "#be185d"
-          },
           {
             "name": "School admin",
             "color": "#1d4ed8"
@@ -45215,6 +45152,2032 @@
             "schema": {
               "type": "string",
               "pattern": "^\\d{1,9}$"
+            }
+          }
+        ]
+      }
+    },
+    "/api/class-timetable/generate": {
+      "post": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Generate class timetables",
+        "description": "Builds the weekly timetable for one class (class_id) or every class of the school from each class's subjects, periods per week and assigned teachers, using the school's schedule settings (or a named template). Respects teacher availability and never puts a teacher in two classes in the same period. force_replace clears earlier generated slots first; custom_mode creates blank slots to fill in by hand.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "postClassTimetableGenerate",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/class-timetable/generate/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "class_id": {
+                    "type": "integer"
+                  },
+                  "force_replace": {
+                    "type": "boolean"
+                  },
+                  "template_id": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "custom_mode": {
+                    "type": "boolean"
+                  },
+                  "schedule_settings": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "school_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/class-timetable/circulate": {
+      "post": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Publish (circulate) a timetable",
+        "description": "Marks a class's timetable as published (classes.timetable_circulated_at) and notifies the teachers who teach in it.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "postClassTimetableCirculate",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/class-timetable/circulate/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "class_id": {
+                    "type": "integer"
+                  },
+                  "template_id": {
+                    "type": "integer",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "school_id",
+                  "class_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/class-timetable/swap": {
+      "post": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Swap two periods",
+        "description": "Swaps two slots of a class. A swap that would put a teacher in two places at once is refused with the reason and changes nothing.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "postClassTimetableSwap",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/class-timetable/swap/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "class_id": {
+                    "type": "integer"
+                  },
+                  "slot_a": {
+                    "type": "integer"
+                  },
+                  "slot_b": {
+                    "type": "integer"
+                  },
+                  "template_id": {
+                    "type": "integer",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "school_id",
+                  "class_id",
+                  "slot_a",
+                  "slot_b"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/class-timetable/sync": {
+      "post": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Sync timetable teachers with class subjects",
+        "description": "Re-applies the teachers assigned in Class Management to the existing timetable slots.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "postClassTimetableSync",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/class-timetable/sync/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "school_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/class-timetable/conflicts": {
+      "get": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "List timetable conflicts",
+        "description": "Teachers double-booked, or booked when unavailable, across the whole school.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "getClassTimetableConflicts",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/class-timetable/conflicts/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "Must equal the signed-in school",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "template_id",
+            "in": "query",
+            "required": false,
+            "description": "A schedule template id, or \"default\"",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Fix a conflict by reassigning a slot's teacher",
+        "description": "Gives one slot to another teacher (or clears it).\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "postClassTimetableConflicts",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/class-timetable/conflicts/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "slot_id": {
+                    "type": "integer"
+                  },
+                  "new_teacher_id": {
+                    "type": "integer",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "school_id",
+                  "slot_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/class-timetable/health": {
+      "get": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Timetable health per class",
+        "description": "How complete each class's timetable is (generated, missing teachers, published).\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "getClassTimetableHealth",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/class-timetable/health/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "Must equal the signed-in school",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/class-timetable/teacher-load": {
+      "get": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Teacher load analysis",
+        "description": "Periods per week each teacher is asked to teach against the slots available — run before generating to catch over-committed teachers.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "getClassTimetableTeacherLoad",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/class-timetable/teacher-load/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "Must equal the signed-in school",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/class-timetable/validate": {
+      "get": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Validate the timetable set-up",
+        "description": "Checks that every class has subjects with teachers and that the numbers can fit into the week.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "getClassTimetableValidate",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/class-timetable/validate/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "Must equal the signed-in school",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/classes/{id}/health": {
+      "get": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "One class's timetable health",
+        "description": "The same health check for a single class.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "getClassHealth",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/classes/[id]/health/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Class id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "Must equal the signed-in school",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/classes/sync": {
+      "post": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Sync classes from student data",
+        "description": "Creates classes for every grade + section that students belong to and removes empty ones with nothing attached.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "postClassesSync",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/classes/sync/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "school_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/schedule-templates": {
+      "get": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "List schedule templates",
+        "description": "Named school-day shapes (periods, breaks) a school can generate timetables from.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "getScheduleTemplates",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/schedule-templates/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "Must equal the signed-in school",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Save a schedule template",
+        "description": "Saves the given settings as a named template.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "postScheduleTemplates",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/schedule-templates/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "settings": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "school_id",
+                  "name",
+                  "settings"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Rename or change a schedule template",
+        "description": "Updates a template (id in the query string).\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "putScheduleTemplates",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/schedule-templates/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "Template id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "settings": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Delete a schedule template",
+        "description": "Deletes a template.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "deleteScheduleTemplates",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/schedule-templates/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "Template id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "Must equal the signed-in school",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/school-schedule": {
+      "get": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Read the school day shape",
+        "description": "Periods per day, start/end time, breaks and lunch (defaults if never set).\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "getSchoolSchedule",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/school-schedule/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "Must equal the signed-in school",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Save the school day shape",
+        "description": "Sets the default schedule used when generating timetables.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "postSchoolSchedule",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/school-schedule/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "periods_per_day": {
+                    "type": "integer"
+                  },
+                  "start_time": {
+                    "type": "string"
+                  },
+                  "end_time": {
+                    "type": "string"
+                  },
+                  "morning_break_after_period": {
+                    "type": "integer"
+                  },
+                  "morning_break_duration": {
+                    "type": "integer"
+                  },
+                  "lunch_after_period": {
+                    "type": "integer"
+                  },
+                  "lunch_duration": {
+                    "type": "integer"
+                  },
+                  "afternoon_break_after_period": {
+                    "type": "integer"
+                  },
+                  "afternoon_break_duration": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "school_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/teacher-availability": {
+      "get": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "List a teacher's blocked periods",
+        "description": "Periods a teacher is unavailable, which the generator avoids. A teacher may call this only about themselves (teacher_id must be their own, otherwise 403); the school admin may manage any teacher.\n\n**Who can call:** School admin, Teacher (own availability only).\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "getTeacherAvailability",
+        "security": [
+          {
+            "schoolAdmin": []
+          },
+          {
+            "teacher": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          },
+          {
+            "name": "Teacher",
+            "color": "#b45309"
+          }
+        ],
+        "x-source-file": "app/api/teacher-availability/route.ts",
+        "parameters": [
+          {
+            "name": "teacher_id",
+            "in": "query",
+            "required": true,
+            "description": "Teacher id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "Must equal the signed-in school",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Block a period for a teacher",
+        "description": "Marks a day + period as unavailable. A teacher may call this only about themselves (teacher_id must be their own, otherwise 403); the school admin may manage any teacher.\n\n**Who can call:** School admin, Teacher (own availability only).\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "postTeacherAvailability",
+        "security": [
+          {
+            "schoolAdmin": []
+          },
+          {
+            "teacher": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          },
+          {
+            "name": "Teacher",
+            "color": "#b45309"
+          }
+        ],
+        "x-source-file": "app/api/teacher-availability/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "teacher_id": {
+                    "type": "integer"
+                  },
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "day_of_week": {
+                    "type": "string"
+                  },
+                  "period_number": {
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "teacher_id",
+                  "school_id",
+                  "day_of_week",
+                  "period_number"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Unblock a period",
+        "description": "Removes a block. A teacher may call this only about themselves (teacher_id must be their own, otherwise 403); the school admin may manage any teacher.\n\n**Who can call:** School admin, Teacher (own availability only).\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "deleteTeacherAvailability",
+        "security": [
+          {
+            "schoolAdmin": []
+          },
+          {
+            "teacher": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          },
+          {
+            "name": "Teacher",
+            "color": "#b45309"
+          }
+        ],
+        "x-source-file": "app/api/teacher-availability/route.ts",
+        "parameters": [
+          {
+            "name": "teacher_id",
+            "in": "query",
+            "required": true,
+            "description": "Teacher id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "Must equal the signed-in school",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "day_of_week",
+            "in": "query",
+            "required": true,
+            "description": "Day",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "period_number",
+            "in": "query",
+            "required": true,
+            "description": "Period",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/timetable-modes": {
+      "get": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "List timetable modes per class",
+        "description": "Whether each class follows the master timetable or a custom one.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "getTimetableModes",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/timetable-modes/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "Must equal the signed-in school",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Set a class's timetable mode",
+        "description": "Sets master / custom mode (and the master class to follow).\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "postTimetableModes",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/timetable-modes/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "class_id": {
+                    "type": "integer"
+                  },
+                  "mode": {
+                    "type": "string"
+                  },
+                  "master_source_id": {
+                    "type": "integer",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "school_id",
+                  "class_id",
+                  "mode"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/timetable-versions": {
+      "get": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "List timetable versions",
+        "description": "Draft / published versions of the school's timetable, newest first.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "getTimetableVersions",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/timetable-versions/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "Must equal the signed-in school",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Create a timetable version",
+        "description": "Creates a new named version.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "postTimetableVersions",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/timetable-versions/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "school_id",
+                  "name"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/timetable-versions/{id}": {
+      "patch": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Update a timetable version",
+        "description": "Renames or changes the status of a version.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "patchTimetableVersion",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/timetable-versions/[id]/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Timetable version id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Delete a timetable version",
+        "description": "Deletes a version.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "deleteTimetableVersion",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/timetable-versions/[id]/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Timetable version id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/timetable-versions/{id}/circulate": {
+      "post": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Publish a timetable version",
+        "description": "Publishes the version and notifies the affected teachers.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "postTimetableVersionCirculate",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/timetable-versions/[id]/circulate/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Timetable version id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/timetable-versions/{id}/conflicts": {
+      "get": {
+        "tags": [
+          "Timetable & substitutes"
+        ],
+        "summary": "Conflicts in a timetable version",
+        "description": "Teacher clashes within one version.\n\n**Who can call:** School admin.\n\n**Checks:** School admin, principal or vice principal only (401 otherwise). The school comes from the login: a school_id that differs is 403, and every class, teacher, slot, template or version id must belong to that school (404). Before #175 this route had no sign-in check at all.",
+        "operationId": "getTimetableVersionConflicts",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input"
+          },
+          "401": {
+            "description": "Not signed in as a school admin"
+          },
+          "403": {
+            "description": "school_id is not the signed-in school"
+          },
+          "404": {
+            "description": "A class, teacher, slot, template or version id that is not in the signed-in school"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/timetable-versions/[id]/conflicts/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Timetable version id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "Must equal the signed-in school",
+            "schema": {
+              "type": "integer"
             }
           }
         ]
