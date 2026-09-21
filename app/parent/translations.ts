@@ -29,7 +29,6 @@ const en = {
   // Nav
   nav: {
     overview:     'Overview',
-    today:        "Today's Schedule",
     syllabus:     'Syllabus',
     library:      'Digital Library',
     attendance:   'Attendance',
@@ -49,7 +48,6 @@ const en = {
   // Overview
   yourChild: 'Your Child',
   thisMonth: 'This month',
-  todaysPeriods: "Today's Periods",
   upcomingExams: 'Upcoming Exams',
   pendingSignoff: 'Pending Sign-off',
   outstandingFees: 'Outstanding Fees',
@@ -73,8 +71,6 @@ const en = {
 
   // Today's schedule
   refresh: 'Refresh',
-  noTimetableToday: 'No timetable for today',
-  noTimetableHint: 'It may be a holiday or timetable is not set up yet',
   freePeriod: 'Free Period',
   now: 'NOW',
 
@@ -182,7 +178,6 @@ const te: typeof en = {
   // Nav
   nav: {
     overview:     'అవలోకనం',
-    today:        'నేటి వేళాపట్టిక',
     syllabus:     'పాఠ్యక్రమం',
     library:      'డిజిటల్ లైబ్రరీ',
     attendance:   'హాజరు',
@@ -202,7 +197,6 @@ const te: typeof en = {
   // Overview
   yourChild: 'మీ పిల్లవాడు',
   thisMonth: 'ఈ నెల',
-  todaysPeriods: 'నేటి తరగతులు',
   upcomingExams: 'రాబోయే పరీక్షలు',
   pendingSignoff: 'సంతకం పెండింగ్',
   outstandingFees: 'బాకీ రుసుములు',
@@ -226,8 +220,6 @@ const te: typeof en = {
 
   // Today's schedule
   refresh: 'తాజాచేయి',
-  noTimetableToday: 'నేటికి వేళాపట్టిక లేదు',
-  noTimetableHint: 'సెలవు రోజు కావచ్చు లేదా వేళాపట్టిక ఏర్పాటు కాలేదు',
   freePeriod: 'విరామ వ్యవధి',
   now: 'ఇప్పుడు',
 

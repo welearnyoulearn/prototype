@@ -256,29 +256,4 @@ test.describe.serial('School Admin Workflow', () => {
     }
   })
 
-  test.skip('8. School Admin — view Timetable section', async ({ page }) => {
-    await page.goto('/login?role=school')
-    await page.getByPlaceholder('you@school.com').fill(adminEmail)
-    await page.getByPlaceholder('Enter your password').fill(schoolPass)
-    await page.getByTestId('auth-submit-btn').click()
-    await page.waitForURL(/\/school-admin|\/profile-setup/, { timeout: 10000 })
-    if (page.url().includes('profile-setup')) {
-      await expect(page.getByText('Step 1 of 2')).toBeVisible({ timeout: 5000 })
-      await page.getByPlaceholder('Your full name').fill('Test Admin')
-      await page.getByPlaceholder('+91 98765 43210').fill('9876500100')
-      await page.getByPlaceholder('e.g., Principal, School Admin').fill('Principal')
-      await page.getByRole('button', { name: 'Next →' }).click()
-      await expect(page.getByText('Step 2 of 2')).toBeVisible({ timeout: 5000 })
-      await page.getByRole('button', { name: 'Complete Setup →' }).click()
-      await page.waitForURL(/\/school-admin/, { timeout: 15000 })
-    }
-
-    // Navigate to Timetable
-    const ttBtn = page.getByRole('button', { name: /timetable/i }).first()
-    if (await ttBtn.isVisible()) {
-      await ttBtn.click()
-      await page.waitForTimeout(1000)
-      await expect(page.getByText(/timetable|schedule|period/i).first()).toBeVisible({ timeout: 5000 })
-    }
-  })
 })

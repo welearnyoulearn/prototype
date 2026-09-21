@@ -20,11 +20,6 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
 
   // ── Scheduling ───────────────────────────────────────────────────────────────
   { key: 'attendance',         label: 'Attendance Tracking',             category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },
-  // Standalone, independently-sellable main feature (own tier row, and
-  // per-school overridable the same as any other feature). Class Management
-  // reads schoolHasFeature('timetable') directly and shows/hides its whole
-  // Timetable tab and generation/editing UI based on it — see ClassManagement.tsx.
-  { key: 'timetable',          label: 'Timetable Management',            category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },
   { key: 'curriculum',         label: 'Syllabus Customizer',             category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },
   // Combined switch for the entire exam/marks feature — school admin's
   // create-and-release screen, teacher's marks entry/review, and the
@@ -77,7 +72,6 @@ export const PORTAL_NAV_KEY_ALIASES: Record<string, string> = {
   'syllabus-tracking': 'curriculum',  // school-admin's own alias, pre-existing
   'exam-schedule': 'exam-marks',      // school-admin's nav key for the combined exam/marks feature
   'syllabus': 'curriculum',           // student/parent portals' nav key for the same capability
-  'today': 'timetable',               // parent portal's "Today's Schedule" nav key
   'my-marks': 'exam-marks',           // student portal's results nav key
   'results': 'exam-marks',            // parent portal's results nav key
   'exams': 'exam-marks',              // parent portal's exam-calendar nav key

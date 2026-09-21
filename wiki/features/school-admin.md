@@ -17,7 +17,7 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Overview Dashboard | Built | Stats cards (teachers, students, classes), timetable conflicts, attendance summary, upcoming exams, fee collection %. Uses batched `/api/admin/overview` (pending-leaves and uncovered-periods metrics removed with Leave Requests/Emergency Cover below) |
+| Overview Dashboard | Built | Stats cards (teachers, students, classes), attendance summary, upcoming exams, fee collection %. Uses batched `/api/admin/overview` (pending-leaves and uncovered-periods metrics removed with Leave Requests/Emergency Cover below) |
 | Daily Briefing | Built | Morning briefing: exams, chronic absentees, syllabus coverage, announcements. From `/api/admin/briefing` (leave/uncovered-periods alerts removed with Leave Requests/Emergency Cover below) |
 
 ### People Management
@@ -34,7 +34,7 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Timetable Management | Built | Generate, view conflicts, swap periods, lock/publish. Master/slave sync. Version control (draft → published). Teacher unavailability constraints. Schedule templates |
+| Timetable Management | Removed | Removed from `dev` (#176). The complete workflow lives on `feature/175-timetable-full-workflow` (draft PR #177). |
 | Attendance Dashboard | Built | Day/Month/Year tabs. Day: school-wide per-class cards (morning+afternoon), class-detail drilldown, substitute coverage, offline queue via service worker. Month: attendance % calendar heatmap + sortable class-wise table. Year: month-over-month trend chart, best/worst month, best/worst classes. Insights tab: rolling 7/30/90-day trend + chronic-absentee list (3+ absences). All views green/amber/red color-coded (≥85% / 70-84% / <70%). Backed by `GET /api/attendance/analytics` (`view=month\|year`, defaults to rolling window) |
 | Leave Requests | Removed | Pulled out of `dev` for rework — full code + removal notes on `feature/139-remove-leave-requests` (issue #139) |
 | Emergency Cover | Removed | Pulled out of `dev` for rework — full code + removal notes on `feature/140-remove-emergency-cover` (issue #140) |
@@ -91,8 +91,6 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 | `GET/POST /api/teachers` | Staff CRUD |
 | `GET/POST /api/students` | Student CRUD |
 | `GET/POST /api/classes` | Class CRUD |
-| `POST /api/class-timetable/generate` | Timetable generation |
-| `POST /api/class-timetable/circulate` | Publish timetable |
 | `GET/POST /api/attendance` | Attendance marking + daily/monthly reads |
 | `GET /api/attendance/analytics` | Rolling-window, month, and year attendance analytics (dashboard) |
 | `GET/POST/PUT /api/leave-requests` | Leave management |

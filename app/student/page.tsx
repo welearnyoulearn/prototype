@@ -31,7 +31,6 @@ function ModuleSkeleton() {
 }
 // Turbopack requires inline object literals for next/dynamic options
 const StudentMarks     = dynamic(() => import('./components/StudentMarks'),     { loading: () => <ModuleSkeleton /> })
-const StudentTimetable = dynamic(() => import('./components/StudentTimetable'), { loading: () => <ModuleSkeleton /> })
 const StudentSyllabus  = dynamic(() => import('./components/StudentSyllabus'),  { loading: () => <ModuleSkeleton /> })
 const DigitalLibrary    = dynamic(() => import('../components/library/DigitalLibrary'), { loading: () => <ModuleSkeleton /> })
 const StudentAiHub      = dynamic(() => import('./components/StudentAiHub'),     { loading: () => <ModuleSkeleton /> })
@@ -51,7 +50,6 @@ const NAV_SECTIONS: NavSection[] = [
     label: 'HOME',
     items: [
       { key: 'dashboard', label: 'Dashboard',    icon: '🏠' },
-      { key: 'timetable', label: 'My Timetable', icon: '🗓️' },
       { key: 'syllabus',  label: 'Syllabus',     icon: '📚' },
       { key: 'library',   label: 'Digital Library', icon: '📖' },
     ],
@@ -90,13 +88,13 @@ const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
 
 // Only nav keys that map to a plan-gated ALL_FEATURES entry get checked
 // against enabledFeatures — everything else (dashboard, profile) has always
-// been unconditionally available and stays that way. 'syllabus'/'timetable'/
+// been unconditionally available and stays that way. 'syllabus'/
 // 'my-marks' resolves through PORTAL_NAV_KEY_ALIASES to its real
 // ALL_FEATURES key ('exam-marks').
 // 'attendance' has no dedicated nav item — it only gates the Dashboard's
 // engagement-score ring, so isNavItemVisible('attendance') is read directly
 // by StudentDashboard, not used for a sidebar entry.
-const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'timetable', 'my-marks', 'attendance', 'calendar'])
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'my-marks', 'attendance', 'calendar'])
 
 const BOTTOM_NAV = [
   { key: 'dashboard', label: 'Home',    emoji: '🏠' },
@@ -174,7 +172,7 @@ function StudentPortal() {
           if (cls) setClassId(cls.id)
         }
         // Ambient "which year am I looking at" badge — one fetch, shown once
-        // in the header, covers every tab (syllabus, marks, timetable, ...).
+        // in the header, covers every tab (syllabus, marks, ...).
         fetch(`/api/academic-year/current?school_id=${data.school_id}`)
           .then(r => r.ok ? r.json() : null)
           .then(d => { if (d?.label) setAcademicYear(d.label) })
@@ -373,7 +371,6 @@ function StudentPortal() {
               </div>
             )}
             {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={student.school_id} classId={classId} /></div>}
-            {visitedNav.has('timetable')   && <div hidden={activeNav !== 'timetable'}><StudentTimetable classId={classId} schoolId={student.school_id} grade={student.grade} section={student.section} /></div>}
             {visitedNav.has('syllabus') && isNavItemVisible('syllabus') && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={student.school_id} classId={classId} grade={student.grade} /></div>}
             {visitedNav.has('library') && isNavItemVisible('library') && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}`} /></div>}
             {visitedNav.has('profile')     && <div hidden={activeNav !== 'profile'}><StudentProfile student={student} /></div>}

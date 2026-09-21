@@ -10,19 +10,6 @@ import AttendanceOverviewDashboard from './AttendanceOverviewDashboard'
 
 type Props = { schoolId: number; onNavigate?: (key: string) => void }
 
-type SubstituteRecord = {
-  id: number
-  period_number: number
-  subject_name: string | null
-  grade: string
-  section: string
-  original_teacher_name: string | null
-  substitute_teacher_name: string | null
-  time_from: string | null
-  time_to: string | null
-  date: string
-}
-
 type ClassAttendance = {
   id: number
   grade: string
@@ -121,7 +108,6 @@ export default function AttendanceDashboard({ schoolId, onNavigate }: Props) {
   const [data, setData]         = useState<ClassAttendance[]>([])
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
-  const [substitutes, setSubstitutes] = useState<SubstituteRecord[]>([])
   const [overview, setOverview] = useState<AttendanceOverview | null>(null)
   // Class detail modal
   const [modalClass, setModalClass]         = useState<ClassAttendance | null>(null)
@@ -132,17 +118,14 @@ export default function AttendanceDashboard({ schoolId, onNavigate }: Props) {
     setLoading(true)
     setError('')
     try {
-      const [attRes, subRes, ovRes] = await Promise.all([
+      const [attRes, ovRes] = await Promise.all([
         fetch(`/api/attendance?school_id=${schoolId}&date=${d}&view=school`),
-        fetch(`/api/substitutes?school_id=${schoolId}&date=${d}`),
         fetch(`/api/attendance/overview?date=${d}`),
       ])
       setOverview(ovRes.ok ? await ovRes.json() : null)
       const attJson = await attRes.json()
       if (!attRes.ok) throw new Error(attJson.error)
       setData(Array.isArray(attJson) ? attJson : [])
-      const subJson = await subRes.json()
-      setSubstitutes(Array.isArray(subJson) ? subJson : [])
     } catch {
       setError('Failed to load attendance data')
     } finally {
@@ -431,45 +414,6 @@ export default function AttendanceDashboard({ schoolId, onNavigate }: Props) {
           </p>
         </div>
       </div>
-
-      {/* Substitutes active on selected date */}
-      {substitutes.length > 0 && (
-        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-amber-100 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-amber-800">Substitute Assignments</span>
-              <span className="text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-medium">{substitutes.length} period{substitutes.length > 1 ? 's' : ''}</span>
-            </div>
-            <p className="text-xs text-amber-600">Teachers covering for absent staff on this date</p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="bg-amber-100/50">
-                  <th className="text-left px-4 py-2 font-semibold text-amber-700">Class</th>
-                  <th className="text-left px-3 py-2 font-semibold text-amber-700">Period</th>
-                  <th className="text-left px-3 py-2 font-semibold text-amber-700">Subject</th>
-                  <th className="text-left px-3 py-2 font-semibold text-amber-700">Time</th>
-                  <th className="text-left px-3 py-2 font-semibold text-amber-700">Absent Teacher</th>
-                  <th className="text-left px-3 py-2 font-semibold text-amber-700">Substitute</th>
-                </tr>
-              </thead>
-              <tbody>
-                {substitutes.map(s => (
-                  <tr key={s.id} className="border-t border-amber-100 hover:bg-amber-50">
-                    <td className="px-4 py-2 font-semibold text-gray-800">Class {s.grade}-{s.section}</td>
-                    <td className="px-3 py-2 text-gray-600">P{s.period_number}</td>
-                    <td className="px-3 py-2 text-gray-700">{s.subject_name || '—'}</td>
-                    <td className="px-3 py-2 text-gray-500">{s.time_from ? `${s.time_from}–${s.time_to}` : '—'}</td>
-                    <td className="px-3 py-2 text-red-600">{s.original_teacher_name || '—'}</td>
-                    <td className="px-3 py-2 text-green-700 font-medium">{s.substitute_teacher_name || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {/* Alert: classes with no attendance */}
       {notMarkedAny > 0 && (

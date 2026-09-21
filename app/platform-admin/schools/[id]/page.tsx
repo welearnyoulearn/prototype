@@ -597,7 +597,7 @@ export default function SchoolDetailPage() {
           <div className="px-6 py-5 flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-900">Delete this school</p>
-              <p className="text-xs text-gray-500 mt-0.5">Removes the school and all associated data — teachers, students, timetables, attendance records.</p>
+              <p className="text-xs text-gray-500 mt-0.5">Removes the school and all associated data — teachers, students, classes, attendance records.</p>
             </div>
             <button onClick={handleDelete}
               className="ml-6 flex-shrink-0 text-sm px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium transition-colors">

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast as sonnerToast } from 'sonner'
 import ExamMarks from './ExamMarks'
-import { SCHEDULE } from '@/lib/schedule'
 import { BookOpen, ChevronDown, Check, Loader2, X, Upload, Hash, Trash2, Pencil, Sparkles } from 'lucide-react'
 import { INK, GOLD, PURPLE, GREEN, BORDER, SURFACE } from '@/app/components/ulearn/theme'
 import { ProgressBar, Toast } from '@/app/components/ulearn/primitives'
@@ -45,23 +44,6 @@ type ClassDetail = {
   subjects: Subject[]
 }
 
-type TimetableSlot = {
-  id: number
-  period_number: number
-  time_from: string
-  time_to: string
-  subject_name: string | null
-  teacher_name: string | null
-  room: string | null
-  is_break: boolean
-  break_label: string | null
-  day_of_week: string
-  substitute_teacher_id: number | null
-  substitute_teacher_name: string | null
-  substitute_teacher_subject?: string | null
-  substitute_teacher_department?: string | null
-}
-
 type AttendanceRecord = {
   student_id: number
   student_name: string
@@ -83,21 +65,6 @@ type SessionSummaryItem = {
 type SessionSummary = {
   morning?: SessionSummaryItem
   afternoon?: SessionSummaryItem
-}
-
-type ClassSubstitute = {
-  id: number
-  period_number: number
-  subject_name: string | null
-  substitute_teacher_id: number | null
-  substitute_teacher_name: string | null
-  substitute_teacher_subject?: string | null
-  substitute_teacher_department?: string | null
-  original_teacher_name: string | null
-  original_teacher_department: string | null
-  date: string
-  time_from: string | null
-  time_to: string | null
 }
 
 export type TeacherObj = {
@@ -129,8 +96,8 @@ type Props = {
   readOnly?: boolean
 }
 
-const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Attendance', 'Timetable', 'Marks & Results', 'Syllabus']
-const SUBJECT_TEACHER_TABS = ['My Overview', 'Students', 'Marks & Results', 'Timetable', 'Syllabus']
+const CLASS_TEACHER_TABS = ['Overview', 'Students', 'Attendance', 'Marks & Results', 'Syllabus']
+const SUBJECT_TEACHER_TABS = ['My Overview', 'Students', 'Marks & Results', 'Syllabus']
 
 // API returns: { id, exam_name, exam_type, exam_date, status, subject_name, subject_status, max_marks, ... }
 type MyExamRow = {
@@ -252,50 +219,6 @@ function SubjectTeacherOverview({
       )}
     </div>
   )
-}
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-
-function timeToMins(t: string) {
-  if (!t) return 0
-  const [h, m] = t.split(':').map(Number)
-  return h * 60 + (m || 0)
-}
-
-function getToday() {
-  const d = new Date().getDay()
-  return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d]
-}
-
-// Returns the Monday of the "anchor week" (handles Sunday → next week)
-function getAnchorMonday(): Date {
-  const today = new Date()
-  const dow = today.getDay() // 0=Sun, 1=Mon, ...
-  const monday = new Date(today)
-  if (dow === 0) monday.setDate(today.getDate() + 1)       // Sunday → next Monday
-  else monday.setDate(today.getDate() - (dow - 1))          // Mon-Sat → this Monday
-  monday.setHours(0, 0, 0, 0)
-  return monday
-}
-
-// Returns { Monday: 'YYYY-MM-DD', ... } for anchor week + weekOffset weeks
-function getWeekDates(weekOffset = 0): Record<string, string> {
-  const monday = getAnchorMonday()
-  monday.setDate(monday.getDate() + weekOffset * 7)
-  const result: Record<string, string> = {}
-  DAYS.forEach((d, i) => {
-    const date = new Date(monday)
-    date.setDate(monday.getDate() + i)
-    result[d] = date.toISOString().split('T')[0]
-  })
-  return result
-}
-
-// Calculate which week offset a date falls in relative to anchor week
-function getWeekOffsetForDate(dateStr: string): number {
-  const monday = getAnchorMonday()
-  const target = new Date(dateStr + 'T00:00:00')
-  const diffMs = target.getTime() - monday.getTime()
-  return Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000))
 }
 
 function getDaysInMonth(year: number, month: number) {
@@ -2149,12 +2072,10 @@ export function SyllabusTracking({
 }
 
 export default function ClassView({ classId, grade, section, schoolId, teacherName, teacherId, isClassTeacher, teacher, onBack, initialTab, openExamId, academicYear, readOnly }: Props) {
-  const hasTimetableFeature = useFeature('timetable')
   const hasAttendanceFeature = useFeature('attendance')
   const hasExamMarksFeature = useFeature('exam-marks')
   const allTabs = isClassTeacher ? CLASS_TEACHER_TABS : SUBJECT_TEACHER_TABS
   const tabs = allTabs.filter(t =>
-    (t !== 'Timetable' || hasTimetableFeature) &&
     (t !== 'Attendance' || hasAttendanceFeature) &&
     (t !== 'Marks & Results' || hasExamMarksFeature)
   )
@@ -2164,75 +2085,8 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   const [activeTab, setActiveTab] = useState(initialTab && tabs.includes(initialTab) ? initialTab : tabs[0])
   const [detailStudent, setDetailStudent] = useState<Student | null>(null)
 
-  // Today's timetable (for 1st period card + day-wise view)
-  const [todaySlots, setTodaySlots] = useState<TimetableSlot[]>([])
-  // Today's attendance (for overview card)
+  // Today's attendance (for the overview card)
   const [todayAtt, setTodayAtt] = useState<AttendanceRecord[]>([])
-  const notifSentRef = useRef(false)
-
-  // All timetable slots (for Timetable tab)
-  const [allTimetableSlots, setAllTimetableSlots] = useState<TimetableSlot[]>([])
-  // All substitute assignments for this class (for full-week overlay)
-  const [classSubstitutes, setClassSubstitutes] = useState<ClassSubstitute[]>([])
-  // Week offset for Timetable tab (0 = current/anchor week, 1 = next week, etc.)
-  const [ttWeekOffset, setTtWeekOffset] = useState(0)
-
-  // Teacher portal slot editing
-  const [editSlot, setEditSlot] = useState<TimetableSlot | null>(null)
-  const [roomVal, setRoomVal] = useState<string>('')
-  const [savingSlot, setSavingSlot] = useState(false)
-
-  const handleCellClick = (slot: TimetableSlot) => {
-    if (!teacher) return
-    if (slot.subject_name && slot.subject_name !== teacher.subject) return
-    setEditSlot(slot)
-    setRoomVal(slot.room || '')
-  }
-
-  const saveTeacherSlot = async (isClear: boolean) => {
-    if (!editSlot || !teacher) return
-    setSavingSlot(true)
-    try {
-      const payload = {
-        id: editSlot.id,
-        class_id: classId,
-        school_id: schoolId,
-        day_of_week: editSlot.day_of_week,
-        period_number: editSlot.period_number,
-        subject_name: isClear ? null : teacher.subject,
-        teacher_id: isClear ? null : teacher.id,
-        room: isClear ? null : roomVal.trim(),
-        time_from: editSlot.time_from,
-        time_to: editSlot.time_to
-      }
-      
-      const res = await fetch('/api/class-timetable', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      })
-      
-      if (res.ok) {
-        // Re-fetch all class timetable slots
-        const data = await fetch(`/api/class-timetable?class_id=${classId}&school_id=${schoolId}`).then(r => r.json())
-        const allSlots: TimetableSlot[] = Array.isArray(data) ? data : []
-        setAllTimetableSlots(allSlots)
-        // Refresh today's slots too
-        const todayDay = getToday()
-        const daySlots = allSlots.filter(s => s.day_of_week === todayDay)
-          .sort((a, b) => a.period_number - b.period_number)
-        setTodaySlots(daySlots)
-        setEditSlot(null)
-      } else {
-        sonnerToast.error('Failed to save slot. Please try again.')
-      }
-    } catch (err) {
-      console.error(err)
-      sonnerToast.error('Error updating timetable slot.')
-    } finally {
-      setSavingSlot(false)
-    }
-  }
 
   // Attendance tab state
   const [attView, setAttView] = useState<'day' | 'monthly'>('day')
@@ -2252,64 +2106,16 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   useEffect(() => {
     setLoading(true)
     const todayStr = new Date().toISOString().split('T')[0]
-    const todayDay = getToday()
     Promise.all([
       fetch(`/api/classes/${classId}`).then(r => r.json()),
       fetch(`/api/students?school_id=${schoolId}&grade=${encodeURIComponent(grade)}&section=${encodeURIComponent(section)}`).then(r => r.json()),
       fetch(`/api/attendance?class_id=${classId}&date=${todayStr}&school_id=${schoolId}`).then(r => r.json()),
-      // Timetable without date — all week slots for the grid
-      fetch(`/api/class-timetable?class_id=${classId}&school_id=${schoolId}`).then(r => r.json()),
-      // All substitute assignments for this class (used for full-week overlay)
-      fetch(`/api/substitutes?school_id=${schoolId}&class_id=${classId}`).then(r => r.json()),
-    ]).then(([cls, studs, att, tt, subs]) => {
+    ]).then(([cls, studs, att]) => {
       setClassDetail(cls)
       setStudents(Array.isArray(studs) ? studs.filter((s: Student) => !s.status || s.status === 'active') : [])
       setTodayAtt(Array.isArray(att) ? att : [])
-      const allSlots: TimetableSlot[] = Array.isArray(tt) ? tt : []
-      setAllTimetableSlots(allSlots)
-      const daySlots = allSlots.filter(s => s.day_of_week === todayDay)
-        .sort((a, b) => a.period_number - b.period_number)
-      setTodaySlots(daySlots)
-      setClassSubstitutes(Array.isArray(subs) ? subs : [])
     }).finally(() => setLoading(false))
   }, [classId, schoolId, grade, section])
-
-  // Auto-advance timetable week to show the first upcoming substitute
-  useEffect(() => {
-    if (classSubstitutes.length === 0) return
-    const todayStr = new Date().toISOString().split('T')[0]
-    const upcomingDate = classSubstitutes
-      .map(s => s.date?.toString().slice(0, 10) || '')
-      .filter(d => d >= todayStr)
-      .sort()[0]
-    if (upcomingDate) {
-      setTtWeekOffset(getWeekOffsetForDate(upcomingDate))
-    }
-  }, [classSubstitutes])
-
-  // Notify class teacher if 1st period started + 15 min but no attendance
-  useEffect(() => {
-    if (!isClassTeacher || notifSentRef.current) return
-    if (todaySlots.length === 0) return
-    const firstSlot = todaySlots[0]
-    const nowMins = new Date().getHours() * 60 + new Date().getMinutes()
-    const startMins = timeToMins(firstSlot.time_from)
-    if (nowMins >= startMins + 15 && todayAtt.length === 0) {
-      notifSentRef.current = true
-      fetch('/api/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          school_id: schoolId,
-          recipient_teacher_id: classDetail?.class_teacher_id,
-          type: 'attendance_reminder',
-          title: 'Attendance Not Marked',
-          message: `1st period of Class ${grade}-${section} started at ${firstSlot.time_from} — attendance not yet marked.`,
-          data: { class_id: classId, grade, section, period: firstSlot.period_number },
-        }),
-      }).catch(() => {})
-    }
-  }, [todaySlots, todayAtt, classDetail, isClassTeacher, schoolId, classId, grade, section])
 
   // Fetch attendance for selected date (Attendance tab - day-wise)
   useEffect(() => {
@@ -2375,13 +2181,6 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
 
   const className = `Class ${grade}${section}`
   const subjects = classDetail?.subjects || []
-
-  // Split timetable into morning (before break) and afternoon (after break)
-  const firstBreakIdx = todaySlots.findIndex(s => s.is_break)
-  const morningSlots  = (firstBreakIdx === -1 ? todaySlots : todaySlots.slice(0, firstBreakIdx)).filter(s => !s.is_break)
-  const afternoonSlots = (firstBreakIdx === -1 ? [] : todaySlots.slice(firstBreakIdx + 1)).filter(s => !s.is_break)
-  const morningFirst   = morningSlots[0] || null
-  const afternoonFirst = afternoonSlots[0] || null
 
   // Today's attendance by session
   const morningAtt   = todayAtt.filter(a => !a.session || a.session === 'morning')
@@ -2501,7 +2300,6 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                       <div className="flex items-center gap-1.5 mb-1">
                         <span className="text-sm">🌅</span>
                         <p className="text-xs font-semibold text-orange-700">Morning</p>
-                        {morningFirst && <span className="text-[10px] text-orange-400 ml-auto">{morningFirst.time_from}</span>}
                       </div>
                       {s.total > 0 ? (
                         <>
@@ -2527,7 +2325,6 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                       <div className="flex items-center gap-1.5 mb-1">
                         <span className="text-sm">🌆</span>
                         <p className="text-xs font-semibold text-purple-700">Afternoon</p>
-                        {afternoonFirst && <span className="text-[10px] text-purple-400 ml-auto">{afternoonFirst.time_from}</span>}
                       </div>
                       {s.total > 0 ? (
                         <>
@@ -2932,217 +2729,6 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         </div>
       )}
 
-      {/* ── TIMETABLE TAB ───────────────────────────────────────────────────── */}
-      {activeTab === 'Timetable' && (() => {
-        const maxPeriod = allTimetableSlots.reduce((m, s) => Math.max(m, s.period_number), 0)
-        const periods = Array.from({ length: maxPeriod }, (_, i) => i + 1)
-        const getSlot = (day: string, period: number) =>
-          allTimetableSlots.find(s => s.day_of_week === day && s.period_number === period) || null
-        const todayLabel = getToday()
-        // Week dates for the currently viewed week (offset from anchor)
-        const weekDates = getWeekDates(ttWeekOffset)
-        const weekStart = weekDates['Monday']
-        const weekEnd   = weekDates['Saturday']
-
-        // Build lookup: date-period → substitute (all weeks)
-        const subLookup = new Map<string, ClassSubstitute>()
-        classSubstitutes.forEach(s => {
-          const dateStr = s.date?.toString().slice(0, 10)
-          if (dateStr) subLookup.set(`${dateStr}-${s.period_number}`, s)
-        })
-
-        // Count substitutes visible in this week
-        const subsThisWeek = classSubstitutes.filter(s => {
-          const d = s.date?.toString().slice(0, 10)
-          return d && d >= weekStart && d <= weekEnd
-        })
-
-        return (
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
-              <h3 className="font-semibold text-gray-800 text-sm">Class {grade}-{section} Timetable</h3>
-              <div className="flex items-center gap-3">
-                {subsThisWeek.length > 0 && (
-                  <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">
-                    {subsThisWeek.length} substitute{subsThisWeek.length > 1 ? 's' : ''} this week
-                  </span>
-                )}
-                {classSubstitutes.length > 0 && subsThisWeek.length === 0 && (
-                  <span className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">
-                    {classSubstitutes.length} sub{classSubstitutes.length > 1 ? 's' : ''} in other weeks
-                  </span>
-                )}
-                {/* Week navigation */}
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setTtWeekOffset(o => o - 1)}
-                    className="text-xs border border-gray-200 px-2 py-1 rounded hover:bg-gray-50">
-                    ← Prev
-                  </button>
-                  <button
-                    onClick={() => setTtWeekOffset(0)}
-                    className={`text-xs border px-2 py-1 rounded ${ttWeekOffset === 0 ? 'bg-orange-500 text-white border-orange-500' : 'border-gray-200 hover:bg-gray-50'}`}>
-                    This Week
-                  </button>
-                  <button
-                    onClick={() => setTtWeekOffset(o => o + 1)}
-                    className="text-xs border border-gray-200 px-2 py-1 rounded hover:bg-gray-50">
-                    Next →
-                  </button>
-                </div>
-              </div>
-            </div>
-            {allTimetableSlots.length === 0 ? (
-              <div className="py-16 text-center">
-                <p className="text-sm text-gray-400">No timetable set up yet</p>
-                <p className="text-xs text-gray-300 mt-1">Ask school admin to configure the class timetable</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="text-xs border-collapse min-w-max w-full">
-                  <thead>
-                    <tr className="bg-slate-800">
-                      <th className="sticky left-0 bg-slate-800 px-3 py-3 text-left font-semibold text-slate-200 min-w-[100px] border-r border-slate-700">
-                        Slot / Time
-                      </th>
-                      {DAYS.map(day => (
-                        <th key={day} className={`px-3 py-3 text-center font-semibold min-w-[120px] border-r border-slate-700 last:border-r-0 ${day === todayLabel ? 'bg-orange-600 text-white' : 'text-slate-300'}`}>
-                          <span className="block">{day.slice(0, 3)}</span>
-                          <span className="block text-[9px] font-normal opacity-70">{weekDates[day]?.slice(5)}</span>
-                          {day === todayLabel && <span className="block text-[9px] font-normal text-orange-200">Today</span>}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {SCHEDULE.map(schedSlot => {
-                      if (schedSlot.is_break) {
-                        return (
-                          <tr key={schedSlot.slot} className="bg-amber-50 border-y border-amber-100">
-                            <td className="sticky left-0 bg-amber-50 px-3 py-2 border-r border-amber-100 z-10">
-                              <span className="font-semibold text-amber-600 text-[11px]">{schedSlot.break_label}</span>
-                              <span className="block text-amber-400 text-[10px]">{schedSlot.time_from}–{schedSlot.time_to}</span>
-                            </td>
-                            <td colSpan={DAYS.length} className="text-center text-amber-400 italic py-2 text-[11px]">
-                              {schedSlot.break_label} · {schedSlot.time_from} – {schedSlot.time_to}
-                            </td>
-                          </tr>
-                        )
-                      }
-
-                      return (
-                        <tr key={schedSlot.slot} className="border-b border-gray-100 hover:bg-gray-50/50">
-                          <td className="sticky left-0 bg-gray-50 px-3 py-2 border-r border-gray-100 z-10">
-                            <span className="font-bold text-gray-700 text-[11px] block">{schedSlot.short}</span>
-                            <span className="text-gray-400 text-[10px]">{schedSlot.time_from}–{schedSlot.time_to}</span>
-                          </td>
-                          {DAYS.map(day => {
-                            const slot = allTimetableSlots.find(s =>
-                              s.day_of_week === day && Math.round(Number(s.period_number)) === schedSlot.slot && !s.is_break
-                            )
-                            const isToday = day === todayLabel
-                            const cellDate = weekDates[day]
-                            const sub = cellDate ? subLookup.get(`${cellDate}-${schedSlot.slot}`) : undefined
-                            const hasSub = !!sub
-                            const isMe = hasSub && teacherId && sub.substitute_teacher_id === teacherId
-
-                            if (!slot) {
-                              const canSchedule = !!teacher?.subject
-                              return (
-                                <td key={day} className="px-2 py-2 border-r border-gray-100 last:border-r-0">
-                                  {canSchedule ? (
-                                    <button
-                                      onClick={() => handleCellClick({
-                                        id: 0,
-                                        period_number: schedSlot.slot,
-                                        time_from: schedSlot.time_from,
-                                        time_to: schedSlot.time_to,
-                                        subject_name: null,
-                                        teacher_name: null,
-                                        room: null,
-                                        is_break: false,
-                                        break_label: null,
-                                        day_of_week: day,
-                                        substitute_teacher_id: null,
-                                        substitute_teacher_name: null
-                                      })}
-                                      className={`w-full rounded min-h-[42px] flex items-center justify-center ${isToday ? 'bg-orange-50/30 hover:bg-orange-50' : 'bg-gray-50 hover:bg-slate-100'} border border-dashed border-slate-200 hover:border-slate-400 transition-all text-slate-400 hover:text-slate-600 font-semibold cursor-pointer`}
-                                    >
-                                      <span className="text-[10px]">+ Schedule</span>
-                                    </button>
-                                  ) : (
-                                    <div className={`rounded min-h-[42px] flex items-center justify-center ${isToday ? 'bg-orange-50/30' : 'bg-gray-50'} border border-gray-100`}>
-                                      <span className="text-gray-200 text-[10px] italic">Free</span>
-                                    </div>
-                                  )}
-                                </td>
-                              )
-                            }
-
-                            const isMySubject = slot.subject_name === teacher?.subject
-
-                            return (
-                              <td key={day} className={`px-2 py-2 border-r border-gray-100 last:border-r-0 ${isToday ? 'bg-orange-50/20' : ''}`}>
-                                {isMySubject ? (
-                                  <button
-                                    onClick={() => handleCellClick(slot)}
-                                    className={`w-full text-left rounded px-2 py-1.5 min-h-[42px] transition-all hover:shadow-sm border cursor-pointer ${
-                                      hasSub ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-blue-50 border-blue-100 hover:bg-blue-100'
-                                    }`}
-                                  >
-                                    <div className="flex items-start justify-between gap-1">
-                                      <p className={`font-semibold text-[11px] leading-tight ${hasSub ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-                                        {slot.subject_name || '—'}
-                                      </p>
-                                      {hasSub && <span className="text-[9px] bg-amber-400 text-white px-1 py-0.5 rounded font-bold flex-shrink-0">SUB</span>}
-                                    </div>
-                                    {hasSub ? (
-                                      <>
-                                        <p className="text-gray-300 line-through text-[10px]">{slot.teacher_name || 'No teacher'}</p>
-                                        <p className={`text-[10px] font-semibold ${isMe ? 'text-amber-600' : 'text-blue-600'}`}>
-                                          {isMe ? '★ You (Sub)' : sub.substitute_teacher_name || 'Substitute'}
-                                        </p>
-                                      </>
-                                    ) : (
-                                      <p className="text-gray-400 text-[10px] mt-0.5">{slot.teacher_name || 'No teacher'} (edit)</p>
-                                    )}
-                                    {slot.room && <p className="text-gray-300 text-[10px]">{slot.room}</p>}
-                                  </button>
-                                ) : (
-                                  <div className={`rounded px-2 py-1.5 min-h-[42px] border ${hasSub ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-100'}`}>
-                                    <div className="flex items-start justify-between gap-1">
-                                      <p className={`font-semibold text-[11px] leading-tight ${hasSub ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-                                        {slot.subject_name || '—'}
-                                      </p>
-                                      {hasSub && <span className="text-[9px] bg-amber-400 text-white px-1 py-0.5 rounded font-bold flex-shrink-0">SUB</span>}
-                                    </div>
-                                    {hasSub ? (
-                                      <>
-                                        <p className="text-gray-300 line-through text-[10px]">{slot.teacher_name || 'No teacher'}</p>
-                                        <p className={`text-[10px] font-semibold ${isMe ? 'text-amber-600' : 'text-blue-600'}`}>
-                                          {isMe ? '★ You (Sub)' : sub.substitute_teacher_name || 'Substitute'}
-                                        </p>
-                                      </>
-                                    ) : (
-                                      <p className="text-gray-400 text-[10px] mt-0.5">{slot.teacher_name || 'No teacher'}</p>
-                                    )}
-                                    {slot.room && <p className="text-gray-300 text-[10px]">{slot.room}</p>}
-                                  </div>
-                                )}
-                              </td>
-                            )
-                          })}
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )
-      })()}
-
       {/* ── MARKS & RESULTS TAB ─────────────────────────────────────────────── */}
       {activeTab === 'Marks & Results' && teacher && (
         <ExamMarks
@@ -3174,83 +2760,6 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         />
       )}
 
-      {/* ── TEACHER EDIT TIMETABLE SLOT MODAL ── */}
-      {editSlot && teacher && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setEditSlot(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-gray-900 text-base">
-                {editSlot.id === 0 ? 'Schedule Class' : 'Edit Timetable Slot'}
-              </h3>
-              <button onClick={() => setEditSlot(null)} className="text-gray-400 hover:text-gray-600 text-xl font-bold cursor-pointer">×</button>
-            </div>
-
-            <div className="flex flex-wrap gap-1.5 mb-4">
-              <span className="text-[11px] bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-medium">{editSlot.day_of_week}</span>
-              <span className="text-[11px] bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-medium">Period {editSlot.period_number}</span>
-              <span className="text-[11px] bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-medium">{editSlot.time_from}–{editSlot.time_to}</span>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Subject</label>
-                <div className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 font-semibold">
-                  {teacher.subject}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Teacher</label>
-                <div className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 font-semibold">
-                  {teacher.name}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Room (optional)</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Room 102, Science Lab..."
-                  value={roomVal}
-                  onChange={e => setRoomVal(e.target.value)}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-300 font-medium"
-                />
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setEditSlot(null)}
-                  className="flex-1 py-2 border border-slate-200 text-slate-600 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-all cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={savingSlot}
-                  onClick={() => saveTeacherSlot(false)}
-                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-all disabled:opacity-50 cursor-pointer"
-                >
-                  {savingSlot ? 'Saving...' : editSlot.id === 0 ? 'Schedule' : 'Save'}
-                </button>
-              </div>
-
-              {editSlot.id !== 0 && (
-                <div className="pt-3 border-t border-slate-100">
-                  <button
-                    type="button"
-                    disabled={savingSlot}
-                    onClick={() => saveTeacherSlot(true)}
-                    className="w-full py-2 border border-dashed border-red-300 text-red-600 hover:bg-red-50 rounded-xl text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer"
-                  >
-                    🗑 Clear Slot (Make Free)
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
