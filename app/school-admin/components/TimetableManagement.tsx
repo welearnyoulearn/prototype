@@ -130,8 +130,11 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   const [showLoadPanel, setShowLoadPanel] = useState(false)
 
   async function runLoadAnalysis() {
-    // Teacher load analysis not available in wlylV1
-    setShowLoadPanel(false)
+    setLoadAnalysing(true); setShowLoadPanel(true)
+    try {
+      const data = await fetch(`/api/class-timetable/teacher-load?school_id=${schoolId}`).then(r => r.json())
+      setLoadData(data)
+    } finally { setLoadAnalysing(false) }
   }
 
   // Named schedule templates — loaded once, used for template selector in Regenerate
@@ -251,7 +254,13 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   }
 
   const loadConflicts = useCallback(async () => {
-    setConflicts([]); setConflictsLoading(false)
+    setConflictsLoading(true)
+    try {
+      const tmplParam = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
+      const data = await fetch(`/api/class-timetable/conflicts?school_id=${schoolId}&template_id=${tmplParam}`).then(r => r.json())
+      setConflicts(Array.isArray(data) ? data : [])
+    } catch { setConflicts([]) }
+    finally { setConflictsLoading(false) }
   }, [schoolId, selectedTemplateId])
 
   async function fixConflict(slotId: number, newTeacherId: number | null) {
@@ -280,7 +289,15 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   const today = getToday()
 
   const loadHealth = useCallback(() => {
-    // Health API not available in wlylV1
+    fetch(`/api/class-timetable/health?school_id=${schoolId}`)
+      .then(r => r.json())
+      .then((rows: ClassHealth[]) => {
+        if (!Array.isArray(rows)) return
+        const map: Record<number, ClassHealth> = {}
+        rows.forEach(r => { map[r.class_id] = r })
+        setHealthMap(map)
+      })
+      .catch(() => {})
   }, [schoolId])
 
   // ── Cache all school slots on mount — avoids re-fetching on every class open ─
@@ -298,11 +315,12 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
       fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()),
       fetch(`/api/teachers?school_id=${schoolId}&staff_type=teaching`).then(r => r.json()),
       fetch(`/api/class-timetable?school_id=${schoolId}`).then(r => r.json()),
-    ]).then(([cls, tch, allSlots]) => {
+      fetch(`/api/schedule-templates?school_id=${schoolId}`).then(r => r.json()),
+    ]).then(([cls, tch, allSlots, tmpls]) => {
       setClasses(Array.isArray(cls) ? cls : [])
       setTeachers(Array.isArray(tch) ? tch : [])
       setAllSchoolSlots(Array.isArray(allSlots) ? allSlots : [])
-      setSavedTemplates([])
+      setSavedTemplates(Array.isArray(tmpls) ? tmpls : [])
     }).finally(() => setLoading(false))
     loadHealth()
     loadConflicts()  // eagerly load school-wide conflicts for the top banner
@@ -388,8 +406,33 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
   }, [editSlot, selected, schoolId])
 
   // ── Swap two slots from within the modal ─────────────────────────────────
-  async function doSwapFromModal(_slotA: TimetableSlot, _slotB: TimetableSlot) {
-    toast.error('Timetable swap is not available in this version.')
+  async function doSwapFromModal(slotA: TimetableSlot, slotB: TimetableSlot) {
+    if (!selected) return
+    setSwapping(true)
+    const pA = Math.round(Number(slotA.period_number))
+    const pB = Math.round(Number(slotB.period_number))
+    try {
+      const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
+      const tmplParam = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
+      const res = await fetch('/api/class-timetable/swap', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId, class_id: selected.id, template_id: tmplIdForBody,
+          slot_a: { day: slotA.day_of_week, period_number: pA },
+          slot_b: { day: slotB.day_of_week, period_number: pB },
+        }),
+      })
+      if (res.ok) {
+        const freshData = await fetch(`/api/class-timetable?class_id=${selected.id}&school_id=${schoolId}&template_id=${tmplParam}`).then(r => r.json())
+        const freshSlots: TimetableSlot[] = Array.isArray(freshData) ? freshData : []
+        setTimetable(freshSlots)
+        setConflictCount(freshSlots.filter(s => (s as TimetableSlot & { has_conflict?: boolean }).has_conflict).length)
+        setHasChanges(true)
+        setChangedClassIds(prev => new Set([...prev, selected.id]))
+        loadHealth(); refreshAllSlots()
+        setEditSlot(null)
+      }
+    } finally { setSwapping(false) }
   }
 
   // ── Add a new subject directly to a slot ─────────────────────────────────
@@ -534,8 +577,74 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
     return null
   }
 
-  function doSwap(_slotA: TimetableSlot, _slotB: TimetableSlot) {
-    toast.error('Slot swap is not available in this version.')
+  function doSwap(slotA: TimetableSlot, slotB: TimetableSlot) {
+    if (!selected) return
+    const pA = Math.round(Number(slotA.period_number))
+    const pB = Math.round(Number(slotB.period_number))
+    const classId = selected.id
+    // Push undo entry before modifying
+    const preSwapSnapshot = [...timetable]
+    setUndoStack(prev => [...prev.slice(-9), {
+      label: `${slotA.subject_name || '?'} ↔ ${slotB.subject_name || '?'}`,
+      snapshot: preSwapSnapshot,
+      apiReverse: async () => {
+        const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
+        await fetch('/api/class-timetable/swap', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            school_id: schoolId, class_id: classId, template_id: tmplIdForBody,
+            slot_a: { day: slotB.day_of_week, period_number: pB },
+            slot_b: { day: slotA.day_of_week, period_number: pA },
+          }),
+        })
+      },
+    }])
+    // Optimistic update — show result immediately
+    setTimetable(prev => prev.map(s => {
+      const aMatch = s.day_of_week === slotA.day_of_week && Math.round(Number(s.period_number)) === pA
+      const bMatch = s.day_of_week === slotB.day_of_week && Math.round(Number(s.period_number)) === pB
+      if (aMatch) return { ...s, subject_name: slotB.subject_name, teacher_name: slotB.teacher_name, teacher_id: slotB.teacher_id, room: slotB.room }
+      if (bMatch) return { ...s, subject_name: slotA.subject_name, teacher_name: slotA.teacher_name, teacher_id: slotA.teacher_id, room: slotA.room }
+      return s
+    }))
+    setSelectedSlot(null); setHasChanges(true)
+    setChangedClassIds(prev => new Set([...prev, classId]))
+    setSwapMsg({ text: 'Periods swapped', ok: true })
+    setTimeout(() => setSwapMsg(null), 3000)
+    // Fire-and-forget save; revert on failure, refresh health on success
+    const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
+    fetch('/api/class-timetable/swap', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        school_id: schoolId, class_id: selected.id, template_id: tmplIdForBody,
+        slot_a: { day: slotA.day_of_week, period_number: pA },
+        slot_b: { day: slotB.day_of_week, period_number: pB },
+      }),
+    }).then(async res => {
+      if (!res.ok) {
+        const d = await res.json()
+        setTimetable(prev => prev.map(s => {
+          const aMatch = s.day_of_week === slotA.day_of_week && Math.round(Number(s.period_number)) === pA
+          const bMatch = s.day_of_week === slotB.day_of_week && Math.round(Number(s.period_number)) === pB
+          if (aMatch) return { ...s, subject_name: slotA.subject_name, teacher_name: slotA.teacher_name, teacher_id: slotA.teacher_id, room: slotA.room }
+          if (bMatch) return { ...s, subject_name: slotB.subject_name, teacher_name: slotB.teacher_name, teacher_id: slotB.teacher_id, room: slotB.room }
+          return s
+        }))
+        setSwapMsg({ text: d.error ?? 'Swap failed — reverted', ok: false })
+      } else {
+        // Refresh health glimpse after successful save
+        loadHealth()
+      }
+    }).catch(() => {
+      setTimetable(prev => prev.map(s => {
+        const aMatch = s.day_of_week === slotA.day_of_week && Math.round(Number(s.period_number)) === pA
+        const bMatch = s.day_of_week === slotB.day_of_week && Math.round(Number(s.period_number)) === pB
+        if (aMatch) return { ...s, subject_name: slotA.subject_name, teacher_name: slotA.teacher_name, teacher_id: slotA.teacher_id, room: slotA.room }
+        if (bMatch) return { ...s, subject_name: slotB.subject_name, teacher_name: slotB.teacher_name, teacher_id: slotB.teacher_id, room: slotB.room }
+        return s
+      }))
+      setSwapMsg({ text: 'Network error — swap reverted', ok: false })
+    })
   }
 
   function handleCellClick(slot: TimetableSlot) {
@@ -567,17 +676,111 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
 
   // ── Regenerate timetable ──────────────────────────────────────────────────
   async function regenerate() {
-    toast.error('Timetable generation is not available in this version. Please enter your timetable manually by clicking on a slot.')
+    if (!selected) return
+    setRegenerating(true); setRegenMsg(null)
+    try {
+      // Pass selected template's settings if not using school default
+      const templateSettings = selectedTemplateId !== 'default'
+        ? savedTemplates.find(t => t.id === selectedTemplateId)?.settings
+        : undefined
+      const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
+      const tmplParam = selectedTemplateId === 'default' ? 'default' : selectedTemplateId
+      const res = await fetch('/api/class-timetable/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId, class_id: selected.id, force_replace: true,
+          template_id: tmplIdForBody,
+          ...(templateSettings ? { schedule_settings: templateSettings } : {}),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setRegenMsg({ text: data.error || 'Regeneration failed', ok: false })
+      } else {
+        const parts: string[] = ['Timetable regenerated.']
+        if (data.conflicts_auto_resolved > 0) parts.push(`${data.conflicts_auto_resolved} conflict(s) auto-resolved.`)
+        if (data.conflicts_need_manual   > 0) parts.push(`${data.conflicts_need_manual} slot(s) need a teacher — click amber cells.`)
+        setRegenMsg({ text: parts.join(' '), ok: true })
+        const ttData = await fetch(`/api/class-timetable?class_id=${selected.id}&school_id=${schoolId}&template_id=${tmplParam}`).then(r => r.json())
+        const slots: TimetableSlot[] = Array.isArray(ttData) ? ttData : []
+        setTimetable(slots)
+        const newConflicts = slots.filter(s => (s as TimetableSlot & { has_conflict?: boolean }).has_conflict).length
+        setConflictCount(newConflicts)
+        if (newConflicts > 0 && showConflictPanel) loadConflicts()
+        setClasses(prev => prev.map(c => c.id === selected.id ? { ...c, timetable_generated_at: new Date().toISOString() } : c))
+        setHasChanges(true)
+        if (selected) setChangedClassIds(prev => new Set([...prev, selected.id]))
+        refreshAllSlots(); loadHealth()
+        setTimeout(() => setRegenMsg(null), 6000)
+      }
+    } finally { setRegenerating(false) }
   }
 
+  // ── Create custom blank timetable ────────────────────────────────────────
   async function createCustomTimetable() {
-    toast.error('Timetable generation is not available in this version.')
-    setShowCustomModal(false)
+    if (!selected) return
+    setCreatingCustom(true)
+    try {
+      const tmpl = customTemplateId !== 'default' ? savedTemplates.find(t => t.id === customTemplateId) : null
+      const res = await fetch('/api/class-timetable/generate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          school_id: schoolId, class_id: selected.id,
+          force_replace: true, custom_mode: true,
+          template_id: customTemplateId !== 'default' ? customTemplateId : null,
+          schedule_settings: tmpl ? tmpl.settings : undefined,
+        }),
+      })
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error) }
+      // Reload timetable
+      const tmplParam = customTemplateId !== 'default' ? customTemplateId : 'default'
+      const data = await fetch(`/api/class-timetable?class_id=${selected.id}&school_id=${schoolId}&template_id=${tmplParam}`).then(r => r.json())
+      const slots: TimetableSlot[] = Array.isArray(data) ? data : []
+      setTimetable(slots)
+      setConflictCount(0)
+      setHasChanges(false)
+      setSelectedTemplateId(customTemplateId)
+      if (tmpl) { setActiveSchedule(buildScheduleFromSettings(tmpl.settings)); setActiveAcademicSlots(buildScheduleFromSettings(tmpl.settings).filter(s => !s.is_break)) }
+      setShowCustomModal(false)
+      setEditMode(true)  // auto-enter edit mode so admin can fill in subjects
+      setClasses(prev => prev.map(c => c.id === selected.id ? { ...c, timetable_generated_at: new Date().toISOString() } : c))
+      refreshAllSlots(); loadHealth()
+    } catch (e) {
+      setRegenMsg({ text: e instanceof Error ? e.message : 'Failed to create custom timetable', ok: false })
+      setShowCustomModal(false)
+    } finally {
+      setCreatingCustom(false)
+    }
   }
 
   // ── Circulate timetable ───────────────────────────────────────────────────
   async function circulate() {
-    toast.error('Timetable publication is not available in this version.')
+    if (!selected) return
+    setCirculating(true); setCirculateMsg(null)
+    try {
+      const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
+      const res = await fetch('/api/class-timetable/circulate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, class_id: selected.id, template_id: tmplIdForBody }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setCirculateMsg({ text: data.error || 'Circulation failed', ok: false })
+      } else {
+        const circulatedAt = data.circulated_at ?? new Date().toISOString()
+        setCirculateMsg({ text: `Published — ${data.staff_notified} staff and all students notified`, ok: true })
+        setEditMode(false); setHasChanges(false); setUndoStack([])
+        setChangedClassIds(prev => { const next = new Set(prev); next.delete(selected.id); return next })
+        // Stamp circulation time locally so LIVE badge appears immediately
+        setClasses(prev => prev.map(c => c.id === selected.id
+          ? { ...c, timetable_circulated_at: circulatedAt }
+          : c
+        ))
+        setSelected(prev => prev ? { ...prev, timetable_circulated_at: circulatedAt } : prev)
+        loadHealth()
+        setTimeout(() => setCirculateMsg(null), 6000)
+      }
+    } finally { setCirculating(false) }
   }
 
   // ── Undo last swap ────────────────────────────────────────────────────────
@@ -594,7 +797,28 @@ function ClassesTab({ schoolId, schedule, academicSlots }: { schoolId: number; s
 
   // ── Publish all classes that were changed in this session ─────────────────
   async function publishAll() {
-    toast.error('Timetable publication is not available in this version.')
+    if (changedClassIds.size === 0) return
+    setPublishingAll(true)
+    try {
+      const tmplIdForBody = selectedTemplateId === 'default' ? null : selectedTemplateId
+      for (const classId of changedClassIds) {
+        const res = await fetch('/api/class-timetable/circulate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ school_id: schoolId, class_id: classId, template_id: tmplIdForBody }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          const circulatedAt = data.circulated_at ?? new Date().toISOString()
+          setClasses(prev => prev.map(c => c.id === classId ? { ...c, timetable_circulated_at: circulatedAt } : c))
+          setChangedClassIds(prev => { const next = new Set(prev); next.delete(classId); return next })
+          if (selected?.id === classId) {
+            setSelected(prev => prev ? { ...prev, timetable_circulated_at: circulatedAt } : prev)
+            setHasChanges(false)
+          }
+        }
+      }
+      loadHealth()
+    } finally { setPublishingAll(false) }
   }
 
   // Group by grade
@@ -1989,10 +2213,42 @@ function TemplateTab({
   const [showSaveAs, setShowSaveAs]       = useState(false)
   const [deletingId, setDeletingId]       = useState<number | null>(null)
 
-  useEffect(() => { setTemplates([]); setTemplatesLoading(false) }, [schoolId])
+  useEffect(() => {
+    fetch(`/api/schedule-templates?school_id=${schoolId}`)
+      .then(r => r.json())
+      .then(d => setTemplates(Array.isArray(d) ? d : []))
+      .catch(() => {})
+      .finally(() => setTemplatesLoading(false))
+  }, [schoolId])
 
-  async function saveAsTemplate() { toast.error('Schedule templates not available in this version.') }
-  async function deleteTemplate(_id: number) { toast.error('Schedule templates not available in this version.') }
+  async function saveAsTemplate() {
+    if (!saveAsName.trim()) return
+    setSavingTemplate(true)
+    try {
+      const res = await fetch('/api/schedule-templates', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, name: saveAsName.trim(), settings: form }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setTemplates(prev => {
+          const filtered = prev.filter(t => t.id !== data.id)
+          return [...filtered, data].sort((a, b) => a.created_at.localeCompare(b.created_at))
+        })
+        setSaveAsName(''); setShowSaveAs(false)
+        setSaveMsg({ text: `Template "${data.name}" saved`, ok: true })
+        setTimeout(() => setSaveMsg(null), 3000)
+      }
+    } finally { setSavingTemplate(false) }
+  }
+
+  async function deleteTemplate(id: number) {
+    setDeletingId(id)
+    try {
+      await fetch(`/api/schedule-templates?id=${id}&school_id=${schoolId}`, { method: 'DELETE' })
+      setTemplates(prev => prev.filter(t => t.id !== id))
+    } finally { setDeletingId(null) }
+  }
 
   function loadTemplate(t: SavedTemplate) {
     setForm(t.settings)

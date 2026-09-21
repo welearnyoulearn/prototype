@@ -25,6 +25,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- **Timetable, full workflow** (feature branch `feature/175-timetable-full-workflow`): school schedule and templates, teacher availability, generate, conflicts / health / validation / teacher load, swap, manual edit, publish (circulate), and the teacher / student / parent views — restored from history and covered by 11 end-to-end tests. (#175)
+
+### Fixed
+- **Security:** the restored timetable routes (generate, circulate, swap, sync, conflicts, health, templates, schedule, availability, modes, versions) now require a school-admin login and check that every id belongs to the caller's school. Students, parents and teachers could previously change a school's timetable through `PUT/PATCH/DELETE /api/class-timetable`; that is now school staff only. (#175)
+
+### Added
 - **Academic Calendar** (school admin): a month calendar with holidays, exams, events and meetings (date or range, "everyone" or "staff only"), weekly-off days, and clear warnings. Teachers, students and parents get a read-only **School Calendar** tab. A **holiday closes attendance** for its dates — the screens say why, the server refuses, and those dates are left out of every percentage. (#153)
 - **Attendance session locking**: any teacher can mark any class, Morning or Afternoon; the first submit locks the session and other teachers see "Already marked by <name> at <time>" (no overwriting, including when two submit at the same moment). The marking teacher can correct it the same day; the school admin any time; teachers can "Report a mistake" to the admin. (#153)
 - Admin Attendance page: **Today** panel (classes marked / not marked with the teacher to ask, holiday banner, "Mark today as a holiday", mistake reports); daily absentee list export. (#153)

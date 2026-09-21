@@ -3,6 +3,7 @@ import pool, { ensureDB } from '@/lib/db'
 import { notifyTimetableChange } from '@/lib/notifyTimetable'
 import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
 import { getAnySession } from '@/lib/auth'
+import { TIMETABLE_WRITE_ROLES } from '@/lib/timetableAuth'
 
 export async function GET(req: NextRequest) {
   try {
@@ -120,6 +121,8 @@ export async function PUT(req: NextRequest) {
   try {
     const authSession = await getAnySession()
     if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Reading is for everyone in the school; changing the timetable is for school staff only.
+    if (!TIMETABLE_WRITE_ROLES.includes(authSession.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const body = await req.json()
 
@@ -291,6 +294,8 @@ export async function PATCH(req: NextRequest) {
   try {
     const authSession = await getAnySession()
     if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Reading is for everyone in the school; changing the timetable is for school staff only.
+    if (!TIMETABLE_WRITE_ROLES.includes(authSession.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const { school_id, period_number, time_from, time_to } = await req.json()
     if (!school_id || period_number == null || !time_from || !time_to) {
@@ -315,6 +320,8 @@ export async function DELETE(req: NextRequest) {
   try {
     const authSession = await getAnySession()
     if (!authSession) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // Reading is for everyone in the school; changing the timetable is for school staff only.
+    if (!TIMETABLE_WRITE_ROLES.includes(authSession.role)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     const { searchParams } = new URL(req.url)
     const school_id         = searchParams.get('school_id')
