@@ -23,6 +23,8 @@ Any teacher marks; class teachers get a class dashboard; the school admin sees t
 - Dashboards: school admin *Overview* (school → class → student), class teacher *My class*, parent/student calendar.
 - Exports: class register and daily absentee list (CSV); absence emails to parents.
 
+- **Absentees view (Day register):** Attendance → Day register → **Absentees** shows everyone absent in Morning (or Afternoon) on one page, class by class — roll number, name, parent and a tap-to-call phone number, and a **Whole day** / **Morning only** tag. Classes that have not marked that session are listed at the top; classes with no absentees are summed up in one line. Print, or download the day's list as CSV. School admins only.
+
 ## Rules and limits
 
 - Late counts as attended; % = attended ÷ marked sessions; bands 90% / 75%; a dashboard needs 4 marked sessions before labelling a student.
@@ -59,3 +61,4 @@ API routes these screens call (all exist):
 | Date | Change | Issue |
 |------|--------|-------|
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
+| 2026-09-22 | Day register: Absentees view (all absentees on one page, class-wise) | #208 |

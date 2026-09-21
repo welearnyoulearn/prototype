@@ -7,6 +7,7 @@ import AttendanceTodayPanel, { type AttendanceOverview } from './AttendanceToday
 import { todayIST } from '@/lib/attendanceRules'
 import { EmptyState } from '@/components/ui/empty-state'
 import AttendanceOverviewDashboard from './AttendanceOverviewDashboard'
+import AttendanceAbsentees from './AttendanceAbsentees'
 
 type Props = { schoolId: number; onNavigate?: (key: string) => void }
 
@@ -104,6 +105,8 @@ function SessionCell({ total, present, absent, late, markedBy, markedAt, session
 export default function AttendanceDashboard({ schoolId, onNavigate }: Props) {
   const { isOnline, queue, retryFailed, dismissRejected } = useOfflineAttendance()
   const [tab, setTab]           = useState<'overview' | 'daily'>('overview')
+  // Day register: the class cards, or every absentee on one page
+  const [dailyView, setDailyView] = useState<'classes' | 'absentees'>('classes')
   const [date, setDate]         = useState(todayIST())
   const [data, setData]         = useState<ClassAttendance[]>([])
   const [loading, setLoading]   = useState(true)
@@ -232,6 +235,20 @@ export default function AttendanceDashboard({ schoolId, onNavigate }: Props) {
 
       {tab === 'daily' && !modalClass && <p className="text-sm text-gray-500 mb-4">{dateFormatted}</p>}
       {tab === 'daily' && !modalClass && (
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit mb-4" role="tablist" aria-label="Day register view">
+          {(['classes', 'absentees'] as const).map(v => (
+            <button key={v} type="button" role="tab" aria-selected={dailyView === v} data-testid={`attendance-daily-view-${v}`}
+              onClick={() => setDailyView(v)}
+              className={`px-4 py-1.5 rounded-md text-xs font-semibold transition-colors ${dailyView === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              {v === 'classes' ? 'Classes' : 'Absentees'}
+            </button>
+          ))}
+        </div>
+      )}
+      {tab === 'daily' && !modalClass && dailyView === 'absentees' && (
+        <AttendanceAbsentees date={date} onOpenClass={id => { const c = data.find(x => x.id === id); if (c) void openClassDetail(c) }} />
+      )}
+      {tab === 'daily' && !modalClass && dailyView === 'classes' && (
         <AttendanceTodayPanel overview={overview} onNavigate={onNavigate}
           onOpenClass={id => { const c = data.find(x => x.id === id); if (c) void openClassDetail(c) }} />
       )}
@@ -386,7 +403,7 @@ export default function AttendanceDashboard({ schoolId, onNavigate }: Props) {
         </div>
       )}
 
-      {tab === 'daily' && !modalClass && !overview?.nonWorking && <>
+      {tab === 'daily' && !modalClass && dailyView === 'classes' && !overview?.nonWorking && <>
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
           {error}
