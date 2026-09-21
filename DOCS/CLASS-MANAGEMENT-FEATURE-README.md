@@ -1,5 +1,7 @@
 # Class Management Feature — Complete Reference
 
+> **Note (2026-09-21):** the Timetable tab and everything timetable-related described below were removed from `dev` (#176) and live on `feature/175-timetable-full-workflow`. The rest of this document still applies.
+
 > **Flowchart:** https://claude.ai/code/artifact/ec5d608f-779f-4800-a97b-f593e3b41d63
 
 > Last verified against code: 2026-09-03

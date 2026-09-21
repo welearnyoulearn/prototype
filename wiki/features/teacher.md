@@ -26,7 +26,7 @@ The Teacher portal is the daily workspace for teachers at `/teacher`. It covers 
 | My Classes | Built | List of assigned classes with grade, section, student count, class teacher status |
 | My Students | Built | All students across assigned classes. Sortable, searchable |
 | Class View | Built | Drill-down: student list, attendance summary, marks overview (Homework and Doubts tabs removed, #136/#137) |
-| Timetable | Built | Personal weekly schedule with times, rooms, subjects, grades |
+| Timetable | Removed | Removed from `dev` (#176). The complete workflow lives on `feature/175-timetable-full-workflow` (draft PR #177). |
 | Attendance Marking | Built | Mark per class per session. Offline support via service worker. Auto-saves |
 
 ### Tasks & Learning
@@ -52,7 +52,6 @@ The Teacher portal is the daily workspace for teachers at `/teacher`. It covers 
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /api/class-timetable` | Teacher's timetable |
 | `GET/POST /api/attendance` | Attendance marking |
 | `GET/POST /api/syllabus` | Syllabus tracking |
 | `GET /api/transliterate` | Staff-only: English letters → Telugu/Hindi spellings for syllabus names (#116) |

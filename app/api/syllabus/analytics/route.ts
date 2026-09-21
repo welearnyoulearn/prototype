@@ -114,7 +114,7 @@ export async function GET(req: NextRequest) {
       //    (class/grade shown for each) instead of one blended "Mathematics"
       //    total. Aggregate across all classes/subjects they're actually
       //    assigned via Class Management's class_subjects — the real source
-      //    of truth (not a timetable, which may not exist for schools
+      //    of truth (which may not exist for schools
       //    without that feature, or a class_id/subject the teacher was never
       //    assigned by the school admin).
       //    Same class-scoped visibility rules as chapter_coverage above:

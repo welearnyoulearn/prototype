@@ -9,8 +9,6 @@ type Props = { schoolId: number }
 type ClassRow = {
   id: number; grade: string; section: string
   class_teacher_name: string | null
-  timetable_generated_at: string | null
-  timetable_circulated_at: string | null
 }
 
 type StudentPerf = {
@@ -28,11 +26,6 @@ type ClassPerfData = {
   class_avg: { attendance_pct: number | null; task_submission_rate: number | null; avg_score_pct: number | null; engagement: number | null }
   total_students: number
   period_days: number
-}
-
-type ClassHealth = {
-  class_id: number; conflict_count: number; no_teacher_count: number
-  subjects_unassigned: number; timetable_exists: boolean
 }
 
 type Subject = { subject_name: string; teacher_name: string | null; periods_per_week: number }
@@ -57,7 +50,6 @@ function EngBar({ value }: { value: number }) {
 
 export default function ClassAnalytics({ schoolId }: Props) {
   const [classes, setClasses]         = useState<ClassRow[]>([])
-  const [health, setHealth]           = useState<Record<number, ClassHealth>>({})
   const [selected, setSelected]       = useState<ClassRow | null>(null)
   const [perf, setPerf]               = useState<ClassPerfData | null>(null)
   const [subjects, setSubjects]       = useState<Subject[]>([])
@@ -67,15 +59,9 @@ export default function ClassAnalytics({ schoolId }: Props) {
   const [view, setView]               = useState<'overview' | 'students'>('overview')
 
   useEffect(() => {
-    Promise.all([
-      fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()),
-      fetch(`/api/class-timetable/health?school_id=${schoolId}`).then(r => r.json()),
-    ]).then(([cls, hlt]) => {
+    fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()).then(cls => {
       const clsList: ClassRow[] = Array.isArray(cls) ? cls : []
       setClasses(clsList)
-      const hMap: Record<number, ClassHealth> = {}
-      if (Array.isArray(hlt)) hlt.forEach((h: ClassHealth) => { hMap[h.class_id] = h })
-      setHealth(hMap)
       if (clsList.length > 0) loadClass(clsList[0], days)
     }).finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -109,7 +95,6 @@ export default function ClassAnalytics({ schoolId }: Props) {
     <EmptyState icon={BarChart3} title="No classes configured yet." className="py-16" />
   )
 
-  const h = selected ? health[selected.id] : null
   const avg = perf?.class_avg
 
   return (
@@ -123,17 +108,10 @@ export default function ClassAnalytics({ schoolId }: Props) {
               <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Grade {grade}</span>
             </div>
             {gradeClasses.map(c => {
-              const ch = health[c.id]
-              const dot = !ch ? 'bg-gray-200'
-                : ch.conflict_count > 0 ? 'bg-red-500'
-                : !ch.timetable_exists ? 'bg-gray-300'
-                : (ch.no_teacher_count > 0 || ch.subjects_unassigned > 0) ? 'bg-amber-400'
-                : 'bg-emerald-400'
               return (
                 <button key={c.id} onClick={() => loadClass(c, days)}
                   className={`w-full text-left px-3 py-2.5 border-b border-gray-50 last:border-b-0 flex items-center justify-between transition-colors ${selected?.id === c.id ? 'bg-blue-50 border-l-2 border-l-blue-500' : 'hover:bg-gray-50'}`}>
                   <span className={`text-sm font-semibold ${selected?.id === c.id ? 'text-blue-700' : 'text-gray-800'}`}>Section {c.section}</span>
-                  <span className={`w-2 h-2 rounded-full ${dot}`} />
                 </button>
               )
             })}
@@ -290,35 +268,6 @@ export default function ClassAnalytics({ schoolId }: Props) {
                     </div>
                   )}
 
-                  {h && (
-                    <div className="bg-white rounded-xl border border-gray-200 p-5">
-                      <p className="font-bold text-gray-800 text-sm mb-3">Timetable Status</p>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-gray-600">Timetable</span>
-                          <span className={`text-xs font-semibold ${h.timetable_exists ? 'text-emerald-600' : 'text-gray-400'}`}>{h.timetable_exists ? 'Generated' : 'Not generated'}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-gray-600">Teacher conflicts</span>
-                          <span className={`text-xs font-semibold ${h.conflict_count > 0 ? 'text-red-500' : 'text-emerald-600'}`}>{h.conflict_count > 0 ? `${h.conflict_count} conflict(s)` : 'None'}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-gray-600">Slots without teacher</span>
-                          <span className={`text-xs font-semibold ${h.no_teacher_count > 0 ? 'text-amber-500' : 'text-emerald-600'}`}>{h.no_teacher_count > 0 ? h.no_teacher_count : 'None'}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="text-gray-600">Subjects unassigned</span>
-                          <span className={`text-xs font-semibold ${h.subjects_unassigned > 0 ? 'text-orange-500' : 'text-emerald-600'}`}>{h.subjects_unassigned > 0 ? h.subjects_unassigned : 'None'}</span>
-                        </div>
-                        {selected.timetable_circulated_at && (
-                          <div className="flex items-center justify-between text-sm pt-1 border-t border-gray-50">
-                            <span className="text-gray-600">Last circulated</span>
-                            <span className="text-xs text-emerald-600 font-semibold">{new Date(selected.timetable_circulated_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </>
             ) : (

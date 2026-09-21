@@ -55,6 +55,10 @@ rebuilding from scratch.
 
 ---
 
+### Timetable - full workflow (removed from dev, #176)
+**Portal:** School Admin / Teacher / Student / Parent
+**Branch:** `feature/175-timetable-full-workflow` (draft PR #177) - working end to end (11 tests) and secured; see `wiki/features/timetable-workflow.md` there. The feature key `timetable` returns to `lib/features.ts` when it is merged back.
+
 ### Also removed from `dev` on 2026-09-21 (unstable / unreachable — each preserved on its own branch)
 - **Student Learning Hub & Daily Knowledge** (#164) — `feature/164-student-learning-hub-daily-knowledge` (draft PR #169). Student-independent: not a feature-config key.
 - **Rewards Marketplace** — student, parent, admin (#165) — `feature/165-rewards-marketplace` (draft PR #170). Student-independent: not a feature-config key.

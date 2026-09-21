@@ -70,8 +70,7 @@ export default function MyStudents({ teacher, schoolId }: Props) {
         if (cls) classMap.set(`${cls.grade}-${cls.section}`, cls)
       }
       // Class Management's class_subjects assignment — same source used by
-      // Syllabus/My Classes, not the timetable (a class is "theirs" the
-      // moment it's assigned, with or without a timetable existing).
+      // Syllabus/My Classes (a class is "theirs" the moment it's assigned).
       classSubjects.forEach((a: ClassSubjectAssignment) => {
         if (!a.grade || !a.section) return
         const key = `${a.grade}-${a.section}`

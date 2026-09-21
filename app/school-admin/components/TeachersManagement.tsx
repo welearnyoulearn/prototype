@@ -28,30 +28,6 @@ type Teacher = {
 
 type EditForm = Partial<Teacher>
 
-type TimetableSlot = {
-  id: number
-  day_of_week: string
-  period_number: number
-  time_from: string
-  time_to: string
-  subject: string
-  grade: string
-  section: string
-  room: string
-}
-
-type SubDuty = {
-  id: number
-  period_number: number
-  subject_name: string | null
-  original_teacher_name: string | null
-  original_teacher_department: string | null
-  grade: string
-  section: string
-}
-
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-
 function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
   const sz = size === 'sm' ? 'w-8 h-8 text-xs' : size === 'lg' ? 'w-14 h-14 text-lg' : 'w-10 h-10 text-sm'
   return (
@@ -74,20 +50,11 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState<EditForm>({})
   const [saving, setSaving] = useState(false)
-  const [showTimetable, setShowTimetable] = useState(false)
-  const [teacherTimetable, setTeacherTimetable] = useState<TimetableSlot[]>([])
-  const [teacherSubDuties, setTeacherSubDuties] = useState<SubDuty[]>([])
-  const [timetableLoading, setTimetableLoading] = useState(false)
   const [detailTab, setDetailTab] = useState<'info' | 'analytics'>('info')
-  const [teacherAnalytics, setTeacherAnalytics] = useState<{
-    subDutyCount: number; periodsPerWeek: number
-  } | null>(null)
-  const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [showRemoveDialog, setShowRemoveDialog] = useState(false)
   const [removeConsequences, setRemoveConsequences] = useState<{
     subjects_teaching: { subject_name: string; grade: string; section: string }[]
     class_teacher_of: { grade: string; section: string }[]
-    timetable_slots: { subject_name: string; grade: string; section: string; day_of_week: string; period_number: number }[]
   } | null>(null)
   const [loadingConsequences, setLoadingConsequences] = useState(false)
   const [removing, setRemoving] = useState(false)
@@ -195,34 +162,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     }
   }
 
-  async function loadTeacherTimetable(teacherId: number) {
-    setTimetableLoading(true)
-    const todayStr = new Date().toISOString().split('T')[0]
-    try {
-      const [ttRes, subRes] = await Promise.all([
-        fetch(`/api/timetable?teacher_id=${teacherId}&school_id=${schoolId}`),
-        fetch(`/api/substitutes?school_id=${schoolId}&substitute_teacher_id=${teacherId}&date=${todayStr}`),
-      ])
-      const ttData = await ttRes.json()
-      const subData = await subRes.json()
-      setTeacherTimetable(Array.isArray(ttData) ? ttData : [])
-      setTeacherSubDuties(Array.isArray(subData) ? subData : [])
-    } catch { setError('Failed to load timetable') }
-    finally { setTimetableLoading(false) }
-  }
-
-  async function loadTeacherAnalytics(teacherId: number) {
-    setAnalyticsLoading(true); setTeacherAnalytics(null)
-    try {
-      const tt = await fetch(`/api/timetable?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()).catch(() => [])
-      const ttArr = Array.isArray(tt) ? tt : []
-      setTeacherAnalytics({
-        subDutyCount: teacherSubDuties.length,
-        periodsPerWeek: ttArr.length,
-      })
-    } finally { setAnalyticsLoading(false) }
-  }
-
   async function handleDelete(teacher: Teacher) {
     setLoadingConsequences(true)
     setShowRemoveDialog(true)
@@ -233,7 +172,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       setRemoveConsequences({
         subjects_teaching: data.subjects_teaching ?? [],
         class_teacher_of:  data.class_teacher_of  ?? [],
-        timetable_slots:   data.timetable_slots   ?? [],
       })
     } catch {
       setError('Failed to fetch removal consequences')
@@ -261,8 +199,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
           summary.push(`Class teacher unlinked from ${impact.class_teacher_of.map(c => `Gr.${c.grade}-${c.section}`).join(', ')}`)
         if (impact.subjects_teaching.length > 0)
           summary.push(`Unassigned from ${impact.subjects_teaching.length} subject${impact.subjects_teaching.length !== 1 ? 's' : ''}`)
-        if (impact.timetable_slots.length > 0)
-          summary.push(`${impact.timetable_slots.length} timetable slot${impact.timetable_slots.length !== 1 ? 's' : ''} cleared`)
       }
       setRemoveToast({ name: teacherName, summary })
       setTimeout(() => setRemoveToast(null), 6000)
@@ -279,8 +215,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     setEditing(false)
     setEditForm({})
     setDetailTab('info')
-    setShowTimetable(false)
-    setTeacherAnalytics(null)
   }
 
   const byType = useMemo(() => teachers.filter(t => (t.staff_type || 'teaching') === tab), [teachers, tab])
@@ -459,10 +393,9 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
               {(['info', 'analytics'] as const).map(t => (
                 <button key={t} onClick={() => {
                   setDetailTab(t)
-                  if (t === 'analytics' && !teacherAnalytics) loadTeacherAnalytics(selected.id)
                 }}
                   className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${detailTab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                  {t === 'info' ? 'Profile' : '360° View'}
+                  {t === 'info' ? 'Profile' : 'Details'}
                 </button>
               ))}
             </div>
@@ -563,48 +496,11 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                     </div>
                   )}
 
-                  {/* Timetable toggle */}
-                  <div className="mt-6 border-t border-gray-100 pt-4">
-                    <button
-                      onClick={() => {
-                        const next = !showTimetable
-                        setShowTimetable(next)
-                        if (next) loadTeacherTimetable(selected.id)
-                      }}
-                      className="text-sm font-medium text-purple-600 hover:text-purple-800 flex items-center gap-2">
-                      {showTimetable ? '▲ Hide Timetable' : '▼ View Weekly Timetable'}
-                    </button>
-                    {showTimetable && (
-                      <div className="mt-3">
-                        <TeacherTimetableView
-                          timetable={teacherTimetable}
-                          loading={timetableLoading}
-                          teacherName={selected.name}
-                          subDuties={teacherSubDuties}
-                        />
-                      </div>
-                    )}
-                  </div>
                 </>
               )}
 
               {detailTab === 'analytics' && (
-                analyticsLoading ? (
-                  <div className="py-12 text-center">
-                    <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto" />
-                  </div>
-                ) : !teacherAnalytics ? null : (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-1 gap-3">
-                      {[
-                        { label: 'Periods/Week', value: teacherAnalytics.periodsPerWeek, color: 'text-blue-600', bg: 'bg-blue-50' },
-                      ].map(({ label, value, color, bg }) => (
-                        <div key={label} className={`${bg} rounded-xl p-4 text-center`}>
-                          <p className={`text-3xl font-black ${color}`}>{value}</p>
-                          <p className="text-xs text-gray-500 mt-1">{label}</p>
-                        </div>
-                      ))}
-                    </div>
                     <div className="bg-gray-50 rounded-xl p-4 grid grid-cols-2 gap-3 text-sm">
                       {[
                         { label: 'Subject', value: selected.subject },
@@ -619,7 +515,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                       ) : null)}
                     </div>
                   </div>
-                )
               )}
             </div>
 
@@ -733,13 +628,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                       ))}
                     </div>
                   )}
-                  {removeConsequences.timetable_slots.length > 0 && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                      <p className="text-xs font-semibold text-amber-700 mb-1">{removeConsequences.timetable_slots.length} timetable slot(s) will lose teacher</p>
-                      <p className="text-xs text-amber-600">Timetable slots will remain but teacher will be blank</p>
-                    </div>
-                  )}
-                  {removeConsequences.class_teacher_of.length === 0 && removeConsequences.subjects_teaching.length === 0 && removeConsequences.timetable_slots.length === 0 && (
+                  {removeConsequences.class_teacher_of.length === 0 && removeConsequences.subjects_teaching.length === 0 && (
                     <p className="text-sm text-gray-500 text-center py-2">No active assignments found. Safe to remove.</p>
                   )}
                 </>
@@ -759,125 +648,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-const ALL_PERIODS = [1, 2, 3, 4, 5, 6]
-const PERIOD_TIMES: Record<number, { from: string; to: string }> = {
-  1: { from: '08:00', to: '08:45' },
-  2: { from: '08:50', to: '09:35' },
-  3: { from: '09:40', to: '10:25' },
-  4: { from: '10:45', to: '11:30' },
-  5: { from: '11:35', to: '12:20' },
-  6: { from: '12:25', to: '13:10' },
-}
-const BREAK_ROWS = [{ afterPeriod: 3, label: 'Break', time: '10:25–10:45' }]
-
-function TeacherTimetableView({ timetable, loading, teacherName, subDuties }: { timetable: TimetableSlot[]; loading: boolean; teacherName: string; subDuties: SubDuty[] }) {
-  if (loading) return <div className="py-6 text-center text-gray-400 text-sm">Loading timetable...</div>
-  if (timetable.length === 0) {
-    return (
-      <div className="py-6 text-center">
-        <p className="text-gray-400 text-sm">No timetable generated yet</p>
-      </div>
-    )
-  }
-
-  const byDay: Record<string, TimetableSlot[]> = {}
-  DAYS.forEach(d => { byDay[d] = [] })
-  timetable.forEach(p => { if (byDay[p.day_of_week]) byDay[p.day_of_week].push(p) })
-
-  const today = (() => {
-    const d = new Date().getDay()
-    if (d === 0 || d === 6) return null
-    return DAYS[d - 1]
-  })()
-  const nowMins = new Date().getHours() * 60 + new Date().getMinutes()
-
-  const rows: ({ type: 'period'; num: number } | { type: 'break'; label: string; time: string })[] = []
-  for (const p of ALL_PERIODS) {
-    rows.push({ type: 'period', num: p })
-    const brk = BREAK_ROWS.find(b => b.afterPeriod === p)
-    if (brk) rows.push({ type: 'break', label: brk.label, time: brk.time })
-  }
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <p className="text-sm font-semibold text-gray-700">Weekly Timetable — {teacherName}</p>
-        {subDuties.length > 0 && (
-          <span className="text-xs bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full font-semibold">
-            {subDuties.length} substitute period{subDuties.length > 1 ? 's' : ''} today
-          </span>
-        )}
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs border-collapse">
-          <thead>
-            <tr>
-              <th className="bg-slate-700 text-slate-200 px-2 py-1.5 text-left font-semibold rounded-tl-lg">P</th>
-              {DAYS.map(d => (
-                <th key={d} className={`px-2 py-1.5 text-center font-semibold ${d === today ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
-                  {d.slice(0, 3)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => {
-              if (row.type === 'break') {
-                return (
-                  <tr key={`brk-${i}`} className="bg-amber-50 border-y border-amber-100">
-                    <td className="px-2 py-1 text-amber-600 font-semibold text-center">{row.label}</td>
-                    <td colSpan={6} className="px-2 py-1 text-center text-amber-400 italic">{row.time}</td>
-                  </tr>
-                )
-              }
-              const pNum = row.num
-              const { from, to } = PERIOD_TIMES[pNum]
-              const pFromMins = parseInt(from.split(':')[0]) * 60 + parseInt(from.split(':')[1])
-              const pToMins = parseInt(to.split(':')[0]) * 60 + parseInt(to.split(':')[1])
-              const isCurrentPeriod = nowMins >= pFromMins && nowMins < pToMins
-              return (
-                <tr key={pNum} className={`border-b border-gray-100 ${isCurrentPeriod ? 'bg-orange-50/30' : ''}`}>
-                  <td className="px-2 py-1.5 bg-gray-50 font-semibold text-gray-500 border-r border-gray-100 text-center whitespace-nowrap">
-                    <span>{pNum}</span>
-                    <span className="block text-gray-300 font-normal" style={{ fontSize: '8px' }}>{from}</span>
-                  </td>
-                  {DAYS.map(day => {
-                    const slot = byDay[day].find(s => s.period_number === pNum)
-                    const isNow = day === today && isCurrentPeriod
-                    const subDuty = day === today ? subDuties.find(s => s.period_number === pNum) : undefined
-                    return (
-                      <td key={day} className="px-1 py-1 border-r border-gray-100 last:border-r-0">
-                        {slot ? (
-                          <div className={`rounded px-1 py-1 text-center ${isNow ? 'border border-orange-300 bg-orange-50' : 'bg-emerald-50 border border-emerald-100'}`}>
-                            <p className="font-semibold text-gray-800 leading-tight">{slot.subject}</p>
-                            <p className="text-gray-400 leading-tight">Gr.{slot.grade}-{slot.section}</p>
-                          </div>
-                        ) : subDuty ? (
-                          <div className="rounded px-1 py-1 text-center bg-amber-50 border-2 border-amber-300">
-                            <p className="font-semibold text-amber-800 leading-tight text-[10px]">
-                              {subDuty.subject_name || subDuty.original_teacher_department || '—'}
-                            </p>
-                            <p className="text-amber-600 leading-tight text-[10px]">Gr.{subDuty.grade}-{subDuty.section}</p>
-                          </div>
-                        ) : (
-                          <div className="rounded px-1 py-1 text-center bg-gray-50 border border-gray-100">
-                            <p className="text-gray-300 italic">Free</p>
-                          </div>
-                        )}
-                      </td>
-                    )
-                  })}
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-xs text-gray-400 mt-2">{timetable.length} assigned period{timetable.length !== 1 ? 's' : ''}</p>
     </div>
   )
 }

@@ -37,7 +37,7 @@ export default function TeacherSyllabus({
     // Class visibility comes from two sources: the class they're class
     // teacher of (they oversee the whole class regardless of subject), plus
     // every (class, subject) pair Class Management explicitly assigned them
-    // via class_subjects — replacing the old "any timetable slot" heuristic,
+    // via class_subjects — replacing an older heuristic,
     // which let a teacher see subjects that weren't actually theirs.
     Promise.all([
       fetch(`/api/teachers/${teacher.id}/class-subjects`).then(r => r.json()).catch(() => []),

@@ -18,7 +18,7 @@ The Student portal is the learning interface at `/student`. It covers syllabus p
 | Feature | Status | Description |
 |---------|--------|-------------|
 | Dashboard | Built | Recent exam marks, announcements (filtered to students). Quick navigation — published-tasks and open-doubts tiles removed with #136/#137 |
-| My Timetable | Built | Class weekly schedule with period times, subjects, teachers, rooms |
+| My Timetable | Removed | Removed from `dev` (#176). The complete workflow lives on `feature/175-timetable-full-workflow` (draft PR #177). |
 
 ### Learning
 

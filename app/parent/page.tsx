@@ -40,10 +40,6 @@ type Summary = {
   attendance_pct: number | null
 }
 
-type TimetablePeriod = {
-  period_number: number; time_from: string; time_to: string
-  subject_name: string | null; teacher_name: string | null; department: string | null
-}
 
 
 type FeeLedger = {
@@ -94,7 +90,6 @@ const STATUS_COLOR: Record<string, string> = {
 
 const NAV = [
   { key: 'overview',   label: 'Overview',          icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6' },
-  { key: 'today',      label: "Today's Schedule",   icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
   { key: 'attendance', label: 'Attendance',         icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4' },
   { key: 'calendar',   label: 'School Calendar',    icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z' },
   { key: 'fees',       label: 'Fees',               icon: 'M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z' },
@@ -107,9 +102,8 @@ const NAV = [
 
 // Only nav keys that map to a plan-gated ALL_FEATURES entry get checked
 // against enabledFeatures — everything else (overview, profile) has always
-// been unconditionally available and stays that way. 'syllabus' and 'today'
-// resolve through PORTAL_NAV_KEY_ALIASES to 'curriculum'/'timetable'.
-const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'today', 'attendance', 'fees', 'exams', 'results', 'calendar'])
+// been unconditionally available and stays that way. 'syllabus' resolves through PORTAL_NAV_KEY_ALIASES to 'curriculum'.
+const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'attendance', 'fees', 'exams', 'results', 'calendar'])
 
 function fmt(n: number | string) { return `₹${Number(n).toLocaleString('en-IN')}` }
 function timeStr(t: string) { return t ? t.slice(0, 5) : '' }
@@ -161,9 +155,6 @@ function ParentDashboard() {
   const hasOnlinePayments = enabledFeatures === null ? true : enabledFeatures.has('online-payments')
 
   // Per-section data
-  const [timetable, setTimetable] = useState<TimetablePeriod[]>([])
-  const [timetableDay, setTimetableDay] = useState('')
-  const [timetableLoading, setTimetableLoading] = useState(false)
 
 
   const [feeLedger, setFeeLedger] = useState<FeeLedger[]>([])
@@ -234,17 +225,6 @@ function ParentDashboard() {
     } catch { /* non-critical */ }
   }
 
-  const loadTimetable = useCallback(async (s: Student) => {
-    setTimetableLoading(true)
-    try {
-      const r = await fetch(`/api/parent/timetable?school_id=${s.school_id}&class_id=${s.class_id}`)
-      const d = await r.json()
-      setTimetable(d.periods || [])
-      setTimetableDay(d.day || '')
-    } catch { setTimetable([]) }
-    setTimetableLoading(false)
-  }, [])
-
   const loadFees = useCallback(async (s: Student, year: string) => {
     setFeeLoading(true)
     try {
@@ -262,7 +242,6 @@ function ParentDashboard() {
   // Load section data on first visit
   useEffect(() => {
     if (!student) return
-    if (activeNav === 'today' && !timetable.length && !timetableLoading) loadTimetable(student)
     if (activeNav === 'fees' && !feeLedger.length && !feeLoading) loadFees(student, feeAcYear)
   }, [activeNav, student]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -284,7 +263,6 @@ function ParentDashboard() {
     setStudent(s)
     setShowChildPicker(false)
     setSummary(null); setFeeLedger([]); setFeePayments([]); setFeeWaivers([]); setFeeSummary(null)
-    setTimetable([])
     resetNav('overview'); setVisited(new Set(['overview']))
 
     await loadSummary(s)
@@ -649,12 +627,6 @@ function ParentDashboard() {
                 hidden right alongside that section rather than pointing
                 somewhere the school's plan doesn't actually include. */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {isNavItemVisible('today') && (
-                <button onClick={() => navigateTo('today')} className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-pink-300 transition-colors group">
-                  <div className="text-2xl font-black text-blue-600 group-hover:text-pink-600">{timetable.length || '—'}</div>
-                  <div className="text-xs text-gray-500 mt-1">{T.todaysPeriods}</div>
-                </button>
-              )}
               {isNavItemVisible('exams') && (
                 <button onClick={() => navigateTo('exams')} className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-pink-300 transition-colors group">
                   <div className="text-2xl font-black text-purple-600 group-hover:text-pink-600">{summary?.upcoming_exams?.length ?? 0}</div>
@@ -837,74 +809,6 @@ function ParentDashboard() {
           {visited.has('profile') && parentInfo && (
           <div hidden={activeNav !== 'profile'}>
             <ParentProfile parentInfo={parentInfo} />
-          </div>
-          )}
-
-          {/* ── TODAY'S SCHEDULE ───────────────────────────────────────────── */}
-          {visited.has('today') && (
-          <div hidden={activeNav !== 'today'} className="max-w-2xl space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-bold text-gray-800">{T.nav.today}</h2>
-                {timetableDay && <p className="text-xs text-gray-400">{timetableDay} · {T.grade} {student.grade}-{student.section}</p>}
-              </div>
-              <button onClick={() => loadTimetable(student)} className="text-xs text-pink-600 hover:text-pink-800 border border-pink-200 px-3 py-1.5 rounded-lg">{T.refresh}</button>
-            </div>
-
-            {timetableLoading ? (
-              <div className="space-y-2">{[...Array(6)].map((_, i) => (
-                <div key={i} className="bg-white rounded-xl border border-gray-100 p-4 animate-pulse">
-                  <div className="h-3 bg-gray-100 rounded w-20 mb-2" />
-                  <div className="h-4 bg-gray-200 rounded w-40" />
-                </div>
-              ))}</div>
-            ) : timetable.length === 0 ? (
-              <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-                <p className="text-gray-400 text-sm">{T.noTimetableToday}</p>
-                <p className="text-gray-300 text-xs mt-1">{T.noTimetableHint}</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {(() => {
-                  const now = new Date()
-                  const nowMins = now.getHours() * 60 + now.getMinutes()
-                  return timetable.map(p => {
-                    const [fh, fm] = p.time_from.split(':').map(Number)
-                    const [th, tm] = p.time_to.split(':').map(Number)
-                    const fromMins = fh * 60 + fm
-                    const toMins   = th * 60 + tm
-                    const isNow    = nowMins >= fromMins && nowMins <= toMins
-                    const isDone   = nowMins > toMins
-                    return (
-                      <div key={p.period_number} className={`rounded-xl border p-4 transition-all ${
-                        isNow ? 'border-pink-400 bg-pink-50 shadow-sm' : isDone ? 'border-gray-100 bg-gray-50 opacity-60' : 'border-gray-200 bg-white'
-                      }`}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
-                              isNow ? 'bg-pink-500 text-white' : 'bg-gray-100 text-gray-500'
-                            }`}>{p.period_number}</div>
-                            <div>
-                              <p className={`font-semibold text-sm ${isNow ? 'text-pink-800' : 'text-gray-800'}`}>
-                                {p.subject_name || T.freePeriod}
-                              </p>
-                              {p.teacher_name && <p className="text-xs text-gray-400">{p.teacher_name}</p>}
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className={`text-xs font-semibold ${isNow ? 'text-pink-600' : 'text-gray-500'}`}>
-                              {timeStr(p.time_from)} – {timeStr(p.time_to)}
-                            </p>
-                            {isNow && <span className="text-[10px] font-bold text-pink-600 bg-pink-100 px-1.5 py-0.5 rounded-full">{T.now}</span>}
-                            {isDone && <span className="text-[10px] text-gray-400">{T.done}</span>}
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })
-                })()}
-              </div>
-            )}
           </div>
           )}
 

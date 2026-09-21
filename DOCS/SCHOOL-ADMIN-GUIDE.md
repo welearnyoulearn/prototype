@@ -478,6 +478,8 @@ After applying, a confirmation shows how many were carried (and total amount) an
 
 ## 7. Timetable Management
 
+> **Not available on `dev`.** Timetable was moved to its own feature branch (`feature/175-timetable-full-workflow`, PR #177). This section describes the earlier behaviour.
+
 **Location:** Left sidebar → Scheduling → Timetable
 
 ### What You Can Do

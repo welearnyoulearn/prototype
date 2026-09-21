@@ -18,6 +18,12 @@ All finished features and bug fixes. Most recent first.
 
 ---
 
+### 2026-09-21 — Removed all timetable from dev; full workflow moved to its own branch (#175, #176)
+**Type:** Removal + Feature branch
+**Portal:** School Admin / Teacher / Student / Parent
+**Summary:** Timetable was half-present on `dev` (screens without their generation/publishing backend). It now lives only on `feature/175-timetable-full-workflow` (draft PR #177): the backend was restored, secured (the old routes had no sign-in checks) and covered by 11 end-to-end tests. Removed from `dev`: admin, teacher, student and parent screens, the class-management tab, overview timetable stats, the teacher dashboard schedule, the substitutes panel, the API routes and the `timetable` feature key. Tables are untouched.
+**PR:** the chore PR that closes #176
+
 ### 2026-09-21 — Removed unstable, unreachable features from dev (#163–#168)
 **Type:** Removal
 **Portal:** Student / Parent / School Admin / Teacher / Kiosk

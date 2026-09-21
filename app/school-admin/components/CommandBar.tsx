@@ -17,7 +17,6 @@ const QUICK_ACTIONS: Result[] = [
   { type: 'action', label: 'Create Announcement',     sub: 'Post to students & teachers', nav: 'announcements' },
   { type: 'action', label: 'Mark Attendance',         sub: 'Today\'s register',           nav: 'attendance' },
   { type: 'action', label: 'Collect Fee Payment',     sub: 'Record a payment',            nav: 'fee-management' },
-  { type: 'action', label: 'View Timetable',          sub: 'Manage class schedules',      nav: 'timetable' },
   { type: 'action', label: 'Exam Schedule',           sub: 'Upcoming exams',              nav: 'exam-schedule' },
   { type: 'action', label: 'Fee Defaulters',          sub: 'Students with overdue fees',  nav: 'fee-management' },
   { type: 'action', label: 'School Settings',         sub: 'Configure school details',    nav: 'settings' },
@@ -29,7 +28,6 @@ const NAV_SEARCH: Result[] = [
   { type: 'nav', label: 'Teachers',         sub: 'Staff management',    nav: 'staff' },
   { type: 'nav', label: 'Students',         sub: 'Student management',  nav: 'students' },
   { type: 'nav', label: 'Class Management', sub: 'Manage classes',      nav: 'class-management' },
-  { type: 'nav', label: 'Timetable',        sub: 'Class schedules',     nav: 'timetable' },
   { type: 'nav', label: 'Exam Schedule',    sub: 'Exams & marks',       nav: 'exam-schedule' },
   { type: 'nav', label: 'Fee Management',   sub: 'Ledger, payments',    nav: 'fee-management' },
   { type: 'nav', label: 'Fee Ledger',       sub: 'View all entries',    nav: 'fee-management' },
@@ -179,7 +177,7 @@ export default function CommandBar({ schoolId, onNavigate }: Props) {
           <input
             ref={inputRef}
             type="text"
-            placeholder="Search anything — students, teachers, fees, timetable…"
+            placeholder="Search anything — students, teachers, fees…"
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
