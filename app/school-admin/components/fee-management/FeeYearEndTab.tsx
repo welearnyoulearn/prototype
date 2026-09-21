@@ -26,11 +26,11 @@ type YearEndState = {
   is_closed: boolean
   close_record: { closed_by: string; closed_at: string; carried_count?: number; carried_total: number; writeoff_count?: number; writeoff_total: number; open_count?: number; open_total: number } | null
 }
-type RolloverPreview = { requires_confirmation: boolean; pending_count: number; pending_total: number; message: string }
 
 // Year-end closure: review outstanding dues, decide per-student (carry/write-off/
-// passout/leave-open), apply, then close the year — plus the one-shot Year Rollover
-// alternative. Subscribes to yearEndVersion from the shared fee store so a payment,
+// passout/leave-open), apply, then close the year. Creating the next academic year, promoting
+// students and switching the active year live in the Year Rollover tab, which requires this
+// year to be closed first. Subscribes to yearEndVersion from the shared fee store so a payment,
 // waiver, or cancellation elsewhere invalidates this tab's data even while it isn't
 // mounted. The other data this tab's own actions invalidate (stats, ledger, academic
 // years list, passout ledger) still lives in the parent, so those go back up via
@@ -42,6 +42,7 @@ export default function FeeYearEndTab({
   adminName,
   branding,
   onGoToSetup,
+  onGoToYearRollover,
   onStatsChanged,
   onLedgerChanged,
   onAcademicYearsChanged,
@@ -52,6 +53,7 @@ export default function FeeYearEndTab({
   adminName?: string
   branding: { school_name: string; logo_url: string | null; logo_align: 'left' | 'center' | 'right'; receipt_header_blocks: ReceiptHeaderBlock[] }
   onGoToSetup: () => void
+  onGoToYearRollover: () => void
   onStatsChanged: () => void
   onLedgerChanged: () => void
   onAcademicYearsChanged: () => void
@@ -69,7 +71,6 @@ export default function FeeYearEndTab({
   const [yeFilter, setYeFilter]             = useState<'all' | 'leavers' | 'continuing'>('all')
   const [yeProcessing, setYeProcessing]     = useState(false)
   const [yeMsg, setYeMsg]                   = useState('')
-  const [yeCreateYearLoading, setYeCreateYearLoading] = useState(false)
   const [yeClosing, setYeClosing]           = useState(false)
   // Reopen year modal
   const [showReopenModal, setShowReopenModal] = useState(false)
@@ -78,24 +79,6 @@ export default function FeeYearEndTab({
   const [showCloseConfirm, setShowCloseConfirm] = useState(false)
   // Apply decisions confirm modal
   const [showApplyConfirm, setShowApplyConfirm] = useState(false)
-
-  // Year rollover modal state
-  const [showRolloverModal, setShowRolloverModal] = useState(false)
-  const [rolloverPreview, setRolloverPreview] = useState<RolloverPreview | null>(null)
-  const [rolloverLoading, setRolloverLoading] = useState(false)
-  const [rolloverMsg, setRolloverMsg]         = useState('')
-  const [rolloverDone, setRolloverDone]       = useState(false)
-
-  // Carry-forward modal state (when target year doesn't exist)
-  const [showCfModal, setShowCfModal]         = useState(false)
-  const [cfExistingYears, setCfExistingYears] = useState<{ label: string; start_date: string; end_date: string }[]>([])
-  const [cfSelectedYear, setCfSelectedYear]   = useState('')
-  const [cfCreateMode, setCfCreateMode]       = useState(false)
-  const [cfNewLabel, setCfNewLabel]           = useState('')
-  const [cfNewStart, setCfNewStart]           = useState('')
-  const [cfNewEnd, setCfNewEnd]               = useState('')
-  const [cfCreating, setCfCreating]           = useState(false)
-  const [cfMsg, setCfMsg]                     = useState('')
 
   const loadYearEnd = useCallback(async () => {
     if (!academicYear) return
@@ -117,7 +100,7 @@ export default function FeeYearEndTab({
 
   useEffect(() => { loadYearEnd() }, [loadYearEnd, yearEndVersion])
 
-  async function applyYearEndDecisions(overrideTargetYear?: string) {
+  async function applyYearEndDecisions() {
     if (!yearEnd) return
     // Build decisions only for students who have an actionable (non-'open') decision
     const decisions = yearEnd.students
@@ -129,9 +112,10 @@ export default function FeeYearEndTab({
     const badLeaver = yearEnd.students.find(s => s.is_leaver && yeDecisions[s.student_id] === 'carry')
     if (badLeaver) { setYeMsg(`${badLeaver.student_name} is leaving — cannot carry forward. Choose Passout, Write Off, or Leave Open.`); return }
 
-    const targetYear = overrideTargetYear ?? yearEnd.target_year
-    if (decisions.some(d => d.decision === 'carry') && !overrideTargetYear && !yearEnd.target_year_exists) {
-      openCfModal(); return
+    const targetYear = yearEnd.target_year
+    if (decisions.some(d => d.decision === 'carry') && !yearEnd.target_year_exists) {
+      setYeMsg(`${yearEnd.target_year} does not exist yet — create it in the Year Rollover tab first, then carry the dues forward.`)
+      return
     }
 
     setYeProcessing(true); setYeMsg('')
@@ -170,45 +154,6 @@ export default function FeeYearEndTab({
     }
   }
 
-  // Two-phase year rollover: phase 1 = preview pending dues, phase 2 = confirm → execute
-  async function startRollover() {
-    setRolloverLoading(true); setRolloverMsg(''); setRolloverPreview(null); setRolloverDone(false)
-    const r = await fetch('/api/fees/year-rollover', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ school_id: schoolId, from_year: academicYear }),
-    })
-    const d = await r.json()
-    setRolloverLoading(false)
-    if (d.requires_confirmation) {
-      setRolloverPreview(d)
-    } else if (r.ok) {
-      // No pending dues — rolled over immediately
-      setRolloverDone(true)
-      setRolloverMsg(`✓ Rolled over to ${d.to_year} — ${d.dues_carried} student${d.dues_carried !== 1 ? 's' : ''} carried (${fmt(d.dues_amount)})`)
-      loadYearEnd(); onStatsChanged(); onAcademicYearsChanged(); onLedgerChanged(); bumpReports()
-    } else {
-      setRolloverMsg(d.error || 'Rollover failed')
-    }
-  }
-
-  async function confirmRollover() {
-    setRolloverLoading(true); setRolloverMsg('')
-    const r = await fetch('/api/fees/year-rollover', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ school_id: schoolId, from_year: academicYear, confirmed: true }),
-    })
-    const d = await r.json()
-    setRolloverLoading(false)
-    if (r.ok) {
-      setRolloverDone(true)
-      setRolloverPreview(null)
-      setRolloverMsg(`✓ Rolled over to ${d.to_year} — ${d.dues_carried} student${d.dues_carried !== 1 ? 's' : ''} carried (${fmt(d.dues_amount)})`)
-      loadYearEnd(); onStatsChanged(); onAcademicYearsChanged(); onLedgerChanged(); bumpReports()
-    } else {
-      setRolloverMsg(d.error || 'Rollover failed')
-    }
-  }
-
   async function reopenYear() {
     if (!reopenReason.trim()) return
     setShowReopenModal(false)
@@ -222,41 +167,6 @@ export default function FeeYearEndTab({
     setReopenReason('')
     setYeClosing(false)
     if (r.ok) loadYearEnd()
-  }
-
-  // ── Carry-forward modal: open it and load existing years ────────────────────────
-  async function openCfModal() {
-    setCfMsg(''); setCfCreateMode(false); setCfSelectedYear(''); setShowCfModal(true)
-    try {
-      const r = await fetch(`/api/academic-years?school_id=${schoolId}`)
-      if (r.ok) {
-        const all = await r.json()
-        setCfExistingYears(Array.isArray(all) ? all : [])
-      } else {
-        setCfMsg('Could not load existing academic years — you can still create a new one below')
-      }
-    } catch { setCfMsg('Network error — could not load existing academic years') }
-  }
-
-  async function createYearInCfModal() {
-    if (!cfNewLabel.trim() || !cfNewStart || !cfNewEnd) { setCfMsg('All fields required'); return }
-    setCfCreating(true); setCfMsg('')
-    const r = await fetch('/api/academic-years', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ school_id: schoolId, label: cfNewLabel.trim(), start_date: cfNewStart, end_date: cfNewEnd }),
-    })
-    const d = await r.json()
-    if (r.ok) {
-      const all = await fetch(`/api/academic-years?school_id=${schoolId}`).then(x => x.ok ? x.json() : [])
-      setCfExistingYears(Array.isArray(all) ? all : [])
-      setCfSelectedYear(cfNewLabel.trim())
-      setCfCreateMode(false)
-      setCfNewLabel(''); setCfNewStart(''); setCfNewEnd('')
-      onAcademicYearsChanged()
-    } else {
-      setCfMsg(d.error || 'Failed')
-    }
-    setCfCreating(false)
   }
 
   // Year-end view helpers
@@ -319,7 +229,7 @@ export default function FeeYearEndTab({
       <LoadErrorBanner message={yearEndError} onRetry={loadYearEnd} />
       <div>
         <h2 className="text-base font-semibold text-gray-800">Year-End Closure — {academicYear}</h2>
-        <p className="text-xs text-gray-400 mt-0.5">Review the year, then roll over to the next — all dues carry forward automatically, students are promoted.</p>
+        <p className="text-xs text-gray-400 mt-0.5">Decide each student’s dues, then close the year. Once it is closed, run the Year Rollover tab to promote students and move the whole school to the new year.</p>
       </div>
 
       {yearEndLoading ? (
@@ -359,11 +269,9 @@ export default function FeeYearEndTab({
                     className="text-xs bg-gray-600 text-white px-3 py-1.5 rounded-lg hover:bg-gray-500 disabled:opacity-50">
                     {yeClosing ? 'Working…' : 'Reopen'}
                   </button>
-                  <button
-                    data-testid="btn-start-rollover"
-                    onClick={() => { setShowRolloverModal(true); setRolloverPreview(null); setRolloverMsg(''); setRolloverDone(false) }}
+                  <button data-testid="btn-yearend-go-year-rollover" onClick={onGoToYearRollover}
                     className="text-xs bg-green-500 text-white px-4 py-1.5 rounded-lg font-semibold hover:bg-green-400">
-                    Start Year Rollover →
+                    Next: Year Rollover →
                   </button>
                 </div>
               </div>
@@ -506,30 +414,10 @@ export default function FeeYearEndTab({
                       <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">✓ Year exists</span>
                     ) : (
                       <>
-                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">⚠ Not created yet</span>
-                        <button
-                          disabled={yeCreateYearLoading}
-                          onClick={async () => {
-                            const startNum = parseInt(startYearLabel(yearEnd.target_year))
-                            if (isNaN(startNum)) return
-                            setYeCreateYearLoading(true)
-                            const r = await fetch('/api/academic-years', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                school_id: schoolId,
-                                label: yearEnd.target_year,
-                                start_date: `${startNum}-04-01`,
-                                end_date: `${startNum + 1}-03-31`,
-                                set_current: false,
-                              }),
-                            })
-                            setYeCreateYearLoading(false)
-                            if (r.ok) { loadYearEnd(); onAcademicYearsChanged() }
-                            else { const e = await r.json(); setYeMsg(e.error || 'Failed to create year') }
-                          }}
-                          className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
-                          {yeCreateYearLoading ? 'Creating…' : `Create ${yearEnd.target_year}`}
+                        <span data-testid="yearend-target-missing" className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">⚠ Not created yet — create it in the Year Rollover tab</span>
+                        <button data-testid="btn-yearend-open-year-rollover" onClick={onGoToYearRollover}
+                          className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg font-medium hover:bg-blue-700">
+                          Open Year Rollover →
                         </button>
                       </>
                     )}
@@ -582,160 +470,6 @@ export default function FeeYearEndTab({
             </div>
           )}
         </>
-      )}
-
-      {/* ── Carry-forward modal (target year missing) ── */}
-      {showCfModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-gray-900">Select Target Academic Year for Carry Forward</h2>
-              <button onClick={() => setShowCfModal(false)} className="text-gray-400 hover:text-gray-600 text-lg">✕</button>
-            </div>
-            <p className="text-sm text-gray-600">The next year <strong>{yearEnd?.target_year}</strong> doesn&apos;t exist yet. Select an existing year or create a new one to carry unpaid dues into.</p>
-
-            {!cfCreateMode ? (
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Select Year</label>
-                  <select data-testid="cf-year-select" value={cfSelectedYear} onChange={e => setCfSelectedYear(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="">— Choose a year —</option>
-                    {cfExistingYears.filter(y => y.label !== academicYear).map(y => (
-                      <option key={y.label} value={y.label}>{y.label} ({y.start_date?.slice(0,10)} → {y.end_date?.slice(0,10)})</option>
-                    ))}
-                  </select>
-                </div>
-                <button onClick={() => setCfCreateMode(true)} className="text-sm text-blue-600 hover:underline">+ Create new academic year instead</button>
-                {cfMsg && <p className="text-sm text-red-600">{cfMsg}</p>}
-                <div className="flex gap-2 pt-1">
-                  <button onClick={() => setShowCfModal(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50">Cancel</button>
-                  <button data-testid="cf-confirm" disabled={!cfSelectedYear} onClick={() => {
-                    if (!yearEnd) return
-                    setShowCfModal(false)
-                    applyYearEndDecisions(cfSelectedYear)
-                  }} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
-                    Confirm & Carry Forward
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Year Label (e.g. 2026-27)</label>
-                  <input data-testid="cf-new-label" value={cfNewLabel} onChange={e => setCfNewLabel(e.target.value)}
-                    placeholder="2026-27" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Start Date</label>
-                    <input data-testid="cf-new-start" type="date" value={cfNewStart} onChange={e => setCfNewStart(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">End Date</label>
-                    <input data-testid="cf-new-end" type="date" value={cfNewEnd} onChange={e => setCfNewEnd(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                </div>
-                {cfMsg && <p className="text-sm text-red-600">{cfMsg}</p>}
-                <div className="flex gap-2">
-                  <button onClick={() => setCfCreateMode(false)} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50">Back</button>
-                  <button data-testid="cf-create-year" onClick={createYearInCfModal} disabled={cfCreating}
-                    className="flex-1 bg-green-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50">
-                    {cfCreating ? 'Creating…' : 'Create Year'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ══ Year Rollover Modal ═════════════════════════════════════════════════ */}
-      {showRolloverModal && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-          onClick={e => { if (e.target === e.currentTarget && !rolloverLoading) setShowRolloverModal(false) }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-bold text-gray-900">Year Rollover — {academicYear}</h2>
-                <p className="text-xs text-gray-400 mt-0.5">Creates next academic year and carries forward unpaid dues</p>
-              </div>
-              {!rolloverLoading && (
-                <button onClick={() => setShowRolloverModal(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
-              )}
-            </div>
-
-            {!rolloverPreview && !rolloverDone && !rolloverMsg && (
-              <div className="space-y-3">
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 space-y-1.5">
-                  <p className="font-semibold">What this does:</p>
-                  <ul className="list-disc list-inside space-y-1 text-xs">
-                    <li>Creates the next academic year and sets it as current</li>
-                    <li>Carries all remaining unpaid dues forward as &quot;Previous Year Dues&quot;</li>
-                    <li>Grade {FINAL_GRADE} students and leavers are excluded from auto-carry</li>
-                  </ul>
-                </div>
-                <p className="text-xs text-gray-500">This is irreversible. Make sure all year-end decisions (carry / write-off / passout) are applied first.</p>
-                <button
-                  data-testid="btn-rollover-preview"
-                  onClick={startRollover}
-                  disabled={rolloverLoading}
-                  className="w-full bg-green-600 text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-green-700 disabled:opacity-50">
-                  {rolloverLoading ? 'Checking…' : 'Check & Start Rollover'}
-                </button>
-              </div>
-            )}
-
-            {rolloverPreview && !rolloverDone && (
-              <div className="space-y-4">
-                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                  <p className="text-sm font-semibold text-blue-800 mb-1">Pending dues will be carried forward</p>
-                  <p className="text-xs text-blue-700">{rolloverPreview.pending_count} ledger entries · {fmt(rolloverPreview.pending_total)} will become &quot;Previous Year Dues&quot; in the new year</p>
-                </div>
-                <p className="text-xs text-gray-500">Confirm to proceed. This cannot be undone without reopening the year.</p>
-                {rolloverMsg && <p className="text-sm text-red-600">{rolloverMsg}</p>}
-                <div className="flex gap-2">
-                  <button onClick={() => { setRolloverPreview(null) }} disabled={rolloverLoading}
-                    className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50 disabled:opacity-50">
-                    Cancel
-                  </button>
-                  <button
-                    data-testid="btn-rollover-confirm"
-                    onClick={confirmRollover}
-                    disabled={rolloverLoading}
-                    className="flex-1 bg-green-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-green-700 disabled:opacity-50">
-                    {rolloverLoading ? 'Rolling over…' : `Confirm — Carry ${rolloverPreview.pending_count} entries`}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {(rolloverDone || (rolloverMsg && !rolloverPreview)) && (
-              <div className="space-y-4">
-                <p className={`text-sm font-medium ${rolloverMsg.startsWith('✓') ? 'text-green-700' : 'text-red-600'}`}>{rolloverMsg}</p>
-                {rolloverDone && (
-                  <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800">
-                    Rollover complete. The new academic year is now active. Go to the Setup tab to generate fee bills for the new year.
-                  </div>
-                )}
-                <div className="flex gap-2">
-                  <button onClick={() => setShowRolloverModal(false)}
-                    className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-xl text-sm hover:bg-gray-50">
-                    Close
-                  </button>
-                  {rolloverDone && (
-                    <button onClick={() => { setShowRolloverModal(false); onGoToSetup() }}
-                      className="flex-1 bg-blue-600 text-white py-2 rounded-xl text-sm font-semibold hover:bg-blue-700">
-                      Go to Setup →
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
       )}
 
       {/* ══ Reopen Year Modal ════════════════════════════════════════════════════ */}

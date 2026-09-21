@@ -43,9 +43,11 @@ function fmtDate(d: string) {
 import dynamic from 'next/dynamic'
 
 export default function FeeManagement({
-  schoolId, adminName, schoolName, schoolLogoUrl, schoolLogoAlign, schoolHeaderBlocks,
+  schoolId, adminName, schoolName, schoolLogoUrl, schoolLogoAlign, schoolHeaderBlocks, onGoToYearRollover,
 }: {
   schoolId: number
+  // Opens the Year Rollover tab (the only place a new academic year is created and made current)
+  onGoToYearRollover?: () => void
   adminName?: string
   // Passed down from the school-admin page's already-loaded `selectedSchool` (fetched
   // before this component ever mounts) rather than fetched again here — avoids a race
@@ -957,6 +959,7 @@ export default function FeeManagement({
           <FeeYearEndTab
             schoolId={schoolId} academicYear={academicYear} adminName={adminName} branding={branding}
             onGoToSetup={() => setActiveTab('setup' as Tab)}
+            onGoToYearRollover={() => onGoToYearRollover?.()}
             onStatsChanged={loadStats} onLedgerChanged={bumpLedger}
             onAcademicYearsChanged={loadAcademicYears} onPassoutChanged={loadPassout}
           />

@@ -50,6 +50,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Absence emails now go through the standard sender, after the response, with names HTML-escaped. (#153)
 
 ### Changed
+- **Year Rollover is now the one central place** to move the whole school to the next academic year (#199). It is blocked until Fee Management → Year-End is closed (popup on screen, `409 FEES_NOT_CLOSED` on the server; schools without Fee Management are not gated). Fee Year-End no longer creates academic years or has its own "Start Year Rollover" action (`POST /api/fees/year-rollover` removed), and a fee year cannot be reopened once rolled over. After a school's first year, the active year can only change through Year Rollover; creating or switching years now needs a school-admin login.
+- Year Rollover keeps class roll numbers (it used to fail on the unique roll-number index when, for example, grade 9 roll 1 moved into grade 10 roll 1). The old roll number is stored in the class history; graduated students' roll numbers are cleared; students whose number is already taken in the new class are reported.
 - Attendance percentage everywhere = (present + late) ÷ marked sessions; holidays and weekly-off days are excluded; unmarked days are gaps, not absences. (#153)
 - Schools now have a weekly-off setting (default Sunday). (#153)
 

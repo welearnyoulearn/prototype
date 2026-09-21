@@ -730,9 +730,9 @@ function SchoolAdmin() {
                 {visited.has('export')           && <div hidden={activeNav !== 'export'}><ExportCenter schoolId={selectedSchool.id} /></div>}
                 {visited.has('settings')         && <div hidden={activeNav !== 'settings'}><SchoolSettings schoolId={selectedSchool.id} /></div>}
                 {visited.has('profile')          && <div hidden={activeNav !== 'profile'}><StaffProfile /></div>}
-                {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} schoolName={selectedSchool.name} schoolLogoUrl={selectedSchool.logo_url ?? null} schoolLogoAlign={selectedSchool.logo_align ?? 'center'} schoolHeaderBlocks={selectedSchool.receipt_header_blocks ?? []} /></div>}
+                {visited.has('fee-management')   && <div hidden={activeNav !== 'fee-management'}><FeeManagement schoolId={selectedSchool.id} schoolName={selectedSchool.name} schoolLogoUrl={selectedSchool.logo_url ?? null} schoolLogoAlign={selectedSchool.logo_align ?? 'center'} schoolHeaderBlocks={selectedSchool.receipt_header_blocks ?? []} onGoToYearRollover={() => navigateTo('year-rollover')} /></div>}
                 {visited.has('expenses')         && <div hidden={activeNav !== 'expenses'}><ExpenseManagement schoolId={selectedSchool.id} /></div>}
-                {visited.has('year-rollover')    && <div hidden={activeNav !== 'year-rollover'}><YearRollover schoolId={selectedSchool.id} /></div>}
+                {visited.has('year-rollover')    && <div hidden={activeNav !== 'year-rollover'}><YearRollover schoolId={selectedSchool.id} onGoToFeeYearEnd={() => navigateTo('fee-management')} /></div>}
               </FeaturesProvider>
             )}
           </main>

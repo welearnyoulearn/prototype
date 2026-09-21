@@ -18,6 +18,12 @@ All finished features and bug fixes. Most recent first.
 
 ---
 
+### 2026-09-21 — Central Year Rollover gated by fee year-end (#199)
+**Type:** Feature / rework
+**Portal:** School Admin
+**Summary:** Year Rollover is now the single place the school moves to the next academic year. Blocked (popup + server 409) until Fee Management → Year-End is closed; fee year-end no longer creates years; a rolled-over fee year cannot be reopened; year creation/switching is admin-only and switching is locked after first setup; class roll numbers survive promotion. 14 end-to-end tests.
+**PR:** #199 branch `feature/199-central-year-rollover`
+
 ### 2026-09-21 — Removed all timetable from dev; full workflow moved to its own branch (#175, #176)
 **Type:** Removal + Feature branch
 **Portal:** School Admin / Teacher / Student / Parent

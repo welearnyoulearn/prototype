@@ -9,7 +9,7 @@
 
 ## What it does
 
-Close one academic year and start the next.
+Moves the **whole school** to the next academic year in one step. It is the only place a new academic year is created and made current (after the school's first year is set up).
 
 ## Who uses it
 
@@ -17,12 +17,18 @@ School admin.
 
 ## How it works
 
-- Set up the new year and a grade sequence, **preview** what happens to each grade group, then execute: students are promoted (class history is recorded per year), the old year is archived.
-- Fee dues can be carried forward during rollover (see fee-management.md).
+1. **Fee Management → Year-End first.** Decide every student's pending dues (carry forward, write off, passout, leave open) and close the fee year. Carried dues go into "Previous Year Dues" of the next year. Year-End no longer creates years or promotes anyone.
+2. **Year Rollover tab:** create the next year (its label is fixed to the year after the current one), check the promotion preview, and run it. If the fee year-end is not closed the screen shows a popup ("Complete the fee year-end first") with a button to Fee Year-End; the server refuses too (`409 FEES_NOT_CLOSED`).
+3. **The rollover** (one all-or-nothing transaction): snapshots each active student's grade, section and roll number into the class history, promotes to the next grade, marks final-grade students `graduated`, and makes the new year current — attendance, exams, syllabus, calendar, fees and the portals all follow.
 
 ## Rules and limits
 
-- Race-safe: a year can only be closed once.
+- Only the current year can be rolled over, only into the year that follows it, and only once. Concurrent runs are serialized (the second gets 409).
+- Schools without Fee Management are not gated.
+- After the rollover the old fee year cannot be reopened.
+- Class roll numbers are unique per class: each promoted student keeps their roll number if it is free in the new class, otherwise it is cleared and the school sets a new one (the result screen says how many). Graduated students' roll numbers are cleared; the old value stays in the class history.
+- The active year cannot be switched by hand (Settings or API) once a school has a current year.
+- No "detain / repeat the year" option and no per-student section change yet.
 - Past years stay available in Student 360 through the year switcher.
 
 ## Code evidence
@@ -50,3 +56,4 @@ API routes these screens call (all exist):
 | Date | Change | Issue |
 |------|--------|-------|
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
+| 2026-09-21 | One central rollover gated by fee year-end; fee year-end no longer creates years; roll numbers handled | #199 |
