@@ -163,6 +163,10 @@
     {
       "name": "Operations",
       "description": "Health, init, backup restore, logging and this spec."
+    },
+    {
+      "name": "Export data",
+      "description": "Download school records as CSV or Excel; full backup; export log"
     }
   ],
   "x-tagGroups": [
@@ -44164,6 +44168,312 @@
           }
         ],
         "x-source-file": "app/api/announcements/recipients/route.ts"
+      }
+    },
+    "/api/data-export/catalog": {
+      "get": {
+        "tags": [
+          "Export data"
+        ],
+        "summary": "List everything the school can export",
+        "description": "Every export the school's plan includes (a module's exports appear only when that module is enabled), grouped, with each export's filter definitions and the option lists the screen needs: classes, grades, exams, academic years, expense categories, current year. The 'full-backup' entry is always offered.\n\n**Who can call:** Platform admin, School admin (principal / vice principal).\n\n**Checks:** requireFeeAccess(school_id): school staff may only use their own school; platform admin any school.",
+        "operationId": "getDataExportCatalog",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "School id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "exports": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "group": {
+                            "type": "string",
+                            "enum": [
+                              "people",
+                              "academics",
+                              "attendance",
+                              "fees",
+                              "expenses",
+                              "other",
+                              "backup"
+                            ]
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "feature": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "formats": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "csv",
+                                "xlsx"
+                              ]
+                            }
+                          },
+                          "personal": {
+                            "type": "boolean"
+                          },
+                          "filters": {
+                            "type": "array",
+                            "items": {
+                              "type": "object"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "options": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-source-file": "app/api/data-export/catalog/route.ts"
+      }
+    },
+    "/api/data-export/log": {
+      "get": {
+        "tags": [
+          "Export data"
+        ],
+        "summary": "Recent exports (who downloaded what)",
+        "description": "The latest 100 downloads for the school: export key, format, filters used, row count, who and when. Exports hold personal data, so each one is recorded.\n\n**Who can call:** Platform admin, School admin (principal / vice principal).\n\n**Checks:** requireFeeAccess(school_id): school staff may only use their own school; platform admin any school.",
+        "operationId": "getDataExportLog",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "School id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Log rows",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "integer"
+                      },
+                      "export_key": {
+                        "type": "string"
+                      },
+                      "format": {
+                        "type": "string"
+                      },
+                      "filters": {
+                        "type": "object",
+                        "nullable": true
+                      },
+                      "row_count": {
+                        "type": "integer"
+                      },
+                      "by_name": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-source-file": "app/api/data-export/log/route.ts"
+      }
+    },
+    "/api/data-export/{key}": {
+      "get": {
+        "tags": [
+          "Export data"
+        ],
+        "summary": "Download one export (CSV or Excel)",
+        "description": "Builds and downloads one export from the catalog (see GET /api/data-export/catalog for keys and filters). Filters are passed as query parameters (class_id, exam_id, academic_year, grade, section, status, from, to, date, month, threshold, category_id). Required filters are enforced; classes and exams of other schools are 'not found'. CSV files are UTF-8 with a BOM (Telugu / Hindi names open correctly in Excel) and text starting with = + - @ is neutralised so Excel cannot run it as a formula; Excel files have a bold header, frozen header row and numeric cells. Results over 100,000 rows are refused (narrow the filters). Every successful download is logged. key 'full-backup' returns a workbook with one sheet per enabled module (Excel only).\n\n**Who can call:** Platform admin, School admin (principal / vice principal).\n\n**Checks:** requireFeeAccess(school_id): school staff may only use their own school; platform admin any school.",
+        "operationId": "getDataExportKey",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Export key, e.g. students, fee-defaulters, attendance-summary, full-backup"
+          },
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "School id"
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "csv",
+                "xlsx"
+              ],
+              "default": "csv"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "400": {
+            "description": "Missing or invalid filter, or format not offered for this export"
+          },
+          "404": {
+            "description": "Unknown export, class or exam not found"
+          },
+          "409": {
+            "description": "e.g. the absentee list for a non-working day"
+          },
+          "413": {
+            "description": "Too many rows — narrow the filters"
+          }
+        },
+        "x-source-file": "app/api/data-export/[key]/route.ts"
       }
     }
   },

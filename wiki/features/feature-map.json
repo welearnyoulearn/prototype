@@ -123,7 +123,8 @@
   "export": {
     "doc": "wiki/features/export.md",
     "ui": [
-      "app/school-admin/components/ExportCenter.tsx"
+      "app/school-admin/components/ExportCenter.tsx",
+      "app/school-admin/components/ExportReportCards.tsx"
     ]
   },
   "settings": {

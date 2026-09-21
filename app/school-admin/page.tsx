@@ -204,7 +204,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     key: 'export',
-    label: 'Export & Reports',
+    label: 'Export Data',
     tier: ['basic', 'standard', 'premium'],
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
