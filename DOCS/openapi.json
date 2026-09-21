@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "WLYL School Management API",
-    "version": "2026-09-21",
+    "version": "2026-09-22",
     "description": "Every API route in the WLYL platform, generated from the route handlers on the `dev` branch.\n\n## How to read this\n\n- **Sections and subcategories.** The sidebar groups routes by area, such as Fees & finance, then by topic, such as Waivers.\n- **Who can call.** The coloured badges on each route show which signed-in users it accepts. A red **Public** badge means the route has no sign-in check in code.\n- **Checks.** Extra rules inside the route, such as \"parent must own this student\", are listed under Checks.\n- **Feature flag.** Routes that are switched off unless the school's plan includes a feature say which one.\n\n## Signing in\n\nEach portal has its own session cookie: `wlyl-platform`, `wlyl-auth` (school admin), `wlyl-teacher`, `wlyl-student` and `wlyl-parent`. Sign in to the app in this browser, then use **Test Request** on any route. Scheduled jobs take `Authorization: Bearer $CRON_SECRET`."
   },
   "servers": [
@@ -34680,8 +34680,8 @@
         "tags": [
           "Announcements"
         ],
-        "summary": "List active announcements",
-        "description": "Returns non-expired announcements for the session's school, ordered urgent > high > normal then newest first. Optional audience filter matches 'all' or a comma-separated target_audience containing the audience. Pagination is opt-in: without limit/offset a plain array is returned; with either, a {data, limit, offset, total} envelope.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** Uses getAnySession(); school_id must equal the session's school (403 otherwise).",
+        "summary": "List announcements",
+        "description": "**Teacher / student / parent:** the notices addressed to THEM — their role, and their class(es) when a notice targets classes (a student's own class, a parent's children's classes, the classes a teacher teaches or is class teacher of) — with seen / acked flags. scope=past lists expired ones.\n\n**School staff:** scope live (default) | drafts | scheduled | archive (expired) | deleted | all, each notice with seen_count / ack_count. audience=teachers|students|parents filters by audience (staff only).\n\nOrder: pinned first, then urgent, high, normal, newest first. Live = published, not deleted, publish time reached, not past its expiry (India date). Without limit/offset a plain array is returned; with either, a {data, limit, offset, total} envelope.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** school_id must equal the session's school (403 otherwise).",
         "operationId": "getAnnouncements",
         "security": [
           {
@@ -34719,26 +34719,108 @@
                             "type": "string"
                           },
                           "announcement_type": {
-                            "type": "string"
+                            "type": "string",
+                            "enum": [
+                              "general",
+                              "circular",
+                              "event",
+                              "alert"
+                            ]
                           },
                           "target_audience": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "'all' or a comma-separated subset of teachers/students/parents"
                           },
                           "priority": {
-                            "type": "string"
-                          },
-                          "created_by_name": {
                             "type": "string",
-                            "nullable": true
+                            "enum": [
+                              "normal",
+                              "high",
+                              "urgent"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "draft",
+                              "published"
+                            ]
+                          },
+                          "publish_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true,
+                            "description": "Future = scheduled; null = live as soon as published"
+                          },
+                          "pinned": {
+                            "type": "boolean"
+                          },
+                          "requires_ack": {
+                            "type": "boolean"
+                          },
+                          "template_key": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Festival / holiday / school template (e.g. pongal, diwali, ptm)"
+                          },
+                          "card_data": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "headline": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "target_classes": {
+                            "type": "array",
+                            "nullable": true,
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "grade": {
+                                  "type": "string"
+                                },
+                                "section": {
+                                  "type": "string",
+                                  "nullable": true
+                                }
+                              }
+                            },
+                            "description": "null = whole school; section null = every section of the grade"
+                          },
+                          "translations": {
+                            "type": "object",
+                            "nullable": true,
+                            "description": "{ te?: {title, content}, hi?: {title, content} }"
                           },
                           "expires_at": {
                             "type": "string",
-                            "nullable": true,
-                            "format": "date"
+                            "format": "date",
+                            "nullable": true
+                          },
+                          "created_by_name": {
+                            "type": "string"
                           },
                           "created_at": {
                             "type": "string",
                             "format": "date-time"
+                          },
+                          "seen": {
+                            "type": "boolean",
+                            "description": "Readers only"
+                          },
+                          "acked": {
+                            "type": "boolean",
+                            "description": "Readers only"
+                          },
+                          "seen_count": {
+                            "type": "integer",
+                            "description": "Staff only"
+                          },
+                          "ack_count": {
+                            "type": "integer",
+                            "description": "Staff only"
                           }
                         }
                       }
@@ -34761,26 +34843,108 @@
                                 "type": "string"
                               },
                               "announcement_type": {
-                                "type": "string"
+                                "type": "string",
+                                "enum": [
+                                  "general",
+                                  "circular",
+                                  "event",
+                                  "alert"
+                                ]
                               },
                               "target_audience": {
-                                "type": "string"
+                                "type": "string",
+                                "description": "'all' or a comma-separated subset of teachers/students/parents"
                               },
                               "priority": {
-                                "type": "string"
-                              },
-                              "created_by_name": {
                                 "type": "string",
-                                "nullable": true
+                                "enum": [
+                                  "normal",
+                                  "high",
+                                  "urgent"
+                                ]
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "draft",
+                                  "published"
+                                ]
+                              },
+                              "publish_at": {
+                                "type": "string",
+                                "format": "date-time",
+                                "nullable": true,
+                                "description": "Future = scheduled; null = live as soon as published"
+                              },
+                              "pinned": {
+                                "type": "boolean"
+                              },
+                              "requires_ack": {
+                                "type": "boolean"
+                              },
+                              "template_key": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "Festival / holiday / school template (e.g. pongal, diwali, ptm)"
+                              },
+                              "card_data": {
+                                "type": "object",
+                                "nullable": true,
+                                "properties": {
+                                  "headline": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "target_classes": {
+                                "type": "array",
+                                "nullable": true,
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "grade": {
+                                      "type": "string"
+                                    },
+                                    "section": {
+                                      "type": "string",
+                                      "nullable": true
+                                    }
+                                  }
+                                },
+                                "description": "null = whole school; section null = every section of the grade"
+                              },
+                              "translations": {
+                                "type": "object",
+                                "nullable": true,
+                                "description": "{ te?: {title, content}, hi?: {title, content} }"
                               },
                               "expires_at": {
                                 "type": "string",
-                                "nullable": true,
-                                "format": "date"
+                                "format": "date",
+                                "nullable": true
+                              },
+                              "created_by_name": {
+                                "type": "string"
                               },
                               "created_at": {
                                 "type": "string",
                                 "format": "date-time"
+                              },
+                              "seen": {
+                                "type": "boolean",
+                                "description": "Readers only"
+                              },
+                              "acked": {
+                                "type": "boolean",
+                                "description": "Readers only"
+                              },
+                              "seen_count": {
+                                "type": "integer",
+                                "description": "Staff only"
+                              },
+                              "ack_count": {
+                                "type": "integer",
+                                "description": "Staff only"
                               }
                             }
                           }
@@ -34802,7 +34966,7 @@
             }
           },
           "400": {
-            "description": "school_id missing, or limit/offset not non-negative integers"
+            "description": "school_id missing, invalid scope for this caller, or invalid limit/offset"
           },
           "401": {
             "description": "No session"
@@ -34869,6 +35033,24 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "description": "Staff: live, drafts, scheduled, archive, deleted, all. Readers: live, past.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "live",
+                "drafts",
+                "scheduled",
+                "archive",
+                "deleted",
+                "all",
+                "past"
+              ]
+            }
           }
         ]
       },
@@ -34876,10 +35058,17 @@
         "tags": [
           "Announcements"
         ],
-        "summary": "Create an announcement",
-        "description": "Inserts an announcement. target_audience may be 'all' or a comma-separated subset of teachers/students/parents; selecting all three is stored as 'all'.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all; school_id is taken from the body unverified.",
+        "summary": "Publish, schedule or draft an announcement",
+        "description": "title (max 200) and content (max 5000) required. announcement_type general/circular/event/alert; priority normal/high/urgent; target_audience 'all' or a comma-separated subset (all three is stored as 'all'); status published (default) or draft; publish_at in the future = scheduled (a past time means now); pinned; requires_ack (people tap “I have read this”); template_key + card_data {headline} for festival / greeting cards; target_classes [{grade, section|null}] (null = whole school); translations {te, hi}; expires_at YYYY-MM-DD. The author is the signed-in user. Recorded in the audit trail.\n\n**Who can call:** Platform admin, School admin (principal / vice principal).\n\n**Checks:** requireFeeAccess: school staff may only act on their own school; the school comes from the notice itself for id routes.",
         "operationId": "postAnnouncements",
-        "security": [],
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
         "responses": {
           "201": {
             "description": "Created announcement row",
@@ -34940,16 +35129,23 @@
             }
           },
           "400": {
-            "description": "Missing school_id/title/content, or invalid announcement_type/priority/target_audience"
+            "description": "Invalid title, content, type, priority, audience, status, template, classes, translations, dates, or card_data without a template_key"
           },
           "500": {
             "description": "Internal server error"
+          },
+          "403": {
+            "description": "Not school staff for this school_id"
           }
         },
         "x-badges": [
           {
-            "name": "Public",
-            "color": "#dc2626"
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
           }
         ],
         "x-source-file": "app/api/announcements/route.ts",
@@ -35001,6 +35197,61 @@
                     "type": "string",
                     "nullable": true,
                     "format": "date"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "published"
+                    ]
+                  },
+                  "publish_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true,
+                    "description": "Future = scheduled; null = live as soon as published"
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  },
+                  "requires_ack": {
+                    "type": "boolean"
+                  },
+                  "template_key": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Festival / holiday / school template (e.g. pongal, diwali, ptm)"
+                  },
+                  "card_data": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "headline": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "target_classes": {
+                    "type": "array",
+                    "nullable": true,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "grade": {
+                          "type": "string"
+                        },
+                        "section": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    },
+                    "description": "null = whole school; section null = every section of the grade"
+                  },
+                  "translations": {
+                    "type": "object",
+                    "nullable": true,
+                    "description": "{ te?: {title, content}, hi?: {title, content} }"
                   }
                 },
                 "required": [
@@ -35019,10 +35270,17 @@
         "tags": [
           "Announcements"
         ],
-        "summary": "Update an announcement",
-        "description": "Partially updates an announcement; omitted/null fields keep their current value (COALESCE). No validation of enum values on this path.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all; any caller can edit any announcement by id (proxy treats /api/ as public).",
+        "summary": "Edit an announcement",
+        "description": "Updates any of title, content, announcement_type, priority, target_audience, status (draft ⇄ published), publish_at (null publishes now), pinned, requires_ack, template_key, card_data, target_classes (null = whole school), translations, expires_at (null removes it). Empty body refused. Recorded in the audit trail (edited / published / unpublished).\n\n**Who can call:** Platform admin, School admin (principal / vice principal).\n\n**Checks:** requireFeeAccess: school staff may only act on their own school; the school comes from the notice itself for id routes.",
         "operationId": "patchAnnouncementsId",
-        "security": [],
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Updated announcement row",
@@ -35087,12 +35345,22 @@
           },
           "500": {
             "description": "Internal server error"
+          },
+          "403": {
+            "description": "Not school staff for the notice's school (also returned to signed-out callers, so ids cannot be probed)"
+          },
+          "400": {
+            "description": "Invalid id; invalid or empty change"
           }
         },
         "x-badges": [
           {
-            "name": "Public",
-            "color": "#dc2626"
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
           }
         ],
         "x-source-file": "app/api/announcements/[id]/route.ts",
@@ -35133,6 +35401,61 @@
                   },
                   "announcement_type": {
                     "type": "string"
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "published"
+                    ]
+                  },
+                  "publish_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true,
+                    "description": "Future = scheduled; null = live as soon as published"
+                  },
+                  "pinned": {
+                    "type": "boolean"
+                  },
+                  "requires_ack": {
+                    "type": "boolean"
+                  },
+                  "template_key": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Festival / holiday / school template (e.g. pongal, diwali, ptm)"
+                  },
+                  "card_data": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "headline": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "target_classes": {
+                    "type": "array",
+                    "nullable": true,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "grade": {
+                          "type": "string"
+                        },
+                        "section": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    },
+                    "description": "null = whole school; section null = every section of the grade"
+                  },
+                  "translations": {
+                    "type": "object",
+                    "nullable": true,
+                    "description": "{ te?: {title, content}, hi?: {title, content} }"
                   }
                 }
               }
@@ -35144,10 +35467,17 @@
         "tags": [
           "Announcements"
         ],
-        "summary": "Delete an announcement",
-        "description": "Hard-deletes an announcement row by id.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all; any caller can delete any announcement by id.",
+        "summary": "Delete an announcement (kept in the Deleted tab)",
+        "description": "Soft delete: the notice disappears for everyone and stays in scope=deleted and its audit trail (who deleted it, when).\n\n**Who can call:** Platform admin, School admin (principal / vice principal).\n\n**Checks:** requireFeeAccess: school staff may only act on their own school; the school comes from the notice itself for id routes.",
         "operationId": "deleteAnnouncementsId",
-        "security": [],
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Deleted",
@@ -35172,12 +35502,22 @@
           },
           "500": {
             "description": "Internal server error"
+          },
+          "403": {
+            "description": "Not school staff for the notice's school (also returned to signed-out callers, so ids cannot be probed)"
+          },
+          "400": {
+            "description": "Invalid id"
           }
         },
         "x-badges": [
           {
-            "name": "Public",
-            "color": "#dc2626"
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
           }
         ],
         "x-source-file": "app/api/announcements/[id]/route.ts",
@@ -43396,6 +43736,434 @@
             }
           }
         ]
+      }
+    },
+    "/api/announcements/{id}/read": {
+      "post": {
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Mark a notice as seen",
+        "description": "A teacher / student / parent opened the notice — recorded once. The notice must be published, not deleted, live and addressed to the caller (otherwise 404). School staff: no-op.\n\n**Who can call:** Teacher, Student, Parent, School admin (no-op).\n\n**Checks:** the notice must be visible to the caller's role and class(es).",
+        "operationId": "postAnnouncementsIdRead",
+        "security": [
+          {
+            "teacher": []
+          },
+          {
+            "student": []
+          },
+          {
+            "parent": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          },
+          {
+            "name": "Student",
+            "color": "#15803d"
+          },
+          {
+            "name": "Parent",
+            "color": "#a16207"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "skipped": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Announcement id"
+          }
+        ],
+        "x-source-file": "app/api/announcements/[id]/read/route.ts"
+      }
+    },
+    "/api/announcements/{id}/ack": {
+      "post": {
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Acknowledge a notice (\"I have read this\")",
+        "description": "For notices with requires_ack. Also marks the notice seen. 400 when the notice does not ask for acknowledgement; 404 when it is not addressed to the caller.\n\n**Who can call:** Teacher, Student, Parent (school admin: no-op).\n\n**Checks:** the notice must be visible to the caller's role and class(es).",
+        "operationId": "postAnnouncementsIdAck",
+        "security": [
+          {
+            "teacher": []
+          },
+          {
+            "student": []
+          },
+          {
+            "parent": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "x-badges": [
+          {
+            "name": "Teacher",
+            "color": "#0f766e"
+          },
+          {
+            "name": "Student",
+            "color": "#15803d"
+          },
+          {
+            "name": "Parent",
+            "color": "#a16207"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "skipped": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "400": {
+            "description": "This announcement does not ask for acknowledgement"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Announcement id"
+          }
+        ],
+        "x-source-file": "app/api/announcements/[id]/ack/route.ts"
+      }
+    },
+    "/api/announcements/{id}/stats": {
+      "get": {
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Reach: who has seen / acknowledged a notice",
+        "description": "Recipients (teachers / students / parents addressed by the audience + classes), how many have seen it and acknowledged it, per role, the people who have NOT seen it (first 300, plus the total) and, for acknowledgement notices, who has not acknowledged, and the audit history (created / edited / published / deleted, by whom).\n\n**Who can call:** Platform admin, School admin (principal / vice principal).\n\n**Checks:** requireFeeAccess: school staff may only act on their own school; the school comes from the notice itself for id routes.",
+        "operationId": "getAnnouncementsIdStats",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reach",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "recipients": {
+                      "type": "integer"
+                    },
+                    "seen": {
+                      "type": "integer"
+                    },
+                    "acknowledged": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "requires_ack": {
+                      "type": "boolean"
+                    },
+                    "by_role": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "recipients": {
+                            "type": "integer"
+                          },
+                          "seen": {
+                            "type": "integer"
+                          },
+                          "acked": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "not_seen": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "not_seen_total": {
+                      "type": "integer"
+                    },
+                    "not_acknowledged": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "history": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "action": {
+                            "type": "string"
+                          },
+                          "by_name": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "details": {
+                            "type": "object",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Announcement id"
+          }
+        ],
+        "x-source-file": "app/api/announcements/[id]/stats/route.ts"
+      }
+    },
+    "/api/announcements/recipients": {
+      "get": {
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Preview: how many people an announcement will reach",
+        "description": "The composer's live count for an audience and class filter: teachers, students and (distinct) parents.\n\n**Who can call:** Platform admin, School admin (principal / vice principal).\n\n**Checks:** requireFeeAccess: school staff may only act on their own school; the school comes from the notice itself for id routes.",
+        "operationId": "getAnnouncementsRecipients",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "teachers": {
+                      "type": "integer"
+                    },
+                    "students": {
+                      "type": "integer"
+                    },
+                    "parents": {
+                      "type": "integer"
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          },
+          "400": {
+            "description": "Invalid audience or classes"
+          }
+        },
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "audience",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "'all' (default) or a comma-separated subset of teachers/students/parents"
+          },
+          {
+            "name": "classes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "JSON: [{\"grade\":\"6\",\"section\":\"A\"}] (section null = whole grade)"
+          }
+        ],
+        "x-source-file": "app/api/announcements/recipients/route.ts"
       }
     }
   },

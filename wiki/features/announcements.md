@@ -9,19 +9,29 @@
 
 ## What it does
 
-Publish circulars and announcements to the right people.
+Publish notices, circulars and festival greetings to the right people — and see who has read them. In-app only (no WhatsApp / email / SMS).
 
 ## Who uses it
 
-School admin publishes; teachers, students and parents read what is addressed to them.
+School admin / principal / vice principal publish; teachers, students and parents read what is addressed to them.
 
 ## How it works
 
-- Create with audience targeting (one or several audiences), priority and expiry; edit or delete.
-- Portals show announcements filtered to the audience.
+- **Start from a template:** Pongal, Sankranti, Ugadi, Dasara, Diwali, Holi, Vinayaka Chavithi, Eid, Christmas, New Year, Republic / Independence Day, Teachers' and Children's Day (animated greeting cards), plus holiday, vacation, emergency closure, welcome back, PTM, exam schedule, results, fee reminder, sports day, annual day. Or start blank. The composer shows a live preview of exactly what people will see, and "open as recipients see it".
+- **Audience:** Everyone, or any mix of Teachers / Students / Parents — narrowed to whole grades or single sections. "This will reach N people" updates as you choose. A parent with children in several classes sees a notice once.
+- **When:** publish now, schedule for a date and time, or save as a draft. Optional "hide after" date; expired notices move to the Archive (and to readers' "Past" list).
+- **Priority, pin, acknowledge:** urgent / high / normal; pin to the top; ask for acknowledgement ("I have read this").
+- **Telugu / Hindi:** optional translated title and message; readers using the app in that language see it.
+- **Reader experience:** teacher, student and parent dashboards show a notice card with NEW marks and an "Action needed" tag. Tapping a notice opens it — festive notices open as an animated greeting card, others as a clean sheet with a coloured banner. Unseen greeting, urgent and acknowledgement notices pop up once. "View all" has search and Unread / Pinned / Action needed / Past filters.
+- **Tracking:** opening a notice records "seen"; the admin sees "Seen by 118 of 142", the list of people who have not, and who acknowledged. Every create / edit / publish / delete is kept in a history with who did it.
+- **Manage:** Live, Scheduled, Drafts, Archive and Deleted tabs; edit, pin, unpublish, delete (soft — stays in Deleted).
 
 ## Rules and limits
 
+- Only the school's own admin / principal / vice principal can publish, edit or delete (server-checked). The author name comes from the signed-in user's profile.
+- Class targeting: a student sees a notice for their current class; a parent for any of their children's classes; a teacher for the classes they teach or are class teacher of.
+- A notice with an expiry stays visible through the end of that day in India time.
+- Not built yet: attachments (PDF / images), one-tap emergency broadcast, reminders/nudges to people who have not seen a notice, WhatsApp / email / SMS delivery.
 
 ## Code evidence
 
@@ -33,6 +43,8 @@ Screens: `app/school-admin/components/AnnouncementBoard.tsx`
 API routes these screens call (all exist):
 - `GET/POST` /api/announcements
 - `DELETE/PATCH` /api/announcements/{}
+- `GET` /api/announcements/{}/stats
+- `GET/POST` /api/classes
 
 ✅ Every API route the screens call exists.
 <!-- AUTO:evidence:announcements:end -->
@@ -45,3 +57,5 @@ API routes these screens call (all exist):
 | Date | Change | Issue |
 |------|--------|-------|
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
+| 2026-09-21 | Write API locked to the school's own staff; edit added to the screen; IST expiry; tests | #203 |
+| 2026-09-22 | Templates + greeting cards, class targeting, drafts/scheduling, pin, seen tracking, acknowledgement, translations, archive + audit | #205 |

@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 35
+const SCHEMA_VERSION = 36
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -1668,6 +1668,43 @@ const SYLLABUS_SCHEMA: string[] = [
     // section) / graduated. NULL on rows written before this column existed.
     `ALTER TABLE student_class_history ADD COLUMN IF NOT EXISTS outcome VARCHAR(12)`,
     `ALTER TABLE student_class_history ADD COLUMN IF NOT EXISTS promoted_to_section VARCHAR(10)`,
+
+    // ── Announcement workflow (#205) ─────────────────────────────────────────
+    // Drafts + scheduling, pinning, class targeting, greeting cards, translations, acknowledgement,
+    // soft delete (archive + audit trail) and per-reader "seen" tracking.
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS status VARCHAR(10) NOT NULL DEFAULT 'published'`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS publish_at TIMESTAMPTZ`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS requires_ack BOOLEAN NOT NULL DEFAULT FALSE`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS template_key VARCHAR(40)`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS card_data JSONB`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS target_classes JSONB`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS translations JSONB`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS updated_by_name VARCHAR(100)`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
+    `ALTER TABLE announcements ADD COLUMN IF NOT EXISTS deleted_by_name VARCHAR(100)`,
+    `CREATE TABLE IF NOT EXISTS announcement_reads (
+      id SERIAL PRIMARY KEY,
+      announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+      reader_type VARCHAR(10) NOT NULL CHECK (reader_type IN ('teacher','student','parent')),
+      reader_id INTEGER NOT NULL,
+      seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      acked_at TIMESTAMPTZ,
+      UNIQUE (announcement_id, reader_type, reader_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_announcement_reads_reader ON announcement_reads(reader_type, reader_id)`,
+    `CREATE TABLE IF NOT EXISTS announcement_audit (
+      id SERIAL PRIMARY KEY,
+      announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+      school_id INTEGER NOT NULL,
+      action VARCHAR(20) NOT NULL,
+      by_name VARCHAR(100),
+      details JSONB,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_announcement_audit_ann ON announcement_audit(announcement_id, created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_announcements_live ON announcements(school_id, status, deleted_at)`,
 ]
 
 async function runIncrementalMigrations() {

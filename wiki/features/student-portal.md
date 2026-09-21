@@ -35,7 +35,6 @@ Screens: `app/student/page.tsx`, `app/student/components/StudentAiHub.tsx`, `app
 
 API routes these screens call (all exist):
 - `GET` /api/academic-year/current
-- `GET/POST` /api/announcements
 - `GET/POST` /api/classes
 - `GET` /api/school/enabled-features
 - `GET` /api/school/library

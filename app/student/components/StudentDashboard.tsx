@@ -1,14 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import NoticeCenter from '@/components/announcements/NoticeCenter'
 
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
-}
-type AnnouncementItem = {
-  id: number; title: string; content: string; announcement_type: string
-  target_audience: string; priority: string; created_by_name: string
-  expires_at: string | null; created_at: string
 }
 type Props = {
   student: Student; classId: number; schoolId: number; onNavigate?: (key: string) => void
@@ -54,15 +50,12 @@ function EngagementRing({ score }: { score: number }) {
 export default function StudentDashboard({ student, classId, schoolId, onNavigate, isNavItemVisible }: Props) {
   const [loading,         setLoading]         = useState(true)
   const [engagementScore, setEngagementScore] = useState<number | null>(null)
-  const [announcements,   setAnnouncements]   = useState<AnnouncementItem[]>([])
-  const [annExpanded,     setAnnExpanded]     = useState<number | null>(null)
 
   const hasAttendance = isNavItemVisible?.('attendance') ?? true
 
   useEffect(() => {
-    fetch(`/api/announcements?school_id=${schoolId}&audience=students`).then(r => r.json()).catch(() => [])
-      .then((annData) => {
-      setAnnouncements(Array.isArray(annData) ? annData : [])
+    Promise.resolve()
+      .then(() => {
 
       // Engagement ring is based on attendance %, so it must never use a
       // signal the school hasn't enabled — with Attendance off there's
@@ -163,83 +156,8 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
         )
       })()}
 
-      {/* ── Announcements ─────────────────────────────────────────── */}
-      {announcements.length > 0 && (
-        <div
-          className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden anim-slide-up"
-          style={{ animationDelay: '0.7s' }}
-        >
-          <div className="px-5 py-4 flex items-center justify-between border-b border-gray-50">
-            <div className="flex items-center gap-2">
-              <span className="text-base emoji-wobble">📢</span>
-              <h3 className="text-sm font-black text-gray-900">School News</h3>
-              {announcements.filter(a => a.priority === 'urgent').length > 0 && (
-                <span className="text-[10px] font-black bg-red-100 text-red-600 px-2 py-0.5 rounded-full">
-                  🚨 {announcements.filter(a => a.priority === 'urgent').length} urgent
-                </span>
-              )}
-            </div>
-            <span className="text-xs text-gray-400 font-semibold">{announcements.length}</span>
-          </div>
-
-          <div className="divide-y divide-gray-50">
-            {announcements.slice(0, 4).map((a, i) => {
-              const isUrgent = a.priority === 'urgent'
-              const isOpen   = annExpanded === a.id
-              return (
-                <div key={a.id} className={isUrgent ? 'bg-red-50/40' : ''}>
-                  <button
-                    onClick={() => setAnnExpanded(isOpen ? null : a.id)}
-                    className="w-full flex items-start gap-3 px-5 py-3.5 text-left hover:bg-gray-50 transition-colors"
-                    style={{
-                      animation: 'slideInLeft 0.35s cubic-bezier(0.16,1,0.3,1) both',
-                      animationDelay: `${0.72 + i * 0.06}s`,
-                    }}
-                  >
-                    <span className="text-base flex-shrink-0 mt-0.5">
-                      {isUrgent ? '🚨' : a.priority === 'high' ? '⚠️' : '📌'}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 mb-0.5">
-                        {isUrgent && (
-                          <span className="text-[9px] font-black bg-red-100 text-red-600 px-1.5 py-0.5 rounded uppercase">Urgent</span>
-                        )}
-                        <span className="text-[10px] text-gray-400">
-                          {new Date(a.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-                        </span>
-                      </div>
-                      <p className="text-xs font-bold text-gray-800 truncate">{a.title}</p>
-                      {!isOpen && <p className="text-[10px] text-gray-400 mt-0.5 truncate">{a.content}</p>}
-                    </div>
-                    <svg
-                      className={`w-3.5 h-3.5 text-gray-300 flex-shrink-0 mt-1 transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}
-                      fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                    </svg>
-                  </button>
-                  {isOpen && (
-                    <div className="px-5 pb-4 pl-14 anim-fade-in">
-                      <p className="text-xs text-gray-600 whitespace-pre-wrap leading-relaxed">{a.content}</p>
-                      {a.expires_at && (
-                        <p className="text-[10px] text-amber-500 font-semibold mt-2">
-                          Expires: {new Date(a.expires_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-
-          {announcements.length > 4 && (
-            <div className="px-5 py-3 border-t border-gray-50 text-center">
-              <p className="text-xs text-gray-400">+{announcements.length - 4} more</p>
-            </div>
-          )}
-        </div>
-      )}
+      {/* ── Notices: unread marks, animated greeting cards, acknowledgement ── */}
+      <NoticeCenter schoolId={schoolId} />
     </div>
   )
 }

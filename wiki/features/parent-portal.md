@@ -35,7 +35,6 @@ Screens: `app/parent/page.tsx`, `app/parent/components/ParentProfile.tsx`, `app/
 API routes these screens call (all exist):
 - `GET` /api/academic-year/current
 - `GET/PATCH/POST/PUT` /api/academic-years
-- `GET/POST` /api/announcements
 - `GET/POST` /api/classes
 - `POST` /api/exams/{}/acknowledge
 - `GET` /api/fees/upi-qr
