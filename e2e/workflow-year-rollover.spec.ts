@@ -293,7 +293,7 @@ test.describe.serial('Year Rollover — central, gated by fee year-end', () => {
       const page = await ctx.newPage()
       await page.goto(`${BASE}/school-admin`)
       await page.getByText('Year Rollover', { exact: true }).first().click()
-      await expect(page.getByTestId('step-fee-year-end')).toBeVisible()
+      await expect(page.getByTestId('step-fee-year-end')).toBeVisible({ timeout: 30000 })
       await expect(page.getByTestId('fee-gate-banner')).toBeVisible()
       await page.getByTestId('btn-review-rollover').click()
       await expect(page.getByTestId('fee-gate-modal')).toBeVisible()
@@ -304,5 +304,138 @@ test.describe.serial('Year Rollover — central, gated by fee year-end', () => {
     } finally {
       await api(`/api/schools/${s.id}`, 'DELETE', undefined, platform).catch(() => {})
     }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Exceptions (issue #201): repeat a year / promote into another section
+// ─────────────────────────────────────────────────────────────────────────────
+test.describe.serial('Year Rollover — repeat a year / change section', () => {
+  const ts = Date.now() + 7
+  let schoolId = 0, cookie = '', email = '', tempPass = ''
+  let AY = '', AY_NEXT = '', ayId = 0, nextId = 0
+  let r6 = 0, m6 = 0, p6 = 0, s5 = 0, f10 = 0, g10 = 0
+
+  const roll = (exceptions: unknown, as: string | null = cookie) => api('/api/academic-years/rollover', 'POST', {
+    school_id: schoolId, from_year_id: ayId, to_year_id: nextId, final_grade: '10', grade_sequence: GRADES, exceptions,
+  }, as ?? undefined)
+  const roster = async () => (await api(`/api/students?school_id=${schoolId}`, 'GET', undefined, cookie)).data as Array<{ id: number; grade: string; section: string; status: string | null; school_roll_number: number | null }>
+
+  test.beforeAll(async () => {
+    test.setTimeout(120000)
+    const platform = await platformAdminCookie()
+    const sc = await createSchool(platform, { name: `Exceptions School ${ts}`, phone: `6${String(ts).slice(-9)}`, email: `exc${ts}@test.com`, address: '4 Exception Rd' })
+    schoolId = sc.id; email = sc.email; tempPass = sc.temp_password
+    await setSubscription(platform, schoolId, 'premium')
+    await ensureFeaturesOn(platform)
+    const first = await loginSchoolAdmin(email, tempPass)
+    expect((await api('/api/auth/change-password', 'POST', { newPassword: 'RollExc#2026x' }, first)).status).toBe(200)
+    cookie = await loginSchoolAdmin(email, 'RollExc#2026x')
+    await api('/api/auth/profile', 'PUT', { full_name: 'Exc Admin', phone: '9000000055' }, cookie)
+
+    const cur = ((await api(`/api/academic-years?school_id=${schoolId}`, 'GET', undefined, cookie)).data as Year[]).find(y => y.is_current)!
+    AY = cur.label; ayId = cur.id
+    const start = parseInt(AY) + 1
+    AY_NEXT = `${start}-${String(start + 1).slice(2)}`
+    const made = await api('/api/academic-years', 'POST', { school_id: schoolId, label: AY_NEXT, start_date: `${start}-04-01`, end_date: `${start + 1}-03-31` }, cookie)
+    nextId = (made.data as { id: number }).id
+
+    for (const [grade, section] of [['5', 'A'], ['6', 'A'], ['6', 'B'], ['7', 'A'], ['7', 'B'], ['10', 'A']]) {
+      expect((await api('/api/classes', 'POST', { school_id: schoolId, grade, section }, cookie)).status).toBe(201)
+    }
+    let phone = 0
+    const add = async (name: string, grade: string, section: string, rollNo: number) => {
+      phone += 1
+      const { data } = await api('/api/students/bulk', 'POST', {
+        school_id: schoolId,
+        students: [{ name, grade, section, school_roll_number: rollNo, parent_name: `${name} P`, parent_phone: `9${String(ts + phone).slice(-9)}` }],
+      }, cookie)
+      return (data as { students: Array<{ id: number }> }).students[0].id
+    }
+    s5 = await add('Five A', '5', 'A', 1)      // promotes into 6-A roll 1 — which the repeater keeps
+    r6 = await add('Repeater Six', '6', 'A', 1)
+    m6 = await add('Mover Six', '6', 'A', 2)
+    p6 = await add('Plain Six', '6', 'B', 1)
+    f10 = await add('Final Repeater', '10', 'A', 1)
+    g10 = await add('Graduate Ten', '10', 'A', 2)
+    // The fee year-end has to be closed before any rollover
+    expect((await api('/api/fees/year-end', 'POST', { action: 'close', school_id: schoolId, from_year: AY }, cookie)).status).toBe(200)
+  })
+
+  test.afterAll(async () => {
+    const platform = await platformAdminCookie()
+    await api(`/api/schools/${schoolId}`, 'DELETE', undefined, platform).catch(() => {})
+  })
+
+  test('E1. Bad exceptions are refused and nothing changes', async () => {
+    const before = await roster()
+    expect((await roll([{ student_id: 999999999, action: 'repeat' }])).status).toBe(400)              // not this school's student
+    expect((await roll([{ student_id: m6, action: 'move', to_section: 'Z' }])).status).toBe(400)     // section does not exist
+    expect((await roll([{ student_id: g10, action: 'move', to_section: 'A' }])).status).toBe(400)    // graduating student
+    expect((await roll([{ student_id: m6, action: 'jump' }])).status).toBe(400)                      // unknown action
+    expect((await roll('nope')).status).toBe(400)                                                    // not a list
+    expect((await roll([{ student_id: r6, action: 'repeat' }], null)).status).toBe(403)              // not logged in
+    expect(await roster()).toEqual(before)
+    const ready = (await api(`/api/academic-years/rollover?school_id=${schoolId}&readiness=1`, 'GET', undefined, cookie)).data as Readiness
+    expect(ready.current_year?.label).toBe(AY)
+  })
+
+  test('E2. UI: set exceptions per student, search, and see the counts', async ({ browser }) => {
+    const ctx = await browser.newContext()
+    const [name, value] = cookie.split('=')
+    await ctx.addCookies([{ name, value, url: BASE }])
+    const page = await ctx.newPage()
+    await page.goto(`${BASE}/school-admin`)
+    await page.getByText('Year Rollover', { exact: true }).first().click()
+    await expect(page.getByTestId('rollover-exceptions')).toBeVisible({ timeout: 30000 })
+    await page.getByTestId('exceptions-search').fill('Repeater')
+    await expect(page.getByTestId(`exception-row-${r6}`)).toBeVisible()
+    await expect(page.getByTestId(`exception-row-${m6}`)).toHaveCount(0)
+    await page.getByTestId(`exception-select-${r6}`).selectOption('repeat')
+    await page.getByTestId('exceptions-search').fill('Mover')
+    await page.getByTestId(`exception-select-${m6}`).selectOption('move:B')
+    await page.getByTestId('exceptions-search').fill('')
+    await expect(page.getByTestId('exceptions-count')).toHaveText('1 repeat · 1 section change')
+    await page.getByTestId('exceptions-changes-only').check()
+    await expect(page.getByTestId(`exception-row-${r6}`)).toBeVisible()
+    await expect(page.getByTestId(`exception-row-${p6}`)).toHaveCount(0)
+    // A graduating student can repeat instead; the choices are Graduates / Repeat
+    await page.getByTestId('exceptions-changes-only').uncheck()
+    await expect(page.getByTestId(`exception-select-${g10}`).locator('option')).toHaveCount(2)
+    await ctx.close()
+  })
+
+  test('E3. Rollover with exceptions: repeat stays, move changes section, final-grade repeater stays active', async () => {
+    const { status, data } = await roll([
+      { student_id: r6, action: 'repeat' },
+      { student_id: m6, action: 'move', to_section: 'B' },
+      { student_id: f10, action: 'repeat' },
+    ])
+    expect(status).toBe(200)
+    const d = data as { promoted: number; graduated: number; repeated: number; moved: number; snapshotted: number; roll_numbers_cleared: number }
+    expect(d).toMatchObject({ promoted: 3, repeated: 2, moved: 1, graduated: 1, snapshotted: 6 })   // s5, m6, p6 promoted; r6, f10 repeat; g10 graduates
+    expect(d.roll_numbers_cleared).toBe(1)                                                          // s5's roll 1 is taken in 6-A by the repeater
+
+    const all = await roster()
+    const by = (id: number) => all.find(x => x.id === id)!
+    expect(by(r6)).toMatchObject({ grade: '6', section: 'A', school_roll_number: 1 })
+    expect(by(m6)).toMatchObject({ grade: '7', section: 'B', school_roll_number: 2 })
+    expect(by(p6)).toMatchObject({ grade: '7', section: 'B', school_roll_number: 1 })
+    expect(by(s5)).toMatchObject({ grade: '6', section: 'A', school_roll_number: null })
+    expect(by(f10)).toMatchObject({ grade: '10', section: 'A', school_roll_number: 1 })
+    expect(by(f10).status === null || by(f10).status === 'active').toBe(true)
+    expect(by(g10).status).toBe('graduated')
+    const years = (await api(`/api/academic-years?school_id=${schoolId}`, 'GET', undefined, cookie)).data as Year[]
+    expect(years.find(y => y.label === AY_NEXT)?.is_current).toBe(true)
+  })
+
+  test('E4. The class history records what happened to each student', async () => {
+    type H = { academic_year: string; grade: string; outcome: string; promoted_to_grade: string | null; promoted_to_section: string | null }
+    const hist = async (id: number) => ((await api(`/api/academic-years/rollover?school_id=${schoolId}&student_id=${id}`, 'GET', undefined, cookie)).data as H[]).find(h => h.academic_year === AY)!
+    expect(await hist(r6)).toMatchObject({ grade: '6', outcome: 'repeated', promoted_to_grade: '6', promoted_to_section: 'A' })
+    expect(await hist(m6)).toMatchObject({ grade: '6', outcome: 'moved', promoted_to_grade: '7', promoted_to_section: 'B' })
+    expect(await hist(p6)).toMatchObject({ outcome: 'promoted', promoted_to_grade: '7', promoted_to_section: 'B' })
+    expect(await hist(g10)).toMatchObject({ outcome: 'graduated', promoted_to_grade: null })
+    expect(await hist(f10)).toMatchObject({ outcome: 'repeated', promoted_to_grade: '10' })
   })
 })

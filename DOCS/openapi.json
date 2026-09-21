@@ -10414,7 +10414,7 @@
           "Academic years"
         ],
         "summary": "Roll the whole school over to the next academic year",
-        "description": "The single, central rollover. Requires from_year to be the school's CURRENT year and to_year to be the year after it (label 'YYYY-YY' + 1). When the school has Fee Management enabled, the fee year-end for from_year must be CLOSED (fee_year_close, not reopened) or the call is refused with 409 code FEES_NOT_CLOSED. In one transaction (serialized with the fee year-end via the same advisory lock): snapshots every active student's grade/section into student_class_history, promotes each to the next grade in grade_sequence, marks final-grade (or beyond-sequence numeric) students as graduated, and sets to_year as the current academic year. Fee dues are not touched here — they were decided and carried in Fee Management → Year-End. Refuses if a snapshot already exists for from_year.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff must belong to school_id; platform admin may access any school. Both year ids must belong to the school. Roll numbers are unique per class, so each promoted student's roll number is freed, then handed back if still free in the new class (else cleared, counted in roll_numbers_cleared); the old value is kept in student_class_history.school_roll_number. Graduated students' roll numbers are cleared.",
+        "description": "The single, central rollover. Requires from_year to be the school's CURRENT year and to_year to be the year after it (label 'YYYY-YY' + 1). When the school has Fee Management enabled, the fee year-end for from_year must be CLOSED (fee_year_close, not reopened) or the call is refused with 409 code FEES_NOT_CLOSED. In one transaction (serialized with the fee year-end via the same advisory lock): snapshots every active student's grade/section into student_class_history, promotes each to the next grade in grade_sequence, marks final-grade (or beyond-sequence numeric) students as graduated, and sets to_year as the current academic year. Fee dues are not touched here — they were decided and carried in Fee Management → Year-End. Refuses if a snapshot already exists for from_year.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff must belong to school_id; platform admin may access any school. Both year ids must belong to the school. Roll numbers are unique per class, so each promoted student's roll number is freed, then handed back if still free in the new class (else cleared, counted in roll_numbers_cleared); the old value is kept in student_class_history.school_roll_number. Graduated students' roll numbers are cleared. Optional exceptions: a student can repeat the year (stays in the same grade and section, keeps the roll number) or be moved into another existing section. Each student's outcome (promoted / repeated / moved / graduated) is stored in student_class_history.",
         "operationId": "postAcademicYearsRollover",
         "security": [
           {
@@ -10456,6 +10456,14 @@
                     "roll_numbers_cleared": {
                       "type": "integer",
                       "description": "Promoted students whose old roll number was already taken in the new class (they need a new one)"
+                    },
+                    "repeated": {
+                      "type": "integer",
+                      "description": "Students who repeat the year"
+                    },
+                    "moved": {
+                      "type": "integer",
+                      "description": "Promoted students placed in a different section (also counted in promoted)"
                     }
                   }
                 }
@@ -10463,7 +10471,7 @@
             }
           },
           "400": {
-            "description": "Missing ids, grade_sequence not an array of >= 2 grades, from and to are the same year, or to_year is not the year after from_year"
+            "description": "Missing ids, grade_sequence not an array of >= 2 grades, from and to are the same year, or to_year is not the year after from_year; or an exception names a student that is not an active student of the school, a section that does not exist for the next grade, or a graduating student with a section change"
           },
           "403": {
             "description": "Forbidden"
@@ -10543,6 +10551,55 @@
                       "type": "string"
                     },
                     "description": "Ordered list of all grades"
+                  },
+                  "exceptions": {
+                    "type": "array",
+                    "maxItems": 5000,
+                    "description": "Optional per-student exceptions. repeat: the student stays in the same grade and section. move: promoted as usual but into another EXISTING section of the next grade. Every student must be an active student of the school; a graduating student can only repeat.",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "required": [
+                            "student_id",
+                            "action"
+                          ],
+                          "properties": {
+                            "student_id": {
+                              "type": "integer"
+                            },
+                            "action": {
+                              "type": "string",
+                              "enum": [
+                                "repeat"
+                              ]
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "student_id",
+                            "action",
+                            "to_section"
+                          ],
+                          "properties": {
+                            "student_id": {
+                              "type": "integer"
+                            },
+                            "action": {
+                              "type": "string",
+                              "enum": [
+                                "move"
+                              ]
+                            },
+                            "to_section": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      ]
+                    }
                   }
                 }
               }
@@ -10613,6 +10670,22 @@
                             "type": "integer",
                             "nullable": true,
                             "description": "Class roll number the student had in that year"
+                          },
+                          "outcome": {
+                            "type": "string",
+                            "nullable": true,
+                            "enum": [
+                              "promoted",
+                              "repeated",
+                              "moved",
+                              "graduated"
+                            ],
+                            "description": "What happened to the student at rollover (null for history written before this was recorded)"
+                          },
+                          "promoted_to_section": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "Section the student went to (same section if not moved)"
                           }
                         }
                       }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { z } from 'zod'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { lockYearClose, nextAcademicYearLabel } from '@/lib/feeRollover'
@@ -17,6 +18,9 @@ import { FEES_NOT_CLOSED, FEES_NOT_CLOSED_MESSAGE, feeGateRequired, getRolloverR
 //      Roll numbers are unique per class, so promotion first frees each promoted student's roll
 //      number (kept in the history snapshot) and then gives it back if it is still free in the new
 //      class; otherwise it is cleared and the school reassigns it (reported as roll_numbers_cleared).
+//      Exceptions (optional body.exceptions): a student can REPEAT the year (same grade + section) or be
+//      MOVED into another existing section of the next grade. Each student's outcome is recorded in
+//      student_class_history (promoted / repeated / moved / graduated).
 //   4. GRADUATES: marks final-grade students as status='graduated'
 //   5. SETS new year as current academic year — the whole school follows it
 //
@@ -34,6 +38,14 @@ import { FEES_NOT_CLOSED, FEES_NOT_CLOSED_MESSAGE, feeGateRequired, getRolloverR
 //
 // Returns: { snapshotted, promoted, graduated, errors }
 
+// Per-student exceptions to the default "everyone moves up one grade, same section":
+//   repeat — stays in the same grade and section for the new year
+//   move   — is promoted as usual but into another (existing) section
+const ExceptionsSchema = z.array(z.discriminatedUnion('action', [
+  z.object({ student_id: z.number().int().positive(), action: z.literal('repeat') }),
+  z.object({ student_id: z.number().int().positive(), action: z.literal('move'), to_section: z.string().trim().min(1).max(10) }),
+])).max(5000)
+
 function nextGradeInSequence(current: string, sequence: string[]): string | null {
   const idx = sequence.indexOf(current)
   if (idx === -1 || idx === sequence.length - 1) return null
@@ -43,6 +55,11 @@ function nextGradeInSequence(current: string, sequence: string[]): string | null
 export async function POST(req: NextRequest) {
   const body = await req.json()
   const { school_id, from_year_id, to_year_id, final_grade, grade_sequence } = body
+  const parsedExceptions = ExceptionsSchema.safeParse(body.exceptions ?? [])
+  if (!parsedExceptions.success) {
+    return NextResponse.json({ error: 'exceptions must be a list of { student_id, action: "repeat" } or { student_id, action: "move", to_section }' }, { status: 400 })
+  }
+  const exceptionById = new Map(parsedExceptions.data.map(e => [e.student_id, e]))
 
   if (!school_id || !from_year_id || !to_year_id) {
     return NextResponse.json(
@@ -108,6 +125,8 @@ export async function POST(req: NextRequest) {
   let promoted    = 0
   let graduated   = 0
   let rollsCleared = 0
+  let repeated = 0
+  let moved = 0
   const rollBack: Array<{ id: number; grade: string; section: string | null; roll: number }> = []
   const errors: string[] = []
   const now = new Date().toISOString()
@@ -155,6 +174,29 @@ export async function POST(req: NextRequest) {
       [sid]
     )
 
+    // Validate the exceptions against the real roster BEFORE changing anything.
+    const roster = new Map(students.map(st => [Number(st.id), st]))
+    const maxSeq = Math.max(0, ...grade_sequence.filter((g: string) => /^\d+$/.test(g)).map(Number))
+    const graduatesNow = (grade: string) => (!!final_grade && grade === final_grade) || (/^\d+$/.test(grade) && Number(grade) > maxSeq)
+    const badRequest = async (message: string) => {
+      await client.query('ROLLBACK')
+      return NextResponse.json({ error: message }, { status: 400 })
+    }
+    for (const ex of exceptionById.values()) {
+      const st = roster.get(ex.student_id)
+      if (!st) return badRequest(`Student ${ex.student_id} is not an active student of this school`)
+      if (!st.grade) return badRequest(`Student ${ex.student_id} has no grade set`)
+      if (ex.action === 'move') {
+        if (graduatesNow(st.grade)) return badRequest(`Student ${ex.student_id} is graduating — a section change does not apply`)
+        const target = nextGradeInSequence(st.grade, grade_sequence)
+        if (!target) return badRequest(`Grade "${st.grade}" is not in the grade sequence — cannot move student ${ex.student_id}`)
+        const { rows: [cls] } = await client.query(
+          `SELECT 1 AS x FROM classes WHERE school_id = $1 AND grade = $2 AND section = $3`, [sid, target, ex.to_section]
+        )
+        if (!cls) return badRequest(`Section ${ex.to_section} does not exist for grade ${target}. Create the class first.`)
+      }
+    }
+
     for (const student of students) {
       // students.grade is nullable but student_class_history.grade is NOT NULL —
       // a student with no grade recorded can't be meaningfully snapshotted or
@@ -172,10 +214,16 @@ export async function POST(req: NextRequest) {
       // stuck un-promoted.
       const maxSeqNum = Math.max(0, ...grade_sequence.filter((g: string) => /^\d+$/.test(g)).map(Number))
       const isBeyondSequence = /^\d+$/.test(student.grade) && Number(student.grade) > maxSeqNum
-      const isGraduating = (!!final_grade && student.grade === final_grade) || isBeyondSequence
-      const nextGrade = isGraduating
-        ? null
-        : nextGradeInSequence(student.grade, grade_sequence)
+      const exception = exceptionById.get(Number(student.id))
+      const repeating = exception?.action === 'repeat'
+      const isGraduating = !repeating && ((!!final_grade && student.grade === final_grade) || isBeyondSequence)
+      const moveTo = exception?.action === 'move' ? exception.to_section : null
+      const nextGrade = repeating
+        ? student.grade
+        : isGraduating
+          ? null
+          : nextGradeInSequence(student.grade, grade_sequence)
+      const outcome = repeating ? 'repeated' : isGraduating ? 'graduated' : moveTo ? 'moved' : 'promoted'
 
       // 1. Snapshot — record where this student IS RIGHT NOW (from_year).
       // students.section is nullable but student_class_history.section is NOT NULL —
@@ -187,8 +235,8 @@ export async function POST(req: NextRequest) {
       try {
         await client.query(`
           INSERT INTO student_class_history
-            (student_id, school_id, academic_year_id, grade, section, promoted_to_grade, promoted_at, school_roll_number)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            (student_id, school_id, academic_year_id, grade, section, promoted_to_grade, promoted_at, school_roll_number, outcome, promoted_to_section)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
           ON CONFLICT (student_id, academic_year_id) DO NOTHING
         `, [
           student.id, sid, from_year_id,
@@ -196,6 +244,8 @@ export async function POST(req: NextRequest) {
           isGraduating ? null : nextGrade,
           now,
           student.school_roll_number ?? null,
+          outcome,
+          repeating ? (student.section || '') : (moveTo ?? (student.section || '')),
         ])
         snapshotted++
       } catch (e) {
@@ -210,14 +260,19 @@ export async function POST(req: NextRequest) {
           [student.id]
         )
         graduated++
+      } else if (repeating) {
+        // Stays exactly where they are — grade, section and roll number untouched
+        repeated++
       } else if (nextGrade) {
+        const newSection = moveTo ?? student.section ?? null
         await client.query(
-          `UPDATE students SET grade = $1, school_roll_number = NULL WHERE id = $2`,
-          [nextGrade, student.id]
+          `UPDATE students SET grade = $1, section = $2, school_roll_number = NULL WHERE id = $3`,
+          [nextGrade, newSection, student.id]
         )
         if (student.school_roll_number != null) {
-          rollBack.push({ id: student.id, grade: nextGrade, section: student.section ?? null, roll: student.school_roll_number })
+          rollBack.push({ id: student.id, grade: nextGrade, section: newSection, roll: student.school_roll_number })
         }
+        if (moveTo) moved++
         promoted++
       } else {
         // grade not in sequence — leave as-is, just snapshot
@@ -256,9 +311,11 @@ export async function POST(req: NextRequest) {
       snapshotted,
       promoted,
       graduated,
+      repeated,
+      moved,
       roll_numbers_cleared: rollsCleared,
       errors,
-      message: `Rollover complete: ${promoted} promoted, ${graduated} graduated, ${snapshotted} records archived.` +
+      message: `Rollover complete: ${promoted} promoted${moved > 0 ? ` (${moved} into a different section)` : ''}, ${repeated} repeating, ${graduated} graduated, ${snapshotted} records archived.` +
         (rollsCleared > 0 ? ` ${rollsCleared} student${rollsCleared === 1 ? '' : 's'} need a new class roll number (the old one is taken in the new class).` : ''),
     })
   } catch (err) {
@@ -298,6 +355,8 @@ export async function GET(req: NextRequest) {
       sch.section,
       sch.school_roll_number,
       sch.promoted_to_grade,
+      sch.promoted_to_section,
+      sch.outcome,
       sch.promoted_at,
       ay.label   AS academic_year,
       ay.start_date::text,
