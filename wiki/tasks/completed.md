@@ -18,6 +18,12 @@ All finished features and bug fixes. Most recent first.
 
 ---
 
+### 2026-09-22 — Announcement workflow: cards, targeting, drafts, seen tracking (#205)
+**Type:** Feature
+**Portal:** School Admin → all portals
+**Summary:** Templates and animated greeting cards with live preview, class targeting with reach count, drafts + scheduling, pinning, acknowledgement, Telugu/Hindi text, seen-by tracking, archive / deleted / audit history, and a notice centre in the teacher, student and parent dashboards.
+**PR:** feature/205-announcement-workflow
+
 ### 2026-09-21 — Announcement Board: secured the write API, edit in the UI, IST expiry (#203)
 **Type:** Bug fix (security)
 **Portal:** School Admin

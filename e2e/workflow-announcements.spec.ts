@@ -182,6 +182,7 @@ test.describe.serial('Announcement Board', () => {
     await page.goto(`${BASE}/school-admin`)
     await page.getByText('Announcements', { exact: true }).first().click({ timeout: 90000 })
     await page.getByTestId('ann-tab-create').click({ timeout: 30000 })
+    await page.getByTestId('ann-template-blank').click()
 
     await page.getByTestId('ann-title').fill('UI notice')
     await page.getByTestId('ann-content').fill('Written in the browser')

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
+import NoticeCenter from '@/components/announcements/NoticeCenter'
 import { useRouter } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
 import Link from 'next/link'
@@ -188,10 +189,6 @@ function ParentDashboard() {
   const [ackSaving, setAckSaving] = useState(false)
   const [ackError, setAckError]   = useState('')
 
-  type AnnouncementItem = { id: number; title: string; content: string; announcement_type: string; priority: string; created_by_name: string; expires_at: string | null; created_at: string }
-  const [announcements, setAnnouncements] = useState<AnnouncementItem[]>([])
-  const [annExpanded, setAnnExpanded] = useState<number | null>(null)
-
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const [lang, setLang] = useState<Lang>('en')
@@ -213,15 +210,8 @@ function ParentDashboard() {
   // ── Data loaders ─────────────────────────────────────────────────────────────
   async function loadSummary(s: Student) {
     try {
-      const [summaryRes, annRes] = await Promise.all([
-        fetch(`/api/parent/child-summary?school_id=${s.school_id}&student_id=${s.id}&class_id=${s.class_id}`),
-        fetch(`/api/announcements?school_id=${s.school_id}&audience=parents`),
-      ])
+      const summaryRes = await fetch(`/api/parent/child-summary?school_id=${s.school_id}&student_id=${s.id}&class_id=${s.class_id}`)
       if (summaryRes.ok) setSummary(await summaryRes.json())
-      if (annRes.ok) {
-        const annData = await annRes.json()
-        setAnnouncements(Array.isArray(annData) ? annData : [])
-      }
     } catch { /* non-critical */ }
   }
 
@@ -716,72 +706,8 @@ function ParentDashboard() {
             })}
 
 
-            {/* School announcements for parents */}
-            {announcements.length > 0 && (
-              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <svg className="w-4 h-4 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
-                    </svg>
-                    <p className="text-sm font-bold text-gray-800">{T.schoolNotices}</p>
-                    {announcements.filter(a => a.priority === 'urgent').length > 0 && (
-                      <span className="text-[10px] bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-full">
-                        {announcements.filter(a => a.priority === 'urgent').length} {T.urgent}
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-xs text-gray-400">{T.notices(announcements.length)}</span>
-                </div>
-                <div className="divide-y divide-gray-50">
-                  {announcements.slice(0, 4).map(a => {
-                    const isUrgent = a.priority === 'urgent'
-                    const isHigh = a.priority === 'high'
-                    const isOpen = annExpanded === a.id
-                    return (
-                      <div key={a.id} className={`${isUrgent ? 'bg-red-50/40' : isHigh ? 'bg-amber-50/40' : ''}`}>
-                        <button
-                          onClick={() => setAnnExpanded(isOpen ? null : a.id)}
-                          className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-                        >
-                          <span className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${
-                            isUrgent ? 'bg-red-500' : isHigh ? 'bg-amber-400' : 'bg-gray-300'}`} />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 mb-0.5">
-                              {isUrgent && <span className="text-[9px] bg-red-100 text-red-600 font-bold px-1.5 py-0.5 rounded uppercase">{T.urgent}</span>}
-                              <span className="text-[10px] text-gray-400">
-                                {new Date(a.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-                              </span>
-                            </div>
-                            <p className="text-sm font-semibold text-gray-800 truncate">{a.title}</p>
-                            {!isOpen && <p className="text-xs text-gray-400 mt-0.5 truncate">{a.content}</p>}
-                          </div>
-                          <svg className={`w-3.5 h-3.5 text-gray-300 flex-shrink-0 mt-1.5 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-                            fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-                        {isOpen && (
-                          <div className="px-4 pb-4 pl-9">
-                            <p className="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">{a.content}</p>
-                            {a.expires_at && (
-                              <p className="text-xs text-amber-500 mt-1.5">
-                                {T.expires} {new Date(a.expires_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-                {announcements.length > 4 && (
-                  <div className="px-4 py-2.5 border-t border-gray-50 text-center">
-                    <p className="text-xs text-gray-400">{T.moreNotices(announcements.length - 4)}</p>
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Notices: unread marks, animated greeting cards, acknowledgement (Telugu supported) */}
+            <NoticeCenter schoolId={student.school_id} lang={lang} schoolName={parentInfo?.school_name} />
           </div>
           )}
 
