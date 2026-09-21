@@ -23,6 +23,11 @@ All finished features and bug fixes. Most recent first.
 **Portal:** School Admin
 **Summary:** Export & Reports rebuilt as Export Data: a catalog-driven screen with 24 exports + a full backup workbook, CSV and Excel, filters, plan gating, formula-safe cells and an export log. No imports in this tab.
 **PR:** feature/206-export-data
+### 2026-09-22 — Attendance: Absentees view in the Day register (#208)
+**Type:** Feature
+**Portal:** School Admin
+**Summary:** New Absentees tab inside Attendance → Day register: every absent student for Morning or Afternoon on one page, class-wise, with parents and phones, whole-day vs one-session, unmarked classes flagged, print and CSV. New GET /api/attendance/absentees.
+**PR:** feature/208-day-register-absentees
 
 ### 2026-09-22 — Announcement workflow: cards, targeting, drafts, seen tracking (#205)
 **Type:** Feature

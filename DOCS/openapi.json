@@ -44475,6 +44475,175 @@
         },
         "x-source-file": "app/api/data-export/[key]/route.ts"
       }
+    },
+    "/api/attendance/absentees": {
+      "get": {
+        "tags": [
+          "Attendance"
+        ],
+        "summary": "Absentees of one session, class by class",
+        "description": "Everyone who was absent in the morning or afternoon on a date, grouped by class: roll number, name, parent and phone, and whether the student was also absent in the other session (whole day). Also lists classes that have not marked that session yet, and says when the date is a holiday / weekly off. Active students only. The school comes from the login.\n\n**Who can call:** School admin (principal / vice principal).\n\n**Checks:** getAdminActor(): teachers, students, parents and signed-out callers get 401.",
+        "operationId": "getAttendanceAbsentees",
+        "security": [
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "x-badges": [
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/attendance/absentees/route.ts",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "YYYY-MM-DD (default today, India time)"
+          },
+          {
+            "name": "session",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "morning",
+                "afternoon"
+              ],
+              "default": "morning"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Absentees by class",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "date": {
+                      "type": "string"
+                    },
+                    "session": {
+                      "type": "string"
+                    },
+                    "non_working": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "holiday",
+                            "weekly_off"
+                          ]
+                        },
+                        "title": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "totals": {
+                      "type": "object",
+                      "properties": {
+                        "absent": {
+                          "type": "integer"
+                        },
+                        "classes": {
+                          "type": "integer"
+                        },
+                        "classes_marked": {
+                          "type": "integer"
+                        },
+                        "classes_with_absentees": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "classes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "grade": {
+                            "type": "string"
+                          },
+                          "section": {
+                            "type": "string"
+                          },
+                          "class_teacher": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "student_count": {
+                            "type": "integer"
+                          },
+                          "marked": {
+                            "type": "boolean"
+                          },
+                          "marked_by": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "absent": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "student_id": {
+                                  "type": "integer"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "roll": {
+                                  "type": "integer",
+                                  "nullable": true
+                                },
+                                "parent_name": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "parent_phone": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "whole_day": {
+                                  "type": "boolean"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid date or session"
+          },
+          "401": {
+            "description": "Not a school admin"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
     }
   },
   "components": {
