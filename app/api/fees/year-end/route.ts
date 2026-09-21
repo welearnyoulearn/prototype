@@ -158,12 +158,27 @@ export async function POST(req: NextRequest) {
     try {
       // ── REOPEN ── (doesn't touch ledger data, no locking needed)
       if (action === 'reopen') {
+        // Serialize with Year Rollover, then refuse once the students have been rolled over —
+        // the fee book of a finished year is final.
+        await client.query('BEGIN')
+        await lockYearClose(client, school_id, from_year)
+        const { rows: [rolled] } = await client.query(
+          `SELECT 1 AS x FROM student_class_history sch
+           JOIN academic_years ay ON ay.id = sch.academic_year_id
+           WHERE ay.school_id = $1 AND ay.label = $2 LIMIT 1`,
+          [school_id, from_year]
+        )
+        if (rolled) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: `${from_year} has already been rolled over — its fee year can no longer be reopened.` }, { status: 409 })
+        }
         await client.query(
           `UPDATE fee_year_close
            SET is_reopened = TRUE, reopened_by = $1, reopened_at = NOW(), reopen_reason = $2
            WHERE school_id = $3 AND academic_year = $4`,
           [done_by, body.reason || 'Reopened for correction', school_id, from_year]
         )
+        await client.query('COMMIT')
         return NextResponse.json({ reopened: true })
       }
 

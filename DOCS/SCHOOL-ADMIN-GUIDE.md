@@ -470,7 +470,7 @@ After applying, a confirmation shows how many were carried (and total amount) an
 2. Click **Export Ledger CSV** — saves the complete ledger for archiving.
 3. Click **Close Financial Year** — permanently locks the year. No more payments can be recorded for this year after closing (unless reopened with a specific reason).
 
-> **After closing:** A prompt will ask whether to go to Fee Setup to generate bills for the new year. Click Yes and set up the new year's fee structure.
+> **After closing:** the next step is the **Year Rollover** tab, which promotes students and moves the school to the new year. (Year-End does not create the new academic year — do that in Year Rollover.)
 
 **Reopening a closed year** is possible (click Reopen) but requires a reason, is permanently logged, and should only be used for corrections.
 
@@ -641,30 +641,31 @@ Generate bulk exports for any module:
 
 **Location:** Left sidebar → Tools → Year Rollover
 
-Do this once per year, at the end of the academic year, **after completing Year-End in Fee Management.**
+Do this once per year, at the end of the academic year. It moves the **whole school** to the new academic year. It is the only place a new year is created and made active.
 
-### What Rollover Does
+### Before you start
 
-1. Takes a permanent snapshot of all student records for this year.
+Finish **Fee Management → Year-End** and close the fee year. If you have not, Year Rollover shows a popup ("Complete the fee year-end first") and will not run.
+
+### What Rollover does
+
+1. Saves every active student's class, section and roll number for the closing year (permanent history).
 2. Promotes every active student to the next grade.
-3. Students in Grade 12 are marked as Graduated (status = Left).
-4. Creates the new academic year.
-5. Resets class assignments for the new year.
+3. Students in the final grade are marked **Graduated**.
+4. Makes the new academic year the active one for the whole school.
 
 ### Steps
 
-1. Review the pre-rollover checklist (all boxes must be checked: exams done, fees closed, etc.).
-2. Select the target academic year (e.g., 2026-27).
-3. Review the promotion preview — which students go where.
-4. Manually override any promotions (e.g., a student being retained in the same grade).
-5. Click **Execute Rollover**.
+1. Open **Year Rollover**. Check the three steps at the top: current year, next year, fee year-end completed.
+2. If the next year does not exist, create it in the form (the name is fixed to the year after the current one).
+3. If the fee year-end is not closed, use **Go to Fee Year-End**, finish it, and come back.
+4. Check the grade sequence and the promotion preview, then click **Review Rollover → Execute Rollover**.
 
-> **This is a one-way operation. It cannot be undone.** Ensure all year-end work is complete before rolling over.
+> **This cannot be undone.** After it runs, the old year's fee book can no longer be reopened.
 
 After rollover:
-- The previous year becomes read-only.
-- A new academic year is active.
-- You must set up the new year's fee structure from scratch in Fee Management.
+- The new year is active everywhere. Set up the new year's fee structure in Fee Management → Setup (carried-forward dues are already there as "Previous Year Dues").
+- Students keep their class roll number if it is free in the new class; if the result screen says some need a new one, set it in Student Management.
 
 ---
 

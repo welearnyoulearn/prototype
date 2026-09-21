@@ -930,7 +930,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
             <div>
               <h3 className="text-sm font-semibold text-gray-700">Academic Years</h3>
               <p className="text-xs text-gray-400 mt-0.5">
-                All fees, attendance, exams and reports are scoped to the active year
+                All fees, attendance, exams and reports are scoped to the active year. The active year changes only through the Year Rollover tab.
               </p>
             </div>
             {!showAddYear && !editingYear && (
@@ -1051,7 +1051,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                       </p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      {!y.is_current && (
+                      {!y.is_current && !years.some(x => x.is_current) && (
                         <button
                           onClick={() => switchYear(y.id, y.label)}
                           disabled={switchingYear === y.id}

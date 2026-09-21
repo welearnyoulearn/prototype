@@ -44,7 +44,7 @@ API routes these screens call (all exist):
 - `POST` /api/fees/upi-id/verify
 - `DELETE/GET/PATCH/POST` /api/fees/waivers
 - `GET/POST` /api/fees/year-end
-- `GET/POST` /api/fees/year-rollover
+- `GET` /api/fees/year-rollover
 - `DELETE/GET/PUT` /api/schools/{}
 - `GET/POST` /api/students
 
@@ -62,7 +62,7 @@ Single tool for a school's whole fee lifecycle: define fee categories/structures
 1. **Setup** — school admin creates fee categories (fixed = same amount per grade, variable = per-student), sets amounts per grade, generates ledger bills for all active students, then locks the plan (further changes need an audited amendment).
 2. **Collect** — daily counter view groups students with outstanding dues; admin collects a payment (full or partial, FIFO across selected bills), can grant a waiver, and reconciles the day's cash at Day Close. Online (UPI) payments land as pending and need admin verification before they post to the ledger.
 3. **Year-End** — at year end, the admin reviews every student with an unpaid balance and decides per-student: carry forward (creates one "Previous Year Dues" bill in the next year), write off, move to the always-open passout ledger (leavers/graduates), or leave open. Closing the year locks it; reopening requires a reason (logged).
-4. **Year Rollover** — a one-shot action that creates the next academic year, auto-carries all remaining unpaid dues for continuing students, and closes the source year — an alternative to the per-student Year-End flow for a school that wants a single "roll everything forward" action.
+4. **Year Rollover** — lives in the separate Year Rollover tab, not here. Year-End (step 3) must be closed first; the rollover then promotes students, carries the school onto the next academic year and switches it. Year-End no longer creates academic years (create the next year in the Year Rollover tab) and cannot be reopened once the year has been rolled over.
 5. **Past Records** — a read-only tab listing every academic year the school has had, each with its billed/collected/waived/unpaid headline and close status; "View Report"/"View Ledger" jump into the existing Reports/Ledger tabs scoped to that year.
 
 ## Key files

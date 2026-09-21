@@ -12,6 +12,14 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 -->
 
 
+## 2026-09-21 — One central Year Rollover, gated by fee year-end (#199)
+
+**Context:** Fee Year-End could create the next academic year and switch the current year on its own ("Start Year Rollover"), while the Year Rollover tab promoted students. The two did not know about each other, so a school could end up on the new year with students not promoted, and the year could be created or switched from three places.
+
+**Decision:** Year Rollover is the only place the next year is created and made current. It requires the fee year-end to be closed (server 409 + popup). Fee Year-End keeps money decisions only (carry / write off / passout / leave open, then close). The target year is always the label after the current one, so carried dues and promoted students land in the same year. A rolled-over fee year cannot be reopened.
+
+**Consequences:** the one-shot fee rollover route is removed. Schools that already ran the old fee rollover have the new year current with students not yet promoted — they must finish that year's fee year-end and then run Year Rollover. Roll numbers are freed and re-applied during promotion (old value kept in `student_class_history`).
+
 ## 2026-09-21 — Timetable lives only on its own feature branch (#175, #176)
 
 **Context:** The timetable's generation, conflict, publish and availability backend had been stripped from `dev` while the screens stayed, so the feature could not work; and the routes in git history had no sign-in checks.

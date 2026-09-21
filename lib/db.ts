@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 33
+const SCHEMA_VERSION = 34
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -1659,6 +1659,10 @@ const SYLLABUS_SCHEMA: string[] = [
     // until a second same-type book actually shows up for that subject.
     `ALTER TABLE master_chapters ADD COLUMN IF NOT EXISTS book_name VARCHAR(200)`,
     `ALTER TABLE school_chapters ADD COLUMN IF NOT EXISTS book_name VARCHAR(200)`,
+
+    // Year Rollover keeps the class roll number a student had in the year that just ended, so
+    // the class history is complete even though promotion frees / reassigns the live roll number.
+    `ALTER TABLE student_class_history ADD COLUMN IF NOT EXISTS school_roll_number INTEGER`,
 ]
 
 async function runIncrementalMigrations() {

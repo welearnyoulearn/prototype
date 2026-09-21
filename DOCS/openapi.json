@@ -10074,9 +10074,16 @@
           "Academic years"
         ],
         "summary": "Create academic year",
-        "description": "Creates an academic year after checking start < end and a span of at least 270 days. If set_current is true, clears is_current on the school's other years first.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all; any caller can create a year for any school_id.",
+        "description": "Creates an academic year after checking start < end and a span of at least 270 days. set_current is honoured only while the school has NO current year yet (first-time setup); otherwise it returns 409 — the active year changes only through Year Rollover.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id).",
         "operationId": "postAcademicYears",
-        "security": [],
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
         "responses": {
           "201": {
             "description": "Created academic year row",
@@ -10118,16 +10125,23 @@
             "description": "Missing fields or invalid/too-short date span"
           },
           "409": {
-            "description": "Academic year label already exists"
+            "description": "Year label already exists, or set_current requested while a current year already exists"
           },
           "500": {
             "description": "Failed to create academic year / Internal server error"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "x-badges": [
           {
-            "name": "Public",
-            "color": "#dc2626"
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
           }
         ],
         "x-source-file": "app/api/academic-years/route.ts",
@@ -10175,9 +10189,16 @@
           "Academic years"
         ],
         "summary": "Set current academic year",
-        "description": "Clears is_current on all of the school's years and sets it on the given year, in a transaction.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all; any caller can change the current year for any school_id.",
+        "description": "Sets a year as current — first-time setup only (the school has no current year yet). Once a current year exists this returns 409; use POST /api/academic-years/rollover to move to the next year.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id).",
         "operationId": "patchAcademicYears",
-        "security": [],
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Updated",
@@ -10199,12 +10220,22 @@
           },
           "500": {
             "description": "Failed to set current year / Internal server error"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "409": {
+            "description": "The school already has a current year; use Year Rollover"
           }
         },
         "x-badges": [
           {
-            "name": "Public",
-            "color": "#dc2626"
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
           }
         ],
         "x-source-file": "app/api/academic-years/route.ts",
@@ -10382,8 +10413,8 @@
         "tags": [
           "Academic years"
         ],
-        "summary": "Roll students over to next academic year",
-        "description": "In one transaction: snapshots every active student's grade/section into student_class_history for from_year, promotes each to the next grade in grade_sequence, marks final-grade (or beyond-sequence numeric) students as graduated, and sets to_year as current. Refuses if a snapshot already exists for from_year.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff must belong to school_id; platform admin may access any school. Both year ids must belong to the school.",
+        "summary": "Roll the whole school over to the next academic year",
+        "description": "The single, central rollover. Requires from_year to be the school's CURRENT year and to_year to be the year after it (label 'YYYY-YY' + 1). When the school has Fee Management enabled, the fee year-end for from_year must be CLOSED (fee_year_close, not reopened) or the call is refused with 409 code FEES_NOT_CLOSED. In one transaction (serialized with the fee year-end via the same advisory lock): snapshots every active student's grade/section into student_class_history, promotes each to the next grade in grade_sequence, marks final-grade (or beyond-sequence numeric) students as graduated, and sets to_year as the current academic year. Fee dues are not touched here — they were decided and carried in Fee Management → Year-End. Refuses if a snapshot already exists for from_year.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff must belong to school_id; platform admin may access any school. Both year ids must belong to the school. Roll numbers are unique per class, so each promoted student's roll number is freed, then handed back if still free in the new class (else cleared, counted in roll_numbers_cleared); the old value is kept in student_class_history.school_roll_number. Graduated students' roll numbers are cleared.",
         "operationId": "postAcademicYearsRollover",
         "security": [
           {
@@ -10421,6 +10452,10 @@
                     },
                     "message": {
                       "type": "string"
+                    },
+                    "roll_numbers_cleared": {
+                      "type": "integer",
+                      "description": "Promoted students whose old roll number was already taken in the new class (they need a new one)"
                     }
                   }
                 }
@@ -10428,7 +10463,7 @@
             }
           },
           "400": {
-            "description": "Missing ids or grade_sequence not an array of >= 2 grades"
+            "description": "Missing ids, grade_sequence not an array of >= 2 grades, from and to are the same year, or to_year is not the year after from_year"
           },
           "403": {
             "description": "Forbidden"
@@ -10437,7 +10472,26 @@
             "description": "One or both academic year IDs not found for this school"
           },
           "409": {
-            "description": "Rollover already performed for this year"
+            "description": "Rollover already performed; from_year is not the current year; or the fee year-end is not closed (body code FEES_NOT_CLOSED)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "FEES_NOT_CLOSED"
+                      ],
+                      "description": "Only present when the fee year-end is not closed"
+                    }
+                  }
+                }
+              }
+            }
           },
           "500": {
             "description": "Rollover failed, transaction rolled back"
@@ -10500,8 +10554,8 @@
         "tags": [
           "Academic years"
         ],
-        "summary": "Get a student's class history",
-        "description": "Returns every student_class_history row for a student joined with its academic year, newest year first.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff must belong to school_id; platform admin may access any school.",
+        "summary": "Rollover readiness, or a student's class history",
+        "description": "Two modes.\n\n**readiness=1:** tells the Year Rollover screen whether the rollover can run now: the current year and the following year exist, the fee year-end is closed (only required when Fee Management is enabled for the school) and the year has not been rolled over already.\n\n**student_id:** returns every student_class_history row for a student joined with its academic year, newest year first.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff must belong to school_id; platform admin may access any school.",
         "operationId": "getAcademicYearsRollover",
         "security": [
           {
@@ -10517,50 +10571,106 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "integer"
-                      },
-                      "grade": {
-                        "type": "string"
-                      },
-                      "section": {
-                        "type": "string"
-                      },
-                      "promoted_to_grade": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "promoted_at": {
-                        "type": "string",
-                        "format": "date-time",
-                        "nullable": true
-                      },
-                      "academic_year": {
-                        "type": "string"
-                      },
-                      "start_date": {
-                        "type": "string",
-                        "format": "date"
-                      },
-                      "end_date": {
-                        "type": "string",
-                        "format": "date"
-                      },
-                      "is_current": {
-                        "type": "boolean"
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "grade": {
+                            "type": "string"
+                          },
+                          "section": {
+                            "type": "string"
+                          },
+                          "promoted_to_grade": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "promoted_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "academic_year": {
+                            "type": "string"
+                          },
+                          "start_date": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "end_date": {
+                            "type": "string",
+                            "format": "date"
+                          },
+                          "is_current": {
+                            "type": "boolean"
+                          },
+                          "school_roll_number": {
+                            "type": "integer",
+                            "nullable": true,
+                            "description": "Class roll number the student had in that year"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "current_year": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "id": {
+                              "type": "integer"
+                            },
+                            "label": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "next_year": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "id": {
+                              "type": "integer"
+                            },
+                            "label": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "fee_gate_required": {
+                          "type": "boolean"
+                        },
+                        "fee_closed": {
+                          "type": "boolean"
+                        },
+                        "fee_open_count": {
+                          "type": "integer"
+                        },
+                        "fee_open_total": {
+                          "type": "number"
+                        },
+                        "rolled_over": {
+                          "type": "boolean"
+                        },
+                        "can_run": {
+                          "type": "boolean"
+                        }
                       }
                     }
-                  }
+                  ]
                 }
               }
             }
           },
           "400": {
-            "description": "school_id and student_id required"
+            "description": "school_id required (and student_id unless readiness=1)"
           },
           "403": {
             "description": "Forbidden"
@@ -10590,10 +10700,22 @@
           {
             "name": "student_id",
             "in": "query",
-            "required": true,
+            "required": false,
             "description": "Student id",
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "name": "readiness",
+            "in": "query",
+            "required": false,
+            "description": "Pass 1 for the readiness check instead of a student history",
+            "schema": {
+              "type": "integer",
+              "enum": [
+                1
+              ]
             }
           }
         ]
@@ -32458,7 +32580,7 @@
           "Fee year-end"
         ],
         "summary": "Apply year-end decisions, close or reopen",
-        "description": "action='apply' processes per-student decisions on unpaid bills of from_year: carry (one 'Previous Year Dues' bill in to_year; not allowed for leavers), writeoff (full waivers), passout (moves dues to the 'passout' ledger and registers the student in passout_students), or open (left as-is). Carried/passout bills are closed with carry_forward waivers; system fee heads are auto-created. It then upserts fee_year_close with counts and auto-closes the year if nothing remains unpaid. action='close' closes the year with a snapshot of remaining open dues; action='reopen' marks the close record reopened.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id), checked before body validation.",
+        "description": "action='apply' processes per-student decisions on unpaid bills of from_year: carry (one 'Previous Year Dues' bill in to_year; not allowed for leavers), writeoff (full waivers), passout (moves dues to the 'passout' ledger and registers the student in passout_students), or open (left as-is). Carried/passout bills are closed with carry_forward waivers; system fee heads are auto-created. It then upserts fee_year_close with counts and auto-closes the year if nothing remains unpaid. action='close' closes the year with a snapshot of remaining open dues; action='reopen' marks the close record reopened.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id), checked before body validation.\n\n**reopen** is refused (409) once the year has been rolled over by Year Rollover.",
         "operationId": "postFeesYearEnd",
         "security": [
           {
@@ -32654,7 +32776,7 @@
           "Fee year-end"
         ],
         "summary": "List closed academic years",
-        "description": "Lists academic years closed (and not reopened) for the school from fee_year_close, newest first. Returns [] on query failure.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
+        "description": "Lists academic years whose fee year-end is closed (and not reopened) for the school from fee_year_close, newest first. Returns [] on query failure. There is no POST: the next year is created, students are promoted and the active year is switched only by POST /api/academic-years/rollover, after the fee year-end is closed.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id): school staff may only access their own school_id; platform admin any school.",
         "operationId": "getFeesYearRollover",
         "security": [
           {
@@ -32726,122 +32848,6 @@
             }
           }
         ]
-      },
-      "post": {
-        "tags": [
-          "Fee year-end"
-        ],
-        "summary": "Roll fee books over to next year",
-        "description": "One-shot rollover of from_year (must be in \"YYYY-YY\" format): if active students have unpaid dues and confirmed is not true, returns a confirmation prompt instead. Otherwise, in one transaction (serialized against year-end's apply/close for the same year), claims the year close in fee_year_close, gets or creates the 'Previous Year Dues' fee head, creates the next academic year (April-March) and sets it current, carries each active non-final-grade student's unpaid balance into one bill in the new year (propagating the true origin year across multi-year carries), and closes the old bills with carry_forward waivers. Does not promote grades.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(body.school_id). done_by is always the session actor.",
-        "operationId": "postFeesYearRollover",
-        "security": [
-          {
-            "platformAdmin": []
-          },
-          {
-            "schoolAdmin": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Rollover result, or a confirmation prompt when unpaid dues exist and confirmed is not true",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "ok": {
-                          "type": "boolean"
-                        },
-                        "from_year": {
-                          "type": "string"
-                        },
-                        "to_year": {
-                          "type": "string"
-                        },
-                        "dues_carried": {
-                          "type": "integer"
-                        },
-                        "dues_amount": {
-                          "type": "number"
-                        }
-                      }
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "requires_confirmation": {
-                          "type": "boolean"
-                        },
-                        "pending_count": {
-                          "type": "integer"
-                        },
-                        "pending_total": {
-                          "type": "number"
-                        },
-                        "message": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id and from_year required, or from_year is not in \"YYYY-YY\" format"
-          },
-          "403": {
-            "description": "Forbidden"
-          },
-          "409": {
-            "description": "Year is already closed"
-          },
-          "500": {
-            "description": "Rollover failed"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Platform admin",
-            "color": "#6d28d9"
-          },
-          {
-            "name": "School admin",
-            "color": "#1d4ed8"
-          }
-        ],
-        "x-source-file": "app/api/fees/year-rollover/route.ts",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "from_year": {
-                    "type": "string",
-                    "description": "e.g. 2025-26; next year is derived"
-                  },
-                  "confirmed": {
-                    "type": "boolean",
-                    "description": "Must be true to proceed when unpaid dues exist"
-                  }
-                },
-                "required": [
-                  "school_id",
-                  "from_year"
-                ]
-              }
-            }
-          }
-        }
       }
     },
     "/api/expenses": {
