@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 36
+const SCHEMA_VERSION = 37
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -1705,6 +1705,20 @@ const SYLLABUS_SCHEMA: string[] = [
     )`,
     `CREATE INDEX IF NOT EXISTS idx_announcement_audit_ann ON announcement_audit(announcement_id, created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_announcements_live ON announcements(school_id, status, deleted_at)`,
+
+    // ── Export Data (#206): who downloaded what. Exports hold personal data, so each one is recorded. ──
+    `CREATE TABLE IF NOT EXISTS data_export_log (
+      id SERIAL PRIMARY KEY,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      export_key VARCHAR(60) NOT NULL,
+      format VARCHAR(8) NOT NULL,
+      filters JSONB,
+      row_count INTEGER NOT NULL DEFAULT 0,
+      by_user_id INTEGER,
+      by_name VARCHAR(100),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_data_export_log_school ON data_export_log(school_id, created_at DESC)`,
 ]
 
 async function runIncrementalMigrations() {

@@ -24,7 +24,7 @@ Every feature a school can be switched on for has exactly one doc below. "Code e
 | **Online Fee Payments (UPI)** (`online-payments`) | Finance | school-admin, parent | [online-payments.md](online-payments.md) | ✅ all routes exist |
 | **Expense Tracking** (`expenses`) | Finance | school-admin | [expenses.md](expenses.md) | ✅ all routes exist |
 | **Academic Calendar** (`calendar`) | Administration | school-admin, teacher, student, parent | [calendar.md](calendar.md) | ✅ all routes exist |
-| **Export & Reports** (`export`) | Administration | school-admin | [export.md](export.md) | ✅ all routes exist |
+| **Export Data** (`export`) | Administration | school-admin | [export.md](export.md) | ✅ all routes exist |
 | **School Settings** (`settings`) | Administration | school-admin | [settings.md](settings.md) | ✅ all routes exist |
 | **Year Rollover** (`year-rollover`) | Administration | school-admin | [year-rollover.md](year-rollover.md) | ✅ all routes exist |
 

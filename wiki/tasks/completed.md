@@ -18,6 +18,12 @@ All finished features and bug fixes. Most recent first.
 
 ---
 
+### 2026-09-22 — Export Data: one tab for every download (#206)
+**Type:** Feature (rebuild)
+**Portal:** School Admin
+**Summary:** Export & Reports rebuilt as Export Data: a catalog-driven screen with 24 exports + a full backup workbook, CSV and Excel, filters, plan gating, formula-safe cells and an export log. No imports in this tab.
+**PR:** feature/206-export-data
+
 ### 2026-09-22 — Announcement workflow: cards, targeting, drafts, seen tracking (#205)
 **Type:** Feature
 **Portal:** School Admin → all portals

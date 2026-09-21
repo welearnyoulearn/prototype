@@ -44,7 +44,7 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   // ── Administration ───────────────────────────────────────────────────────────
   // The school admin manages it; teachers, students and parents see it read-only (all governed by this one toggle).
   { key: 'calendar',           label: 'Academic Calendar',               category: 'Administration', portals: ['school-admin', 'teacher', 'student', 'parent'] },
-  { key: 'export',             label: 'Export & Reports',                category: 'Administration', portals: ['school-admin'] },
+  { key: 'export',             label: 'Export Data',                     category: 'Administration', portals: ['school-admin'] },
   { key: 'settings',           label: 'School Settings',                 category: 'Administration', portals: ['school-admin'] },
   { key: 'year-rollover',      label: 'Year Rollover',                   category: 'Administration', portals: ['school-admin'] },
 ]

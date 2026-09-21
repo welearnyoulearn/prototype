@@ -34,7 +34,7 @@ const NAV_SEARCH: Result[] = [
   { type: 'nav', label: 'Fee Structure',    sub: 'Configure amounts',   nav: 'fee-management' },
   { type: 'nav', label: 'Defaulters',       sub: 'Overdue fees',        nav: 'fee-management' },
   { type: 'nav', label: 'Announcements',    sub: 'Notice board',        nav: 'announcements' },
-  { type: 'nav', label: 'Export & Reports', sub: 'Download data',       nav: 'export' },
+  { type: 'nav', label: 'Export Data', sub: 'Download data',       nav: 'export' },
   { type: 'nav', label: 'School Settings',  sub: 'Configuration',       nav: 'settings' },
 ]
 
