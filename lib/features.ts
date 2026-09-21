@@ -50,13 +50,14 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'export',             label: 'Export & Reports',                category: 'Administration', portals: ['school-admin'] },
   { key: 'settings',           label: 'School Settings',                 category: 'Administration', portals: ['school-admin'] },
   { key: 'year-rollover',      label: 'Year Rollover',                   category: 'Administration', portals: ['school-admin'] },
-  { key: 'api-monitoring',   label: 'Watchline (API Monitoring)',       category: 'Administration', portals: ['school-admin'] },
 ]
 
 export const CATEGORY_ORDER = ['Core', 'Scheduling', 'Analytics', 'Finance', 'Communication', 'Administration']
 
 // Features that can be overridden per-school via school_feature_overrides,
 // taking precedence over the tier-level plan_features setting.
+// NOTE: 'api-monitoring' (Watchline) is deliberately NOT in ALL_FEATURES: it is not a plan feature. It is switched on
+// per school only (Platform Admin -> school -> Watchline), stored as an override, and read by the logger.
 export const OVERRIDABLE_FEATURE_KEYS = ['student-portal', 'parent-portal', 'api-monitoring', 'online-payments']
 
 // A portal's nav key doesn't always match the ALL_FEATURES key that gates it
