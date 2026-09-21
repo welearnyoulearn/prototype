@@ -18,7 +18,7 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 | Feature | Status | Description |
 |---------|--------|-------------|
 | Overview Dashboard | Built | Stats cards (teachers, students, classes), attendance summary, upcoming exams, fee collection %. Uses batched `/api/admin/overview` (pending-leaves and uncovered-periods metrics removed with Leave Requests/Emergency Cover below) |
-| Daily Briefing | Built | Morning briefing: exams, chronic absentees, syllabus coverage, announcements. From `/api/admin/briefing` (leave/uncovered-periods alerts removed with Leave Requests/Emergency Cover below) |
+| Daily Briefing | Removed | Pulled out of `dev` (#188): the screen was not linked from any menu. Preserved on `feature/188-daily-briefing` (draft PR #191) |
 
 ### People Management
 
@@ -46,7 +46,7 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 |---------|--------|-------------|
 | Class Analytics | Removed | Pulled out of `dev` (#183): its performance route no longer exists and it overlaps the attendance dashboards and the Student 360 profile. Preserved on `feature/183-class-analytics-and-student-performance` (draft PR #186) |
 | Academic Analytics | Built | School-wide: pass rate, subject performance comparison, top performers |
-| Student-Teacher Analysis | Built | Student performance relative to teacher assignments |
+| Student-Teacher Analysis | Removed | Pulled out of `dev` (#189): not linked from any menu, headcount only. Preserved on `feature/189-student-teacher-analysis` (draft PR #192) |
 | Year-in-Review Report | Removed | Pulled out of `dev` (#181): its `/api/year-review` route no longer exists. Preserved on `feature/181-year-in-review` (draft PR #184); to be rebuilt as its own PR |
 | School Health Score | Planned | Composite score of attendance, marks, tasks, fees. Defined in `lib/features.ts` as `school-health` but not implemented |
 | Syllabus Predictor | Planned | AI prediction of syllabus completion date. Defined in `lib/features.ts` as `syllabus-predictor` but not implemented |
@@ -56,7 +56,7 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 | Feature | Status | Description |
 |---------|--------|-------------|
 | Announcement Board | Built | Create with audience targeting, priority, expiry. TV Mode section |
-| Notification Center | Built | Full notification history for the school |
+| Notification Center | Removed | The history page was pulled out of `dev` (#190): not linked from any menu (the header notification bell stays). Preserved on `feature/190-notification-center` (draft PR #193) |
 | Student Leaderboard | Removed | Deleted from `dev` (#180): unreachable, its backend no longer exists and most point sources were removed. No branch (code is in git history) |
 | Parent Engagement | Removed | Pulled out of `dev` (#182): its `/api/parent/engagement` route no longer exists (the acknowledgement data still does). Preserved on `feature/182-parent-engagement` (draft PR #185); small PR to restore |
 | Feedback Management | Built | No-login QR-code feedback form (parent/student/teacher/visitor/other) with a school-admin dashboard, issue pipeline, category CRUD, and QR poster generation. `feedback-management` in `lib/features.ts`. See `wiki/features/feedback-management.md` |
@@ -87,7 +87,6 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /api/admin/overview` | Batched dashboard stats |
-| `GET /api/admin/briefing` | Daily briefing data |
 | `GET/POST /api/teachers` | Staff CRUD |
 | `GET/POST /api/students` | Student CRUD |
 | `GET/POST /api/classes` | Class CRUD |

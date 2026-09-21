@@ -70,6 +70,9 @@ rebuilding from scratch.
 - **Parent Engagement** (#182) — `feature/182-parent-engagement` (draft PR #185). Small PR: one summary route is missing.
 - **Class Analytics + Student Management performance tab** (#183) — `feature/183-class-analytics-and-student-performance` (draft PR #186). Rebuild later as marks / class analytics.
 - **Admin Student Leaderboard** (#180) — deleted (no branch).
+- **Daily Briefing** (#188) — `feature/188-daily-briefing` (draft PR #191). Screen + route ready; needs a sidebar entry.
+- **Student-Teacher Analysis** (#189) — `feature/189-student-teacher-analysis` (draft PR #192). Headcount only.
+- **Notification Center** (#190) — `feature/190-notification-center` (draft PR #193). Needs a sidebar entry.
 
 ## Partial Features to Complete
 
