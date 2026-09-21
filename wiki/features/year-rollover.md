@@ -28,7 +28,7 @@ School admin.
 - After the rollover the old fee year cannot be reopened.
 - Class roll numbers are unique per class: each promoted student keeps their roll number if it is free in the new class, otherwise it is cleared and the school sets a new one (the result screen says how many). Graduated students' roll numbers are cleared; the old value stays in the class history.
 - The active year cannot be switched by hand (Settings or API) once a school has a current year.
-- No "detain / repeat the year" option and no per-student section change yet.
+- **Exceptions:** before running, the admin can mark individual students to **repeat the year** (same grade and section, roll number kept) or to be promoted into a **different section** of the next grade (the section must already exist). A student in the final grade can repeat instead of graduating. Each student's outcome (promoted / repeated / moved / graduated) is stored in the class history. Bad exceptions (unknown student, missing section) are refused before anything changes.
 - Past years stay available in Student 360 through the year switcher.
 
 ## Code evidence
@@ -41,6 +41,8 @@ Screens: `app/school-admin/components/YearRollover.tsx`
 API routes these screens call (all exist):
 - `GET/PATCH/POST/PUT` /api/academic-years
 - `GET/POST` /api/academic-years/rollover
+- `GET/POST` /api/classes
+- `GET/POST` /api/students
 - `GET/POST` /api/students/promote
 
 ✅ Every API route the screens call exists.
@@ -57,3 +59,4 @@ API routes these screens call (all exist):
 |------|--------|-------|
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
 | 2026-09-21 | One central rollover gated by fee year-end; fee year-end no longer creates years; roll numbers handled | #199 |
+| 2026-09-21 | Repeat a year / promote into another section, outcome recorded in class history | #201 |

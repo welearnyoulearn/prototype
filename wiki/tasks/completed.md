@@ -18,6 +18,12 @@ All finished features and bug fixes. Most recent first.
 
 ---
 
+### 2026-09-21 — Year Rollover: repeat a year / change section (#201)
+**Type:** Feature
+**Portal:** School Admin
+**Summary:** Per-student exceptions in the Year Rollover screen: repeat the year, or be promoted into another existing section. Outcome recorded in student_class_history (new columns outcome, promoted_to_section). Validation refuses unknown students / missing sections before anything changes. 4 more end-to-end tests (18 in total).
+**PR:** feature/201-rollover-exceptions
+
 ### 2026-09-21 — Central Year Rollover gated by fee year-end (#199)
 **Type:** Feature / rework
 **Portal:** School Admin

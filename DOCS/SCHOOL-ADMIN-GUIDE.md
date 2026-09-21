@@ -659,7 +659,9 @@ Finish **Fee Management → Year-End** and close the fee year. If you have not, 
 1. Open **Year Rollover**. Check the three steps at the top: current year, next year, fee year-end completed.
 2. If the next year does not exist, create it in the form (the name is fixed to the year after the current one).
 3. If the fee year-end is not closed, use **Go to Fee Year-End**, finish it, and come back.
-4. Check the grade sequence and the promotion preview, then click **Review Rollover → Execute Rollover**.
+4. Check the grade sequence and the promotion preview.
+5. **Exceptions (optional):** in the *Exceptions* list, search a student and choose **Repeat** (they stay in the same grade and section) or **Promote → another section** (they move up but into a different section — the section must already exist in Class Management). A final-grade student can repeat instead of graduating. Use *Changes only* to review your list.
+6. Click **Review Rollover → Execute Rollover**.
 
 > **This cannot be undone.** After it runs, the old year's fee book can no longer be reopened.
 

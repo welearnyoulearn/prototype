@@ -25,12 +25,18 @@ type Readiness = {
   can_run: boolean
 }
 
+type RosterStudent = { id: number; name: string; grade: string | null; section: string | null; school_roll_number: number | null }
+type ClassRow = { grade: string; section: string }
+type Exception = { action: 'repeat' } | { action: 'move'; to_section: string }
+
 type GradeGroup = { grade: string; section: string; student_count: number }
 
 type RolloverResult = {
   snapshotted: number
   promoted: number
   graduated: number
+  repeated?: number
+  moved?: number
   roll_numbers_cleared?: number
   errors: string[]
   message: string
@@ -63,6 +69,12 @@ export default function YearRollover({ schoolId, onGoToFeeYearEnd }: { schoolId:
   const [error, setError]             = useState('')
   const [readiness, setReadiness]     = useState<Readiness | null>(null)
   const [showFeeGate, setShowFeeGate]  = useState(false)
+  // Per-student exceptions to "everyone moves up one grade, same section"
+  const [roster, setRoster]            = useState<RosterStudent[]>([])
+  const [classes, setClasses]          = useState<ClassRow[]>([])
+  const [exceptions, setExceptions]    = useState<Record<number, Exception>>({})
+  const [studentSearch, setStudentSearch] = useState('')
+  const [changesOnly, setChangesOnly]  = useState(false)
 
   // Year setup form
   const currentYear = new Date().getFullYear()
@@ -82,11 +94,15 @@ export default function YearRollover({ schoolId, onGoToFeeYearEnd }: { schoolId:
   async function init() {
     setLoading(true)
     try {
-      const [yr, gr, rd] = await Promise.all([
+      const [yr, gr, rd, st, cl] = await Promise.all([
         fetch(`/api/academic-years?school_id=${schoolId}`).then(r => r.json()),
         fetch(`/api/students/promote?school_id=${schoolId}`).then(r => r.json()),
         fetch(`/api/academic-years/rollover?school_id=${schoolId}&readiness=1`).then(r => r.ok ? r.json() : null),
+        fetch(`/api/students?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
+        fetch(`/api/classes?school_id=${schoolId}`).then(r => r.ok ? r.json() : []),
       ])
+      setRoster(Array.isArray(st) ? st : [])
+      setClasses(Array.isArray(cl) ? cl : [])
       setYears(Array.isArray(yr) ? yr : [])
       setGroups(gr.groups ?? [])
       setReadiness(rd)
@@ -113,9 +129,32 @@ export default function YearRollover({ schoolId, onGoToFeeYearEnd }: { schoolId:
     return { ...g, to, isGrad }
   })
 
+  const activeExceptions = Object.entries(exceptions)
+  const repeatCount = activeExceptions.filter(([, e]) => e.action === 'repeat').length
+  const moveCount   = activeExceptions.filter(([, e]) => e.action === 'move').length
+  // A repeating student is not promoted (or graduated); a moved one is promoted into another section
+  const isFinal = (grade: string | null) => !!grade && grade === finalGrade
+  const finalRepeaters = activeExceptions.filter(([id, e]) => e.action === 'repeat' && isFinal(roster.find(r => r.id === Number(id))?.grade ?? null)).length
+
+  function setException(studentId: number, value: string) {
+    setExceptions(prev => {
+      const next = { ...prev }
+      if (value === 'default') delete next[studentId]
+      else if (value === 'repeat') next[studentId] = { action: 'repeat' }
+      else if (value.startsWith('move:')) next[studentId] = { action: 'move', to_section: value.slice(5) }
+      return next
+    })
+  }
+
+  const visibleStudents = roster
+    .filter(st => st.grade)
+    .filter(st => !changesOnly || exceptions[st.id])
+    .filter(st => !studentSearch.trim() || `${st.name} ${st.grade}-${st.section ?? ''}`.toLowerCase().includes(studentSearch.trim().toLowerCase()))
+    .slice(0, 200)
+
   const totalStudents  = groups.reduce((s, g) => s + g.student_count, 0)
-  const gradStudents   = groups.filter(g => g.grade === finalGrade).reduce((s, g) => s + g.student_count, 0)
-  const promoteStudents = totalStudents - gradStudents
+  const gradStudents   = groups.filter(g => g.grade === finalGrade).reduce((s, g) => s + g.student_count, 0) - finalRepeaters
+  const promoteStudents = totalStudents - gradStudents - repeatCount
 
   // ── Set a year as current ────────────────────────────────────────────────
 
@@ -176,6 +215,7 @@ export default function YearRollover({ schoolId, onGoToFeeYearEnd }: { schoolId:
           to_year_id: selectedToYear,
           final_grade: finalGrade || null,
           grade_sequence: sequence,
+          exceptions: activeExceptions.map(([id, e]) => ({ student_id: Number(id), ...e })),
         }),
       })
       const d = await r.json()
@@ -259,6 +299,9 @@ export default function YearRollover({ schoolId, onGoToFeeYearEnd }: { schoolId:
           <div className="text-5xl">🎓</div>
           <h3 className="text-xl font-bold text-gray-800">Rollover Complete!</h3>
           <p className="text-sm text-gray-500">{result.message}</p>
+          {((result.repeated ?? 0) > 0 || (result.moved ?? 0) > 0) && (
+            <p data-testid="rollover-exceptions-result" className="text-xs text-gray-500">{result.repeated ?? 0} repeating the year · {result.moved ?? 0} moved to a different section</p>
+          )}
           <div className="grid grid-cols-3 gap-4 max-w-md mx-auto">
             <div className="bg-blue-50 rounded-xl p-4">
               <p className="text-3xl font-black text-blue-600">{result.snapshotted}</p>
@@ -464,6 +507,50 @@ export default function YearRollover({ schoolId, onGoToFeeYearEnd }: { schoolId:
               </div>
             </div>
 
+            {/* Exceptions: repeat a year / change section */}
+            <div data-testid="rollover-exceptions" className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+              <div className="px-5 py-3 border-b border-gray-50 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Exceptions (optional)</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">By default everyone moves up one grade and keeps their section. Change it for individual students.</p>
+                </div>
+                <span data-testid="exceptions-count" className="text-xs text-gray-500 whitespace-nowrap">{repeatCount} repeat · {moveCount} section change</span>
+              </div>
+              <div className="px-5 py-3 flex items-center gap-3 border-b border-gray-50">
+                <input data-testid="exceptions-search" value={studentSearch} onChange={e => setStudentSearch(e.target.value)}
+                  placeholder="Search name or class, e.g. 6-A"
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                <label className="text-xs text-gray-500 flex items-center gap-1.5 whitespace-nowrap">
+                  <input data-testid="exceptions-changes-only" type="checkbox" checked={changesOnly} onChange={e => setChangesOnly(e.target.checked)} /> Changes only
+                </label>
+              </div>
+              <div className="divide-y divide-gray-50 max-h-72 overflow-y-auto">
+                {visibleStudents.length === 0 ? (
+                  <div className="text-center py-6 text-gray-400 text-sm">{changesOnly ? 'No exceptions set' : 'No students found'}</div>
+                ) : visibleStudents.map(st => {
+                  const grad = isFinal(st.grade)
+                  const target = grad ? null : nextGrade(st.grade as string, sequence)
+                  const sections = target ? classes.filter(c => c.grade === target && c.section !== st.section).map(c => c.section) : []
+                  const ex = exceptions[st.id]
+                  const value = !ex ? 'default' : ex.action === 'repeat' ? 'repeat' : `move:${ex.to_section}`
+                  return (
+                    <div key={st.id} data-testid={`exception-row-${st.id}`} className={`flex items-center gap-3 px-5 py-2 text-sm ${ex ? 'bg-amber-50/60' : ''}`}>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-gray-800 font-medium truncate">{st.name}</p>
+                        <p className="text-[11px] text-gray-400">{st.grade}-{st.section ?? '—'}{st.school_roll_number != null ? ` · roll ${st.school_roll_number}` : ''}</p>
+                      </div>
+                      <select data-testid={`exception-select-${st.id}`} value={value} onChange={e => setException(st.id, e.target.value)}
+                        className="border border-gray-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                        <option value="default">{grad ? '🎓 Graduates' : target ? `Promote → ${target}-${st.section ?? ''}` : '⚠ Not in sequence'}</option>
+                        <option value="repeat">↺ Repeat {st.grade}-{st.section ?? ''}</option>
+                        {sections.map(sec => <option key={sec} value={`move:${sec}`}>Promote → {target}-{sec}</option>)}
+                      </select>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
             {/* Execute button */}
             {step === 'setup' || step === 'configure' ? (
               <div className="space-y-3">
@@ -503,7 +590,7 @@ export default function YearRollover({ schoolId, onGoToFeeYearEnd }: { schoolId:
                     <p className="text-sm font-bold text-red-800">This cannot be undone</p>
                     <p className="text-xs text-red-600 mt-1">
                       <strong>{currentYearObj?.label}</strong> → <strong>{years.find(y => y.id === selectedToYear)?.label}</strong><br />
-                      {promoteStudents} students promoted · {gradStudents} graduated · {totalStudents} history records written
+                      {promoteStudents} students promoted{moveCount > 0 ? ` (${moveCount} into a different section)` : ''} · {repeatCount} repeating · {gradStudents} graduated · {totalStudents} history records written
                     </p>
                   </div>
                 </div>
