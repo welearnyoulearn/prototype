@@ -31,13 +31,10 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'exam-marks',         label: 'Exam Schedule & Marks',           category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },
 
   // ── Analytics & Intelligence ─────────────────────────────────────────────────
-  { key: 'briefing',           label: 'Daily Briefing',                  category: 'Analytics', portals: ['school-admin'] },
-  { key: 'analysis',           label: 'Student–Teacher Analysis',        category: 'Analytics', portals: ['school-admin'] },
 
   // ── Communication ────────────────────────────────────────────────────────────
   { key: 'announcements',      label: 'Announcement Board',              category: 'Communication', portals: ['school-admin'] },
   { key: 'feedback-management', label: 'Feedback Management',            category: 'Communication', portals: ['school-admin'] },
-  { key: 'notifications',      label: 'Notification Center',             category: 'Communication', portals: ['school-admin'] },
 
   // ── Finance ──────────────────────────────────────────────────────────────────
   { key: 'fee-management',     label: 'Fee Management',                  category: 'Finance', portals: ['school-admin', 'parent'] },

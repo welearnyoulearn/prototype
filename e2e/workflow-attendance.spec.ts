@@ -184,7 +184,6 @@ test.describe.serial('Student attendance — all portals, end to end', () => {
     expect((await call(a, 'get', '/api/school-calendar')).status).toBe(401)
     expect((await call(a, 'post', '/api/school-calendar', { title: 'x', event_type: 'holiday', event_date: today })).status).toBe(403)
     expect((await call(a, 'delete', '/api/school-calendar/1')).status).toBe(403)
-    expect((await call(a, 'get', `/api/admin/briefing?school_id=${schoolId}`)).status).toBe(401)
     expect((await call(a, 'get', `/api/export/attendance?mode=absentees&date=${today}`)).status).toBe(401)
   })
 
@@ -458,9 +457,8 @@ test.describe.serial('Student attendance — all portals, end to end', () => {
     const during = await ytd()
     expect(during.month.days.find((d: any) => d.date === today).status).toBe('holiday')
     expect(during.yearToDate.summary).toMatchObject({ marked: 0, pct: null })                              // those records are ignored now
-    const brief = await call(owner, 'get', '/api/admin/briefing')
-    expect(brief.body.attendance.holiday).toMatchObject({ kind: 'holiday', title: 'Sudden Closure' })
-    expect(brief.body.attendance.unmarked_classes).toBe(0)
+    const ovHoliday = await call(owner, 'get', `/api/admin/overview?school_id=${schoolId}&features=attendance&date=${today}`)
+    expect(ovHoliday.body.attendance_holiday).toMatchObject({ kind: 'holiday', title: 'Sudden Closure' })
     expect((await call(teacherA, 'post', '/api/attendance', { class_id: classB, date: today, session: 'afternoon', records: allPresent([ids.Esha]) })).status).toBe(409)
     const reg = await call(owner, 'get', `/api/export/attendance?class_id=${classA}&from=${today}&to=${today}`)
     expect(String(reg.body)).toContain('Holiday: Sudden Closure (ignored in reports)')
@@ -536,13 +534,10 @@ test.describe.serial('Student attendance — all portals, end to end', () => {
   })
 
   test('22. Admin dashboards reflect the same day', async () => {
-    const brief = (await call(owner, 'get', '/api/admin/briefing')).body
-    expect(brief.attendance.holiday).toBeNull()
-    expect(brief.attendance.pct).toEqual(expect.any(Number))
-    const ov = (await call(owner, 'get', `/api/admin/overview?school_id=${schoolId}&features=attendance`)).body
+    const ov = (await call(owner, 'get', `/api/admin/overview?school_id=${schoolId}&features=attendance&date=${today}`)).body
+    expect(ov.attendance_holiday).toBeNull()
     expect(ov.attendance.find((c: any) => c.class_id === classA)).toMatchObject({ morning_marked: true })
     expect((await call(ownerB, 'get', `/api/admin/overview?school_id=${schoolId}&features=attendance`)).status).toBe(403)
-    expect((await call(ownerB, 'get', `/api/admin/briefing?school_id=${schoolId}`)).status).toBe(403)
   })
 
   // ═════════════════════════════════════════════════════════════════════════

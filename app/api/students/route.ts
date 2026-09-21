@@ -79,7 +79,7 @@ async function handleGET(req: NextRequest) {
       const where = `WHERE ${conditions.join(' AND ')}`
 
       // Pagination is strictly opt-in. A default cap was tried and rejected: several
-      // screens (FeeManagement, StudentsManagement, StudentTeacherAnalysis) fetch the
+      // screens (FeeManagement, StudentsManagement) fetch the
       // whole roster and aggregate over it, so a silent LIMIT would quietly produce
       // WRONG fee totals for any school past the cap. A slow correct answer beats a
       // fast wrong one — callers that want paging ask for it and get `total` back so

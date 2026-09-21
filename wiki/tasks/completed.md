@@ -30,6 +30,12 @@ All finished features and bug fixes. Most recent first.
 **Summary:** Deleted the Display/TV kiosk permanently (#163). Extracted five features to their own preservation branches and removed them from `dev`: Student Learning Hub & Daily Knowledge (#164), Rewards Marketplace (#165), Teacher Lesson Planner (#166), Teacher Class Performance (#167), Weekly Test incl. its weekly cron (#168). All were unreachable from any menu and called API routes that do not exist on `dev`. Database tables are untouched.
 **PR:** the chore PR that closes #163–#168
 
+### 2026-09-21 — Removed three unreachable admin features from dev (#188–#190)
+**Type:** Removal
+**Portal:** School Admin
+**Summary:** Daily Briefing (screen + `/api/admin/briefing`), Student-Teacher Analysis and the Notification Center page were not linked from any menu, so their Platform Admin toggles opened nothing. Removed from `dev`, each preserved on its own branch (draft PRs #191–#193); feature keys `briefing`, `analysis`, `notifications` removed. The notification bell stays.
+**PR:** the chore PR that closes #188–#190
+
 ### 2026-09-21 — Removed the analytics leftovers from dev (#180–#183)
 **Type:** Removal
 **Portal:** School Admin
