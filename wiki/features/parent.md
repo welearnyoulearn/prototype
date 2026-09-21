@@ -19,7 +19,7 @@ The Parent portal provides read-only visibility into a child's school life at `/
 | Attendance Calendar | Built | Month-view calendar for the child. Shows present/absent/late per day |
 | Fee Ledger | Built | Outstanding fees, payment history, waiver details. Amount due vs paid per category |
 | Learning Activity | Built | Child's recent activity: newspapers read, rewards earned (tasks-submitted/doubts-asked entries removed with #136/#137) |
-| Timetable View | Built | Child's class timetable (read-only) |
+| Timetable View | Removed | Removed from `dev` (#176). The complete workflow lives on `feature/175-timetable-full-workflow` (draft PR #177). |
 | Parent Login | Partial | Lookup by parent phone + child roll number works. No proper JWT session — no persistent login |
 | Mark Acknowledgement | Partial | API and DB table exist. Not prominently surfaced in parent portal UI |
 
@@ -33,7 +33,6 @@ The Parent portal provides read-only visibility into a child's school life at `/
 | `GET /api/parent/attendance` | Attendance calendar |
 | `GET /api/parent/fees` | Fee ledger |
 | `GET /api/parent/activity` | Learning activity |
-| `GET /api/parent/timetable` | Class timetable |
 | `POST /api/exams/[id]/acknowledge` | Acknowledge marks |
 
 ---

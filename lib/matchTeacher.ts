@@ -1,4 +1,4 @@
-// Smart 3-level subject→teacher matching used across timetable generation and subject assignment.
+// Smart 3-level subject→teacher matching used for subject assignment.
 // Level 1: exact match (case-insensitive)
 // Level 2: one name contains the other ("Maths" matches "Mathematics")
 // Level 3: any meaningful word in common ("Social Studies" matches "Social Science")

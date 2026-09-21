@@ -5,18 +5,15 @@ import dynamic from 'next/dynamic'
 import StudentSyllabus from '../../student/components/StudentSyllabus'
 import { useFeature } from '@/lib/features-context'
 import { GRADE_SEQUENCE } from '@/lib/grades'
-import { InlineLoader, ButtonLoader } from '@/components/loaders'
+import { InlineLoader } from '@/components/loaders'
 import { useConfirm } from '@/components/ui/use-confirm'
 
 type Props = { schoolId: number; onNavigate?: (tab: string, subTab?: string) => void }
 
-type ClassRow = { id: number; grade: string; section: string; class_teacher_id: number | null; class_teacher_name: string | null; student_count: number; timetable_generated_at: string | null }
+type ClassRow = { id: number; grade: string; section: string; class_teacher_id: number | null; class_teacher_name: string | null; student_count: number; }
 type Teacher = { id: number; name: string; subject: string; employee_id: string; department: string; teaches_grades?: string; staff_type?: string }
 type Subject = { id: number; subject_name: string; teacher_id: number | null; teacher_name: string | null; periods_per_week: number }
-type TimetableSlot = { id: number; day_of_week: string; period_number: number; time_from: string; time_to: string; subject_name: string | null; teacher_id: number | null; teacher_name: string | null; is_break: boolean; break_label: string | null; room: string | null; has_conflict?: boolean; source?: string }
 type Student = { id: number; name: string; roll_number: string; email: string; phone: string }
-
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 // Returns true when teacher has no grade restriction OR their restriction includes this grade
 const StudentProfile = dynamic(() => import('./StudentProfile'), { ssr: false })
@@ -27,11 +24,6 @@ function canTeachGrade(teachesGrades: string | null | undefined, grade: string):
 }
 
 export default function ClassManagement({ schoolId, onNavigate }: Props) {
-  // Timetable is a standalone main feature (own tier row + per-school
-  // override, same as any other ALL_FEATURES entry) — when a school doesn't
-  // have it enabled, every timetable-related tab/button/generation-editing
-  // control in Class Management is hidden. See lib/features.ts.
-  const timetableFeatureEnabled = useFeature('timetable')
   const [classes, setClasses] = useState<ClassRow[]>([])
   const [removedClasses, setRemovedClasses] = useState<{ id: number; grade: string; section: string; student_count: number; deleted_at: string }[]>([])
   const [teachers, setTeachers] = useState<Teacher[]>([])
@@ -103,9 +95,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
     setAddingClass(true)
     setSetupMsg('Creating class...')
     try {
-      // Create class — backend auto-assigns subjects + teachers. Timetable
-      // is a separate manual step (Timetable tab, when the school has that
-      // feature) — not auto-generated at class-creation time.
+      // Create class — backend auto-assigns subjects + teachers.
       const res = await fetch('/api/classes', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ school_id: schoolId, grade, section }),
@@ -269,13 +259,6 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
                       {cls.class_teacher_name
                         ? <p className="text-[10px] text-indigo-500 font-medium truncate">CT: {cls.class_teacher_name}</p>
                         : <p className="text-[10px] text-amber-400">No class teacher</p>}
-                      {/* Timetable is a separate sub-feature, currently disabled
-                          — see the commented-out Timetable tab in ClassDetail. */}
-                      {false && timetableFeatureEnabled && (
-                        cls.timetable_generated_at
-                          ? <p className="text-[10px] text-emerald-500 font-medium">Timetable ready</p>
-                          : <p className="text-[10px] text-gray-300">No timetable</p>
-                      )}
                     </div>
                     <button onClick={e => openDeleteModal(e, cls)} data-testid={`delete-class-${cls.id}`}
                       title={`Remove Grade ${cls.grade} – ${cls.section}`}
@@ -355,7 +338,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
               <div>
                 <h3 className="font-bold text-gray-900 text-sm">Remove Grade {deleteTarget.grade} – {deleteTarget.section}</h3>
                 <p className="text-xs text-gray-500 mt-1">
-                  Its subject-teacher assignments{deleteTarget.timetable_generated_at ? ' and timetable' : ''} will be permanently removed.
+                  Its subject-teacher assignments will be permanently removed.
                   {deleteTarget.student_count > 0 && (
                     <> {deleteTarget.student_count} student{deleteTarget.student_count !== 1 ? 's are' : ' is'} still active in this class — choose what happens to them:</>
                   )}
@@ -441,10 +424,9 @@ function ClassDetail({
   onClassUpdated: (updates: Partial<ClassRow> & { id: number }) => void
   onNavigate?: (tab: string, subTab?: string) => void
 }) {
-  const timetableFeatureEnabled = useFeature('timetable')
   const hasAttendance = useFeature('attendance')
   const { confirm, ConfirmDialog } = useConfirm()
-  const [tab, setTab] = useState<'overview' | 'subjects' | 'timetable' | 'students' | 'syllabus'>('overview')
+  const [tab, setTab] = useState<'overview' | 'subjects' | 'students' | 'syllabus'>('overview')
   const [attSummary, setAttSummary] = useState<{ date: string; present: number; absent: number; late: number }[]>([])
   const [attLoading, setAttLoading] = useState(false)
   const [subjects, setSubjects] = useState<Subject[]>([])
@@ -455,13 +437,6 @@ function ClassDetail({
   const [ctId, setCtId] = useState(String(cls.class_teacher_id || ''))
   const [savingCT, setSavingCT] = useState(false)
   const [ctConflict, setCtConflict] = useState<{ teacherName: string; existingClass: ClassRow } | null>(null)
-  const [timetable, setTimetable] = useState<TimetableSlot[]>([])
-  const [ttLoading, setTtLoading] = useState(false)
-  const [generating, setGenerating] = useState(false)
-  const [genMsg, setGenMsg] = useState<{ text: string; ok: boolean } | null>(null)
-  const [editSlotId, setEditSlotId] = useState<number | null>(null)
-  const [editSubject, setEditSubject] = useState('')
-  const [editTeacher, setEditTeacher] = useState('')
   const [students, setStudents] = useState<Student[]>([])
   const [studLoading, setStudLoading] = useState(false)
   const [profileId, setProfileId] = useState<number | null>(null)
@@ -493,14 +468,6 @@ function ClassDetail({
     }
   }, [schoolId, cls.grade])
 
-  const loadTimetable = useCallback(async () => {
-    setTtLoading(true)
-    try {
-      const data = await fetch(`/api/class-timetable?class_id=${cls.id}&school_id=${schoolId}`).then(r => r.json())
-      setTimetable(Array.isArray(data) ? data : [])
-    } finally { setTtLoading(false) }
-  }, [cls.id, schoolId])
-
   async function loadAttendanceSummary() {
     setAttLoading(true)
     try {
@@ -528,8 +495,6 @@ function ClassDetail({
   useEffect(() => {
     setTab('overview')
     setSubjectMsg(null)
-    setGenMsg(null)
-    setEditSlotId(null)
     setEditingClassTeacher(false)
     setCtId(String(cls.class_teacher_id || ''))
     loadSubjects()
@@ -546,7 +511,6 @@ function ClassDetail({
   }
 
   useEffect(() => {
-    if (tab === 'timetable') loadTimetable()
     if (tab === 'students') loadStudents()
   }, [tab]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -586,26 +550,6 @@ function ClassDetail({
     } finally { setSavingCT(false) }
   }
 
-  async function generateTimetable(forceReplace: boolean) {
-    setGenerating(true); setGenMsg(null)
-    try {
-      const res = await fetch('/api/class-timetable/generate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, class_id: cls.id, force_replace: forceReplace }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      const parts: string[] = [`Generated successfully.`]
-      if (data.conflicts_auto_resolved > 0) parts.push(`${data.conflicts_auto_resolved} conflict(s) auto-resolved.`)
-      if (data.conflicts_need_manual  > 0) parts.push(`${data.conflicts_need_manual} slot(s) need a teacher — click the amber cells to assign.`)
-      setGenMsg({ text: parts.join(' '), ok: true })
-      onClassUpdated({ id: cls.id, timetable_generated_at: new Date().toISOString() } as Partial<ClassRow> & { id: number })
-      await loadTimetable()
-    } catch (err: unknown) {
-      setGenMsg({ text: err instanceof Error ? err.message : 'Generation failed', ok: false })
-    } finally { setGenerating(false) }
-  }
-
   async function assignTeacherInline(subjectId: number) {
     if (!inlineTeacher) return
     try {
@@ -618,18 +562,6 @@ function ClassDetail({
     } catch { /* silent */ }
   }
 
-  async function saveSlotEdit(slotId: number) {
-    try {
-      await fetch('/api/class-timetable', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: slotId, subject_name: editSubject || null, teacher_id: editTeacher ? parseInt(editTeacher) : null }),
-      })
-      setEditSlotId(null)
-      await loadTimetable()
-    } catch { /* silent */ }
-  }
-
-  const hasTimetable = timetable.length > 0
   const totalPPW = subjects.reduce((a, s) => a + s.periods_per_week, 0)
 
   return (
@@ -690,7 +622,6 @@ function ClassDetail({
                 </div>
               )}
               <span className="text-xs text-gray-400">{subjects.length} subjects · {totalPPW} periods/week</span>
-              {hasTimetable && <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Timetable Active</span>}
             </div>
           </div>
         </div>
@@ -732,14 +663,13 @@ function ClassDetail({
 
         {/* Tabs */}
         <div className="flex gap-0 mt-3 -mb-4">
-          {(['overview', 'subjects', 'timetable', 'students', 'syllabus'] as const)
-            .filter(t => t !== 'timetable' || timetableFeatureEnabled)
+          {(['overview', 'subjects', 'students', 'syllabus'] as const)
             .map(t => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-2 text-xs font-medium border-b-2 transition-colors ${
                 tab === t ? 'border-violet-600 text-violet-700' : 'border-transparent text-gray-500 hover:text-gray-800'
               }`}>
-              {t === 'overview' ? 'Overview' : t === 'subjects' ? `Subjects (${subjects.length})` : t === 'timetable' ? 'Timetable' : t === 'students' ? `Students (${cls.student_count})` : 'Syllabus'}
+              {t === 'overview' ? 'Overview' : t === 'subjects' ? `Subjects (${subjects.length})` : t === 'students' ? `Students (${cls.student_count})` : 'Syllabus'}
             </button>
           ))}
         </div>
@@ -779,7 +709,7 @@ function ClassDetail({
             </div>
 
             {/* Summary cards */}
-            <div className={`grid gap-3 ${timetableFeatureEnabled ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            <div className={`grid gap-3 grid-cols-2`}>
               <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 text-center">
                 <p className="text-3xl font-black text-violet-700">{cls.student_count}</p>
                 <p className="text-xs text-violet-600 mt-1">Students</p>
@@ -788,18 +718,6 @@ function ClassDetail({
                 <p className="text-3xl font-black text-blue-700">{subjects.length}</p>
                 <p className="text-xs text-blue-600 mt-1">Subjects</p>
               </div>
-              {timetableFeatureEnabled && (
-                <div className={`border rounded-xl p-4 text-center ${cls.timetable_generated_at ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
-                  <p className={`text-xs font-bold mt-1 ${cls.timetable_generated_at ? 'text-green-700' : 'text-amber-600'}`}>
-                    {cls.timetable_generated_at ? 'Timetable Ready' : 'No Timetable'}
-                  </p>
-                  {cls.timetable_generated_at && (
-                    <p className="text-[10px] text-green-500 mt-0.5">
-                      {new Date(cls.timetable_generated_at).toLocaleDateString()}
-                    </p>
-                  )}
-                </div>
-              )}
             </div>
 
             {/* Teachers & Subjects */}
@@ -868,19 +786,12 @@ function ClassDetail({
             )}
 
             {/* Quick actions */}
-            <div className={`grid gap-3 ${timetableFeatureEnabled ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            <div className={`grid gap-3 grid-cols-2`}>
               <button onClick={() => setTab('subjects')}
                 className="border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors">
                 <p className="text-sm font-semibold text-gray-700">Manage Subjects</p>
                 <p className="text-xs text-gray-400 mt-0.5">{subjects.length} assigned</p>
               </button>
-              {timetableFeatureEnabled && (
-                <button onClick={() => setTab('timetable')}
-                  className="border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors">
-                  <p className="text-sm font-semibold text-gray-700">View Timetable</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{cls.timetable_generated_at ? 'Generated' : 'Not generated'}</p>
-                </button>
-              )}
               <button onClick={() => setTab('students')}
                 className="border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors">
                 <p className="text-sm font-semibold text-gray-700">Student List</p>
@@ -989,95 +900,6 @@ function ClassDetail({
               </div>
             )}
 
-            {subjects.length > 0 && timetableFeatureEnabled && (
-              <div className={`rounded-xl px-4 py-3 flex items-center justify-between flex-wrap gap-3 ${hasTimetable ? 'bg-emerald-50 border border-emerald-200' : 'bg-blue-50 border border-blue-200'}`}>
-                <div>
-                  <p className={`text-sm font-medium ${hasTimetable ? 'text-emerald-800' : 'text-blue-800'}`}>
-                    {hasTimetable ? '✓ Timetable is active.' : `${subjects.length} subject${subjects.length !== 1 ? 's' : ''} added — timetable not generated yet.`}
-                  </p>
-                  <p className={`text-xs mt-0.5 ${hasTimetable ? 'text-emerald-600' : 'text-blue-600'}`}>
-                    {hasTimetable ? `${subjects.length} subjects · ${totalPPW} periods/week` : 'Go to the Timetable tab to generate.'}
-                  </p>
-                </div>
-                <button onClick={() => setTab('timetable')}
-                  className={`px-4 py-1.5 text-xs font-medium rounded-lg ${hasTimetable ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-blue-600 text-white hover:bg-blue-700'}`}>
-                  {hasTimetable ? 'View Timetable →' : 'Go to Timetable →'}
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── TIMETABLE ── only reachable when timetableFeatureEnabled — see
-            the tab list filter above, and useFeature('timetable') at the top
-            of this component. */}
-        {tab === 'timetable' && (
-          <div className="space-y-4">
-            {genMsg && (
-              <div className={`rounded-xl px-4 py-2.5 text-sm border ${genMsg.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
-                {genMsg.text}
-              </div>
-            )}
-
-            {ttLoading ? (
-              <div className="py-10">
-                <InlineLoader portal="school-admin" />
-              </div>
-            ) : timetable.length === 0 ? (
-              <div className="bg-white rounded-xl border border-gray-200 py-16 flex flex-col items-center justify-center gap-4 text-center">
-                <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center">
-                  <svg className="w-7 h-7 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                </div>
-                {subjects.length === 0 ? (
-                  <>
-                    <div>
-                      <p className="text-gray-700 font-semibold">No subjects added yet</p>
-                      <p className="text-gray-400 text-sm mt-1">Add subjects in the Subjects tab first, then come back to generate the timetable.</p>
-                    </div>
-                    <button onClick={() => setTab('subjects')}
-                      className="px-5 py-2 bg-violet-600 text-white text-sm font-medium rounded-xl hover:bg-violet-700">
-                      Go to Subjects →
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <p className="text-gray-700 font-semibold">Ready to generate!</p>
-                      <p className="text-gray-400 text-sm mt-1">{subjects.length} subject{subjects.length !== 1 ? 's' : ''} · {totalPPW} periods/week</p>
-                    </div>
-                    <button onClick={() => generateTimetable(false)} disabled={generating}
-                      className="px-6 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
-                      {generating
-                        ? <ButtonLoader label="Generating..." />
-                        : <>⚡ Generate Timetable</>}
-                    </button>
-                  </>
-                )}
-              </div>
-            ) : (
-              <>
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <p className="text-xs text-gray-400">{subjects.length} subjects · {totalPPW} periods/week</p>
-                  <button onClick={() => generateTimetable(true)} disabled={generating}
-                    className="text-xs text-blue-500 hover:text-blue-700 font-medium transition-colors disabled:opacity-50">
-                    {generating ? 'Regenerating…' : 'Regenerate →'}
-                  </button>
-                </div>
-                <TimetableGrid
-                  timetable={timetable}
-                  teachers={teachers}
-                  editSlotId={editSlotId}
-                  editSubject={editSubject}
-                  editTeacher={editTeacher}
-                  setEditSlotId={setEditSlotId}
-                  setEditSubject={setEditSubject}
-                  setEditTeacher={setEditTeacher}
-                  onSaveSlot={saveSlotEdit}
-                />
-              </>
-            )}
           </div>
         )}
 
@@ -1137,189 +959,6 @@ function ClassDetail({
         {tab === 'syllabus' && (
           <StudentSyllabus schoolId={schoolId} classId={cls.id} grade={cls.grade} />
         )}
-      </div>
-    </div>
-  )
-}
-
-// ─── Timetable Grid (days × periods) ──────────────────────────────────────────
-function TimetableGrid({
-  timetable, teachers, editSlotId, editSubject, editTeacher,
-  setEditSlotId, setEditSubject, setEditTeacher, onSaveSlot,
-}: {
-  timetable: TimetableSlot[]
-  teachers: Teacher[]
-  editSlotId: number | null
-  editSubject: string
-  editTeacher: string
-  setEditSlotId: (id: number | null) => void
-  setEditSubject: (v: string) => void
-  setEditTeacher: (v: string) => void
-  onSaveSlot: (id: number) => void
-}) {
-  const activeDays = DAYS.filter(d => timetable.some(s => s.day_of_week === d))
-
-  // Periods sorted ascending
-  const periodNumbers = Array.from(new Set(timetable.map(s => s.period_number))).sort((a, b) => a - b)
-
-  // Slot lookup: day+period → slot
-  const slotMap = new Map<string, TimetableSlot>()
-  for (const s of timetable) slotMap.set(`${s.day_of_week}-${s.period_number}`, s)
-
-  // Colour by subject name
-  const subjectColors: Record<string, string> = {}
-  const palette = [
-    'bg-blue-50 border-blue-200 text-blue-800',
-    'bg-violet-50 border-violet-200 text-violet-800',
-    'bg-emerald-50 border-emerald-200 text-emerald-800',
-    'bg-rose-50 border-rose-200 text-rose-800',
-    'bg-amber-50 border-amber-200 text-amber-800',
-    'bg-cyan-50 border-cyan-200 text-cyan-800',
-    'bg-fuchsia-50 border-fuchsia-200 text-fuchsia-800',
-    'bg-teal-50 border-teal-200 text-teal-800',
-    'bg-orange-50 border-orange-200 text-orange-800',
-    'bg-sky-50 border-sky-200 text-sky-800',
-  ]
-  let colorIdx = 0
-  for (const s of timetable) {
-    if (!s.is_break && s.subject_name && !subjectColors[s.subject_name]) {
-      subjectColors[s.subject_name] = palette[colorIdx % palette.length]
-      colorIdx++
-    }
-  }
-
-  // Get time label for a period (from any day that has it)
-  function getTime(period: number) {
-    const s = timetable.find(t => t.period_number === period)
-    return s ? `${s.time_from}–${s.time_to}` : ''
-  }
-
-  // Is this period a break across all days?
-  function isBreakPeriod(period: number) {
-    const sample = activeDays.map(d => slotMap.get(`${d}-${period}`)).find(Boolean)
-    return sample?.is_break ?? false
-  }
-
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs border-collapse">
-          <thead>
-            <tr className="bg-gray-50 border-b border-gray-200">
-              {/* Day column header */}
-              <th className="px-3 py-2.5 text-left font-semibold text-gray-500 w-20 border-r border-gray-200 sticky left-0 bg-gray-50 z-10">
-                Day
-              </th>
-              {/* Period columns */}
-              {periodNumbers.map(period => {
-                const isBreak = isBreakPeriod(period)
-                const sample = activeDays.map(d => slotMap.get(`${d}-${period}`)).find(Boolean)
-                return (
-                  <th key={period} className={`px-2 py-2 text-center font-semibold min-w-[100px] border-r border-gray-100 last:border-r-0 ${isBreak ? 'bg-amber-50' : ''}`}>
-                    {isBreak ? (
-                      <span className="text-amber-600 text-[10px] font-semibold">{sample?.break_label || 'Break'}</span>
-                    ) : (
-                      <div>
-                        <div className="text-gray-600">P{period}</div>
-                        <div className="text-gray-400 text-[10px] font-normal mt-0.5 whitespace-nowrap">{getTime(period)}</div>
-                      </div>
-                    )}
-                  </th>
-                )
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            {activeDays.map(day => (
-              <tr key={day} className="border-b border-gray-100 last:border-b-0 hover:bg-gray-50/30">
-                {/* Day label */}
-                <td className="px-3 py-2 border-r border-gray-200 sticky left-0 bg-white z-10">
-                  <span className="font-semibold text-gray-700 text-[11px]">{day.slice(0, 3)}</span>
-                </td>
-
-                {/* Period cells */}
-                {periodNumbers.map(period => {
-                  const slot = slotMap.get(`${day}-${period}`)
-                  if (!slot) return (
-                    <td key={period} className="px-2 py-2 border-r border-gray-100 last:border-r-0 text-center text-gray-200">—</td>
-                  )
-                  if (slot.is_break) return (
-                    <td key={period} className="px-2 py-2 border-r border-gray-100 last:border-r-0 text-center bg-amber-50/60">
-                      <span className="text-amber-500 text-[10px]">Break</span>
-                    </td>
-                  )
-                  if (editSlotId === slot.id) return (
-                    <td key={period} className="px-2 py-1.5 border-r border-gray-100 last:border-r-0">
-                      <div className="flex flex-col gap-1">
-                        <input value={editSubject} onChange={e => setEditSubject(e.target.value)}
-                          className="border border-gray-200 rounded px-1.5 py-1 text-[10px] text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-violet-300 w-full" placeholder="Subject" />
-                        <select value={editTeacher} onChange={e => setEditTeacher(e.target.value)}
-                          className="border border-gray-200 rounded px-1 py-1 text-[10px] text-gray-900 bg-white focus:outline-none w-full">
-                          <option value="">No teacher</option>
-                          {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                        </select>
-                        <div className="flex gap-1">
-                          <button onClick={() => onSaveSlot(slot.id)}
-                            className="flex-1 bg-blue-600 text-white text-[10px] py-0.5 rounded hover:bg-blue-700">Save</button>
-                          <button onClick={() => setEditSlotId(null)}
-                            className="flex-1 border border-gray-200 text-gray-500 text-[10px] py-0.5 rounded hover:bg-gray-50">✕</button>
-                        </div>
-                      </div>
-                    </td>
-                  )
-                  const isConflict = slot.has_conflict === true
-                  const isManual = slot.source === 'manual'
-                  const colorCls = isConflict
-                    ? 'bg-red-50 border-red-400 text-red-800'
-                    : slot.subject_name
-                    ? subjectColors[slot.subject_name] ?? 'bg-gray-50 border-gray-200 text-gray-700'
-                    : 'bg-gray-50 border-gray-200 text-gray-400'
-                  return (
-                    <td key={period} className="px-1.5 py-1.5 border-r border-gray-100 last:border-r-0">
-                      <div
-                        className={`rounded-lg border px-2 py-1.5 cursor-pointer hover:opacity-80 transition-opacity group relative ${colorCls}`}
-                        onClick={() => { setEditSlotId(slot.id); setEditSubject(slot.subject_name || ''); setEditTeacher(String(slot.teacher_id || '')) }}
-                        title={isConflict ? `⚠ ${slot.teacher_name} is also teaching another class at this slot` : undefined}
-                      >
-                        {isConflict && (
-                          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full flex items-center justify-center text-white text-[8px] font-bold">!</span>
-                        )}
-                        {isManual && !isConflict && (
-                          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-violet-400 rounded-full" title="Manually set" />
-                        )}
-                        <div className="font-semibold text-[11px] leading-tight truncate">
-                          {slot.subject_name || <span className="text-gray-300 italic">Empty</span>}
-                        </div>
-                        {slot.teacher_name ? (
-                          <div className={`text-[10px] truncate mt-0.5 ${isConflict ? 'text-red-600 font-medium' : 'opacity-70'}`}>
-                            {isConflict ? '⚠ ' : ''}{slot.teacher_name}
-                          </div>
-                        ) : (
-                          <div className="text-[10px] text-amber-500 mt-0.5 italic">No teacher</div>
-                        )}
-                      </div>
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {/* Legend */}
-      <div className="px-4 py-2 border-t border-gray-100 flex items-center gap-4 flex-wrap">
-        <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
-          <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />
-          Teacher conflict — same teacher in two classes at this slot
-        </div>
-        <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
-          <span className="w-2.5 h-2.5 rounded-full bg-violet-400 inline-block" />
-          Manually set — preserved during regeneration
-        </div>
-        <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
-          <span className="w-2.5 h-2.5 rounded bg-amber-100 border border-amber-200 inline-block" />
-          No teacher assigned
-        </div>
       </div>
     </div>
   )

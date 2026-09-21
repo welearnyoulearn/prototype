@@ -230,24 +230,7 @@ export async function POST(req: NextRequest) {
           )
           for (const m of matches) {
             await client.query('UPDATE class_subjects SET teacher_id = $1 WHERE id = $2', [teacher.id, m.id])
-            // Same conflict-safe propagation as POST /api/classes/[id]/subjects —
-            // only fill an existing timetable slot for this subject if doing so
-            // wouldn't double-book the teacher at the same day/period elsewhere.
-            await client.query(
-              `UPDATE class_timetable ct
-               SET teacher_id = $1
-               WHERE ct.class_id = $2 AND ct.subject_name = $3 AND ct.is_break = FALSE
-                 AND ct.teacher_id IS DISTINCT FROM $1
-                 AND NOT EXISTS (
-                   SELECT 1 FROM class_timetable other
-                   WHERE other.school_id = ct.school_id AND other.class_id != ct.class_id
-                     AND other.day_of_week = ct.day_of_week AND other.period_number = ct.period_number
-                     AND other.teacher_id = $1 AND other.is_break = FALSE
-                 )`,
-              [teacher.id, m.class_id, m.subject_name]
-            )
             invalidateCache(`subjects:class:${m.class_id}`)
-            invalidateCache(`timetable:class:${m.class_id}`)
           }
           if (matches.length > 0) invalidateCache(`health:${school_id}`)
         }

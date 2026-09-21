@@ -141,7 +141,6 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
       {(() => {
         const quickActions = [
           { label: 'My Marks',   emoji: '📊', key: 'my-marks' },
-          { label: 'Timetable',  emoji: '🗓️', key: 'timetable' },
         ].filter(item => isNavItemVisible?.(item.key) ?? true)
         if (quickActions.length === 0) return null
         return (

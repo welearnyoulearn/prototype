@@ -12,6 +12,14 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 -->
 
 
+## 2026-09-21 — Timetable lives only on its own feature branch (#175, #176)
+
+**Context:** The timetable's generation, conflict, publish and availability backend had been stripped from `dev` while the screens stayed, so the feature could not work; and the routes in git history had no sign-in checks.
+
+**Decision:** Build the full end-to-end workflow on `feature/175-timetable-full-workflow` (restored backend, new `lib/timetableAuth.ts` guard, 11 end-to-end tests) and remove every timetable screen, route and the `timetable` feature key from `dev`. Tables stay. Letting a teacher schedule their own periods in the class view is a known follow-up on the branch.
+
+**Consequences:** `dev` no longer offers timetables; substitute-duty panels went with them (Emergency Cover was already removed). Merge the branch back when the workflow is signed off.
+
 ## 2026-09-21 — Clean dev down to features that work end to end (#163–#168)
 
 **Context:** After an earlier "stripped for production" commit removed many API routes, `dev` still carried screens for features whose backend no longer existed (Display kiosk, Learning Hub, Daily Knowledge, Marketplace, Lesson Planner, Class Performance, Weekly Test). None was reachable from a menu, and calling them returned 404. They confused the docs, the API spec and the product story.

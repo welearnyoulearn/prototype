@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useFeature } from '@/lib/features-context'
 
 type Teacher = {
   id: number
@@ -29,18 +28,6 @@ type ClassSubjectAssignment = {
   section: string
 }
 
-type ClassTimetableSlot = {
-  id: number
-  day_of_week: string
-  period_number: number
-  subject_name: string | null
-  teacher_name: string | null
-  time_from: string
-  time_to: string
-  is_break: boolean
-  break_label: string | null
-}
-
 type ClassEntry = {
   cls: ClassOption
   subjects: string[]
@@ -54,23 +41,10 @@ type Props = {
   onGoToSyllabus: (cls: { id: number; grade: string; section: string; class_teacher_name: string | null }) => void
 }
 
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-
-function todayName() {
-  const d = new Date().getDay()
-  return ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][d]
-}
-
 export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllabus }: Props) {
-  const hasTimetableFeature = useFeature('timetable')
   const [entries, setEntries] = useState<ClassEntry[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Expanded non-own class timetable
-  const [expandedClassId, setExpandedClassId] = useState<number | null>(null)
-  const [classTimetable, setClassTimetable] = useState<ClassTimetableSlot[]>([])
-  const [ttLoading, setTtLoading] = useState(false)
-  const [ttDay, setTtDay] = useState(todayName())
 
   useEffect(() => {
     Promise.all([
@@ -86,8 +60,7 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
       }
 
       // Subject teacher classes — from Class Management's class_subjects
-      // assignment, not the timetable (a class is "theirs" the moment
-      // school-admin assigns it, whether or not a timetable exists yet).
+      // assignment (a class is "theirs" the moment school-admin assigns it).
       classSubjects.forEach((a: ClassSubjectAssignment) => {
         if (!a.grade || !a.section) return
         const key = `${a.grade}-${a.section}`
@@ -104,20 +77,6 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
       setEntries(Array.from(classMap.values()))
     }).finally(() => setLoading(false))
   }, [teacher, schoolId])
-
-  async function expandClass(cls: ClassOption) {
-    if (expandedClassId === cls.id) { setExpandedClassId(null); return }
-    setExpandedClassId(cls.id)
-    setTtLoading(true)
-    try {
-      const slots: ClassTimetableSlot[] = await fetch(
-        `/api/class-timetable?school_id=${schoolId}&class_id=${cls.id}`
-      ).then(r => r.json()).catch(() => [])
-      setClassTimetable(Array.isArray(slots) ? slots : [])
-    } finally {
-      setTtLoading(false)
-    }
-  }
 
   if (loading) {
     return (
@@ -250,64 +209,9 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
                       </svg>
                       Syllabus
                     </button>
-                    {hasTimetableFeature && (
-                      <button
-                        onClick={() => expandClass(cls)}
-                        className="px-3 py-2 border border-gray-200 text-gray-500 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors flex items-center gap-1"
-                      >
-                        <svg className={`w-3.5 h-3.5 transition-transform ${expandedClassId === cls.id ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                        Timetable
-                      </button>
-                    )}
                   </div>
                 </div>
 
-                {/* Timetable drawer */}
-                {expandedClassId === cls.id && (
-                  <div className="border-t border-gray-100 bg-gray-50 p-4">
-                    {/* Day selector */}
-                    <div className="flex gap-1 mb-3 overflow-x-auto pb-1">
-                      {DAYS.map(d => (
-                        <button key={d} onClick={() => setTtDay(d)}
-                          className={`flex-shrink-0 text-[10px] px-2.5 py-1 rounded-full font-medium transition-colors ${
-                            ttDay === d ? 'bg-slate-800 text-white' : 'bg-white border border-gray-200 text-gray-500 hover:bg-gray-100'
-                          } ${d === todayName() && ttDay !== d ? 'border-blue-300 text-blue-600' : ''}`}>
-                          {d.slice(0, 3)}
-                        </button>
-                      ))}
-                    </div>
-
-                    {ttLoading ? (
-                      <div className="flex justify-center py-4">
-                        <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-                      </div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {classTimetable
-                          .filter(slot => slot.day_of_week === ttDay)
-                          .sort((a, b) => a.period_number - b.period_number)
-                          .map(slot => (
-                            <div key={slot.id} className={`flex items-center gap-3 rounded-lg px-3 py-2 text-xs ${slot.is_break ? 'bg-amber-50 text-amber-700' : 'bg-white border border-gray-100'}`}>
-                              <span className="text-gray-400 w-14 flex-shrink-0">{slot.time_from}–{slot.time_to}</span>
-                              <span className="font-medium flex-1 text-gray-800">
-                                {slot.is_break ? (slot.break_label || 'Break') : (slot.subject_name || '—')}
-                              </span>
-                              {!slot.is_break && slot.teacher_name && (
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${slot.teacher_name === teacher.name ? 'bg-blue-100 text-blue-600 font-semibold' : 'bg-gray-100 text-gray-400'}`}>
-                                  {slot.teacher_name === teacher.name ? 'You' : slot.teacher_name}
-                                </span>
-                              )}
-                            </div>
-                          ))}
-                        {classTimetable.filter(s => s.day_of_week === ttDay).length === 0 && (
-                          <p className="text-xs text-gray-400 text-center py-3">No periods on {ttDay}</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             )}
           </div>

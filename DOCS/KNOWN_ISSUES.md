@@ -7,7 +7,7 @@ Current bugs and workarounds for the WLYL School prototype.
 
 ### [#163–#168 follow-up] Screens that still call API routes that do not exist on dev
 - **Severity:** Medium — the calls return 404 and the screens show nothing or an error.
-- **Detail:** Found by scanning every screen for `/api/...` calls with no matching `route.ts`. Still open after the clean-up: timetable generation, conflicts, health, schedule settings and teacher availability (`/api/class-timetable/generate|conflicts|health`, `/api/school-schedule`, `/api/teacher-availability`); the admin Student Leaderboard (`/api/leaderboard`); Year-in-Review (`/api/year-review`); Parent Engagement (`/api/parent/engagement`); Class Analytics and Student Management performance panels (`/api/classes/{id}/performance`).
+- **Detail:** Found by scanning every screen for `/api/...` calls with no matching `route.ts`. Still open after the clean-up (timetable was removed separately, #176): the admin Student Leaderboard (`/api/leaderboard`); Year-in-Review (`/api/year-review`); Parent Engagement (`/api/parent/engagement`); Class Analytics and Student Management performance panels (`/api/classes/{id}/performance`).
 - **Workaround:** Do not present these as available. The removed code is in git history before commit `046992f`.
 - **Status:** Owner decides per feature: restore the route, or remove the screen as in #163–#168.
 
