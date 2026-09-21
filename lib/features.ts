@@ -38,13 +38,11 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   // ── Analytics & Intelligence ─────────────────────────────────────────────────
   { key: 'briefing',           label: 'Daily Briefing',                  category: 'Analytics', portals: ['school-admin'] },
   { key: 'analysis',           label: 'Student–Teacher Analysis',        category: 'Analytics', portals: ['school-admin'] },
-  { key: 'class-analytics',    label: 'Class Analytics',                 category: 'Analytics', portals: ['school-admin'] },
 
   // ── Communication ────────────────────────────────────────────────────────────
   { key: 'announcements',      label: 'Announcement Board',              category: 'Communication', portals: ['school-admin'] },
   { key: 'feedback-management', label: 'Feedback Management',            category: 'Communication', portals: ['school-admin'] },
   { key: 'notifications',      label: 'Notification Center',             category: 'Communication', portals: ['school-admin'] },
-  { key: 'parent-engagement',  label: 'Parent Engagement',               category: 'Communication', portals: ['school-admin'] },
 
   // ── Finance ──────────────────────────────────────────────────────────────────
   { key: 'fee-management',     label: 'Fee Management',                  category: 'Finance', portals: ['school-admin', 'parent'] },
@@ -54,11 +52,9 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   // ── Administration ───────────────────────────────────────────────────────────
   // The school admin manages it; teachers, students and parents see it read-only (all governed by this one toggle).
   { key: 'calendar',           label: 'Academic Calendar',               category: 'Administration', portals: ['school-admin', 'teacher', 'student', 'parent'] },
-  { key: 'leaderboard',        label: 'Student Leaderboard',             category: 'Administration', portals: ['school-admin'] },
   { key: 'export',             label: 'Export & Reports',                category: 'Administration', portals: ['school-admin'] },
   { key: 'settings',           label: 'School Settings',                 category: 'Administration', portals: ['school-admin'] },
   { key: 'year-rollover',      label: 'Year Rollover',                   category: 'Administration', portals: ['school-admin'] },
-  { key: 'year-review',        label: 'Year-in-Review Report',           category: 'Administration', portals: ['school-admin'] },
   { key: 'api-monitoring',   label: 'Watchline (API Monitoring)',       category: 'Administration', portals: ['school-admin'] },
 ]
 

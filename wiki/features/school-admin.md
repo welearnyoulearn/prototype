@@ -44,10 +44,10 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Class Analytics | Built | Per-class: average marks, attendance %, task submission rate, top students |
+| Class Analytics | Removed | Pulled out of `dev` (#183): its performance route no longer exists and it overlaps the attendance dashboards and the Student 360 profile. Preserved on `feature/183-class-analytics-and-student-performance` (draft PR #186) |
 | Academic Analytics | Built | School-wide: pass rate, subject performance comparison, top performers |
 | Student-Teacher Analysis | Built | Student performance relative to teacher assignments |
-| Year-in-Review Report | Built | Full-year: attendance, pass rate, fee collection, top students |
+| Year-in-Review Report | Removed | Pulled out of `dev` (#181): its `/api/year-review` route no longer exists. Preserved on `feature/181-year-in-review` (draft PR #184); to be rebuilt as its own PR |
 | School Health Score | Planned | Composite score of attendance, marks, tasks, fees. Defined in `lib/features.ts` as `school-health` but not implemented |
 | Syllabus Predictor | Planned | AI prediction of syllabus completion date. Defined in `lib/features.ts` as `syllabus-predictor` but not implemented |
 
@@ -57,8 +57,8 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 |---------|--------|-------------|
 | Announcement Board | Built | Create with audience targeting, priority, expiry. TV Mode section |
 | Notification Center | Built | Full notification history for the school |
-| Student Leaderboard | Built | Points-based ranking with badges, streaks, gamification |
-| Parent Engagement | Built | Metrics on parent portal usage |
+| Student Leaderboard | Removed | Deleted from `dev` (#180): unreachable, its backend no longer exists and most point sources were removed. No branch (code is in git history) |
+| Parent Engagement | Removed | Pulled out of `dev` (#182): its `/api/parent/engagement` route no longer exists (the acknowledgement data still does). Preserved on `feature/182-parent-engagement` (draft PR #185); small PR to restore |
 | Feedback Management | Built | No-login QR-code feedback form (parent/student/teacher/visitor/other) with a school-admin dashboard, issue pipeline, category CRUD, and QR poster generation. `feedback-management` in `lib/features.ts`. See `wiki/features/feedback-management.md` |
 | Anonymous Class Pulse | Planned | Anonymous student feedback. Defined in `lib/features.ts` as `class-pulse` but not implemented |
 
