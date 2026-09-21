@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useConfirm } from '@/components/ui/use-confirm'
 import { Megaphone } from 'lucide-react'
 import { EmptyState } from '@/components/ui/empty-state'
 
@@ -69,6 +70,8 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
   const [success, setSuccess]     = useState('')
   const [expanded, setExpanded]   = useState<number | null>(null)
   const [filterAudience, setFilterAudience] = useState<string>('all')
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const { confirm, ConfirmDialog } = useConfirm()
 
 
   // Form state — target_audience as array
@@ -104,6 +107,24 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
   }
 
 
+  function startEdit(a: Announcement) {
+    setEditingId(a.id)
+    setError('')
+    setForm({
+      title: a.title, content: a.content,
+      announcement_type: a.announcement_type,
+      target_audience: a.target_audience === 'all' ? ['all'] : a.target_audience.split(',').map(x => x.trim()),
+      priority: a.priority,
+      expires_at: a.expires_at ? a.expires_at.slice(0, 10) : '',
+    })
+    setTab('create')
+  }
+
+  function resetForm() {
+    setEditingId(null)
+    setForm({ title: '', content: '', announcement_type: 'general', target_audience: ['all'], priority: 'normal', expires_at: '' })
+  }
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
     if (form.target_audience.length === 0) {
@@ -116,14 +137,16 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
         ? 'all'
         : form.target_audience.join(',')
 
-      const r = await fetch('/api/announcements', {
-        method: 'POST',
+      const editing = editingId !== null
+      const r = await fetch(editing ? `/api/announcements/${editingId}` : '/api/announcements', {
+        method: editing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, target_audience, school_id: schoolId, created_by_name: 'Admin' }),
+        // expires_at '' clears the expiry when editing; the server derives the author
+        body: JSON.stringify(editing ? { ...form, target_audience } : { ...form, target_audience, school_id: schoolId }),
       })
       if (!r.ok) { const d = await r.json(); throw new Error(d.error) }
-      setSuccess('Announcement published successfully!')
-      setForm({ title: '', content: '', announcement_type: 'general', target_audience: ['all'], priority: 'normal', expires_at: '' })
+      setSuccess(editing ? 'Announcement updated.' : 'Announcement published successfully!')
+      resetForm()
       setTab('list')
       await load()
       setTimeout(() => setSuccess(''), 4000)
@@ -135,10 +158,16 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
   }
 
   async function handleDelete(id: number) {
+    const ok = await confirm('Delete this announcement? Everyone who could see it will lose it.', { title: 'Delete announcement?', confirmText: 'Delete' })
+    if (!ok) return
     setDeleting(id)
-    await fetch(`/api/announcements/${id}`, { method: 'DELETE' })
-    setItems(prev => prev.filter(a => a.id !== id))
-    setDeleting(null)
+    try {
+      const r = await fetch(`/api/announcements/${id}`, { method: 'DELETE' })
+      if (!r.ok) { const d = await r.json().catch(() => ({})); setError(d.error || 'Could not delete the announcement'); return }
+      setItems(prev => prev.filter(a => a.id !== id))
+    } finally {
+      setDeleting(null)
+    }
   }
 
   function fmtDate(s: string) {
@@ -170,13 +199,13 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <button onClick={() => { setTab('list'); load() }}
+          <button data-testid="ann-tab-list" onClick={() => { setTab('list'); resetForm(); load() }}
             className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${tab === 'list'
               ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
               : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
             All Announcements
           </button>
-          <button onClick={() => setTab('create')}
+          <button data-testid="ann-tab-create" onClick={() => { resetForm(); setTab('create') }}
             className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-1.5 ${tab === 'create'
               ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200'
               : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
@@ -262,7 +291,7 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
               const isHigh = a.priority === 'high'
 
               return (
-                <div key={a.id} className={`bg-white border rounded-2xl shadow-sm overflow-hidden transition-all ${
+                <div key={a.id} data-testid={`ann-card-${a.id}`} className={`bg-white border rounded-2xl shadow-sm overflow-hidden transition-all ${
                   isUrgent ? 'border-red-200' : isHigh ? 'border-amber-200' : 'border-gray-100'
                 }`}>
                   <div
@@ -307,8 +336,16 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
                   {isOpen && (
                     <div className="px-5 pb-5 border-t border-gray-50">
                       <p className="text-sm text-gray-600 mt-4 whitespace-pre-wrap leading-relaxed">{a.content}</p>
-                      <div className="flex justify-end mt-4 pt-3 border-t border-gray-50">
+                      <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-50">
                         <button
+                          data-testid={`ann-edit-${a.id}`}
+                          onClick={() => startEdit(a)}
+                          className="text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50 px-4 py-1.5 rounded-lg transition-all font-medium"
+                        >
+                          ✏ Edit
+                        </button>
+                        <button
+                          data-testid={`ann-delete-${a.id}`}
                           onClick={() => handleDelete(a.id)}
                           disabled={deleting === a.id}
                           className="text-xs text-red-500 hover:text-red-700 border border-red-200 hover:border-red-400 hover:bg-red-50 px-4 py-1.5 rounded-lg transition-all disabled:opacity-40 font-medium"
@@ -327,10 +364,10 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
 
       {/* ── Create Form ── */}
       {tab === 'create' && (
-        <form onSubmit={handleCreate} className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+        <form data-testid="ann-form" onSubmit={handleCreate} className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
           <div className="px-6 py-5 border-b border-gray-50 bg-gradient-to-r from-indigo-50 to-white">
-            <h3 className="text-base font-bold text-gray-900">New Announcement</h3>
-            <p className="text-sm text-gray-500 mt-0.5">Post a notice visible to selected audience</p>
+            <h3 className="text-base font-bold text-gray-900">{editingId !== null ? 'Edit Announcement' : 'New Announcement'}</h3>
+            <p className="text-sm text-gray-500 mt-0.5">{editingId !== null ? 'Changes show to the selected audience straight away' : 'Post a notice visible to selected audience'}</p>
           </div>
 
           <div className="p-6 space-y-5">
@@ -348,6 +385,7 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Title *</label>
               <input
                 className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                data-testid="ann-title" maxLength={200}
                 placeholder="e.g. School closed for Republic Day"
                 value={form.title}
                 onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
@@ -359,7 +397,7 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Content *</label>
               <textarea
                 className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
-                rows={5}
+                rows={5} data-testid="ann-content" maxLength={5000}
                 placeholder="Write the full announcement here…"
                 value={form.content}
                 onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
@@ -374,6 +412,7 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
                 {/* All chip */}
                 <button
                   type="button"
+                  data-testid="ann-audience-all"
                   onClick={() => toggleAudience('all')}
                   className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all ${
                     form.target_audience.includes('all')
@@ -387,7 +426,7 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
                   const selected = !form.target_audience.includes('all') && form.target_audience.includes(opt.key)
                   return (
                     <button
-                      key={opt.key}
+                      key={opt.key} data-testid={`ann-audience-${opt.key}`}
                       type="button"
                       onClick={() => toggleAudience(opt.key)}
                       className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all ${
@@ -417,6 +456,7 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Type</label>
                 <select
+                  data-testid="ann-type"
                   className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white transition-all"
                   value={form.announcement_type}
                   onChange={e => setForm(f => ({ ...f, announcement_type: e.target.value }))}
@@ -430,6 +470,7 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Priority</label>
                 <select
+                  data-testid="ann-priority"
                   className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white transition-all"
                   value={form.priority}
                   onChange={e => setForm(f => ({ ...f, priority: e.target.value }))}
@@ -444,7 +485,7 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
             <div>
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Expiry Date (optional)</label>
               <input
-                type="date"
+                type="date" data-testid="ann-expires"
                 className="border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
                 value={form.expires_at}
                 onChange={e => setForm(f => ({ ...f, expires_at: e.target.value }))}
@@ -454,7 +495,7 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
 
             <div className="flex gap-3 pt-2">
               <button
-                type="submit"
+                type="submit" data-testid="ann-submit"
                 disabled={saving}
                 className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-all disabled:opacity-60 shadow-sm shadow-indigo-200 flex items-center gap-2"
               >
@@ -463,20 +504,20 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
                     <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
-                    Publishing…
+                    {editingId !== null ? 'Saving…' : 'Publishing…'}
                   </>
                 ) : (
                   <>
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
                     </svg>
-                    Publish Announcement
+                    {editingId !== null ? 'Save Changes' : 'Publish Announcement'}
                   </>
                 )}
               </button>
               <button
-                type="button"
-                onClick={() => setTab('list')}
+                type="button" data-testid="ann-cancel"
+                onClick={() => { resetForm(); setTab('list') }}
                 className="px-4 py-2.5 border border-gray-200 text-gray-600 text-sm font-semibold rounded-xl hover:bg-gray-50 transition-all"
               >
                 Cancel
@@ -486,6 +527,7 @@ export default function AnnouncementBoard({ schoolId }: { schoolId: number }) {
         </form>
       )}
 
+      {ConfirmDialog}
     </div>
   )
 }

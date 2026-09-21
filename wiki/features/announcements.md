@@ -17,11 +17,16 @@ School admin publishes; teachers, students and parents read what is addressed to
 
 ## How it works
 
-- Create with audience targeting (one or several audiences), priority and expiry; edit or delete.
-- Portals show announcements filtered to the audience.
+- **Publish:** the school admin (or principal / vice principal) writes a title and message, picks a type (general, circular, event, alert), a priority (normal, high, urgent), an audience (All, or any mix of Teachers, Students, Parents) and an optional expiry date.
+- **Edit / delete:** from the notice card; delete asks for confirmation. Editing can also remove the expiry.
+- **Read:** teacher dashboard feed, student dashboard card and parent dashboard card — each shows only notices addressed to that audience (or to all).
+- **Order:** urgent, then high, then normal; newest first within each.
 
 ## Rules and limits
 
+- Only school staff of the same school can publish, edit or delete (server-checked; teachers, students, parents and other schools cannot). The author name comes from the signed-in user's profile.
+- A notice with an expiry stays visible through the end of that day in India time.
+- No read tracking, attachments, scheduling, drafts or push/email/WhatsApp alerts yet — notices are seen when someone opens their dashboard.
 
 ## Code evidence
 
@@ -45,3 +50,4 @@ API routes these screens call (all exist):
 | Date | Change | Issue |
 |------|--------|-------|
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
+| 2026-09-21 | Write API locked to the school's own staff; edit added to the screen; IST expiry; tests | #203 |

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getAnySession } from '@/lib/auth'
+import { getAnySession, requireFeeAccess } from '@/lib/auth'
+import { AnnouncementCreateSchema, normaliseAudience } from '@/lib/announcements'
+import { todayIST } from '@/lib/istDate'
 
 // Hard ceiling on rows per request so a noticeboard can never come back unbounded.
 const MAX_LIMIT = 500
@@ -32,7 +34,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const today = new Date().toISOString().slice(0, 10)
+    // India date: a notice that expires "today" stays up until midnight IST, not 05:30 the next morning
+    const today = todayIST()
 
     // Build audience filter:
     // - No audience param → return everything (admin view)
@@ -101,53 +104,32 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/announcements
-// Body: { school_id, title, content, announcement_type, target_audience, priority, created_by_name, expires_at }
+// Body: { school_id, title, content, announcement_type, target_audience, priority, expires_at }
 // target_audience: 'all' | comma-separated e.g. 'teachers,students' | 'teachers' | 'students' | 'parents'
+// School admin / principal / vice principal of THAT school (or a platform admin) only.
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json()
-    const {
-      school_id, title, content,
-      announcement_type = 'general',
-      target_audience = 'all',
-      priority = 'normal',
-      created_by_name = 'Admin',
-      expires_at,
-    } = body
+    const body = await req.json().catch(() => null)
+    const access = await requireFeeAccess(body?.school_id)
+    if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
-    if (!school_id || !title?.trim() || !content?.trim()) {
-      return NextResponse.json({ error: 'school_id, title, content required' }, { status: 400 })
-    }
-    if (!['general', 'circular', 'event', 'alert'].includes(announcement_type)) {
-      return NextResponse.json({ error: 'Invalid announcement_type' }, { status: 400 })
-    }
-    if (!['normal', 'high', 'urgent'].includes(priority)) {
-      return NextResponse.json({ error: 'Invalid priority' }, { status: 400 })
-    }
+    const parsed = AnnouncementCreateSchema.safeParse(body)
+    if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Invalid input' }, { status: 400 })
+    const d = parsed.data
 
-    // Validate target_audience — allow 'all' or any comma-separated subset of valid values
-    const VALID_AUDIENCES = ['all', 'teachers', 'students', 'parents']
-    const audienceParts = String(target_audience).split(',').map(s => s.trim())
-    const isValidAudience = audienceParts.every(p => VALID_AUDIENCES.includes(p))
-    if (!isValidAudience) {
-      return NextResponse.json({ error: 'Invalid target_audience' }, { status: 400 })
-    }
-    // Normalise: if all 3 individual audiences are selected, store as 'all'
-    const normalised =
-      audienceParts.length === 3 &&
-      ['teachers', 'students', 'parents'].every(a => audienceParts.includes(a))
-        ? 'all'
-        : audienceParts.join(',')
+    // Author comes from the signed-in user, never from the request
+    const { rows: [author] } = await pool.query<{ full_name: string | null }>(`SELECT full_name FROM user_profiles WHERE user_id = $1`, [access.userId])
+    const createdBy = author?.full_name?.trim() || access.actor
 
     const { rows: [row] } = await pool.query(`
       INSERT INTO announcements
         (school_id, title, content, announcement_type, target_audience, priority, created_by_name, expires_at)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-      RETURNING *
-    `, [school_id, title.trim(), content.trim(), announcement_type, normalised, priority, created_by_name, expires_at || null])
+      RETURNING id, school_id, title, content, announcement_type, target_audience, priority, created_by_name, expires_at::text, created_at
+    `, [access.schoolId, d.title, d.content, d.announcement_type, normaliseAudience(d.target_audience), d.priority, createdBy, d.expires_at || null])
 
     return NextResponse.json(row, { status: 201 })
-} catch (err: unknown) {
+  } catch (err: unknown) {
     console.error('[API]', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }

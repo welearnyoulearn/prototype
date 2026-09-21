@@ -34681,7 +34681,7 @@
           "Announcements"
         ],
         "summary": "List active announcements",
-        "description": "Returns non-expired announcements for the session's school, ordered urgent > high > normal then newest first. Optional audience filter matches 'all' or a comma-separated target_audience containing the audience. Pagination is opt-in: without limit/offset a plain array is returned; with either, a {data, limit, offset, total} envelope.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** Uses getAnySession(); school_id must equal the session's school (403 otherwise).",
+        "description": "Returns non-expired announcements for the session's school, ordered urgent > high > normal then newest first. Optional audience filter matches 'all' or a comma-separated target_audience containing the audience. Pagination is opt-in: without limit/offset a plain array is returned; with either, a {data, limit, offset, total} envelope.\n\n**Who can call:** Teacher, Student, Parent, School admin.\n\n**Checks:** Uses getAnySession(); school_id must equal the session's school (403 otherwise).\n\nA notice with expires_at is shown through the end of that day in India time (IST).",
         "operationId": "getAnnouncements",
         "security": [
           {
@@ -34876,10 +34876,17 @@
         "tags": [
           "Announcements"
         ],
-        "summary": "Create an announcement",
-        "description": "Inserts an announcement. target_audience may be 'all' or a comma-separated subset of teachers/students/parents; selecting all three is stored as 'all'.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all; school_id is taken from the body unverified.",
+        "summary": "Publish an announcement",
+        "description": "Publishes a notice to the school's noticeboard. title (max 200) and content (max 5000) required; announcement_type general/circular/event/alert; priority normal/high/urgent; target_audience 'all' or a comma-separated subset of teachers/students/parents (all three is stored as 'all'; stored in a stable order); expires_at optional YYYY-MM-DD. The author name is taken from the signed-in user's profile, never from the request.\n\n**Who can call:** Platform admin, School admin (principal / vice principal).\n\n**Checks:** requireFeeAccess: school staff may only write to their own school; the school comes from the notice itself for edit/delete.",
         "operationId": "postAnnouncements",
-        "security": [],
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
         "responses": {
           "201": {
             "description": "Created announcement row",
@@ -34940,16 +34947,23 @@
             }
           },
           "400": {
-            "description": "Missing school_id/title/content, or invalid announcement_type/priority/target_audience"
+            "description": "Missing/invalid title, content, type, priority, audience or expires_at"
           },
           "500": {
             "description": "Internal server error"
+          },
+          "403": {
+            "description": "Not school staff for this school_id"
           }
         },
         "x-badges": [
           {
-            "name": "Public",
-            "color": "#dc2626"
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
           }
         ],
         "x-source-file": "app/api/announcements/route.ts",
@@ -35019,10 +35033,17 @@
         "tags": [
           "Announcements"
         ],
-        "summary": "Update an announcement",
-        "description": "Partially updates an announcement; omitted/null fields keep their current value (COALESCE). No validation of enum values on this path.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all; any caller can edit any announcement by id (proxy treats /api/ as public).",
+        "summary": "Edit an announcement",
+        "description": "Updates any of title, content, announcement_type, priority, target_audience, expires_at. Send expires_at null (or '') to remove the expiry. Same validation as publishing; an empty body is refused.\n\n**Who can call:** Platform admin, School admin (principal / vice principal).\n\n**Checks:** requireFeeAccess: school staff may only write to their own school; the school comes from the notice itself for edit/delete.",
         "operationId": "patchAnnouncementsId",
-        "security": [],
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Updated announcement row",
@@ -35087,12 +35108,22 @@
           },
           "500": {
             "description": "Internal server error"
+          },
+          "403": {
+            "description": "Not school staff for the notice's school (also returned to signed-out callers, so ids cannot be probed)"
+          },
+          "400": {
+            "description": "Invalid id; invalid or empty change"
           }
         },
         "x-badges": [
           {
-            "name": "Public",
-            "color": "#dc2626"
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
           }
         ],
         "x-source-file": "app/api/announcements/[id]/route.ts",
@@ -35145,9 +35176,16 @@
           "Announcements"
         ],
         "summary": "Delete an announcement",
-        "description": "Hard-deletes an announcement row by id.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session check at all; any caller can delete any announcement by id.",
+        "description": "Permanently deletes a notice.\n\n**Who can call:** Platform admin, School admin (principal / vice principal).\n\n**Checks:** requireFeeAccess: school staff may only write to their own school; the school comes from the notice itself for edit/delete.",
         "operationId": "deleteAnnouncementsId",
-        "security": [],
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Deleted",
@@ -35172,12 +35210,22 @@
           },
           "500": {
             "description": "Internal server error"
+          },
+          "403": {
+            "description": "Not school staff for the notice's school (also returned to signed-out callers, so ids cannot be probed)"
+          },
+          "400": {
+            "description": "Invalid id"
           }
         },
         "x-badges": [
           {
-            "name": "Public",
-            "color": "#dc2626"
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
           }
         ],
         "x-source-file": "app/api/announcements/[id]/route.ts",

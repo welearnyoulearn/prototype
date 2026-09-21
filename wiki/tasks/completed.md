@@ -18,6 +18,12 @@ All finished features and bug fixes. Most recent first.
 
 ---
 
+### 2026-09-21 — Announcement Board: secured the write API, edit in the UI, IST expiry (#203)
+**Type:** Bug fix (security)
+**Portal:** School Admin
+**Summary:** POST/PATCH/DELETE /api/announcements were open to anyone. Now school-staff-of-that-school only, author from the session, zod validation, edit + delete-confirm + data-testids on the board, expiry in India time. 10 end-to-end tests.
+**PR:** fix/203-announcement-board
+
 ### 2026-09-21 — Year Rollover: repeat a year / change section (#201)
 **Type:** Feature
 **Portal:** School Admin

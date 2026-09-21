@@ -44,6 +44,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - `docs/ATTENDANCE.md`: the whole flow, rules, API, data model and how to test it.
 
 ### Fixed
+- **Announcement Board security** (#203): publishing, editing and deleting notices required no login and no school check — anyone could post to or delete any school's notices. Now only that school's own admin / principal / vice principal can (or a platform admin). The author name comes from the signed-in user, and input is validated (lengths, dates, enums).
+- Announcement expiry is judged in India time (a notice expiring today stays up until midnight IST). The board can now edit a notice and remove its expiry, and asks before deleting.
 - **Security:** any logged-in user (students and parents included) could read every class's attendance and write attendance for any class as any teacher; a parent could read any child's records; the calendar, admin briefing, overview and export routes had no login or school check; one attendance route was open to SQL injection. Identity now comes only from the signed login and every route is scoped to the caller's school. (#153)
 - Admin, teacher, parent and student screens each computed attendance % differently (morning only, late counted as absent, late as half…). They now share one rule, so the same child shows the same numbers everywhere. (#153)
 - Admin "today" used UTC, showing yesterday between 00:00 and 05:30 IST. (#153)
