@@ -28,6 +28,14 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 
 **Consequences:** `dev` has fewer half-features; the rewards points/badges/streak data and `GET /api/students/{id}/rewards` stay for the admin's student panel. Screens for other features that still call missing routes (timetable generation, leaderboard, year review, parent engagement, class-analytics panels) are tracked in KNOWN_ISSUES.
 
+## 2026-09-21 — Analytics leftovers leave dev (#180–#183)
+
+**Context:** Four school-admin analytics screens (Student Leaderboard, Year-in-Review, Parent Engagement, Class Analytics) and the Student Management performance tab had no working backend on `dev`; three of the screens were not linked from any menu. The Leaderboard's points mostly came from features already removed.
+
+**Decision:** Delete the Leaderboard. Preserve Year-in-Review, Parent Engagement and Class Analytics + the performance tab on their own branches (#184–#186) and remove them from `dev`; rebuild each later as its own PR. Parent Engagement is the smallest to restore; Class Analytics should be redesigned around exam data and the shared attendance rules, reusing the Student 360 profile.
+
+**Consequences:** the four feature keys leave the Platform Admin config. The unauthenticated rewards route was deleted with the only screen that used it.
+
 ## 2026-09-20 — Attendance: any teacher marks, first submit locks; holidays live in the Academic Calendar (#153)
 
 **Context:** Attendance let any logged-in user (students and parents too) read and write any class, silently overwrote earlier records, and each portal computed its own percentage. The school calendar existed but nothing used it, so a holiday looked like a day nobody marked, and its routes had no authentication.

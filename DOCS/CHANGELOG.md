@@ -24,6 +24,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 -->
 
 ## [Unreleased]
+- **Admin Student Leaderboard** deleted, and the unauthenticated `GET /api/students/{id}/rewards` route with it (#180). **Year-in-Review**, **Parent Engagement** and **Class Analytics** (with the Student Management performance tab) taken out of `dev` and preserved on their own feature branches (#181, #182, #183). The feature keys `leaderboard`, `year-review`, `parent-engagement` and `class-analytics` are gone from the Platform Admin feature config. Tables untouched.
 
 ### Removed
 - **Display / TV kiosk** (`/display`) deleted permanently — its backend routes no longer existed. (#163)

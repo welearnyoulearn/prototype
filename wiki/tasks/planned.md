@@ -66,6 +66,10 @@ rebuilding from scratch.
 - **Teacher Class Performance** (#167) — `feature/167-teacher-class-performance` (draft PR #172). Own feature key `class-performance` when restored.
 - **Weekly Test** (#168) — `feature/168-weekly-test` (draft PR #173). Own feature key `weekly-test` when restored.
 - **Display / TV kiosk** (#163) — deleted permanently, no branch.
+- **Year-in-Review** (#181) — `feature/181-year-in-review` (draft PR #184). Rebuild later as its own PR.
+- **Parent Engagement** (#182) — `feature/182-parent-engagement` (draft PR #185). Small PR: one summary route is missing.
+- **Class Analytics + Student Management performance tab** (#183) — `feature/183-class-analytics-and-student-performance` (draft PR #186). Rebuild later as marks / class analytics.
+- **Admin Student Leaderboard** (#180) — deleted (no branch).
 
 ## Partial Features to Complete
 

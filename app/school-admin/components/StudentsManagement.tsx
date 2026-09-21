@@ -39,20 +39,6 @@ type DupGroup = {
 
 type EditForm = Partial<Student>
 
-type StudentPerf = {
-  attendance_pct: number | null
-  task_submission_rate: number | null
-  avg_score_pct: number | null
-  points: number
-  engagement: number
-  rank: number
-}
-type StudentRewards = {
-  total_points: number
-  badges: { badge_type: string; earned_at: string }[]
-  streak: { current_streak: number; longest_streak: number } | null
-}
-
 type DuplicatesPanelProps = {
   dupGroups: DupGroup[]
   dupLoading: boolean
@@ -267,7 +253,6 @@ const StudentProfile = dynamic(() => import('./StudentProfile'), { ssr: false })
 export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const { confirm, ConfirmDialog } = useConfirm()
   const [students, setStudents] = useState<Student[]>([])
-  const [classes, setClasses] = useState<{ id: number; grade: string; section: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [gradeFilter, setGradeFilter] = useState('all')
@@ -286,10 +271,6 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState<EditForm>({})
   const [saving, setSaving] = useState(false)
-  const [detailTab, setDetailTab] = useState<'info' | 'performance'>('info')
-  const [studentPerf, setStudentPerf] = useState<StudentPerf | null>(null)
-  const [studentRewards, setStudentRewards] = useState<StudentRewards | null>(null)
-  const [perfLoading, setPerfLoading] = useState(false)
 
   // Auto-scroll to top when this module opens
   useEffect(() => {
@@ -298,34 +279,12 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
 
   useEffect(() => {
     setLoading(true)
-    Promise.all([
-      fetch(`/api/students?school_id=${schoolId}`).then(r => r.json()),
-      fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()),
-    ]).then(([stu, cls]) => {
+    fetch(`/api/students?school_id=${schoolId}`).then(r => r.json()).then(stu => {
       // Normalise section to uppercase so "a" and "A" are the same class
       const normStu = Array.isArray(stu) ? stu.map((s: Student) => ({ ...s, section: s.section?.toUpperCase() ?? s.section })) : []
       setStudents(normStu)
-      setClasses(Array.isArray(cls) ? cls : [])
     }).catch(() => setError('Failed to load students')).finally(() => setLoading(false))
   }, [schoolId, refreshKey])
-
-  async function loadStudentPerformance(student: Student) {
-    setPerfLoading(true); setStudentPerf(null); setStudentRewards(null)
-    try {
-      const cls = classes.find(c => c.grade === student.grade && c.section === student.section)
-      const [rewards, perf] = await Promise.all([
-        fetch(`/api/students/${student.id}/rewards?school_id=${schoolId}`).then(r => r.json()).catch(() => null),
-        cls
-          ? fetch(`/api/classes/${cls.id}/performance?school_id=${schoolId}&days=30`).then(r => r.json()).catch(() => null)
-          : Promise.resolve(null),
-      ])
-      if (rewards) setStudentRewards({ total_points: rewards.total_points ?? 0, badges: rewards.badges ?? [], streak: rewards.streak ?? null })
-      if (perf && perf.students) {
-        const me = perf.students.find((s: { id: number }) => s.id === student.id)
-        if (me) setStudentPerf(me)
-      }
-    } finally { setPerfLoading(false) }
-  }
 
   async function reloadStudents() {
     setLoading(true)
@@ -630,7 +589,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                       if (b.school_roll_number != null) return 1
                       return a.name.localeCompare(b.name)
                     }).map(s => (
-                      <tr key={s.id} onClick={() => { setSelected(s); setEditing(false); setEditForm({}); setDetailTab('info'); setStudentPerf(null); setStudentRewards(null) }}
+                      <tr key={s.id} onClick={() => { setSelected(s); setEditing(false); setEditForm({}); }}
                         className={`cursor-pointer transition-colors ${selected?.id === s.id ? 'bg-green-50' : 'hover:bg-gray-50'}`}>
                         <td className="px-3 py-3 text-center font-semibold text-sm text-amber-700 bg-amber-50/40">
                           {s.school_roll_number ?? <span className="text-gray-300 font-normal text-xs">—</span>}
@@ -697,103 +656,11 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
         <div className="w-72 flex-shrink-0">
           <div className="bg-white rounded-xl border border-gray-200 sticky top-6 flex flex-col max-h-[calc(100vh-6rem)] overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-              <div className="flex gap-1">
-                {(['info', 'performance'] as const).map(t => (
-                  <button key={t} onClick={() => {
-                    setDetailTab(t)
-                    if (t === 'performance' && !studentPerf && !perfLoading) loadStudentPerformance(selected)
-                  }}
-                    className={`px-3 py-1 rounded-md text-xs font-semibold capitalize transition-colors ${detailTab === t ? 'bg-green-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
-                    {t === 'info' ? 'Profile' : '360° View'}
-                  </button>
-                ))}
-              </div>
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Student</span>
               <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
             </div>
 
             <div className="overflow-y-auto flex-1">
-            {detailTab === 'performance' ? (
-              <div className="px-5 py-5">
-                {/* Avatar header */}
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-10 h-10 rounded-full bg-green-600 flex items-center justify-center text-white font-bold flex-shrink-0">
-                    {selected.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <p className="font-bold text-gray-900 text-sm">{selected.name}</p>
-                    <p className="text-xs text-gray-400">Grade {selected.grade} – Sec {selected.section} · {selected.roll_number}</p>
-                  </div>
-                </div>
-                {perfLoading ? (
-                  <div className="py-8 text-center"><div className="w-5 h-5 border-2 border-green-400 border-t-transparent rounded-full animate-spin mx-auto" /></div>
-                ) : (
-                  <div className="space-y-4">
-                    {/* Performance metrics */}
-                    {studentPerf ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        {[
-                          { label: 'Attendance', value: studentPerf.attendance_pct, good: 80, warn: 60 },
-                          { label: 'Tasks Done', value: studentPerf.task_submission_rate, good: 70, warn: 50 },
-                          { label: 'Avg Score', value: studentPerf.avg_score_pct, good: 60, warn: 40 },
-                          { label: 'Engagement', value: studentPerf.engagement, good: 70, warn: 50 },
-                        ].map(({ label, value, good, warn }) => (
-                          <div key={label} className="bg-gray-50 rounded-xl p-3 text-center">
-                            <p className={`text-xl font-black ${value === null ? 'text-gray-300' : value >= good ? 'text-emerald-600' : value >= warn ? 'text-amber-500' : 'text-red-500'}`}>
-                              {value === null ? '—' : `${value}%`}
-                            </p>
-                            <p className="text-[10px] text-gray-500 mt-0.5">{label}</p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-gray-400 text-center">No performance data yet for this class.</p>
-                    )}
-                    {studentPerf && (
-                      <div className="bg-gray-50 rounded-xl px-3 py-2.5 flex items-center justify-between">
-                        <span className="text-xs text-gray-500">Class Rank</span>
-                        <span className="text-sm font-black text-violet-600">#{studentPerf.rank}</span>
-                      </div>
-                    )}
-                    {/* Rewards */}
-                    {studentRewards && (
-                      <div className="space-y-2">
-                        <div className="bg-amber-50 rounded-xl px-3 py-2.5 flex items-center justify-between">
-                          <span className="text-xs text-amber-700 font-semibold">Total Points</span>
-                          <span className="text-sm font-black text-amber-600">{studentRewards.total_points}</span>
-                        </div>
-                        {studentRewards.streak && studentRewards.streak.current_streak > 0 && (
-                          <div className="bg-orange-50 rounded-xl px-3 py-2.5 flex items-center justify-between">
-                            <span className="text-xs text-orange-700 font-semibold">Current Streak</span>
-                            <span className="text-sm font-black text-orange-500">{studentRewards.streak.current_streak} days</span>
-                          </div>
-                        )}
-                        {studentRewards.badges.length > 0 && (
-                          <div>
-                            <p className="text-xs font-semibold text-gray-500 mb-1.5">Badges Earned ({studentRewards.badges.length})</p>
-                            <div className="flex flex-wrap gap-1.5">
-                              {studentRewards.badges.map((b, i) => (
-                                <span key={i} className="text-[10px] bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium capitalize">
-                                  {(b.badge_type ?? '').replace(/_/g, ' ')}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {/* Parent info */}
-                    {(selected.parent_name || selected.parent_phone || selected.parent_email) && (
-                      <div className="bg-blue-50 rounded-xl px-3 py-2.5">
-                        <p className="text-[10px] font-semibold text-blue-500 uppercase tracking-wide mb-1">Parent</p>
-                        {selected.parent_name && <p className="text-xs font-semibold text-gray-800">{selected.parent_name}</p>}
-                        {selected.parent_phone && <p className="text-xs text-gray-500">{selected.parent_phone}</p>}
-                        {selected.parent_email && <p className="text-xs text-gray-400">{selected.parent_email}</p>}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
             <><div className="px-5 py-5 border-b border-gray-100">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-12 h-12 rounded-full bg-green-600 flex items-center justify-center text-white font-bold text-lg flex-shrink-0">
@@ -878,7 +745,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                 </button>
               )}
             </div>
-            </>) /* end info tab */}
+            </>
             </div> {/* end scroll wrapper */}
 
           </div>

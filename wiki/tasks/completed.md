@@ -30,6 +30,12 @@ All finished features and bug fixes. Most recent first.
 **Summary:** Deleted the Display/TV kiosk permanently (#163). Extracted five features to their own preservation branches and removed them from `dev`: Student Learning Hub & Daily Knowledge (#164), Rewards Marketplace (#165), Teacher Lesson Planner (#166), Teacher Class Performance (#167), Weekly Test incl. its weekly cron (#168). All were unreachable from any menu and called API routes that do not exist on `dev`. Database tables are untouched.
 **PR:** the chore PR that closes #163–#168
 
+### 2026-09-21 — Removed the analytics leftovers from dev (#180–#183)
+**Type:** Removal
+**Portal:** School Admin
+**Summary:** Deleted the unreachable admin Student Leaderboard (#180) and the unauthenticated, now-unused `GET /api/students/{id}/rewards`. Extracted Year-in-Review (#181), Parent Engagement (#182) and Class Analytics + the Student Management performance tab (#183) to their own preserved branches (draft PRs #184–#186). The four feature keys were removed from `lib/features.ts`. Tables untouched.
+**PR:** the chore PR that closes #180–#183
+
 ### 2026-09-20 — Removed Emergency Cover from dev, pending rework (#140)
 **Type:** Removal
 **Portal:** School Admin / Teacher
