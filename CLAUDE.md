@@ -47,6 +47,9 @@ The `wiki/` folder is the living documentation of this project. Read it to under
 3. **When a feature status changes** (Planned → Partial → Built): update both the feature doc and `wiki/tasks/planned.md`
 4. **Use the template** at `wiki/features/_template.md` when documenting new features
 
+### Product docs (definition of done)
+A feature PR is not done until its doc is current: update `wiki/features/<feature>.md` and `wiki/features/feature-map.json`, run `node scripts/product-docs.mjs`, commit the regenerated `wiki/features/CATALOG.md` and `docs/product/PRODUCT-FACTBOOK.md`. See `.claude/skills/update-product-docs/SKILL.md`. `e2e/docs-coverage.spec.ts` fails if a feature in `lib/features.ts` has no doc or the generated files are stale.
+
 ## Project Rules
 
 - TypeScript strict mode — no `any` type
