@@ -8,7 +8,6 @@ type Props = { schoolId: number; onNavigate?: (key: string) => void }
 
 type Stats          = { teachers: number; students: number; classes: number }
 type AttendanceSummary = { class_id: number; grade: string; section: string; morning_present: number; morning_absent: number; morning_total: number; morning_marked: boolean }
-type HealthTimetable   = { class_id: number; timetable_exists: boolean; conflict_count: number; no_teacher_count: number; subjects_unassigned: number }
 type ExamRow           = { id: number; exam_name: string; exam_date: string; exam_type: string; grade: string; section: string }
 
 function StatCard({ label, value, sub, color, bg, border, onClick }: {
@@ -50,14 +49,12 @@ function StatCardSkeleton() {
 export default function Overview({ schoolId, onNavigate }: Props) {
   // Feature flags — only fetch/render what this plan allows
   const hasAttendance     = useFeature('attendance')
-  const hasTimetable      = useFeature('timetable')
   const hasExams          = useFeature('exam-marks')
   const hasFeeManagement  = useFeature('fee-management')
 
   const [stats, setStats]                     = useState<Stats>({ teachers: 0, students: 0, classes: 0 })
   const [attendance, setAttendance]           = useState<AttendanceSummary[]>([])
   const [attHoliday, setAttHoliday]           = useState<{ kind: string; title: string } | null>(null)
-  const [timetableHealth, setTimetableHealth] = useState<HealthTimetable[]>([])
   const [upcomingExams, setUpcomingExams]     = useState<ExamRow[]>([])
   const [feeOverdue, setFeeOverdue]           = useState(0)
   const [feeOutstanding, setFeeOutstanding]   = useState(0)
@@ -72,7 +69,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
     // Build features list for batched API — only request what's enabled
     const featuresList = [
       hasAttendance  && 'attendance',
-      hasTimetable   && 'timetable',
       hasExams       && 'exams',
       hasFeeManagement && 'fees',
     ].filter(Boolean).join(',')
@@ -94,7 +90,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
       // Feature-gated
       if (d.attendance !== null) setAttendance(Array.isArray(d.attendance) ? d.attendance : [])
       setAttHoliday(d.attendance_holiday ?? null)
-      if (d.timetable  !== null) setTimetableHealth(Array.isArray(d.timetable) ? d.timetable : [])
       if (d.exams      !== null) setUpcomingExams(Array.isArray(d.exams) ? d.exams : [])
       if (d.fees       !== null) {
         setFeeOverdue(Number(d.fees?.overdue_count) || 0)
@@ -103,7 +98,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [schoolId, hasAttendance, hasTimetable, hasExams, hasFeeManagement])
+  }, [schoolId, hasAttendance, hasExams, hasFeeManagement])
 
   // Fetch current academic year once, then load overview with it
   useEffect(() => {
@@ -127,12 +122,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
   const attPct       = attStudents > 0 ? Math.round((attPresent / attStudents) * 100) : null
   // On a holiday / weekly off nothing is expected, so nothing is "not marked".
   const attNotMarked = attHoliday ? 0 : attTotal - attMarked
-  const ttConflicts  = timetableHealth.filter(h => h.conflict_count > 0).length
-  const ttNoTeacher  = timetableHealth.reduce((s, h) => s + h.no_teacher_count, 0)
-  const ttNoTimetable = timetableHealth.filter(h => !h.timetable_exists).length
-  const ttHealthy    = timetableHealth.filter(h => h.timetable_exists && h.conflict_count === 0 && h.no_teacher_count === 0).length
-
-  const alertCount = ttConflicts + attNotMarked + (hasFeeManagement && feeOverdue > 0 ? 1 : 0)
+  const alertCount = attNotMarked + (hasFeeManagement && feeOverdue > 0 ? 1 : 0)
 
   // Count cards (shown at bottom)
   const countCards = [
@@ -183,18 +173,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
       {/* ── Alert strip (feature-gated) ── */}
       {!loading && (
         <div className="space-y-2">
-          {hasTimetable && ttConflicts > 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <span className="w-7 h-7 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-sm font-bold flex-shrink-0">⚠</span>
-                <p className="text-sm font-semibold text-amber-800">{ttConflicts} class{ttConflicts > 1 ? 'es have' : ' has'} teacher conflicts in timetable</p>
-              </div>
-              <button onClick={() => onNavigate?.('timetable')}
-                className="text-xs font-semibold text-amber-600 hover:text-amber-800 border border-amber-200 hover:border-amber-400 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0">
-                Fix Conflicts →
-              </button>
-            </div>
-          )}
           {hasAttendance && attHoliday && (
             <div data-testid="overview-holiday-banner" className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center gap-3">
               <span className="text-lg" aria-hidden>🎉</span>
@@ -239,7 +217,6 @@ export default function Overview({ schoolId, onNavigate }: Props) {
       {!loading && (() => {
         const quickActions = [
           { label: 'Mark Attendance',  sub: 'Daily register',                 nav: 'attendance',      color: 'bg-blue-600',    show: hasAttendance },
-          { label: 'Timetable',        sub: 'Manage schedules',                nav: 'timetable',       color: 'bg-emerald-600', show: hasTimetable },
           { label: 'Collect Fees',     sub: feeOverdue > 0 ? `${feeOverdue} overdue` : 'Fee management', nav: 'fee-management', color: 'bg-amber-600', show: hasFeeManagement },
         ].filter(a => a.show)
 
@@ -272,45 +249,8 @@ export default function Overview({ schoolId, onNavigate }: Props) {
       )}
 
       {/* ── Health panels row (only panels for enabled features) ── */}
-      {!loading && (hasTimetable || hasAttendance || hasExams) && (
-        <div className={`grid gap-4 ${[hasTimetable, hasAttendance, hasExams].filter(Boolean).length === 3 ? 'grid-cols-3' : [hasTimetable, hasAttendance, hasExams].filter(Boolean).length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-
-          {hasTimetable && (
-            <div className="bg-white rounded-2xl border border-gray-200 p-5">
-              <div className="flex items-center justify-between mb-4">
-                <p className="font-bold text-gray-800 text-sm">Timetable Health</p>
-                <button onClick={() => onNavigate?.('timetable')} className="text-xs text-blue-500 hover:text-blue-700">View →</button>
-              </div>
-              {timetableHealth.length === 0 ? (
-                <p className="text-xs text-gray-400 text-center py-4">No classes configured yet</p>
-              ) : (
-                <div className="space-y-3">
-                  <div>
-                    <div className="flex justify-between text-xs text-gray-500 mb-1">
-                      <span>Classes with timetable</span>
-                      <span className="font-semibold text-gray-700">{timetableHealth.length - ttNoTimetable}/{timetableHealth.length}</span>
-                    </div>
-                    <HealthBar value={timetableHealth.length - ttNoTimetable} max={timetableHealth.length} color="bg-emerald-400" />
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-xs text-gray-500 mb-1">
-                      <span>Conflict-free</span>
-                      <span className="font-semibold text-gray-700">{ttHealthy}/{timetableHealth.length}</span>
-                    </div>
-                    <HealthBar value={ttHealthy} max={timetableHealth.length} color="bg-blue-400" />
-                  </div>
-                  <div className="pt-2 border-t border-gray-50 flex gap-3 flex-wrap">
-                    {ttConflicts > 0 && <span className="text-[11px] text-red-500 font-medium">{ttConflicts} conflict{ttConflicts > 1 ? 's' : ''}</span>}
-                    {ttNoTeacher > 0 && <span className="text-[11px] text-amber-500 font-medium">{ttNoTeacher} no teacher</span>}
-                    {ttNoTimetable > 0 && <span className="text-[11px] text-gray-400 font-medium">{ttNoTimetable} not generated</span>}
-                    {ttConflicts === 0 && ttNoTeacher === 0 && ttNoTimetable === 0 && (
-                      <span className="text-[11px] text-emerald-600 font-semibold">All timetables healthy ✓</span>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+      {!loading && (hasAttendance || hasExams) && (
+        <div className={`grid gap-4 ${[hasAttendance, hasExams].filter(Boolean).length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
 
           {hasAttendance && (
             <div className="bg-white rounded-2xl border border-gray-200 p-5">

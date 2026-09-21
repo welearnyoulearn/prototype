@@ -142,7 +142,7 @@ export async function sendTeacherWelcomeEmail(params: {
       <li>Visit your teacher portal using the button above</li>
       <li>Enter your email address and the temporary password</li>
       <li>Create a strong new password when prompted</li>
-      <li>Explore your classes, timetable, tasks, and more</li>
+      <li>Explore your classes, syllabus and more</li>
     </ol>`)
   return sendMail(params.to, `Your WLYL Teacher Account — ${params.schoolName}`, html)
 }
@@ -165,7 +165,7 @@ export async function sendStudentWelcomeEmail(params: {
       <li>Visit your student portal using the button above</li>
       <li>Enter your Roll Number and the temporary password</li>
       <li>Set a new password of your choice</li>
-      <li>Start learning — check your tasks, timetable, and daily knowledge!</li>
+      <li>Start learning — check your syllabus, marks and attendance!</li>
     </ol>`)
   return sendMail(params.to, `Welcome to WLYL — ${params.schoolName}`, html)
 }
@@ -215,7 +215,7 @@ export async function sendParentWelcomeEmail(params: {
       <div class="info-row"><span class="info-label">Exam results & report cards</span><span class="info-value">✓</span></div>
       <div class="info-row"><span class="info-label">Attendance records</span><span class="info-value">✓</span></div>
       <div class="info-row"><span class="info-label">Fee status & payments</span><span class="info-value">✓</span></div>
-      <div class="info-row"><span class="info-label">Timetable & announcements</span><span class="info-value">✓</span></div>
+      <div class="info-row"><span class="info-label">Announcements</span><span class="info-value">✓</span></div>
     </div>`)
   return sendMail(params.to, `Your WLYL Parent Account — ${params.schoolName}`, html)
 }

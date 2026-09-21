@@ -34,7 +34,7 @@ const roles = [
   },
   {
     title: 'Student',
-    description: 'View timetable, check marks & results',
+    description: 'Check attendance, marks & fees',
     href: '/student/login',
     testid: 'student',
     photo: 'https://images.unsplash.com/photo-1581726690015-c9861fa5057f?w=800&auto=format&fit=crop&q=70',

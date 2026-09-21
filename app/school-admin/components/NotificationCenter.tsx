@@ -22,7 +22,6 @@ const TYPE_META: Record<string, { icon: string; color: string; label: string }> 
   substitute_assigned: { icon: '🔄', color: 'bg-amber-100 text-amber-700', label: 'Substitute' },
   exam_scheduled:      { icon: '📝', color: 'bg-purple-100 text-purple-700',label: 'Exam Scheduled' },
   marks_entry_required:{ icon: '📊', color: 'bg-orange-100 text-orange-700',label: 'Marks Entry' },
-  timetable_updated:   { icon: '🗓️', color: 'bg-cyan-100 text-cyan-700',   label: 'Timetable' },
   general:             { icon: '🔔', color: 'bg-gray-100 text-gray-600',   label: 'General' },
 }
 

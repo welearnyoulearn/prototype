@@ -19,6 +19,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Change description (#issue-number)
 
 ### Removed
+- **All timetable** taken off `dev` (admin, teacher, student and parent screens; class-management tab; overview stats; substitutes panel; `/api/class-timetable`, `/api/timetable`, `/api/parent/timetable`, `/api/substitutes`; the `timetable` feature key). The complete, secured workflow is on `feature/175-timetable-full-workflow` (draft PR #177). Tables are untouched. (#176)
 - Removed feature description (#issue-number)
 -->
 

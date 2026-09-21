@@ -50,48 +50,6 @@ export async function GET(req: NextRequest) {
         `, [school_id, date])
       : null
 
-    // ── 5. Timetable health (uses class_timetable directly) ──────────────────
-    const ttQ = features.has('timetable')
-      ? pool.query(`
-          WITH conflict_slots AS (
-            SELECT a.class_id, COUNT(*) AS conflict_count
-            FROM class_timetable a
-            JOIN class_timetable b ON
-              b.teacher_id = a.teacher_id AND
-              b.day_of_week = a.day_of_week AND
-              b.period_number = a.period_number AND
-              b.class_id <> a.class_id AND
-              b.school_id = a.school_id AND
-              b.is_break = false
-            WHERE a.school_id = $1 AND a.teacher_id IS NOT NULL AND a.is_break = false
-            GROUP BY a.class_id
-          ),
-          no_teacher_slots AS (
-            SELECT class_id, COUNT(*) AS no_teacher_count
-            FROM class_timetable
-            WHERE school_id = $1 AND teacher_id IS NULL AND is_break = false
-            GROUP BY class_id
-          ),
-          tt_exists AS (
-            SELECT class_id, TRUE AS timetable_exists
-            FROM class_timetable WHERE school_id = $1
-            GROUP BY class_id
-          )
-          SELECT
-            c.id AS class_id,
-            COALESCE(cf.conflict_count, 0)::int   AS conflict_count,
-            COALESCE(nt.no_teacher_count, 0)::int AS no_teacher_count,
-            0::int                                 AS subjects_unassigned,
-            COALESCE(te.timetable_exists, FALSE)   AS timetable_exists
-          FROM classes c
-          LEFT JOIN conflict_slots  cf ON cf.class_id = c.id
-          LEFT JOIN no_teacher_slots nt ON nt.class_id = c.id
-          LEFT JOIN tt_exists        te ON te.class_id = c.id
-          WHERE c.school_id = $1
-          ORDER BY ${gradeOrderSql('c.grade')}, c.section
-        `, [school_id])
-      : null
-
     // ── 6. Upcoming exams (7 days) ────────────────────────────────────────────
     const examsQ = features.has('exams')
       ? pool.query(`
@@ -118,10 +76,9 @@ export async function GET(req: NextRequest) {
       : null
 
     try {
-      const [core, att, tt, exams, fees, holiday] = await Promise.all([
+      const [core, att, exams, fees, holiday] = await Promise.all([
         coreQ,
         attQ       ?? Promise.resolve(null),
-        ttQ        ?? Promise.resolve(null),
         examsQ     ?? Promise.resolve(null),
         feesQ      ?? Promise.resolve(null),
         attQ ? nonWorkingDay(school_id, date) : Promise.resolve(null),
@@ -132,7 +89,6 @@ export async function GET(req: NextRequest) {
         attendance: att              ? att.rows    : null,
         // Set when `date` is a holiday / weekly off: the card shows that instead of "not marked".
         attendance_holiday: holiday ? { kind: holiday.kind, title: holiday.title } : null,
-        timetable:  tt               ? tt.rows     : null,
         exams:      exams            ? exams.rows  : null,
         fees:       fees             ? fees.rows[0]: null,
       })
