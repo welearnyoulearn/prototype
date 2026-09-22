@@ -22,17 +22,17 @@ function sanitizeSegment(seg: string): string {
 export async function POST(req: NextRequest) {
   if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   try {
-    const { filename, content_type, subject_id } = await req.json()
+    const { filename, content_type, subject_id, material_type } = await req.json()
     if (typeof filename !== 'string' || !filename.trim()) {
       return NextResponse.json({ error: 'filename is required' }, { status: 400 })
     }
 
     // subject_id (when supplied) files the object under
-    // materials/{board}/grade-{grade}/{subject}/ instead of a flat prefix —
-    // looked up server-side rather than trusting client-supplied board/grade
-    // strings. Falls back to the flat prefix when no subject context exists
-    // yet (or the id doesn't resolve), same as every file uploaded before
-    // this folder structure existed.
+    // materials/{board}/grade-{grade}/{subject}/{material_type}s/ instead of
+    // a flat prefix — looked up server-side rather than trusting
+    // client-supplied board/grade strings. Falls back to the flat prefix
+    // when no subject context exists yet (or the id doesn't resolve), same
+    // as every file uploaded before this folder structure existed.
     let folderPrefix = 'materials/'
     if (subject_id) {
       const { rows } = await pool.query(
@@ -42,6 +42,9 @@ export async function POST(req: NextRequest) {
       if (rows.length > 0) {
         const { board, grade, subject_name } = rows[0]
         folderPrefix = `materials/${sanitizeSegment(board)}/grade-${sanitizeSegment(grade)}/${sanitizeSegment(subject_name)}/`
+        if (material_type === 'textbook' || material_type === 'handbook') {
+          folderPrefix += `${material_type}s/`
+        }
       }
     }
 
