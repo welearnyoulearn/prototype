@@ -660,7 +660,7 @@ export default function PlatformCurriculum() {
   // free-tier 10MB-per-file cap (some run 50-80MB), and R2 has no such limit.
   // Same presign-then-PUT-directly shape as handleUploadFile above, just
   // against our own /api/platform/materials/upload-sign instead of Cloudinary.
-  const handleUploadFileToR2 = async (file: File, onError?: (msg: string) => void) => {
+  const handleUploadFileToR2 = async (file: File, onError?: (msg: string) => void, materialType?: 'textbook' | 'handbook', subjectIdOverride?: number) => {
     if (!file) return null
     setUploading(true)
     setUploadProgress(0)
@@ -669,7 +669,7 @@ export default function PlatformCurriculum() {
       const signRes = await fetch('/api/platform/materials/upload-sign', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: file.name, content_type: file.type || 'application/pdf', subject_id: activeSubject?.id }),
+        body: JSON.stringify({ filename: file.name, content_type: file.type || 'application/pdf', subject_id: subjectIdOverride ?? activeSubject?.id, material_type: materialType }),
       })
       const signData = await signRes.json()
       if (!signRes.ok) throw new Error(signData?.error || 'Failed to get upload URL')
@@ -854,7 +854,7 @@ export default function PlatformCurriculum() {
       const title = file.name.replace(/\.[^./]+$/, '')
       try {
         let uploadErrMsg = ''
-        const url = await handleUploadFileToR2(file, msg => { uploadErrMsg = msg })
+        const url = await handleUploadFileToR2(file, msg => { uploadErrMsg = msg }, materialTypeToUpload, activeSubject.id)
         if (!url) throw new Error(uploadErrMsg || 'File upload failed')
 
         const res = await fetch(`/api/platform/subjects/${activeSubject.id}/materials`, {
@@ -1166,16 +1166,16 @@ export default function PlatformCurriculum() {
 
       for (const book of group.books) {
         try {
-          let uploadErrMsg = ''
-          const url = await handleUploadFileToR2(book.file, msg => { uploadErrMsg = msg })
-          if (!url) throw new Error(uploadErrMsg || 'upload failed')
-          const title = book.file.name.replace(/\.pdf$/i, '')
           // master_subject_materials only accepts textbook/handbook (the
           // downloadable-file registry, separate from chapter book_type) —
           // a workbook classification still registers the PDF, just filed as
           // a handbook until that table's CHECK is widened.
           const classification = bookTypeChoices[book.bookType] || 'textbook'
-          const material_type = classification === 'workbook' ? 'handbook' : classification
+          const material_type = (classification === 'workbook' ? 'handbook' : classification) as 'textbook' | 'handbook'
+          let uploadErrMsg = ''
+          const url = await handleUploadFileToR2(book.file, msg => { uploadErrMsg = msg }, material_type, subjectId)
+          if (!url) throw new Error(uploadErrMsg || 'upload failed')
+          const title = book.file.name.replace(/\.pdf$/i, '')
           const res = await fetch(`/api/platform/subjects/${subjectId}/materials`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
