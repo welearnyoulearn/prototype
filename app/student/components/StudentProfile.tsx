@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import ChangePasswordCard from '@/app/components/ChangePasswordCard'
 import BirthdayField from '@/app/components/BirthdayField'
+import AvatarPicker, { resolveAvatarSrc, type AvatarGender } from '@/app/components/AvatarPicker'
 
 type Student = {
   id: number
@@ -17,12 +18,17 @@ type Student = {
   phone: string | null
   school_id: number
   date_of_birth?: string | null
+  gender?: string | null
+  avatar_url?: string | null
 }
 
 type Props = { student: Student }
 
 export default function StudentProfile({ student }: Props) {
   const [dob, setDob] = useState(student.date_of_birth ?? null)
+  const [avatarUrl, setAvatarUrl] = useState(student.avatar_url ?? null)
+  const gender = (student.gender === 'male' || student.gender === 'female' ? student.gender : null) as AvatarGender
+  const avatarSrc = resolveAvatarSrc(avatarUrl)
 
   return (
     <motion.div
@@ -35,14 +41,25 @@ export default function StudentProfile({ student }: Props) {
         <div className="relative bg-gradient-to-r from-indigo-500 to-purple-600 px-6 py-8 text-white overflow-hidden">
           <div className="absolute -top-10 -right-6 w-36 h-36 rounded-full bg-white/10 pointer-events-none" />
           <div className="relative flex items-center gap-4">
-            <motion.div
-              initial={{ scale: 0.6, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.1, type: 'spring', stiffness: 260, damping: 18 }}
-              className="w-16 h-16 rounded-full bg-white/20 ring-4 ring-white/25 flex items-center justify-center text-2xl font-bold flex-shrink-0"
-            >
-              {student.name.charAt(0).toUpperCase()}
-            </motion.div>
+            {avatarSrc ? (
+              <motion.img
+                src={avatarSrc}
+                alt=""
+                initial={{ scale: 0.6, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ delay: 0.1, type: 'spring', stiffness: 260, damping: 18 }}
+                className="w-16 h-16 rounded-full object-cover ring-4 ring-white/25 flex-shrink-0"
+              />
+            ) : (
+              <motion.div
+                initial={{ scale: 0.6, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ delay: 0.1, type: 'spring', stiffness: 260, damping: 18 }}
+                className="w-16 h-16 rounded-full bg-white/20 ring-4 ring-white/25 flex items-center justify-center text-2xl font-bold flex-shrink-0"
+              >
+                {student.name.charAt(0).toUpperCase()}
+              </motion.div>
+            )}
             <div>
               <h2 className="text-xl font-bold">{student.name}</h2>
               <p className="text-indigo-200 text-sm">
@@ -71,6 +88,11 @@ export default function StudentProfile({ student }: Props) {
             accentGradient="from-indigo-500 to-purple-600"
             onSaved={setDob}
           />
+
+          <div>
+            <h3 className="font-semibold text-gray-700 pt-2 mb-3">Avatar</h3>
+            <AvatarPicker role="student" gender={gender} value={avatarUrl} accentColor="#6366f1" onSaved={setAvatarUrl} />
+          </div>
 
           {(student.parent_name || student.parent_phone) && (
             <>

@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 35
+const SCHEMA_VERSION = 38
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3164,6 +3164,19 @@ async function runIncrementalMigrations() {
   await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS date_of_birth DATE`).catch(() => {})
   await pool.query(`ALTER TABLE teachers ADD COLUMN IF NOT EXISTS date_of_birth DATE`).catch(() => {})
   await pool.query(`ALTER TABLE parents  ADD COLUMN IF NOT EXISTS date_of_birth DATE`).catch(() => {})
+
+  // ── Onboarding: gender + avatar ──────────────────────────────────────────
+  // gender is one of 'male' | 'female' | null (never asked to persist a raw
+  // "prefer not to say" value — that's just null). avatar_url holds either
+  // "preset:{portal}:{male|female|neutral}:{1-5}" (a static public/avatars
+  // SVG, no R2 involved) or "/api/avatars/file?key=avatars/..." for an
+  // uploaded photo. Both optional and editable later from the profile page.
+  await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS gender VARCHAR(20)`).catch(() => {})
+  await pool.query(`ALTER TABLE teachers ADD COLUMN IF NOT EXISTS gender VARCHAR(20)`).catch(() => {})
+  await pool.query(`ALTER TABLE parents  ADD COLUMN IF NOT EXISTS gender VARCHAR(20)`).catch(() => {})
+  await pool.query(`ALTER TABLE students ADD COLUMN IF NOT EXISTS avatar_url TEXT`).catch(() => {})
+  await pool.query(`ALTER TABLE teachers ADD COLUMN IF NOT EXISTS avatar_url TEXT`).catch(() => {})
+  await pool.query(`ALTER TABLE parents  ADD COLUMN IF NOT EXISTS avatar_url TEXT`).catch(() => {})
 
   // There is no standalone "grades" table in this schema — students.grade is
   // a plain string, and `classes` rows are per-section (school_id, grade,

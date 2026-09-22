@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import BirthdayField from '@/app/components/BirthdayField'
+import AvatarPicker, { resolveAvatarSrc, type AvatarGender } from '@/app/components/AvatarPicker'
 
 type Teacher = {
   id: number
@@ -20,6 +21,8 @@ type Teacher = {
   class_teacher_section: string | null
   status: string
   date_of_birth?: string | null
+  gender?: string | null
+  avatar_url?: string | null
 }
 
 type AcademicYearOption = { id: number; label: string; is_current: boolean }
@@ -39,6 +42,9 @@ export default function TeacherProfile({ teacher, onUpdate, availableYears, sele
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<Partial<Teacher>>({})
   const [dob, setDob] = useState(teacher.date_of_birth ?? null)
+  const [avatarUrl, setAvatarUrl] = useState(teacher.avatar_url ?? null)
+  const gender = (teacher.gender === 'male' || teacher.gender === 'female' ? teacher.gender : null) as AvatarGender
+  const avatarSrc = resolveAvatarSrc(avatarUrl)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -155,9 +161,14 @@ export default function TeacherProfile({ teacher, onUpdate, availableYears, sele
       {/* Avatar + badge */}
       <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4">
         <div className="flex items-center gap-4 mb-6">
-          <div className="w-16 h-16 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-2xl flex-shrink-0">
-            {teacher.name.charAt(0).toUpperCase()}
-          </div>
+          {avatarSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={avatarSrc} alt="" className="w-16 h-16 rounded-full object-cover flex-shrink-0" />
+          ) : (
+            <div className="w-16 h-16 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-2xl flex-shrink-0">
+              {teacher.name.charAt(0).toUpperCase()}
+            </div>
+          )}
           <div>
             <h3 className="text-lg font-bold text-gray-900">{teacher.name}</h3>
             <p className="text-sm text-gray-500 font-mono">{teacher.employee_id}</p>
@@ -223,6 +234,13 @@ export default function TeacherProfile({ teacher, onUpdate, availableYears, sele
           accentGradient="from-blue-600 to-blue-700"
           onSaved={setDob}
         />
+      </div>
+
+      {/* Avatar — self-service, same shape as Birthday above */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4">
+        <h3 className="text-base font-semibold text-gray-900 mb-0.5">Avatar</h3>
+        <p className="text-xs text-gray-400 mb-4">Choose a preset or upload your own photo</p>
+        <AvatarPicker role="teacher" gender={gender} value={avatarUrl} accentColor="#2563eb" onSaved={setAvatarUrl} />
       </div>
 
       {/* Password change section */}

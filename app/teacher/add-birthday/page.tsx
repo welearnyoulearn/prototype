@@ -21,7 +21,7 @@ export default function TeacherAddBirthdayPage() {
       .then(async r => {
         if (!r.ok) { router.push('/teacher/login'); return }
         const data = await r.json()
-        if (data.date_of_birth) { router.push('/teacher'); return }
+        if (data.date_of_birth) { router.push('/teacher/set-gender'); return }
         setChecking(false)
       })
       .catch(() => router.push('/teacher/login'))
@@ -38,8 +38,8 @@ export default function TeacherAddBirthdayPage() {
         ring={theme.ring}
         accentGradient={theme.btnGradient}
         showSkip
-        onSkip={() => router.push('/teacher')}
-        onSaved={() => router.push('/teacher')}
+        onSkip={() => router.push('/teacher/set-gender')}
+        onSaved={() => router.push('/teacher/set-gender')}
       />
     </AuthShell>
   )

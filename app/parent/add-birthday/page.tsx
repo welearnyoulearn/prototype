@@ -21,7 +21,7 @@ export default function ParentAddBirthdayPage() {
       .then(async r => {
         if (!r.ok) { router.push('/parent/login'); return }
         const data = await r.json()
-        if (data.date_of_birth) { router.push('/parent'); return }
+        if (data.date_of_birth) { router.push('/parent/set-gender'); return }
         setChecking(false)
       })
       .catch(() => router.push('/parent/login'))
@@ -38,8 +38,8 @@ export default function ParentAddBirthdayPage() {
         ring={theme.ring}
         accentGradient={theme.btnGradient}
         showSkip
-        onSkip={() => router.push('/parent')}
-        onSaved={() => router.push('/parent')}
+        onSkip={() => router.push('/parent/set-gender')}
+        onSaved={() => router.push('/parent/set-gender')}
       />
     </AuthShell>
   )
