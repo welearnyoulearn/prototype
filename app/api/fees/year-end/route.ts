@@ -378,7 +378,20 @@ export async function POST(req: NextRequest) {
                          'pending', $6, $7, $8)
                  ON CONFLICT (student_id, fee_category_id, academic_year, period_label)
                  DO UPDATE SET amount_due = student_fee_ledger.amount_due + EXCLUDED.amount_due,
-                               notes = EXCLUDED.notes`,
+                               notes = EXCLUDED.notes,
+                               -- Recompute status against the NEW (accumulated) amount_due —
+                               -- without this, a passout bill already settled ('paid') stayed
+                               -- 'paid' after more debt was added on top of it (e.g. the source
+                               -- year was reopened, a payment cancelled, and the student
+                               -- passed out again), so /api/fees/passout's outstanding-only
+                               -- filter (status IN pending/partial/overdue) silently hid a real
+                               -- collectible balance.
+                               status = CASE
+                                 WHEN COALESCE(student_fee_ledger.waiver_amount,0) + student_fee_ledger.amount_paid
+                                      >= (student_fee_ledger.amount_due + EXCLUDED.amount_due) THEN 'paid'
+                                 WHEN student_fee_ledger.amount_paid > 0 THEN 'partial'
+                                 ELSE 'pending'
+                               END`,
                 [school_id, d.student_id, passoutDuesCatId, periodLabel,
                  parseFloat(b.balance),
                  `Passout carry from ${from_year}: ${b.category_name} - ${b.period_label}`,
@@ -420,14 +433,36 @@ export async function POST(req: NextRequest) {
         // Runs inside the same transaction as the decision loop above (previously this
         // was a separate autocommit statement with its own swallowed error) so a failure
         // here now rolls back the whole apply instead of silently under-reporting it.
+        // carried_count/total and writeoff_count/total ACCUMULATE across apply
+        // batches now, instead of being replaced by only this request's
+        // counters — apply is resumable (year-end's own top comment: "an admin
+        // can apply decisions for a few students today, more tomorrow"), so a
+        // second partial batch (e.g. only writeoffs) was overwriting the first
+        // batch's carried total with whatever this batch alone carried (zero,
+        // if this batch had no carry decisions) — silently discarding a real,
+        // already-applied transfer.
+        //
+        // Blind `+=` is safe against a genuine RETRY of the SAME request (not
+        // just a second, different batch): closeOutBill marks a bill
+        // 'settled'/'waived', and studentBills only ever selects bills still
+        // IN ('pending','overdue','partial') — so a retried request finds
+        // nothing left to carry/write off for any student it already
+        // processed, and carriedCount/carriedTotal/writeoffCount/writeoffTotal
+        // for that retry are correctly 0 for those students, not a duplicate
+        // of the first request's counts. open_count/open_total are NOT
+        // accumulated — getRemainingOpenSummary always computes the CURRENT
+        // true remaining balance from the ledger directly, not a per-request
+        // delta, so overwriting them with each fresh snapshot is already correct.
         await client.query(
           `INSERT INTO fee_year_close
              (school_id, academic_year, closed_by, carried_count, carried_total,
               writeoff_count, writeoff_total, open_count, open_total, is_reopened, closed_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CASE WHEN $10 THEN NULL ELSE NOW() END)
            ON CONFLICT (school_id, academic_year) DO UPDATE
-             SET carried_count  = $4, carried_total  = $5,
-                 writeoff_count = $6, writeoff_total = $7,
+             SET carried_count  = fee_year_close.carried_count  + $4,
+                 carried_total  = fee_year_close.carried_total  + $5,
+                 writeoff_count = fee_year_close.writeoff_count + $6,
+                 writeoff_total = fee_year_close.writeoff_total + $7,
                  open_count     = $8, open_total     = $9,
                  is_reopened    = $10,
                  closed_by      = CASE WHEN $10 THEN fee_year_close.closed_by ELSE $3 END,

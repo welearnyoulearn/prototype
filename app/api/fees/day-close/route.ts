@@ -96,11 +96,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'actual_cash must be a number' }, { status: 400 })
     }
 
-    // Get system totals for the day
+    // Get system totals for the day AND the receipt range/count in ONE query,
+    // not two separate autocommit pool.query() calls — each of those took its
+    // own independent read snapshot, so a payment collected/cancelled between
+    // them could leave the saved receipt count/range inconsistent with the
+    // saved cash/mode totals (e.g. txn_count reflecting one more payment than
+    // total_cash does). A single SQL statement's sub-selects all execute
+    // against the SAME snapshot, even outside an explicit transaction.
     const { rows: byMode } = await pool.query(
-      `SELECT payment_mode, SUM(amount) AS total
-       FROM fee_payments
-       WHERE school_id = $1 AND paid_date = $2 AND payment_status = 'completed'
+      `WITH day_payments AS (
+         SELECT payment_mode, amount, receipt_number
+         FROM fee_payments
+         WHERE school_id = $1 AND paid_date = $2 AND payment_status = 'completed'
+       )
+       SELECT payment_mode, SUM(amount) AS total,
+              (SELECT MIN(receipt_number) FROM day_payments) AS first_receipt,
+              (SELECT MAX(receipt_number) FROM day_payments) AS last_receipt,
+              (SELECT COUNT(*) FROM day_payments) AS cnt
+       FROM day_payments
        GROUP BY payment_mode`,
       [school_id, date]
     )
@@ -108,12 +121,13 @@ export async function POST(req: NextRequest) {
     byMode.forEach((r: { payment_mode: string; total: string }) => {
       modeMap[r.payment_mode] = parseFloat(r.total)
     })
-
-    const { rows: [receipts] } = await pool.query(
-      `SELECT MIN(receipt_number) AS first_receipt, MAX(receipt_number) AS last_receipt, COUNT(*) AS cnt
-       FROM fee_payments WHERE school_id = $1 AND paid_date = $2 AND payment_status = 'completed'`,
-      [school_id, date]
-    )
+    // first_receipt/last_receipt/cnt are the same on every grouped row (they're
+    // computed over the whole day_payments CTE, not per-mode) — or absent
+    // entirely if there were no payments at all for the day, in which case
+    // there's nothing that could have been inconsistent anyway.
+    const receipts = byMode[0]
+      ? { first_receipt: byMode[0].first_receipt, last_receipt: byMode[0].last_receipt, cnt: byMode[0].cnt }
+      : { first_receipt: null, last_receipt: null, cnt: 0 }
 
     const systemCash = modeMap['cash'] || 0
     const diff = actual_cash != null ? parseFloat(actual_cash) - systemCash : null

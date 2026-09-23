@@ -163,8 +163,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (!new_amount || !reason || !school_id) {
         return NextResponse.json({ error: 'new_amount, reason, school_id required' }, { status: 400 })
       }
-      if (Number(new_amount) <= 0) {
-        return NextResponse.json({ error: 'Amount must be greater than 0' }, { status: 400 })
+      // `Number("NaN")` is `NaN`, and every comparison against NaN (`<= 0`,
+      // `< entry.amount_paid`, etc.) evaluates to false — so a literal "NaN"
+      // string sailed through both this and the coveredAmount check below,
+      // reaching the UPDATE and the audit INSERT as-is. Postgres's `numeric`
+      // type accepts the special value NaN and sorts it above every finite
+      // number, so a plain `CHECK (amount_due >= 0)` constraint can't exclude
+      // it either. Number.isFinite rejects NaN, ±Infinity, and non-numeric
+      // strings up front, before any of that.
+      const parsedAmount = Number(new_amount)
+      if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+        return NextResponse.json({ error: 'Amount must be a valid number greater than 0' }, { status: 400 })
+      }
+      // Reject sub-paisa precision here too — NUMERIC(10,2) would otherwise
+      // silently round it, so a value that LOOKS accepted doesn't match what
+      // actually lands in the audit trail. Epsilon tolerance sidesteps
+      // ordinary float noise (e.g. 500.1*100 landing at 50009.999999999996).
+      if (Math.abs(parsedAmount * 100 - Math.round(parsedAmount * 100)) > 1e-6) {
+        return NextResponse.json({ error: 'Amount cannot have more than 2 decimal places' }, { status: 400 })
       }
 
       await client.query('BEGIN')
@@ -220,20 +236,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       // checking amount_paid alone let a bill be cut below amount_paid + waiver_amount
       // (e.g. ₹1,000 bill, ₹300 paid, ₹500 waived could be edited down to ₹400).
       const coveredAmount = Number(entry.amount_paid) + Number(entry.waiver_amount || 0)
-      if (Number(new_amount) < coveredAmount) {
+      if (parsedAmount < coveredAmount) {
         await client.query('ROLLBACK')
         return NextResponse.json({
-          error: `New amount (₹${new_amount}) cannot be less than amount already paid + waived (₹${coveredAmount})`
+          error: `New amount (₹${parsedAmount}) cannot be less than amount already paid + waived (₹${coveredAmount})`
         }, { status: 400 })
       }
 
-      // Record the edit in audit log
+      // Record the edit in audit log — `parsedAmount`, not the raw request
+      // body value, now that it's been validated finite.
       await client.query(
         `INSERT INTO student_fee_ledger_edits
            (ledger_id, school_id, student_id, old_amount, new_amount, reason, changed_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [id, school_id, entry.student_id,
-         entry.amount_due, new_amount, reason, changed_by]
+         entry.amount_due, parsedAmount, reason, changed_by]
       )
 
       // Update the ledger entry
@@ -248,7 +265,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
              END
          WHERE id = $2
          RETURNING *`,
-        [new_amount, id]
+        [parsedAmount, id]
       )
 
       await client.query('COMMIT')

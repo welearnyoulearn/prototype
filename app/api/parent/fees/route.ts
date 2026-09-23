@@ -13,22 +13,27 @@ export async function GET(req: NextRequest) {
     const school_id   = p.get('school_id')
     const student_id  = p.get('student_id')
     if (!school_id || !student_id) return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
-    // getAnySession() only confirms SOME valid login exists — without these
-    // checks, any logged-in parent/teacher/student could pass another
-    // family's student_id/school_id and read their fee ledger, payment
-    // history, and transaction references.
+    // getAnySession() only confirms SOME valid login exists, for whichever role —
+    // this endpoint is parent-only (only app/parent/page.tsx calls it; there is
+    // no student/teacher/admin fees screen that does). Without this check, a
+    // logged-in student or teacher session — neither of which has any
+    // parent-link relationship to verify — could pass ANY same-school
+    // student_id and read that student's fee ledger, payment history, and
+    // transaction references; POST had the same gap for submitting a payment
+    // against another student's bill.
+    if (session.role !== 'parent') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
     if (session.schoolId !== parseInt(school_id)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
-    if (session.role === 'parent') {
-      const parent = await getParentSession()
-      const linkRes = await pool.query(
-        'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
-        [student_id, parent?.parentId]
-      )
-      if (linkRes.rowCount === 0) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-      }
+    const parent = await getParentSession()
+    const linkRes = await pool.query(
+      'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
+      [student_id, parent?.parentId]
+    )
+    if (linkRes.rowCount === 0) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
     const academic_year = p.get('academic_year') || await resolveAcademicYear(school_id)
 
@@ -87,16 +92,21 @@ export async function GET(req: NextRequest) {
       // Fetch waivers so parent sees the full picture of what was reduced/waived —
       // excludes revoked waivers so a revoked waiver doesn't keep showing as active
       // and inflating total_waived below, same filter as reports/stats/passbook.
+      // Scoped to the SAME academic_year as `ledger` above — without this, a
+      // waiver from a different year (most commonly a carry_forward bookkeeping
+      // waiver on last year's now-closed bill) still showed here and inflated
+      // total_waived, even though every other summary figure (total_due,
+      // total_paid, total_outstanding) is scoped to the selected year only.
       const { rows: waivers } = await pool.query(
         `SELECT w.id, w.waiver_type, w.waiver_amount, w.reason, w.granted_by_name, w.created_at,
                 fc.name AS category_name, l.period_label, l.amount_due
          FROM fee_waivers w
          JOIN student_fee_ledger l ON l.id = w.ledger_id
          JOIN fee_categories fc ON fc.id = l.fee_category_id
-         WHERE w.school_id = $1 AND w.student_id = $2
+         WHERE w.school_id = $1 AND w.student_id = $2 AND l.academic_year = $3
            AND COALESCE(w.is_revoked, FALSE) = FALSE
          ORDER BY w.created_at DESC`,
-        [school_id, student_id]
+        [school_id, student_id, academic_year]
       ).catch(() => ({ rows: [] }))
 
       const total_due         = ledger.reduce((s, r) => s + Number(r.amount_due), 0)
@@ -150,23 +160,25 @@ export async function POST(req: NextRequest) {
     if (!school_id || !student_id) {
       return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
     }
-    // getAnySession() only confirms SOME valid login exists — without these
-    // checks (already applied on GET above, but missing here), any logged-in
-    // parent/teacher/student could submit a fabricated payment against ANOTHER
-    // school's student/ledger by supplying its IDs directly, since every query
-    // below trusts school_id/student_id/ledger_id straight from the request body.
+    // getAnySession() only confirms SOME valid login exists, for whichever role —
+    // this endpoint is parent-only (see the matching comment on GET above).
+    // Without this check, a logged-in student or teacher session could submit a
+    // fabricated payment against ANOTHER same-school student's ledger by
+    // supplying its IDs directly, since every query below trusts
+    // school_id/student_id/ledger_id straight from the request body.
+    if (session.role !== 'parent') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
     if (session.schoolId !== Number(school_id)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
-    if (session.role === 'parent') {
-      const parent = await getParentSession()
-      const linkRes = await pool.query(
-        'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
-        [student_id, parent?.parentId]
-      )
-      if (linkRes.rowCount === 0) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-      }
+    const parent = await getParentSession()
+    const linkRes = await pool.query(
+      'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
+      [student_id, parent?.parentId]
+    )
+    if (linkRes.rowCount === 0) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
     // Server-side plan gate — this is the actual write path that creates a
     // fee_payments row; the QR/upi-id endpoints are gated too, but a caller

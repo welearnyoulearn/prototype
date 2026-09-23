@@ -149,14 +149,18 @@ export async function POST(req: NextRequest) {
                 // the existing row's fee_structure_id may now point at the WRONG grade's amount.
                 // Re-sync unpaid/overdue/partial bills to the current grade's structure, exactly
                 // like amending a structure does, so the student is billed at their actual grade.
-                // GREATEST(...) guards against amount_due ending up below amount_paid if the new
-                // grade's fee is lower than what the student already paid toward the old grade's
-                // bill — amount_due must never be less than what's already been collected.
+                // GREATEST(...) guards against amount_due ending up below what's already
+                // covered by payments + waivers COMBINED (not amount_paid alone — floored
+                // only against amount_paid let a heavily-waived bill's amount_due end up
+                // below amount_paid + waiver_amount, an impossible over-credited state, the
+                // exact same class of bug the ledger PATCH route's own coveredAmount check
+                // guards against).
                 await client.query(
                   `UPDATE student_fee_ledger
-                   SET fee_structure_id = $1, amount_due = GREATEST($2, amount_paid),
+                   SET fee_structure_id = $1,
+                       amount_due = GREATEST($2, amount_paid + COALESCE(waiver_amount,0)),
                        status = CASE
-                         WHEN COALESCE(waiver_amount,0) + amount_paid >= GREATEST($2, amount_paid) THEN 'paid'
+                         WHEN COALESCE(waiver_amount,0) + amount_paid >= GREATEST($2, amount_paid + COALESCE(waiver_amount,0)) THEN 'paid'
                          WHEN amount_paid > 0 THEN 'partial'
                          ELSE status
                        END
