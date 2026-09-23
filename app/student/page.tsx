@@ -253,7 +253,7 @@ function StudentPortal() {
       <div className="portal-body">
         <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} label="Student navigation" portal="student">
           <div className="portal-identity">
-            <p className="text-base font-semibold tracking-tight text-[#713f0f]">WeLearnYouLearn</p>
+            <p className="text-lg font-extrabold tracking-tight text-[#5c2f08]">WeLearnYouLearn</p>
             <p className="mt-1 text-xs leading-relaxed text-[#647068]">{student.school_name}</p>
           </div>
           <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Student sections">
@@ -276,7 +276,7 @@ function StudentPortal() {
           </nav>
           <div className="portal-account">
             <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f1e2ca] text-sm font-semibold text-[#713f0f]" aria-hidden="true">{firstName.charAt(0)}</span>
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-[#1a1410] bg-[#ffcf49] text-sm font-extrabold text-[#1a1410]" aria-hidden="true">{firstName.charAt(0)}</span>
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-[#202a25]">{student.name}</p>
                 <p className="mt-0.5 text-xs text-[#647068]">Grade {student.grade} · Section {student.section}</p>

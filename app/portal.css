@@ -213,7 +213,11 @@ h1.portal-section-heading { margin-bottom: 8px; font-size: 26px; line-height: 1.
   background-image: linear-gradient(#e6dcc2 1px, transparent 1px), linear-gradient(90deg, #e6dcc2 1px, transparent 1px);
   background-size: 28px 28px;
 }
-.portal-root[data-portal="student"] .portal-sidebar { background: linear-gradient(180deg, #f7f1e5 0%, #f2eadb 100%); }
+.portal-root[data-portal="student"] .portal-sidebar {
+  background-color: #f7f1e0;
+  background-image: linear-gradient(#e9dcb8 1px, transparent 1px), linear-gradient(90deg, #e9dcb8 1px, transparent 1px);
+  background-size: 24px 24px;
+}
 .portal-root[data-portal="student"] .portal-identity { position: relative; overflow: hidden; }
 .portal-root[data-portal="student"] .portal-identity::after { content: ''; position: absolute; width: 82px; height: 82px; right: -38px; top: -36px; border: 1px solid rgb(168 95 22 / .2); border-radius: 50%; box-shadow: 0 0 0 18px rgb(168 95 22 / .05); }
 .student-page-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; padding: 4px 0 25px; border-bottom: 1px solid var(--border); }
@@ -249,11 +253,25 @@ h1.portal-section-heading { margin-bottom: 8px; font-size: 26px; line-height: 1.
 .student-success-flash { animation: student-success 520ms var(--ease-standard) both; }
 @keyframes student-success { 0% { box-shadow: inset 4px 0 0 #317157; background: rgb(49 113 87 / .12); } 100% { box-shadow: inset 0 0 0 transparent; background: transparent; } }
 
-/* Student nav: 3D sticker icons in the sidebar and mobile bottom bar, student portal only. */
+/* Student nav: 3D sticker icons in the sidebar and mobile bottom bar, neubrutalist to match the dashboard. */
+.portal-root[data-portal="student"] .portal-nav-label { font-weight: 800; letter-spacing: .08em; color: #8a6a33; }
 .portal-root[data-portal="student"] .portal-nav-item img.portal-nav-sticker,
-.portal-root[data-portal="student"] nav[aria-label="Quick navigation"] img.portal-nav-sticker { width: 22px; height: 22px; object-fit: contain; flex-shrink: 0; }
-.portal-root[data-portal="student"] .portal-nav-item[aria-current="page"] img.portal-nav-sticker,
-.portal-root[data-portal="student"] nav[aria-label="Quick navigation"] button[aria-current="page"] img.portal-nav-sticker { transform: scale(1.08); }
+.portal-root[data-portal="student"] nav[aria-label="Quick navigation"] img.portal-nav-sticker {
+  width: 24px; height: 24px; object-fit: contain; flex-shrink: 0;
+  transition: transform var(--motion-micro) var(--ease-standard);
+}
+.portal-root[data-portal="student"] .portal-nav-item {
+  border-radius: 14px; border: 2.5px solid transparent; font-weight: 600;
+  transition: background-color var(--motion-micro) ease, color var(--motion-micro) ease, transform var(--motion-micro) var(--ease-standard), border-color var(--motion-micro) ease, box-shadow var(--motion-micro) var(--ease-standard);
+}
+.portal-root[data-portal="student"] .portal-nav-item:hover { transform: none; border-color: #1a1410; background: #fff3cf; }
+.portal-root[data-portal="student"] .portal-nav-item:hover img.portal-nav-sticker { transform: rotate(-8deg) scale(1.08); }
+.portal-root[data-portal="student"] .portal-nav-item[aria-current="page"] {
+  background: #ffcf49; color: #1a1410; border-color: #1a1410; box-shadow: 3px 3px 0 #1a1410; font-weight: 800;
+}
+.portal-root[data-portal="student"] .portal-nav-item[aria-current="page"]::before { display: none; }
+.portal-root[data-portal="student"] .portal-nav-item[aria-current="page"] img.portal-nav-sticker { transform: rotate(-6deg) scale(1.1); }
+.portal-root[data-portal="student"] nav[aria-label="Quick navigation"] button[aria-current="page"] img.portal-nav-sticker { transform: rotate(-6deg) scale(1.1); }
 
 /* Dashboard "quest" tiles: neubrutalist sticker-book cards for the student home screen only —
    solid flat color, thick dark outline, hard offset shadow, sticker bleeding over the top edge. */
