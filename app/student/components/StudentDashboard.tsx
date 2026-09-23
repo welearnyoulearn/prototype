@@ -3,9 +3,12 @@
 import { useEffect, useState } from 'react'
 import NoticeCenter from '@/components/announcements/NoticeCenter'
 import { motion, useReducedMotion } from 'framer-motion'
-import { ArrowRight, BookOpen, BookOpenText, CalendarCheck2, ChartNoAxesColumn } from 'lucide-react'
+import { ArrowRight, CalendarCheck2 } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StudentProgressTrack, studentReveal } from './StudentExperience'
+
+// 3D sticker icons (Fluent Emoji, MIT-licensed) — see public/student-icons/NOTICE.
+type QuestTone = 'gold' | 'sky' | 'violet' | 'mint'
 
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
@@ -74,37 +77,55 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
             Grade {student.grade} · Section {student.section}
             {student.roll_number && <span className="ml-2">· Roll {student.roll_number}</span>}
           </p>
-          <p className="mt-6 max-w-lg text-sm leading-6 text-white/78">Choose one useful next step and keep your learning moving.</p>
+          <p className="mt-6 max-w-lg text-base leading-7 text-white/85">
+            Ready to make today count
+            <img src="/student-icons/rocket.png" alt="" className="student-hero-sticker" />? Pick a next step below and keep going.
+          </p>
         </div>
         {engagementScore !== null && (
-          <button type="button" onClick={() => onNavigate?.('attendance')} className="rounded-md border border-white/15 bg-white/8 p-4 text-left transition hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f0bc72]">
+          <button type="button" data-testid="student-dashboard-attendance-tile" onClick={() => onNavigate?.('attendance')} className="rounded-md border border-white/15 bg-white/8 p-4 text-left transition hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f0bc72]">
             <p className="text-3xl font-semibold tracking-tight text-white tabular-nums">{engagementScore}<span className="text-xl">%</span></p>
             <StudentProgressTrack value={engagementScore} />
-            <p className="mt-3 text-sm font-medium text-white">Attendance</p><p className="mt-0.5 text-xs text-white/55">This month · view record</p>
+            <p className="mt-3 flex items-center gap-1.5 text-sm font-medium text-white">
+              <img src="/student-icons/calendar.png" alt="" className="h-4 w-4" aria-hidden="true" />
+              Attendance
+            </p>
+            <p className="mt-0.5 text-xs text-white/55">This month · view record</p>
           </button>
         )}
         </div>
       </motion.section>
 
       {(() => {
-        const quickActions = [
-          { label: 'Syllabus', description: 'See what you’re learning in each subject.', icon: <BookOpenText size={20} />, key: 'syllabus' },
-          { label: 'My marks', description: 'Review your exam results and progress.', icon: <ChartNoAxesColumn size={20} />, key: 'my-marks' },
-          { label: 'Digital library', description: 'Browse resources for your studies.', icon: <BookOpen size={20} />, key: 'library' },
-        ].filter(item => isNavItemVisible?.(item.key) ?? true)
+        const allQuestActions: { label: string; description: string; sticker: string; tone: QuestTone; key: string }[] = [
+          { label: 'Syllabus', description: 'See what you’re learning in each subject.', sticker: '/student-icons/graduation-cap.png', tone: 'sky', key: 'syllabus' },
+          { label: 'My marks', description: 'Review your exam results and progress.', sticker: '/student-icons/trophy.png', tone: 'gold', key: 'my-marks' },
+          { label: 'Digital library', description: 'Browse resources for your studies.', sticker: '/student-icons/open-book.png', tone: 'violet', key: 'library' },
+        ]
+        const quickActions = allQuestActions.filter(item => isNavItemVisible?.(item.key) ?? true)
         if (quickActions.length === 0) return null
         return (
           <section aria-labelledby="student-learning-title">
             <div className="mb-3 flex items-end justify-between"><div><p className="student-section-kicker">Choose your next step</p><h2 id="student-learning-title" className="mt-1 text-lg font-semibold text-[#202a25]">Keep your momentum</h2></div><CalendarCheck2 size={20} className="text-[#a85f16]" aria-hidden="true" /></div>
-            <div className="student-action-row">
+            <div className="student-quest-row">
               {quickActions.map((item, index) => (
-                <motion.button key={item.key} custom={index} variants={studentReveal} initial={reduceMotion ? false : 'hidden'} animate="visible" onClick={() => onNavigate?.(item.key)} className="student-action group flex items-center gap-4">
-                  <span className="shrink-0 text-[#a85f16]" aria-hidden="true">{item.icon}</span>
+                <motion.button
+                  key={item.key}
+                  data-testid={`student-quest-${item.key}`}
+                  custom={index}
+                  variants={studentReveal}
+                  initial={reduceMotion ? false : 'hidden'}
+                  animate="visible"
+                  onClick={() => onNavigate?.(item.key)}
+                  className="student-quest-card"
+                  data-tone={item.tone}
+                >
+                  <img src={item.sticker} alt="" className="student-quest-icon" aria-hidden="true" />
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold text-[#202a25]">{item.label}</span>
-                    <span className="mt-1 block text-sm leading-relaxed text-[#647068]">{item.description}</span>
+                    <span className="student-quest-label block">{item.label}</span>
+                    <span className="student-quest-description block">{item.description}</span>
                   </span>
-                  <ArrowRight size={18} className="shrink-0 text-[#7c8980] group-hover:text-[#8b4a10]" aria-hidden="true" />
+                  <ArrowRight size={16} className="student-quest-arrow" aria-hidden="true" />
                 </motion.button>
               ))}
             </div>
