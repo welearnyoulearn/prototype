@@ -50,6 +50,7 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [Year Rollover](../../docs/product/features/19-year-rollover.md)
 - [fee-management.md](fee-management.md)
 - [students.md](students.md)
 

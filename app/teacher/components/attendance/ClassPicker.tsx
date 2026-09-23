@@ -1,6 +1,7 @@
 'use client'
 
 import { SESSION_LABEL, longDate, timeOf, type Overview, type Session, type SessionState } from './types'
+import { Skeleton } from '@/components/ui/skeleton'
 
 // Step 1 — every class in the school, with the state of its Morning and Afternoon attendance.
 // Any teacher can mark any class. A session that someone has already marked shows who did and
@@ -101,8 +102,9 @@ export default function ClassPicker({ overview, loading, error, date, minDate, t
       )}
 
       {loading && !error && (
-        <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4 animate-pulse" aria-busy="true">
-          {[1, 2, 3].map(i => <div key={i} className="h-44 bg-gray-100 rounded-2xl" />)}
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" role="status" aria-live="polite" aria-busy="true">
+          <span className="sr-only">Loading classes</span>
+          {[1, 2, 3].map(i => <Skeleton key={i} className="h-44" />)}
         </div>
       )}
 

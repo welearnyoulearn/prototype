@@ -1,9 +1,12 @@
 'use client'
 
-import { useEffect, useState, useRef } from 'react'
-import { motion, useMotionValue, useTransform, animate } from 'framer-motion'
+import { useEffect, useState } from 'react'
+import { motion, useMotionValue, useTransform, animate, useReducedMotion } from 'framer-motion'
+import { Award, BarChart3, Printer } from 'lucide-react'
 import { GRADE_COLORS, type ExamGrade } from '@/lib/examGrading'
-import { celebrate } from '@/app/components/gamification/confetti'
+import { InlineLoader } from '@/components/loaders'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { StudentEmptyState, StudentPageIntro, StudentProgressTrack } from './StudentExperience'
 
 type SubjectResult = {
   subject_name: string
@@ -40,14 +43,15 @@ type Props = {
 }
 
 function CountUpPercent({ value }: { value: number }) {
+  const reduceMotion = useReducedMotion()
   const mv = useMotionValue(0)
   const rounded = useTransform(mv, v => Math.round(v))
   const [display, setDisplay] = useState(0)
   useEffect(() => {
-    const controls = animate(mv, value, { duration: 0.9, ease: [0.16, 1, 0.3, 1] })
+    const controls = animate(mv, value, { duration: reduceMotion ? 0 : 0.9, ease: [0.16, 1, 0.3, 1] })
     const unsub = rounded.on('change', v => setDisplay(v))
     return () => { controls.stop(); unsub() }
-  }, [value]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [value, reduceMotion]) // eslint-disable-line react-hooks/exhaustive-deps
   return <>{display}</>
 }
 
@@ -64,6 +68,7 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
   const [error, setError] = useState('')
   const [scoreCardExam, setScoreCardExam] = useState<ExamResult | null>(null)
   const [expanded, setExpanded] = useState<number | null>(null)
+  const reduceMotion = useReducedMotion()
 
   useEffect(() => {
     fetchExams()
@@ -86,31 +91,27 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-      </div>
+      <InlineLoader portal="student" label="Preparing your released results…" size="lg" className="py-20" />
     )
   }
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
-        <p className="text-red-600 text-sm">{error}</p>
-        <button onClick={fetchExams} className="mt-3 text-sm text-red-700 underline">Retry</button>
+      <div className="space-y-6">
+        <StudentPageIntro eyebrow="Academic progress" title="My marks" description="Review released exams, understand each subject result, and open a score card when you need the full record." />
+        <div role="alert" className="border-l-2 border-red-600 bg-red-50 p-5">
+          <p className="text-red-800 text-sm">We couldn’t load your released results. {error}</p>
+          <button onClick={fetchExams} className="mt-3 min-h-10 text-sm font-semibold text-red-800 underline underline-offset-4">Try again</button>
+        </div>
       </div>
     )
   }
 
   if (exams.length === 0) {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 py-20 text-center">
-        <div className="w-14 h-14 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4">
-          <svg className="w-7 h-7 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-        </div>
-        <h3 className="text-base font-semibold text-gray-700 mb-1">No Results Yet</h3>
-        <p className="text-sm text-gray-400">Exam results will appear here once released by your school.</p>
+      <div className="space-y-6">
+        <StudentPageIntro eyebrow="Academic progress" title="My marks" description="Review released exams, understand each subject result, and open a score card when you need the full record." />
+        <StudentEmptyState icon={<BarChart3 size={22} />} title="No released results yet" description="Your exam results will appear here after your school releases them." />
       </div>
     )
   }
@@ -118,31 +119,29 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
   const latestExam = exams[0]
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      <StudentPageIntro eyebrow="Academic progress" title="My marks" description="Review released exams, understand each subject result, and open a score card when you need the full record." />
       {latestExam.percentage !== null && (
         <motion.div
-          initial={{ opacity: 0, y: 12 }}
+          initial={reduceMotion ? false : { opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-          className="relative overflow-hidden rounded-2xl p-4 text-white flex items-center justify-between"
-          style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #4338ca 50%, #3730a3 100%)' }}
+          className="grid gap-6 border-y border-[#dcd8cd] bg-white/60 px-4 py-6 text-foreground sm:grid-cols-[1fr_auto] sm:items-center"
         >
-          <div className="absolute -top-8 -right-8 w-32 h-32 rounded-full bg-white/10 pointer-events-none" />
           <div className="relative">
-            <p className="text-indigo-200 text-xs font-medium uppercase tracking-wide">Latest Result</p>
-            <p className="text-white font-bold text-lg mt-0.5">{latestExam.exam_name}</p>
-            <p className="text-indigo-200 text-sm">{EXAM_TYPE_LABELS[latestExam.exam_type] || latestExam.exam_type} · {latestExam.exam_date}</p>
+            <p className="student-section-kicker">Latest released result</p>
+            <p className="text-foreground font-semibold text-xl mt-1">{latestExam.exam_name}</p>
+            <p className="text-muted-foreground text-sm">{EXAM_TYPE_LABELS[latestExam.exam_type] || latestExam.exam_type} · {latestExam.exam_date}</p>
+            <div className="mt-4 max-w-sm"><StudentProgressTrack value={latestExam.percentage} label={`${latestExam.total_obtained ?? '—'} of ${latestExam.total_max} total marks`} tone={latestExam.pass ? 'green' : 'red'} /></div>
           </div>
           <div className="relative flex items-center gap-3">
             <div className="text-center">
-              <div className="text-3xl font-black"><CountUpPercent value={latestExam.percentage} />%</div>
-              <div className={`inline-block px-2 py-0.5 rounded-full text-xs font-bold mt-1 ${latestExam.pass ? 'bg-green-400 text-green-900' : 'bg-red-400 text-red-900'}`}>
-                {latestExam.grade} · {latestExam.pass ? 'PASS' : 'FAIL'}
-              </div>
+              <div className="text-3xl font-semibold"><CountUpPercent value={latestExam.percentage} />%</div>
+              <div className={`mt-1 text-xs font-bold ${latestExam.pass ? 'text-green-700' : 'text-red-700'}`}>{latestExam.grade} · {latestExam.pass ? 'PASS' : 'FAIL'}</div>
             </div>
             <button onClick={() => setScoreCardExam(latestExam)} data-testid="view-score-card"
-              className="bg-white/15 hover:bg-white/25 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors">
-              View Score Card
+              className="min-h-11 bg-[#8b4a10] hover:bg-[#713b0b] text-white text-sm font-medium px-4 py-2 rounded-md transition-colors">
+              Open score card
             </button>
           </div>
         </motion.div>
@@ -151,19 +150,19 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
       {exams.map((exam, i) => (
         <motion.div
           key={exam.exam_id}
-          initial={{ opacity: 0, y: 10 }}
+          initial={reduceMotion ? false : { opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.08 + i * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <button className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
+          className="bg-white rounded-md border border-gray-200 overflow-hidden">
+          <button aria-expanded={expanded === exam.exam_id} className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
             onClick={() => setExpanded(expanded === exam.exam_id ? null : exam.exam_id)}>
             <div className="flex items-center gap-3 text-left">
-              <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-black ${exam.pass === true ? 'bg-green-100 text-green-700' : exam.pass === false ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'}`}>
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold ${exam.pass === true ? 'bg-green-100 text-green-700' : exam.pass === false ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'}`}>
                 {exam.grade || '—'}
               </div>
               <div>
                 <p className="font-semibold text-gray-800 text-sm">{exam.exam_name}</p>
-                <p className="text-xs text-gray-400">{EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type} · {exam.exam_date}</p>
+                <p className="text-xs text-muted-foreground">{EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type} · {exam.exam_date}</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -173,7 +172,7 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
                   <div className={`text-xs font-semibold ${exam.pass ? 'text-green-600' : 'text-red-500'}`}>{exam.pass ? 'PASS' : 'FAIL'}</div>
                 </div>
               )}
-              <svg className={`w-4 h-4 text-gray-400 transition-transform ${expanded === exam.exam_id ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className={`w-4 h-4 text-muted-foreground transition-transform ${expanded === exam.exam_id ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
             </div>
@@ -184,7 +183,7 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm mb-3">
                   <thead>
-                    <tr className="text-xs text-gray-400 uppercase tracking-wide">
+                    <tr className="text-xs text-muted-foreground uppercase tracking-wide">
                       <th className="text-left pb-2 font-medium">Subject</th>
                       <th className="text-right pb-2 font-medium">Marks</th>
                       <th className="text-right pb-2 font-medium">%</th>
@@ -208,7 +207,7 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
                         <td className="py-2 text-right">
                           {sub.pass === true && <span className="text-green-600 text-xs font-semibold">Pass</span>}
                           {sub.pass === false && <span className="text-red-500 text-xs font-semibold">Fail</span>}
-                          {sub.pass === null && <span className="text-gray-400 text-xs">—</span>}
+                          {sub.pass === null && <span className="text-muted-foreground text-xs">—</span>}
                         </td>
                       </tr>
                     ))}
@@ -247,7 +246,7 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
                     <span>Waiting for your parent to acknowledge this result in their own portal.</span>
                   </div>
                 )}
-                <button onClick={() => setScoreCardExam(exam)} className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex-shrink-0">Score Card →</button>
+                <button onClick={() => setScoreCardExam(exam)} className="min-h-10 text-xs font-semibold text-[#8b4a10] hover:text-[#6f3b0b] flex-shrink-0">Open score card →</button>
               </div>
             </div>
           )}
@@ -264,49 +263,34 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
 // accordion above, since a released result is something a family shares/
 // prints, not just a dashboard number.
 function ScoreCardModal({ exam, onClose }: { exam: ExamResult; onClose: () => void }) {
-  const hasCelebrated = useRef(false)
-  useEffect(() => {
-    if (exam.pass && !hasCelebrated.current) {
-      hasCelebrated.current = true
-      celebrate()
-    }
-  }, [exam.pass])
-
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <motion.div
-        initial={{ opacity: 0, scale: 0.92, y: 10 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 26 }}
-        onClick={e => e.stopPropagation()}
-        className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl"
-      >
-        <div className="bg-gradient-to-br from-indigo-600 to-blue-700 text-white px-6 py-6 rounded-t-2xl text-center relative">
-          <button onClick={onClose} className="absolute top-3 right-3 text-white/70 hover:text-white">✕</button>
-          <p className="text-indigo-200 text-xs font-semibold uppercase tracking-widest">Score Card</p>
-          <p className="text-xl font-bold mt-1">{exam.exam_name}</p>
-          <p className="text-indigo-200 text-sm mt-0.5">{EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type} · {exam.exam_date}</p>
-          <div className="mt-4 flex items-center justify-center gap-6">
+    <Dialog open onOpenChange={open => { if (!open) onClose() }}>
+      <DialogContent className="max-h-[90dvh] gap-0 overflow-y-auto border-0 p-0 sm:max-w-lg" showCloseButton>
+        <DialogHeader className="bg-[#713f0f] px-6 py-6 pr-14 text-white">
+          <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.14em] text-[#f0bc72]"><Award size={15} aria-hidden="true" />Released score card</div>
+          <DialogTitle className="text-xl font-semibold text-white">{exam.exam_name}</DialogTitle>
+          <DialogDescription className="text-sm text-white/65">{EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type} · {exam.exam_date}</DialogDescription>
+          <div className="mt-5 flex items-center gap-5 sm:gap-6">
             <div>
-              <p className="text-4xl font-black">{exam.percentage}%</p>
-              <p className="text-indigo-200 text-[10px] uppercase tracking-wide mt-1">Overall</p>
+              <p className="text-4xl font-semibold">{exam.percentage}%</p>
+              <p className="text-white/55 text-xs uppercase tracking-wide mt-1">Overall</p>
             </div>
             <div className="w-px h-12 bg-white/20" />
             <div>
-              <p className="text-4xl font-black">{exam.grade}</p>
-              <p className="text-indigo-200 text-[10px] uppercase tracking-wide mt-1">Grade</p>
+              <p className="text-4xl font-semibold">{exam.grade}</p>
+              <p className="text-white/55 text-xs uppercase tracking-wide mt-1">Grade</p>
             </div>
             <div className="w-px h-12 bg-white/20" />
             <div>
-              <p className={`text-2xl font-black ${exam.pass ? 'text-emerald-300' : 'text-red-300'}`}>{exam.pass ? 'PASS' : 'FAIL'}</p>
-              <p className="text-indigo-200 text-[10px] uppercase tracking-wide mt-1">Result</p>
+              <p className={`text-2xl font-semibold ${exam.pass ? 'text-emerald-300' : 'text-red-300'}`}>{exam.pass ? 'PASS' : 'FAIL'}</p>
+              <p className="text-white/55 text-xs uppercase tracking-wide mt-1">Result</p>
             </div>
           </div>
-        </div>
+        </DialogHeader>
         <div className="p-6">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-xs text-gray-400 uppercase tracking-wide border-b border-gray-100">
+              <tr className="text-xs text-muted-foreground uppercase tracking-wide border-b border-gray-100">
                 <th className="text-left pb-2 font-semibold">Subject</th>
                 <th className="text-right pb-2 font-semibold">Marks</th>
                 <th className="text-right pb-2 font-semibold">Grade</th>
@@ -331,12 +315,12 @@ function ScoreCardModal({ exam, onClose }: { exam: ExamResult; onClose: () => vo
               </tr>
             </tfoot>
           </table>
-          <p className="text-[10px] text-gray-300 text-center mt-5">Passing criteria: {exam.passing_pct}% · Released {new Date(exam.released_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-          <button onClick={() => window.print()} className="w-full mt-4 border border-gray-200 text-gray-600 text-sm font-semibold py-2.5 rounded-xl hover:bg-gray-50 transition-colors">
-            Print / Save as PDF
+          <p className="text-xs text-gray-500 text-center mt-5">Passing criteria: {exam.passing_pct}% · Released {new Date(exam.released_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+          <button onClick={() => window.print()} className="flex min-h-11 w-full items-center justify-center gap-2 mt-4 border border-gray-200 text-gray-700 text-sm font-semibold py-2.5 rounded-md hover:bg-gray-50 transition-colors">
+            <Printer size={16} aria-hidden="true" />Print or save as PDF
           </button>
         </div>
-      </motion.div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

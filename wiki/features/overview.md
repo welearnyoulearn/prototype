@@ -43,6 +43,7 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [Overview Dashboard](../../docs/product/features/01-overview-dashboard.md)
 - [attendance.md](attendance.md)
 - [fee-management.md](fee-management.md)
 

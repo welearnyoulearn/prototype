@@ -1,6 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
+import { Bell, CalendarDays, Check, ClipboardList, Clock, RefreshCw, UserRound, type LucideIcon } from 'lucide-react'
 
 type Notification = {
   id: number
@@ -21,19 +23,24 @@ type Props =
   | { studentId: number; teacherId?: never; schoolId?: never; parentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
   | { parentId: number; teacherId?: never; schoolId?: never; studentId?: never; onNavigate?: (key: string, payload?: NavPayload) => void }
 
-const TYPE_ICONS: Record<string, string> = {
-  period_delay: '⏰',
-  substitute_needed: '🔄',
-  substitute_assigned: '👤',
-  marks_entry_required: '📝',
-  marks_submitted: '✅',
-  marks_published: '📊',
-  exam_scheduled: '📅',
-  exam_entry_open: '📝',
-  exam_reviewed: '👀',
-  marks_released: '📊',
-  ack_nudge: '🔔',
-  ack_completed: '✅',
+const TYPE_ICONS: Record<string, LucideIcon> = {
+  period_delay: Clock,
+  substitute_needed: RefreshCw,
+  substitute_assigned: UserRound,
+  marks_entry_required: ClipboardList,
+  marks_submitted: Check,
+  marks_published: ClipboardList,
+  exam_scheduled: CalendarDays,
+  exam_entry_open: ClipboardList,
+  exam_reviewed: Check,
+  marks_released: ClipboardList,
+  ack_nudge: Bell,
+  ack_completed: Check,
+}
+
+function NotificationTypeIcon({ type }: { type: string }) {
+  const Icon = TYPE_ICONS[type] ?? Bell
+  return <Icon size={15} aria-hidden="true" />
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -76,7 +83,6 @@ function timeAgo(dateStr: string) {
 export default function NotificationBell({ teacherId, schoolId, studentId, parentId, onNavigate }: Props) {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
 
   // These query params are not actually consulted server-side — GET
   // /api/notifications derives the recipient purely from the session cookie
@@ -104,14 +110,6 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
     return () => clearInterval(timer)
   }, [teacherId, schoolId, studentId, parentId])
 
-  // Close dropdown on outside click
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
 
   async function markAllRead() {
     try {
@@ -140,9 +138,6 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
     } catch { /* silent */ }
   }
 
-  function handleOpen() {
-    setOpen(v => !v)
-  }
 
   function handleClick(n: Notification) {
     markOneRead(n.id)
@@ -168,29 +163,31 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
   const unread = notifications.filter(n => !n.is_read).length
 
   return (
-    <div className="relative" ref={ref}>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
       <button
-        onClick={handleOpen}
-        className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 hover:text-gray-700"
+        className="portal-icon-button relative"
         title="Notifications"
+        aria-label={unread ? `Notifications, ${unread} unread` : 'Notifications'}
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
             d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
         </svg>
         {unread > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
             {unread > 9 ? '9+' : unread}
           </span>
         )}
       </button>
+      </PopoverTrigger>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-80 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden">
+        <PopoverContent align="end" collisionPadding={12} aria-label="Notifications" className="w-80 max-w-[calc(100vw-24px)] overflow-hidden p-0">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <span className="font-semibold text-gray-900 text-sm">Notifications</span>
             {unread > 0 && (
-              <button onClick={markAllRead} className="text-xs text-blue-600 hover:text-blue-800 font-medium">
+              <button onClick={markAllRead} className="min-h-10 text-xs text-primary hover:underline font-medium">
                 Mark all read
               </button>
             )}
@@ -198,7 +195,7 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
 
           <div className="max-h-80 overflow-y-auto">
             {notifications.length === 0 ? (
-              <div className="py-10 text-center text-gray-400 text-sm">No notifications</div>
+              <div className="py-10 text-center text-muted-foreground text-sm">No notifications</div>
             ) : (
               notifications.map(n => (
                 <button
@@ -207,7 +204,7 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
                   className={`w-full text-left px-4 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors flex gap-3 items-start ${!n.is_read ? 'bg-blue-50/40' : ''}`}
                 >
                   <span className={`text-xs px-1.5 py-0.5 rounded font-bold flex-shrink-0 mt-0.5 ${TYPE_COLORS[n.type] || 'text-gray-500 bg-gray-100'}`}>
-                    {TYPE_ICONS[n.type] || '🔔'}
+                    <NotificationTypeIcon type={n.type} />
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
@@ -220,9 +217,9 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
                       <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{n.message}</p>
                     )}
                     <div className="flex items-center gap-2 mt-1">
-                      <p className="text-[10px] text-gray-400">{timeAgo(n.created_at)}</p>
+                      <p className="text-xs text-muted-foreground">{timeAgo(n.created_at)}</p>
                       {TYPE_NAV[n.type] && onNavigate && (
-                        <span className="text-[10px] text-blue-500 font-medium">tap to view →</span>
+                        <span className="text-xs text-blue-500 font-medium">tap to view →</span>
                       )}
                     </div>
                   </div>
@@ -233,11 +230,11 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
 
           {notifications.length > 0 && (
             <div className="px-4 py-2 border-t border-gray-100 text-center">
-              <span className="text-xs text-gray-400">{notifications.length} notification{notifications.length !== 1 ? 's' : ''}</span>
+              <span className="text-xs text-muted-foreground">{notifications.length} notification{notifications.length !== 1 ? 's' : ''}</span>
             </div>
           )}
-        </div>
+        </PopoverContent>
       )}
-    </div>
+    </Popover>
   )
 }

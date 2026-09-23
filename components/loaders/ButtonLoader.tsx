@@ -1,6 +1,6 @@
 'use client'
 
-import { ClipLoader } from 'react-spinners'
+import { LoaderCircle } from 'lucide-react'
 
 type ButtonLoaderProps = {
   /** Text shown while loading, e.g. "Saving...", "Deleting..." */
@@ -12,8 +12,7 @@ type ButtonLoaderProps = {
 
 /**
  * Drop-in replacement for the inline spinner+label JSX repeated in every
- * submit/save/delete button across the app. Built on react-spinners'
- * ClipLoader. Usage:
+ * submit/save/delete button across the app.
  *
  *   <button disabled={saving}>
  *     {saving ? <ButtonLoader label="Saving..." /> : 'Save'}
@@ -21,9 +20,9 @@ type ButtonLoaderProps = {
  */
 export default function ButtonLoader({ label, variant = 'on-color', className = '' }: ButtonLoaderProps) {
   return (
-    <span className={`inline-flex items-center gap-2 ${className}`}>
-      <ClipLoader color={variant === 'on-color' ? '#ffffff' : 'currentColor'} size={14} loading />
-      {label}
+    <span role="status" className={`inline-flex items-center gap-2 ${className}`}>
+      <LoaderCircle aria-hidden="true" className={`size-4 animate-spin motion-reduce:animate-none ${variant === 'on-color' ? 'text-white' : 'text-current'}`} />
+      <span>{label}</span>
     </span>
   )
 }

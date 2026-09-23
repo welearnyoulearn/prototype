@@ -3,6 +3,7 @@
 import type { FeeStats, GradeStat, PassoutData, PassoutStudent, RecentPayment } from './types'
 import { LoadErrorBanner } from './LoadErrorBanner'
 import { useFeeStore } from '@/lib/stores/feeStore'
+import { Skeleton } from '@/components/ui/skeleton'
 
 function fmt(n: number | string) {
   return `₹${Number(n).toLocaleString('en-IN')}`
@@ -115,12 +116,13 @@ export default function FeeOverviewTab({
 
       {/* ── Stat Cards ── */}
       {statsLoading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5" role="status" aria-live="polite" aria-busy="true">
+          <span className="sr-only">Loading fee overview</span>
           {[...Array(5)].map((_, i) => (
-            <div key={i} className="bg-white rounded-xl border border-gray-100 p-5 animate-pulse">
-              <div className="h-3 bg-gray-100 rounded w-24 mb-3" />
-              <div className="h-8 bg-gray-200 rounded w-28 mb-2" />
-              <div className="h-3 bg-gray-100 rounded w-20" />
+            <div key={i} className="rounded-lg border border-gray-100 bg-white p-5">
+              <Skeleton className="mb-3 h-3 w-24" />
+              <Skeleton className="mb-2 h-8 w-28" />
+              <Skeleton className="h-3 w-20" />
             </div>
           ))}
         </div>
@@ -152,7 +154,7 @@ export default function FeeOverviewTab({
             </div>
             <div className="h-3 bg-gray-100 rounded-full overflow-hidden mb-3">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-blue-500 to-green-500 transition-all duration-700"
+                className="h-full rounded-full bg-[#245b46] transition-all duration-700"
                 style={{ width: `${pct(Number(stats.summary.total_collected), Number(stats.summary.total_due) - Number(stats.summary.total_waived || 0))}%` }}
               />
             </div>

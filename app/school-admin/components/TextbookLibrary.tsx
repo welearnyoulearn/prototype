@@ -197,7 +197,7 @@ export default function TextbookLibrary({ schoolId }: { schoolId: number }) {
       </div>
 
       {/* How AI uses it */}
-      <div className="bg-gradient-to-r from-violet-50 to-blue-50 border border-violet-200 rounded-xl p-5 mb-6">
+      <div className="bg-[#edf2eb] border-l-2 border-[#245b46] p-5 mb-6">
         <h4 className="font-semibold text-gray-800 mb-3 text-sm">How the AI uses uploaded textbooks</h4>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[

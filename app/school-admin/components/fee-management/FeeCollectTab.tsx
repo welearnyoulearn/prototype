@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState, Fragment, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type { CancelCorrectBundle, LedgerEntry, PaySuccess, PendingPayment, ReceiptHeaderBlock, StudentRow } from './types'
 import { printDualCopyReceipt } from './receipts'
@@ -199,6 +200,9 @@ export default function FeeCollectTab({
   const [openStudentId, setOpenStudentId] = useState<number | null>(null)
   const [collectChecked, setCollectChecked] = useState<Set<number>>(new Set())
   const [showCollectForm, setShowCollectForm] = useState(false)
+  const collectDialogRef = useRef<HTMLDivElement>(null)
+  const collectTriggerRef = useRef<HTMLElement | null>(null)
+  const nestedPaymentDialogRef = useRef(false)
   const [counterPayments, setCounterPayments] = useState<import('./types').PaymentRecord[]>([])
   const [counterPmtLoading, setCounterPmtLoading] = useState(false)
   const [counterPmtError, setCounterPmtError] = useState('')
@@ -405,6 +409,7 @@ export default function FeeCollectTab({
   }, [ledgerVersion])
 
   function startCollect(row: StudentRow) {
+    collectTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     payIdemKeyRef.current = null
     setOpenStudentId(row.student_id)
     setCollectChecked(new Set(row.open_entries.map(e => e.id)))
@@ -415,6 +420,31 @@ export default function FeeCollectTab({
     setPayError(''); setPaySuccess(null)
     setShowCollectForm(true)
   }
+
+  const closeCollect = useCallback(() => setShowCollectForm(false), [])
+
+  useEffect(() => {
+    nestedPaymentDialogRef.current = showPayConfirm || showWaiver
+  }, [showPayConfirm, showWaiver])
+
+  useEffect(() => {
+    if (!showCollectForm) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const focusTimer = window.setTimeout(() => {
+      collectDialogRef.current?.querySelector<HTMLElement>('input, select, button')?.focus()
+    }, 0)
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape' && !nestedPaymentDialogRef.current) closeCollect()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.clearTimeout(focusTimer)
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', onKeyDown)
+      collectTriggerRef.current?.focus()
+    }
+  }, [showCollectForm, closeCollect])
 
   // Multi-entry collection via the payments API (FIFO allocation across checked ledger ids)
   async function submitCounterPayment() {
@@ -678,7 +708,7 @@ export default function FeeCollectTab({
                       <div className="hidden sm:block sm:col-span-2 text-right text-sm font-bold text-red-600">{fmt(row.outstanding)}</div>
                       <div className="flex justify-end sm:justify-center gap-1.5 sm:col-span-2" onClick={e => e.stopPropagation()}>
                         {row.outstanding > 0 ? (
-                          <button onClick={() => startCollect(row)}
+                          <button onClick={() => startCollect(row)} aria-haspopup="dialog"
                             className="text-xs bg-blue-600 text-white px-3 py-1 rounded-lg font-medium hover:bg-blue-700">Collect</button>
                         ) : (
                           <span className="text-xs text-green-600 font-medium px-2 py-1">✓ Clear</span>
@@ -730,10 +760,19 @@ export default function FeeCollectTab({
                                 className="text-sm bg-green-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-green-700">Done</button>
                             </div>
                           </div>
-                        ) : showCollectForm ? (
+                        ) : showCollectForm ? createPortal(
                           /* Collect form */
-                          <div className="bg-white border border-blue-200 rounded-xl p-5 space-y-4">
-                            <p className="text-sm font-semibold text-gray-700">Collect Payment — {row.student_name}</p>
+                          <div className="fixed inset-0 z-[190] flex items-center justify-center bg-black/45 p-3 sm:p-6" onMouseDown={closeCollect}>
+                          <div ref={collectDialogRef} role="dialog" aria-modal="true" aria-labelledby="collect-payment-title" className="max-h-[min(90dvh,760px)] w-full max-w-3xl overflow-y-auto rounded-lg bg-white shadow-2xl" onMouseDown={event => event.stopPropagation()}>
+                            <div className="sticky top-0 z-10 flex items-start justify-between border-b border-gray-200 bg-white px-5 py-4 sm:px-6">
+                              <div>
+                                <p className="text-xs font-semibold uppercase tracking-[.08em] text-[#245b46]">Fee collection</p>
+                                <h2 id="collect-payment-title" className="mt-1 text-lg font-semibold text-gray-900">{row.student_name}</h2>
+                                <p className="mt-0.5 text-xs text-gray-500">Grade {row.grade}{row.section}{row.school_roll_number != null ? ` · Roll ${row.school_roll_number}` : ''} · {fmt(row.outstanding)} outstanding</p>
+                              </div>
+                              <button type="button" onClick={closeCollect} aria-label="Close payment window" className="grid h-10 w-10 place-items-center rounded-md text-xl text-gray-500 hover:bg-gray-100">×</button>
+                            </div>
+                            <div className="space-y-5 px-5 py-5 sm:px-6">
                             <div className="space-y-1.5">
                               {row.open_entries.map(e => (
                                 <label key={e.id} className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer border-l-2 transition-colors ${
@@ -856,10 +895,12 @@ export default function FeeCollectTab({
                                 className="px-3 py-2.5 border border-purple-200 text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm font-medium whitespace-nowrap">
                                 Grant Waiver
                               </button>
-                              <button onClick={() => setShowCollectForm(false)}
+                              <button onClick={closeCollect}
                                 className="text-sm text-gray-500 px-4 py-2.5 hover:text-gray-700">Cancel</button>
                             </div>
                           </div>
+                          </div>
+                          </div>, document.body
                         ) : (
                           /* Dues list (read mode) */
                           <div className="space-y-3">
@@ -881,7 +922,7 @@ export default function FeeCollectTab({
                                     </div>
                                   ))}
                                   <div className="flex gap-2 mt-1">
-                                    <button onClick={() => startCollect(row)}
+                                    <button onClick={() => startCollect(row)} aria-haspopup="dialog"
                                       className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-sm font-semibold">
                                       Collect All ({fmt(row.outstanding)})
                                     </button>
@@ -1311,12 +1352,12 @@ export default function FeeCollectTab({
       {showPayConfirm && openStudent && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
           onClick={() => setShowPayConfirm(false)}>
-          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden"
+          <div role="dialog" aria-modal="true" className="bg-white rounded-lg w-full max-w-sm shadow-2xl overflow-hidden"
             onClick={e => e.stopPropagation()}>
 
             {/* Header */}
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 pt-6 pb-8 text-white">
-              <p className="text-xs font-semibold uppercase tracking-widest text-blue-200 mb-1">Confirm Payment</p>
+            <div className="bg-[#173e2f] px-6 pt-6 pb-8 text-white">
+              <p className="text-xs font-semibold uppercase tracking-widest text-white/60 mb-1">Confirm payment</p>
               <p className="text-2xl font-black tracking-tight">{openStudent.student_name}</p>
               <p className="text-sm text-blue-200 mt-0.5">
                 Gr.{openStudent.grade}{openStudent.section}
@@ -1411,7 +1452,7 @@ export default function FeeCollectTab({
                 data-testid="btn-confirm-payment"
                 onClick={() => { setShowPayConfirm(false); submitCounterPayment() }}
                 disabled={collectLoading}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-blue-200">
+                className="flex-1 bg-[#245b46] hover:bg-[#173e2f] text-white py-3 rounded-md text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
                 {collectLoading
                   ? <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Recording…</>
                   : <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>Confirm & Record</>
@@ -1426,11 +1467,11 @@ export default function FeeCollectTab({
       {showWaiver && selectedEntry && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
           onClick={() => setShowWaiver(false)}>
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden"
+          <div role="dialog" aria-modal="true" className="bg-white rounded-lg w-full max-w-md shadow-2xl overflow-hidden"
             onClick={e => e.stopPropagation()}>
 
             {/* Header */}
-            <div className="bg-gradient-to-r from-purple-600 to-purple-700 px-6 py-4">
+            <div className="bg-[#173e2f] px-6 py-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-white font-bold text-base">Grant Fee Waiver</h3>
@@ -1572,7 +1613,7 @@ export default function FeeCollectTab({
                   data-testid="btn-submit-waiver"
                   onClick={submitWaiver}
                   disabled={waiverLoading || !waiverForm.reason.trim() || (waiverForm.waiver_type !== 'full' && !waiverForm.waiver_value)}
-                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-xl text-sm font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-purple-200">
+                  className="flex-1 bg-[#245b46] hover:bg-[#173e2f] text-white py-3 rounded-md text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center gap-2">
                   {waiverLoading
                     ? <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Saving…</>
                     : <><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>Confirm Waiver</>

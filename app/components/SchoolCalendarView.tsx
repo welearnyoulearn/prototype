@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { addDays, monthBounds, todayIST, weekdayOf } from '@/lib/attendanceRules'
+import { CalendarDays } from 'lucide-react'
 
 // The school's Academic Calendar, READ-ONLY, for teachers, students and parents.
 // (The school admin manages it in the admin portal.) Holidays are shown in red because they
@@ -69,7 +70,7 @@ export function useCalendarRange(from: string, to: string, reloadToken = 0) {
   return { events: data.key === key ? data.events : [], weeklyOff: data.weeklyOff, loading: data.key !== key, ready: data.key !== '', error: data.key === key ? data.error : null }
 }
 
-export default function SchoolCalendarView() {
+export default function SchoolCalendarView({ experience = 'shared' }: { experience?: 'student' | 'shared' }) {
   const today = todayIST()
   const currentMonth = today.slice(0, 7)
   const [month, setMonth] = useState(currentMonth)
@@ -95,30 +96,36 @@ export default function SchoolCalendarView() {
 
   return (
     <div data-testid="school-calendar" className="space-y-5 max-w-4xl">
-      <div className="flex items-center justify-between bg-white border border-gray-200 rounded-2xl px-3 py-2">
+      {experience === 'student' && (
+        <header className="student-page-intro">
+          <div><p className="student-eyebrow">Plan what’s ahead</p><h1>School calendar</h1><p className="student-page-description">See exams, events, holidays, and other dates shared by your school.</p></div>
+          <div className="student-page-aside flex items-center gap-2 text-xs font-medium text-[#68736b]"><CalendarDays size={17} className="text-[#a85f16]" aria-hidden="true" />School schedule</div>
+        </header>
+      )}
+      <div className="flex items-center justify-between border-y border-gray-200 bg-white/65 px-3 py-2">
         <button type="button" onClick={() => go(-1)} aria-label="Previous month" data-testid="cal-prev"
-          className="w-10 h-10 rounded-xl text-gray-500 hover:bg-gray-100 text-lg">‹</button>
+          className="w-10 h-10 rounded-md text-gray-500 hover:bg-gray-100 text-lg">‹</button>
         <div className="text-center">
           <p data-testid="cal-month-label" className="text-base font-bold text-gray-900">{MONTH_NAMES[mm - 1]} {yy}</p>
           {month !== currentMonth && (
             <button type="button" onClick={() => { setMonth(currentMonth); setSelected(null) }} data-testid="cal-today"
-              className="text-xs text-blue-600 hover:underline">Back to this month</button>
+              className="text-xs font-semibold text-[#8b4a10] hover:underline">Back to this month</button>
           )}
         </div>
         <button type="button" onClick={() => go(1)} aria-label="Next month" data-testid="cal-next"
-          className="w-10 h-10 rounded-xl text-gray-500 hover:bg-gray-100 text-lg">›</button>
+          className="w-10 h-10 rounded-md text-gray-500 hover:bg-gray-100 text-lg">›</button>
       </div>
 
       {cal.error && (
-        <div role="alert" data-testid="cal-error" className="bg-red-50 border border-red-200 rounded-2xl px-4 py-4 text-sm text-red-700 flex items-center justify-between gap-3">
+        <div role="alert" data-testid="cal-error" className="bg-red-50 border border-red-200 rounded-lg px-4 py-4 text-sm text-red-700 flex items-center justify-between gap-3">
           <span>{cal.error}</span>
           <button type="button" onClick={() => setReload(r => r + 1)} className="text-xs font-semibold border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-100">Try again</button>
         </div>
       )}
 
-      <div className="bg-white border border-gray-200 rounded-2xl p-3 sm:p-4" aria-busy={cal.loading}>
+      <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4" aria-busy={cal.loading}>
         <div className="grid grid-cols-7 gap-1 sm:gap-1.5 mb-1.5" aria-hidden>
-          {WEEKDAY_SHORT.map(d => <div key={d} className="text-center text-[11px] font-semibold text-gray-400">{d}</div>)}
+          {WEEKDAY_SHORT.map(d => <div key={d} className="text-center text-xs font-semibold text-muted-foreground">{d}</div>)}
         </div>
         <div className={`grid grid-cols-7 gap-1 sm:gap-1.5 ${cal.loading ? 'opacity-50' : ''}`}>
           {Array.from({ length: lead }).map((_, i) => <div key={`b${i}`} />)}
@@ -132,8 +139,8 @@ export default function SchoolCalendarView() {
                 key={d} type="button" onClick={() => setSelected(selected === d ? null : d)}
                 data-testid={`cal-day-${d}`} data-holiday={holiday ? 'true' : 'false'}
                 aria-label={`${fmtLong(d)}${evs.length ? ': ' + evs.map(e => e.title).join(', ') : ''}${off ? ': weekly off' : ''}`}
-                className={`min-h-12 sm:min-h-20 rounded-lg sm:rounded-xl border p-1 sm:p-1.5 text-left flex flex-col transition ${
-                  holiday ? CALENDAR_TYPE_UI.holiday.cell : off ? 'bg-slate-50 border-slate-100 text-slate-400' : 'bg-white border-gray-100 hover:border-gray-300'
+                className={`min-h-12 sm:min-h-20 rounded-lg sm:rounded-md border p-1 sm:p-1.5 text-left flex flex-col transition ${
+                  holiday ? CALENDAR_TYPE_UI.holiday.cell : off ? 'bg-slate-50 border-slate-100 text-muted-foreground' : 'bg-white border-gray-100 hover:border-gray-300'
                 } ${isToday ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${selected === d ? 'outline outline-2 outline-gray-900' : ''}`}
               >
                 <span className={`text-xs sm:text-sm font-semibold ${holiday ? 'text-red-700' : ''}`}>{Number(d.slice(8))}</span>
@@ -143,35 +150,35 @@ export default function SchoolCalendarView() {
                 </span>
                 <span className="hidden sm:flex flex-col gap-0.5 mt-0.5 w-full">
                   {evs.slice(0, 2).map(e => (
-                    <span key={e.id} className={`truncate text-[10px] leading-tight rounded px-1 py-0.5 ${CALENDAR_TYPE_UI[e.event_type].chip}`}>{e.title}</span>
+                    <span key={e.id} className={`truncate text-xs leading-tight rounded px-1 py-0.5 ${CALENDAR_TYPE_UI[e.event_type].chip}`}>{e.title}</span>
                   ))}
-                  {evs.length > 2 && <span className="text-[10px] text-gray-400">+{evs.length - 2} more</span>}
+                  {evs.length > 2 && <span className="text-xs text-muted-foreground">+{evs.length - 2} more</span>}
                 </span>
               </button>
             )
           })}
         </div>
 
-        <div data-testid="cal-detail" className="mt-3 rounded-xl bg-gray-50 border border-gray-100 px-3 py-2.5 text-sm">
+        <div data-testid="cal-detail" className="mt-3 rounded-md bg-gray-50 border border-gray-100 px-3 py-2.5 text-sm">
           {selected ? (
             selectedEvents.length > 0 ? (
               <ul className="space-y-2">
                 <li className="font-semibold text-gray-700">{fmtLong(selected)}</li>
                 {selectedEvents.map(e => (
                   <li key={e.id}>
-                    <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 mr-2 ${CALENDAR_TYPE_UI[e.event_type].chip}`}>{CALENDAR_TYPE_UI[e.event_type].label}</span>
+                    <span className={`text-xs font-semibold rounded-full px-2 py-0.5 mr-2 ${CALENDAR_TYPE_UI[e.event_type].chip}`}>{CALENDAR_TYPE_UI[e.event_type].label}</span>
                     <span className="font-medium text-gray-800">{e.title}</span>
-                    <span className="text-xs text-gray-400 ml-2">{fmtRange(e)}</span>
+                    <span className="text-xs text-muted-foreground ml-2">{fmtRange(e)}</span>
                     {e.description && <p className="text-gray-500 mt-0.5">{e.description}</p>}
                     {e.event_type === 'holiday' && <p className="text-xs text-red-600 mt-0.5">No school and no attendance on this day.</p>}
                   </li>
                 ))}
               </ul>
             ) : <span className="text-gray-500">{fmtLong(selected)} — {cal.weeklyOff.includes(weekdayOf(selected)) ? 'weekly off.' : 'nothing scheduled.'}</span>
-          ) : <span className="text-gray-400">Tap a day to see what is planned.</span>}
+          ) : <span className="text-muted-foreground">Tap a day to see what is planned.</span>}
         </div>
 
-        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-[11px] text-gray-500" aria-label="Legend">
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-gray-500" aria-label="Legend">
           {(Object.keys(CALENDAR_TYPE_UI) as CalendarEvent['event_type'][]).map(t => (
             <span key={t} className="inline-flex items-center gap-1.5"><span className={`w-2.5 h-2.5 rounded-full ${CALENDAR_TYPE_UI[t].dot}`} />{CALENDAR_TYPE_UI[t].label}</span>
           ))}
@@ -179,19 +186,19 @@ export default function SchoolCalendarView() {
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-2xl p-4" data-testid="cal-upcoming">
+      <div className="bg-white border border-gray-200 rounded-lg p-4" data-testid="cal-upcoming">
         <p className="text-sm font-semibold text-gray-800 mb-2">Coming up (next 60 days)</p>
-        {upcoming.loading ? <p className="text-sm text-gray-400">Loading…</p>
-          : upcomingList.length === 0 ? <p className="text-sm text-gray-400">Nothing scheduled in the next 60 days.</p>
+        {upcoming.loading ? <p className="text-sm text-muted-foreground" role="status">Checking the next 60 days…</p>
+          : upcomingList.length === 0 ? <p className="text-sm text-muted-foreground">Nothing scheduled in the next 60 days.</p>
           : (
             <ul className="divide-y divide-gray-100">
               {upcomingList.map(e => (
                 <li key={e.id} className="py-2 flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 mr-2 ${CALENDAR_TYPE_UI[e.event_type].chip}`}>{CALENDAR_TYPE_UI[e.event_type].label}</span>
+                    <span className={`text-xs font-semibold rounded-full px-2 py-0.5 mr-2 ${CALENDAR_TYPE_UI[e.event_type].chip}`}>{CALENDAR_TYPE_UI[e.event_type].label}</span>
                     <span className="text-sm text-gray-800">{e.title}</span>
                   </div>
-                  <span className="text-xs text-gray-400 whitespace-nowrap">{fmtRange(e)}</span>
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">{fmtRange(e)}</span>
                 </li>
               ))}
             </ul>

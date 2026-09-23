@@ -89,7 +89,7 @@ function DuplicatesPanel({
             </p>
           )}
           {!dupLoading && dupTotalCount === 0 && dupGroups.length === 0 && (
-            <p className="text-sm text-gray-400">No duplicates found</p>
+            <p className="text-sm text-muted-foreground">No duplicates found</p>
           )}
         </div>
         <div className="flex gap-2">
@@ -141,22 +141,22 @@ function DuplicatesPanel({
       )}
 
       {dupLoading && (
-        <div className="py-12 text-center text-gray-400">
+        <div className="py-12 text-center text-muted-foreground">
           <div className="w-6 h-6 border-2 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
           Scanning for duplicates...
         </div>
       )}
 
       {!dupLoading && dupGroups.length === 0 && dupTotalCount === 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 py-12 text-center">
-          <p className="text-gray-400 text-sm">Click "Scan for Duplicates" to check for duplicate students</p>
+        <div className="bg-white rounded-md border border-gray-200 py-12 text-center">
+          <p className="text-muted-foreground text-sm">Click "Scan for Duplicates" to check for duplicate students</p>
         </div>
       )}
 
       <div className="space-y-4">
         {dupGroups.map(group => (
           <div key={group.keep.id}
-            className={`bg-white rounded-xl border overflow-hidden ${selectedDupGroups.has(group.keep.id) ? 'border-orange-300' : 'border-gray-200'}`}>
+            className={`bg-white rounded-md border overflow-hidden ${selectedDupGroups.has(group.keep.id) ? 'border-orange-300' : 'border-gray-200'}`}>
             <div className="px-5 py-3 bg-orange-50 border-b border-orange-100 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <input type="checkbox"
@@ -169,7 +169,7 @@ function DuplicatesPanel({
                     Grade {group.keep.grade}{group.keep.section ? ` · Section ${group.keep.section}` : ''}
                     {group.keep.school_roll_number != null ? ` · Roll ${group.keep.school_roll_number}` : ''}
                   </span>
-                  <span className="ml-2 text-xs text-gray-400">— {reasonLabel(group.reason)}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">— {reasonLabel(group.reason)}</span>
                 </div>
               </div>
               <button
@@ -185,9 +185,9 @@ function DuplicatesPanel({
                 <span className="text-xs font-semibold text-green-700 w-14 flex-shrink-0">KEEP</span>
                 <div className="flex-1 min-w-0">
                   <span className="text-sm font-medium text-gray-900">{group.keep.name}</span>
-                  <span className="ml-2 text-xs text-gray-400 font-mono">{group.keep.roll_number}</span>
+                  <span className="ml-2 text-xs text-muted-foreground font-mono">{group.keep.roll_number}</span>
                 </div>
-                <span className="text-xs text-gray-400">Created {fmtTime(group.keep.created_at)}</span>
+                <span className="text-xs text-muted-foreground">Created {fmtTime(group.keep.created_at)}</span>
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${group.keep.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                   {group.keep.status}
                 </span>
@@ -198,9 +198,9 @@ function DuplicatesPanel({
                   <span className="text-xs font-semibold text-red-600 w-14 flex-shrink-0">DELETE</span>
                   <div className="flex-1 min-w-0">
                     <span className="text-sm font-medium text-gray-700">{dup.name}</span>
-                    <span className="ml-2 text-xs text-gray-400 font-mono">{dup.roll_number}</span>
+                    <span className="ml-2 text-xs text-muted-foreground font-mono">{dup.roll_number}</span>
                   </div>
-                  <span className="text-xs text-gray-400">Created {fmtTime(dup.created_at)}</span>
+                  <span className="text-xs text-muted-foreground">Created {fmtTime(dup.created_at)}</span>
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${dup.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                     {dup.status}
                   </span>
@@ -213,7 +213,7 @@ function DuplicatesPanel({
 
       {dupConfirm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-md p-6">
             <h3 className="text-base font-bold text-gray-900 mb-3">
               Delete {dupConfirm === 'all' ? dupTotalCount : selectedDupCount} duplicate record{(dupConfirm === 'all' ? dupTotalCount : selectedDupCount) !== 1 ? 's' : ''}?
             </h3>
@@ -459,7 +459,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
 
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-green-300'
 
-  if (loading) return <div className="py-12 text-center text-gray-400">Loading students...</div>
+  if (loading) return <div className="py-12 text-center text-muted-foreground">Loading students...</div>
 
   return (
     <div className="flex gap-6">
@@ -470,7 +470,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-gray-900">Students</h2>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-400">{students.length} total · {activeStudents.length} active · {inactiveStudents.length} removed</span>
+            <span className="text-sm text-muted-foreground">{students.length} total · {activeStudents.length} active · {inactiveStudents.length} removed</span>
             <button onClick={reloadStudents} disabled={loading}
               title="Refresh student list"
               className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-500 rounded-lg text-xs hover:bg-gray-50 transition-colors disabled:opacity-40">
@@ -488,7 +488,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
             const labels: Record<string, string> = { active: 'Active', inactive: 'Removed', all: 'All' }
             return (
               <button key={key} onClick={() => { setStatusFilter(key); setGradeFilter('all'); setSectionFilter('all') }}
-                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === key ? 'bg-white text-gray-900 ' : 'text-gray-500 hover:text-gray-700'}`}>
                 {labels[key]}
                 {key === 'inactive' && inactiveStudents.length > 0 && (
                   <span className="ml-1.5 bg-red-100 text-red-600 text-xs px-1.5 py-0.5 rounded-full">{inactiveStudents.length}</span>
@@ -499,7 +499,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
           <button
             data-testid="duplicates-tab-btn"
             onClick={() => { setStatusFilter('duplicates'); if (dupGroups.length === 0 && !dupLoading) loadDuplicates() }}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === 'duplicates' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${statusFilter === 'duplicates' ? 'bg-white text-gray-900 ' : 'text-gray-500 hover:text-gray-700'}`}>
             Duplicates
             {dupTotalCount > 0 && (
               <span className="ml-1.5 bg-orange-100 text-orange-600 text-xs px-1.5 py-0.5 rounded-full">{dupTotalCount}</span>
@@ -566,7 +566,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
         ) : (
           <div className="space-y-4">
             {Object.entries(grouped).sort(([a], [b]) => sortGroupKey(a, b)).map(([group, members]) => (
-              <div key={group} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div key={group} className="bg-white rounded-md border border-gray-200 overflow-hidden">
                 <div className="px-5 py-3 bg-green-50 border-b border-green-100 flex items-center justify-between">
                   <span className="font-semibold text-green-800 text-sm">{group}</span>
                   <span className="text-xs text-green-600 font-medium">{members.length} student{members.length !== 1 ? 's' : ''}</span>
@@ -631,7 +631,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
           })
           if (keys.length === 0) return null
           return (
-            <div className="mt-4 bg-white rounded-xl border border-red-100 overflow-hidden">
+            <div className="mt-4 bg-white rounded-md border border-red-100 overflow-hidden">
               <div className="px-5 py-3 bg-red-50 border-b border-red-100 flex items-center justify-between">
                 <span className="font-semibold text-red-700 text-sm">Removed Classes</span>
                 <span className="text-xs text-red-500">{keys.length} class{keys.length !== 1 ? 'es' : ''} · {inactiveStudents.length} students deactivated</span>
@@ -640,7 +640,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                 {keys.map(k => (
                   <div key={k} className="flex items-center justify-between px-5 py-2.5">
                     <span className="text-sm font-medium text-gray-500 line-through">Grade {k.split('-')[0]} – Section {k.split('-')[1]}</span>
-                    <span className="text-xs text-gray-400">{removedGroups[k]} student{removedGroups[k] !== 1 ? 's' : ''}</span>
+                    <span className="text-xs text-muted-foreground">{removedGroups[k]} student{removedGroups[k] !== 1 ? 's' : ''}</span>
                   </div>
                 ))}
               </div>
@@ -654,10 +654,10 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
       {/* Right: Detail panel */}
       {selected && (
         <div className="w-72 flex-shrink-0">
-          <div className="bg-white rounded-xl border border-gray-200 sticky top-6 flex flex-col max-h-[calc(100vh-6rem)] overflow-hidden">
+          <div className="bg-white rounded-md border border-gray-200 sticky top-6 flex flex-col max-h-[calc(100vh-6rem)] overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Student</span>
-              <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-lg leading-none">×</button>
+              <button onClick={() => setSelected(null)} className="text-muted-foreground hover:text-gray-600 text-lg leading-none">×</button>
             </div>
 
             <div className="overflow-y-auto flex-1">
@@ -668,7 +668,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                 </div>
                 <div>
                   <p className="font-bold text-gray-900">{selected.name}</p>
-                  <p className="text-xs text-gray-400 font-mono mt-0.5">{selected.roll_number}</p>
+                  <p className="text-xs text-muted-foreground font-mono mt-0.5">{selected.roll_number}</p>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {selected.grade && selected.section ? `Grade ${selected.grade} – Section ${selected.section}` : ''}
                   </p>
@@ -686,7 +686,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                     { label: 'Parent Ph.', value: selected.parent_phone },
                   ].map(({ label, value }) => value ? (
                     <div key={label} className="flex gap-2">
-                      <span className="text-gray-400 w-20 flex-shrink-0 text-xs">{label}</span>
+                      <span className="text-muted-foreground w-20 flex-shrink-0 text-xs">{label}</span>
                       <span className="text-gray-700 text-xs break-all">{value}</span>
                     </div>
                   ) : null)}

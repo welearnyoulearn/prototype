@@ -6,6 +6,7 @@ import type { TargetClass } from '@/lib/announcements'
 import GreetingCard from './GreetingCard'
 import NoticeModal from './NoticeModal'
 import type { NoticeItem } from './types'
+import { CheckCircle2, Clock3, Eye, Globe2, GraduationCap, Pin, Save, Send, UserRound, UsersRound } from 'lucide-react'
 
 export type ClassRow = { grade: string; section: string }
 
@@ -14,12 +15,12 @@ type ClassSel = Record<string, { all: boolean; sections: string[] }>
 type Trans = { te: { title: string; content: string }; hi: { title: string; content: string } }
 
 const AUDIENCES = [
-  { key: 'teachers', label: 'Teachers', icon: '👩‍🏫' },
-  { key: 'students', label: 'Students', icon: '🎒' },
-  { key: 'parents', label: 'Parents', icon: '👨‍👩‍👧' },
+  { key: 'teachers', label: 'Teachers', icon: UserRound },
+  { key: 'students', label: 'Students', icon: GraduationCap },
+  { key: 'parents', label: 'Parents', icon: UsersRound },
 ] as const
 
-const CATEGORY_LABEL: Record<TemplateCategory | 'blank', string> = { festival: '🎉 Festivals', holiday: '🏖️ Holidays', school: '🏫 School life', blank: '✏️ Blank' }
+const CATEGORY_LABEL: Record<TemplateCategory | 'blank', string> = { festival: 'Festivals', holiday: 'Holidays', school: 'School life', blank: 'Blank' }
 
 function toLocalInput(iso: string | null | undefined): string {
   if (!iso) return ''
@@ -204,8 +205,8 @@ export default function AnnouncementComposer({
   // ── Step 1: template gallery ──────────────────────────────────────────────
   if (!chosen) {
     return (
-      <div data-testid="ann-gallery" className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-gray-50 bg-gradient-to-r from-indigo-50 to-white flex items-center justify-between gap-3">
+      <div data-testid="ann-gallery" className="bg-white border-y border-gray-200 overflow-hidden">
+        <div className="px-6 py-5 border-b border-gray-200 bg-[#f5f7f3] flex items-center justify-between gap-3">
           <div>
             <h3 className="text-base font-bold text-gray-900">Start from a template</h3>
             <p className="text-sm text-gray-500 mt-0.5">Festival greetings open as an animated card for teachers, students and parents.</p>
@@ -216,19 +217,19 @@ export default function AnnouncementComposer({
           <div className="flex gap-2 flex-wrap">
             {(['festival', 'holiday', 'school'] as TemplateCategory[]).map(c => (
               <button key={c} data-testid={`ann-cat-${c}`} onClick={() => setCategory(c)}
-                className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${category === c ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+                className={`px-4 py-2 rounded-md text-sm font-semibold transition-colors ${category === c ? 'bg-[#245b46] text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                 {CATEGORY_LABEL[c]}
               </button>
             ))}
             <button data-testid="ann-template-blank" onClick={() => pickTemplate(null)}
-              className="px-4 py-2 rounded-xl text-sm font-semibold bg-white border border-dashed border-gray-300 text-gray-600 hover:bg-gray-50">
+              className="px-4 py-2 rounded-md text-sm font-semibold bg-white border border-dashed border-gray-300 text-gray-600 hover:bg-gray-50">
               {CATEGORY_LABEL.blank}
             </button>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {visibleTemplates.map(t => (
               <button key={t.key} data-testid={`ann-template-${t.key}`} onClick={() => pickTemplate(t)}
-                className="group rounded-2xl overflow-hidden text-left shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all"
+                className="group rounded-md overflow-hidden text-left transition-transform hover:-translate-y-0.5"
                 style={{ background: `linear-gradient(135deg, ${t.gradient[0]}, ${t.gradient[1]} 55%, ${t.gradient[2]})`, color: t.dark ? '#fff' : '#1f2937' }}>
                 <div className="px-3 pt-4 pb-3 text-center">
                   <div className="text-4xl leading-none group-hover:scale-110 transition-transform">{t.emoji}</div>
@@ -244,13 +245,13 @@ export default function AnnouncementComposer({
   }
 
   // ── Step 2: write, target, schedule, preview ──────────────────────────────
-  const inputCls = 'w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all'
+  const inputCls = 'w-full border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#245b46]/20 focus:border-[#245b46] transition-colors'
   const label = 'block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2'
 
   return (
     <div data-testid="ann-form" className="grid lg:grid-cols-5 gap-5 items-start">
-      <div className="lg:col-span-3 bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
-        <div className="px-6 py-5 border-b border-gray-50 bg-gradient-to-r from-indigo-50 to-white flex items-center justify-between gap-3">
+      <div className="lg:col-span-3 bg-white border-y border-gray-200 overflow-hidden">
+        <div className="px-6 py-5 border-b border-gray-200 bg-[#f5f7f3] flex items-center justify-between gap-3">
           <div>
             <h3 className="text-base font-bold text-gray-900">{editing ? 'Edit announcement' : template ? `New: ${template.label}` : 'New announcement'}</h3>
             <p className="text-sm text-gray-500 mt-0.5">{editing ? 'Changes show to the selected audience straight away' : 'Write it, choose who gets it, check the preview'}</p>
@@ -285,15 +286,15 @@ export default function AnnouncementComposer({
             <label className={label}>Send to *</label>
             <div className="flex flex-wrap gap-2">
               <button type="button" data-testid="ann-audience-all" onClick={() => toggleAudience('all')}
-                className={`px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all ${audience.includes('all') ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-200'}`}>
-                🌐 Everyone
+                className={`inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold border transition-colors ${audience.includes('all') ? 'bg-[#245b46] border-[#245b46] text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-[#9bb7a4]'}`}>
+                <Globe2 size={15} aria-hidden="true" />Everyone
               </button>
               {AUDIENCES.map(a => {
                 const on = !audience.includes('all') && audience.includes(a.key)
                 return (
                   <button key={a.key} type="button" data-testid={`ann-audience-${a.key}`} onClick={() => toggleAudience(a.key)}
-                    className={`px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all ${on ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-indigo-200'}`}>
-                    {a.icon} {a.label}
+                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-semibold border transition-colors ${on ? 'bg-[#245b46] border-[#245b46] text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-[#9bb7a4]'}`}>
+                    <a.icon size={15} aria-hidden="true" />{a.label}
                   </button>
                 )
               })}
@@ -332,7 +333,7 @@ export default function AnnouncementComposer({
                 })}
               </div>
             ))}
-            <p data-testid="ann-recipients" className="text-xs mt-2 px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 font-medium">
+            <p data-testid="ann-recipients" className="text-xs mt-2 border-l-2 border-[#245b46] bg-[#edf2eb] px-3 py-2 text-[#173e2f] font-medium">
               {recipients
                 ? `This will reach ${recipients.total} ${recipients.total === 1 ? 'person' : 'people'} — ${recipients.teachers} teacher${recipients.teachers === 1 ? '' : 's'} · ${recipients.students} student${recipients.students === 1 ? '' : 's'} · ${recipients.parents} parent${recipients.parents === 1 ? '' : 's'}`
                 : 'Counting who will receive this…'}
@@ -343,30 +344,30 @@ export default function AnnouncementComposer({
             <div>
               <label className={label}>Type</label>
               <select data-testid="ann-type" className={`${inputCls} bg-white`} value={type} onChange={e => setType(e.target.value)}>
-                <option value="general">📋 General</option>
-                <option value="circular">📄 Circular</option>
-                <option value="event">🎉 Event</option>
-                <option value="alert">🚨 Alert</option>
+                <option value="general">General</option>
+                <option value="circular">Circular</option>
+                <option value="event">Event</option>
+                <option value="alert">Alert</option>
               </select>
             </div>
             <div>
               <label className={label}>Priority</label>
               <select data-testid="ann-priority" className={`${inputCls} bg-white`} value={priority} onChange={e => setPriority(e.target.value)}>
                 <option value="normal">Normal</option>
-                <option value="high">⚠ High</option>
-                <option value="urgent">🔴 Urgent</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
               </select>
             </div>
           </div>
 
           <div className="grid sm:grid-cols-2 gap-3">
-            <label className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50">
+            <label className="flex items-start gap-3 p-3 rounded-md border border-gray-200 cursor-pointer hover:bg-gray-50">
               <input data-testid="ann-pinned" type="checkbox" className="mt-1" checked={pinned} onChange={e => setPinned(e.target.checked)} />
-              <span><span className="block text-sm font-semibold text-gray-800">📌 Pin to top</span><span className="block text-xs text-gray-400">Stays above newer notices</span></span>
+              <span><span className="flex items-center gap-1.5 text-sm font-semibold text-gray-800"><Pin size={14} />Pin to top</span><span className="block text-xs text-gray-400">Stays above newer notices</span></span>
             </label>
-            <label className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50">
+            <label className="flex items-start gap-3 p-3 rounded-md border border-gray-200 cursor-pointer hover:bg-gray-50">
               <input data-testid="ann-requires-ack" type="checkbox" className="mt-1" checked={requiresAck} onChange={e => setRequiresAck(e.target.checked)} />
-              <span><span className="block text-sm font-semibold text-gray-800">✅ Ask for acknowledgement</span><span className="block text-xs text-gray-400">People tap “I have read this”; you see who did</span></span>
+              <span><span className="flex items-center gap-1.5 text-sm font-semibold text-gray-800"><CheckCircle2 size={14} />Ask for acknowledgement</span><span className="block text-xs text-gray-400">People tap “I have read this”; you see who did</span></span>
             </label>
           </div>
 
@@ -409,20 +410,20 @@ export default function AnnouncementComposer({
           <div className="flex gap-3 pt-2 flex-wrap">
             {(!editing || initial?.status === 'draft') && (
               <button data-testid="ann-submit" disabled={saving} onClick={() => save('publish')}
-                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-all disabled:opacity-60 shadow-sm shadow-indigo-200">
-                {saving ? 'Saving…' : mode === 'schedule' ? '🕒 Schedule' : editing ? 'Publish now' : '📣 Publish'}
+                className="inline-flex items-center gap-2 px-6 py-2.5 bg-[#245b46] hover:bg-[#173e2f] text-white text-sm font-semibold rounded-md transition-colors disabled:opacity-60">
+                {saving ? 'Saving…' : mode === 'schedule' ? <><Clock3 size={15} />Schedule</> : <><Send size={15} />{editing ? 'Publish now' : 'Publish'}</>}
               </button>
             )}
             {editing && initial?.status !== 'draft' && (
               <button data-testid="ann-submit" disabled={saving} onClick={() => save('save')}
-                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl transition-all disabled:opacity-60 shadow-sm shadow-indigo-200">
+                className="px-6 py-2.5 bg-[#245b46] hover:bg-[#173e2f] text-white text-sm font-semibold rounded-md transition-colors disabled:opacity-60">
                 {saving ? 'Saving…' : 'Save changes'}
               </button>
             )}
             {(!editing || initial?.status === 'draft') && (
               <button data-testid="ann-save-draft" disabled={saving} onClick={() => save('draft')}
-                className="px-5 py-2.5 border border-gray-200 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-50 transition-all disabled:opacity-60">
-                💾 Save draft
+                className="inline-flex items-center gap-2 px-5 py-2.5 border border-gray-200 text-gray-700 text-sm font-semibold rounded-md hover:bg-gray-50 transition-colors disabled:opacity-60">
+                <Save size={15} />Save draft
               </button>
             )}
             <button data-testid="ann-cancel" onClick={onCancel} className="px-4 py-2.5 text-gray-500 text-sm font-semibold rounded-xl hover:bg-gray-50">Cancel</button>
@@ -434,20 +435,20 @@ export default function AnnouncementComposer({
       <div className="lg:col-span-2 lg:sticky lg:top-4 space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">Live preview</p>
-          <button data-testid="ann-preview-open" onClick={() => setPreviewOpen(true)} className="text-xs font-semibold text-indigo-600 hover:underline">▶ Open as recipients see it</button>
+          <button data-testid="ann-preview-open" onClick={() => setPreviewOpen(true)} className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#245b46] hover:underline"><Eye size={14} />Open recipient preview</button>
         </div>
         <div data-testid="ann-preview">
           {template && (template.greeting || headline) ? (
             template.greeting
               ? <GreetingCard template={template} headline={headline || title || template.headline} message={content} schoolName={schoolName} compact />
               : (
-                <div className="bg-white rounded-3xl shadow-lg overflow-hidden border border-gray-100">
+                <div className="bg-white rounded-lg overflow-hidden border border-gray-200">
                   <GreetingCard template={template} headline={headline || title || template.headline} variant="banner" />
                   <div className="p-5"><p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{content || 'Your message…'}</p></div>
                 </div>
               )
           ) : (
-            <div className="bg-white rounded-3xl shadow-lg overflow-hidden border border-gray-100 p-5 space-y-2">
+            <div className="bg-white rounded-lg overflow-hidden border border-gray-200 p-5 space-y-2">
               <p className="text-base font-extrabold text-gray-900">{title || 'Your title'}</p>
               <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{content || 'Your message…'}</p>
             </div>

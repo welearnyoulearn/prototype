@@ -5,6 +5,7 @@ import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 import { GOOD_ATTENDANCE_PCT, LOW_ATTENDANCE_PCT, type AttendanceBand } from '@/lib/attendanceRules'
+import { Skeleton } from '@/components/ui/skeleton'
 
 // Building blocks shared by the school-admin and class-teacher attendance dashboards.
 
@@ -63,28 +64,29 @@ export function useApi<T>(url: string | null) {
 
 export function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div role="alert" className="bg-red-50 border border-red-200 rounded-2xl px-4 py-3 text-sm text-red-700 flex items-center justify-between gap-3">
+    <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-red-200 border-l-4 border-l-red-500 bg-red-50 px-4 py-3 text-sm text-red-800">
       <span>{message}</span>
-      {onRetry && <button type="button" onClick={onRetry} className="text-xs font-semibold border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-100">Try again</button>}
+      {onRetry && <button type="button" onClick={onRetry} className="min-h-9 rounded-md border border-red-300 px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-red-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2">Try again</button>}
     </div>
   )
 }
 
 export function DashSkeleton() {
   return (
-    <div className="space-y-4 animate-pulse" aria-busy="true" data-testid="att-dash-loading">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">{[1, 2, 3, 4].map(i => <div key={i} className="h-24 bg-gray-100 rounded-2xl" />)}</div>
-      <div className="h-64 bg-gray-100 rounded-2xl" />
-      <div className="h-48 bg-gray-100 rounded-2xl" />
+    <div className="space-y-4" role="status" aria-live="polite" aria-busy="true" data-testid="att-dash-loading">
+      <span className="sr-only">Loading attendance dashboard</span>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24" />)}</div>
+      <Skeleton className="h-64" />
+      <Skeleton className="h-48" />
     </div>
   )
 }
 
 export function Kpi({ label, value, sub, band, testid }: { label: string; value: ReactNode; sub?: ReactNode; band?: AttendanceBand; testid: string }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-2xl p-4">
+    <div className="rounded-lg border border-gray-200 bg-white p-4">
       <p className="text-xs font-medium text-gray-500">{label}</p>
-      <p data-testid={testid} className={`text-3xl font-black mt-1 ${band ? BAND_TEXT[band] : 'text-gray-900'}`}>{value}</p>
+      <p data-testid={testid} className={`mt-1 text-3xl font-semibold tracking-tight ${band ? BAND_TEXT[band] : 'text-gray-900'}`}>{value}</p>
       {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
     </div>
   )
@@ -92,10 +94,10 @@ export function Kpi({ label, value, sub, band, testid }: { label: string; value:
 
 export function Card({ title, hint, right, children, testid }: { title: string; hint?: string; right?: ReactNode; children: ReactNode; testid?: string }) {
   return (
-    <section className="bg-white border border-gray-200 rounded-2xl p-4" data-testid={testid}>
+    <section className="rounded-lg border border-gray-200 bg-white p-4" data-testid={testid}>
       <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
         <div>
-          <h3 className="text-sm font-bold text-gray-900">{title}</h3>
+          <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
           {hint && <p className="text-xs text-gray-500 mt-0.5">{hint}</p>}
         </div>
         {right}
@@ -117,7 +119,7 @@ export function BandPill({ band, pct }: { band: AttendanceBand; pct?: number | n
 export function PctBar({ pct, band }: { pct: number | null; band: AttendanceBand }) {
   return (
     <div className="h-2 bg-gray-100 rounded-full overflow-hidden" aria-hidden>
-      <div className={`h-full rounded-full ${BAND_BG[band]}`} style={{ width: `${pct ?? 0}%` }} />
+      <div className={`h-full rounded-full transition-[width] duration-300 ease-out ${BAND_BG[band]}`} style={{ width: `${pct ?? 0}%` }} />
     </div>
   )
 }
@@ -182,7 +184,7 @@ export function TrendChart({ points, bucket }: { points: TrendPoint[]; bucket: '
           <Area type="monotone" dataKey="pct" stroke="#2563eb" strokeWidth={2.5} fill="url(#attFill)" dot={{ r: 2.5 }} activeDot={{ r: 5 }} isAnimationActive={false} />
         </AreaChart>
       </ResponsiveContainer>
-      <p className="text-[11px] text-gray-400 -mt-1 text-right">
+      <p className="-mt-1 text-right text-xs text-gray-500">
         <span className="text-green-600">- - {GOOD_ATTENDANCE_PCT}% good</span> · <span className="text-red-600">- - {LOW_ATTENDANCE_PCT}% low</span>
       </p>
     </div>
@@ -223,18 +225,18 @@ export function RangeControl({ range, month, currentMonth, onRange, onMonth }: {
   }
   return (
     <div className="flex items-center gap-2 flex-wrap" data-testid="att-range-control">
-      <div className="inline-flex bg-gray-100 rounded-xl p-1" role="tablist" aria-label="Period">
+      <div className="inline-flex rounded-lg bg-gray-100 p-1" role="tablist" aria-label="Period">
         {([['week', 'Last 7 days'], ['month', 'Month'], ['year', 'School year']] as const).map(([k, label]) => (
           <button key={k} type="button" role="tab" aria-selected={range === k} onClick={() => onRange(k)} data-testid={`att-range-${k}`}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${range === k ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>{label}</button>
+            className={`min-h-9 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 ${range === k ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>{label}</button>
         ))}
       </div>
       {range === 'month' && (
-        <div className="inline-flex items-center bg-white border border-gray-200 rounded-xl">
-          <button type="button" onClick={() => shift(-1)} aria-label="Previous month" data-testid="att-month-prev" className="w-8 h-8 text-gray-500 hover:bg-gray-100 rounded-l-xl">‹</button>
+        <div className="inline-flex items-center rounded-lg border border-gray-200 bg-white">
+          <button type="button" onClick={() => shift(-1)} aria-label="Previous month" data-testid="att-month-prev" className="h-9 w-9 rounded-l-lg text-gray-500 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600">‹</button>
           <span className="px-2 text-xs font-semibold text-gray-700 min-w-[6.5rem] text-center" data-testid="att-month-label">{monthName(month, true)}</span>
           <button type="button" onClick={() => shift(1)} disabled={month >= currentMonth} aria-label="Next month" data-testid="att-month-next"
-            className="w-8 h-8 text-gray-500 hover:bg-gray-100 rounded-r-xl disabled:opacity-30">›</button>
+            className="h-9 w-9 rounded-r-lg text-gray-500 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 disabled:opacity-30">›</button>
         </div>
       )}
     </div>

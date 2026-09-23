@@ -3,6 +3,7 @@ import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import OfflineBanner from "./components/OfflineBanner";
 import { Toaster } from "@/components/ui/sonner";
+import MotionPreferences from "./components/MotionPreferences";
 
 const sans = Plus_Jakarta_Sans({
   subsets: ["latin"],
@@ -30,7 +31,7 @@ export default function RootLayout({
     <html lang="en" className={`${sans.variable} ${mono.variable}`}>
       <body className="min-h-screen bg-gray-50 antialiased" suppressHydrationWarning>
         <OfflineBanner />
-        {children}
+        <MotionPreferences>{children}</MotionPreferences>
         <Toaster />
       </body>
     </html>

@@ -49,6 +49,7 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [Staff](../../docs/product/features/02-staff-directory-and-onboarding.md)
 - [settings.md](settings.md)
 - [class-management.md](class-management.md)
 - [auth.md](auth.md)

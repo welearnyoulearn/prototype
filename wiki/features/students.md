@@ -52,6 +52,7 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [Students](../../docs/product/features/03-students-list-and-onboarding.md)
 - [class-management.md](class-management.md)
 - [attendance.md](attendance.md)
 - [fee-management.md](fee-management.md)

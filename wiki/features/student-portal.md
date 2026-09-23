@@ -55,10 +55,10 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [Student Portal](../../docs/product/features/05-student-portal.md)
 - [attendance.md](attendance.md)
 - [exam-marks.md](exam-marks.md)
 - [curriculum.md](curriculum.md)
-- [student.md](student.md)
 
 ## Status history
 

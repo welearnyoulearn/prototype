@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { CheckCircle2, Download, Phone, Printer, Sunrise, Sunset } from 'lucide-react'
 
 // The Day register's "Absentees" view: everyone absent in one session, class by class, on one page —
 // so the admin can phone home without opening each class.
@@ -60,15 +61,15 @@ export default function AttendanceAbsentees({ date, onOpenClass }: { date: strin
           {(['morning', 'afternoon'] as const).map(s => (
             <button key={s} role="tab" aria-selected={session === s} data-testid={`absentees-session-${s}`} onClick={() => setSession(s)}
               className={`px-4 py-1.5 rounded-md text-sm font-semibold ${session === s ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
-              {s === 'morning' ? '🌅 Morning' : '🌆 Afternoon'}
+              {s === 'morning' ? <span className="inline-flex items-center gap-1.5"><Sunrise size={14} />Morning</span> : <span className="inline-flex items-center gap-1.5"><Sunset size={14} />Afternoon</span>}
             </button>
           ))}
         </div>
         <div className="flex gap-2">
           <a href={`/api/export/attendance?mode=absentees&date=${date}`} data-testid="absentees-download"
-            className="text-xs font-semibold text-gray-700 border border-gray-200 rounded-lg px-3 py-2 hover:bg-gray-50">⬇ Download (both sessions, CSV)</a>
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 border border-gray-200 rounded-md px-3 py-2 hover:bg-gray-50"><Download size={14} aria-hidden="true" />Download CSV</a>
           <button onClick={print} disabled={!data || withAbsent.length === 0} data-testid="absentees-print"
-            className="text-xs font-semibold text-gray-700 border border-gray-200 rounded-lg px-3 py-2 hover:bg-gray-50 disabled:opacity-40">🖨 Print</button>
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 border border-gray-200 rounded-md px-3 py-2 hover:bg-gray-50 disabled:opacity-40"><Printer size={14} aria-hidden="true" />Print</button>
         </div>
       </div>
 
@@ -77,14 +78,14 @@ export default function AttendanceAbsentees({ date, onOpenClass }: { date: strin
 
       {data && !loading && (
         data.non_working ? (
-          <div data-testid="absentees-non-working" className="bg-red-50 border border-red-200 rounded-2xl px-4 py-4 text-sm text-red-800">
+          <div data-testid="absentees-non-working" className="bg-red-50 border-l-2 border-red-600 px-4 py-4 text-sm text-red-800">
             {data.non_working.kind === 'holiday' ? `Holiday — ${data.non_working.title}` : 'Weekly off'}: no attendance is taken on this day.
           </div>
         ) : (
           <>
-            <div className="bg-white border border-gray-200 rounded-2xl p-4 flex items-center gap-5 flex-wrap" data-testid="absentees-summary">
+            <div className="border-y border-gray-200 py-4 flex items-center gap-5 flex-wrap" data-testid="absentees-summary">
               <div>
-                <p data-testid="absentees-total" className="text-3xl font-black text-red-600">{data.totals.absent}</p>
+                <p data-testid="absentees-total" className="text-3xl font-semibold tabular-nums text-red-700">{data.totals.absent}</p>
                 <p className="text-xs text-gray-500">absent in {label}</p>
               </div>
               <div className="text-sm text-gray-600 space-y-0.5">
@@ -96,7 +97,7 @@ export default function AttendanceAbsentees({ date, onOpenClass }: { date: strin
             </div>
 
             {notMarked.length > 0 && (
-              <div data-testid="absentees-not-marked" className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+              <div data-testid="absentees-not-marked" className="bg-amber-50 border-l-2 border-amber-500 p-4">
                 <p className="text-xs font-semibold text-amber-800 mb-1.5">{label} not marked yet — these classes may still have absentees</p>
                 <div className="flex flex-wrap gap-1.5">
                   {notMarked.map(c => (
@@ -110,12 +111,12 @@ export default function AttendanceAbsentees({ date, onOpenClass }: { date: strin
             )}
 
             {withAbsent.length === 0 && notMarked.length < data.totals.classes && (
-              <p data-testid="absentees-none" className="text-sm text-green-700 font-medium bg-green-50 border border-green-100 rounded-2xl px-4 py-4">✓ No absentees in {label}{notMarked.length > 0 ? ' among the classes that have marked' : ''}.</p>
+              <p data-testid="absentees-none" className="flex items-center gap-2 text-sm text-green-700 font-medium border-y border-green-200 bg-green-50 px-4 py-4"><CheckCircle2 size={17} aria-hidden="true" />No absentees in {label}{notMarked.length > 0 ? ' among the classes that have marked' : ''}.</p>
             )}
 
             <div className="grid md:grid-cols-2 gap-3 items-start">
               {withAbsent.map(c => (
-                <div key={c.id} data-testid={`absentees-class-${c.id}`} className="bg-white border border-red-100 rounded-2xl shadow-sm overflow-hidden">
+                <div key={c.id} data-testid={`absentees-class-${c.id}`} className="bg-white border-y border-red-200 overflow-hidden">
                   <div className="px-4 py-3 bg-red-50/60 border-b border-red-100 flex items-center justify-between gap-2">
                     <button onClick={() => onOpenClass?.(c.id)} className="text-sm font-bold text-gray-900 hover:underline text-left">
                       Class {c.grade}-{c.section}
@@ -134,7 +135,7 @@ export default function AttendanceAbsentees({ date, onOpenClass }: { date: strin
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${a.whole_day ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
                             {a.whole_day ? 'Whole day' : `${label} only`}
                           </span>
-                          {a.parent_phone && <a href={`tel:${a.parent_phone}`} className="text-xs font-semibold text-blue-600 border border-blue-200 rounded-lg px-2 py-1 hover:bg-blue-50">📞 {a.parent_phone}</a>}
+                          {a.parent_phone && <a href={`tel:${a.parent_phone}`} className="inline-flex items-center gap-1 text-xs font-semibold text-[#245b46] border border-[#c7d8cc] rounded-md px-2 py-1 hover:bg-[#edf2eb]"><Phone size={12} aria-hidden="true" />{a.parent_phone}</a>}
                         </div>
                       </li>
                     ))}

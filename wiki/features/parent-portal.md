@@ -55,11 +55,11 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [Parent Portal](../../docs/product/features/06-parent-portal.md)
 - [attendance.md](attendance.md)
 - [fee-management.md](fee-management.md)
 - [online-payments.md](online-payments.md)
 - [exam-marks.md](exam-marks.md)
-- [parent.md](parent.md)
 
 ## Status history
 

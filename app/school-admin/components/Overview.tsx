@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useFeature } from '@/lib/features-context'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ArrowRight, CalendarDays, RefreshCw } from 'lucide-react'
 
 type Props = { schoolId: number; onNavigate?: (key: string) => void }
 
@@ -10,16 +11,17 @@ type Stats          = { teachers: number; students: number; classes: number }
 type AttendanceSummary = { class_id: number; grade: string; section: string; morning_present: number; morning_absent: number; morning_total: number; morning_marked: boolean }
 type ExamRow           = { id: number; exam_name: string; exam_date: string; exam_type: string; grade: string; section: string }
 
-function StatCard({ label, value, sub, color, bg, border, onClick }: {
+function StatCard({ label, value, sub, onClick }: {
   label: string; value: number | string; sub?: string; color: string; bg: string; border: string; onClick?: () => void
 }) {
   return (
-    <button onClick={onClick}
-      className={`${bg} ${border} border rounded-2xl p-5 text-left w-full hover:shadow-md hover:scale-[1.02] transition-all group`}>
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{label}</p>
-      <p className={`text-3xl font-black ${color}`}>{value}</p>
-      {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
-      <p className="text-[10px] text-gray-300 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">Click to view →</p>
+    <button onClick={onClick} className="group portal-metric min-w-0 text-left transition-colors hover:bg-[#eef2eb]">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm text-[#67736b]">{label}</p>
+        <ArrowRight size={16} aria-hidden="true" className="shrink-0 text-[#67736b] transition-transform group-hover:translate-x-0.5" />
+      </div>
+      <p className="mt-3 break-words text-2xl font-semibold tracking-tight text-[#202a25] tabular-nums sm:text-3xl">{value}</p>
+      {sub && <p className="mt-1 text-xs leading-relaxed text-[#67736b]">{sub}</p>}
     </button>
   )
 }
@@ -38,7 +40,7 @@ function HealthBar({ value, max, color }: { value: number; max: number; color: s
 
 function StatCardSkeleton() {
   return (
-    <div className="bg-gray-50 border border-gray-200 rounded-2xl p-5" role="status" aria-busy="true">
+    <div className="portal-metric" role="status" aria-busy="true" aria-label="Loading school summary">
       <Skeleton className="h-3 w-24 mb-3" />
       <Skeleton className="h-7 w-16 mb-2" />
       <Skeleton className="h-2.5 w-20" />
@@ -126,7 +128,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
 
   // Count cards (shown at bottom)
   const countCards = [
-    { label: 'Teachers', value: stats.teachers, sub: 'Active staff',   color: 'text-blue-600',    bg: 'bg-blue-50',    border: 'border-blue-200',    nav: 'teachers' },
+    { label: 'Teachers', value: stats.teachers, sub: 'Active staff',   color: 'text-[#235b46]',    bg: 'bg-blue-50',    border: 'border-blue-200',    nav: 'teachers' },
     { label: 'Students', value: stats.students, sub: 'Enrolled',       color: 'text-emerald-600', bg: 'bg-emerald-50', border: 'border-emerald-200', nav: 'students' },
     { label: 'Classes',  value: stats.classes,  sub: 'Configured',     color: 'text-violet-600',  bg: 'bg-violet-50',  border: 'border-violet-200',  nav: 'class-management' },
   ]
@@ -137,7 +139,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
       label: "Today's Attendance",
       value: attPct !== null ? `${attPct}%` : '—',
       sub: attPct !== null ? `${attPresent} of ${attStudents} present` : 'Not yet marked',
-      color: attPct !== null ? (attPct >= 80 ? 'text-emerald-600' : attPct >= 60 ? 'text-amber-600' : 'text-red-600') : 'text-gray-400',
+      color: attPct !== null ? (attPct >= 80 ? 'text-emerald-600' : attPct >= 60 ? 'text-amber-600' : 'text-red-600') : 'text-[#67736b]',
       bg: 'bg-gray-50', border: 'border-gray-200', nav: 'attendance',
     }] : []),
     ...(hasFeeManagement ? [{
@@ -152,21 +154,22 @@ export default function Overview({ schoolId, onNavigate }: Props) {
   ]
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-6xl space-y-7">
 
       {/* ── Header ── */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black text-gray-900">School Dashboard</h2>
-          <p className="text-sm text-gray-400 mt-0.5">
+          <p className="mb-1 text-xs font-medium text-[#67736b]">School workspace</p>
+          <h1 className="portal-section-heading">School overview</h1>
+          <p className="text-sm leading-relaxed text-[#67736b] mt-1.5">
             {todayLabel}
             {!loading && alertCount > 0 && ` · ${alertCount} item${alertCount > 1 ? 's' : ''} need attention`}
             {!loading && alertCount === 0 && ' · All clear today'}
           </p>
         </div>
-        <button onClick={() => load()}
-          className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 transition-colors">
-          Refresh
+        <button onClick={() => load()} aria-label="Refresh school overview"
+          className="flex min-h-10 shrink-0 items-center gap-2 rounded-md border border-[#dce2db] bg-white px-3 text-sm text-[#465449] transition-colors hover:bg-[#eef2eb]">
+          <RefreshCw size={15} aria-hidden="true" /><span className="hidden sm:inline">Refresh</span>
         </button>
       </div>
 
@@ -174,27 +177,27 @@ export default function Overview({ schoolId, onNavigate }: Props) {
       {!loading && (
         <div className="space-y-2">
           {hasAttendance && attHoliday && (
-            <div data-testid="overview-holiday-banner" className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center gap-3">
-              <span className="text-lg" aria-hidden>🎉</span>
-              <p className="text-sm font-semibold text-red-800">
+            <div data-testid="overview-holiday-banner" className="bg-[#eef2eb] border border-[#dce2db] rounded-md px-4 py-3 flex items-center gap-3 text-[#465449]">
+              <CalendarDays size={18} className="shrink-0" aria-hidden="true" />
+              <p className="text-sm font-medium text-[#465449]">
                 Today is {attHoliday.kind === 'holiday' ? `a holiday — ${attHoliday.title}` : 'a weekly off'}. Attendance is not taken.
               </p>
             </div>
           )}
           {hasAttendance && attNotMarked > 0 && (
-            <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+            <div className="bg-[#eef4ee] border border-[#d7e5d9] rounded-md px-4 py-3 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <span className="w-7 h-7 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-sm font-bold flex-shrink-0">{attNotMarked}</span>
-                <p className="text-sm font-semibold text-blue-800">{attNotMarked} class{attNotMarked > 1 ? 'es haven\'t' : ' hasn\'t'} marked attendance today</p>
+                <span className="w-7 h-7 rounded-full bg-[#e0eadf] text-[#235b46] flex items-center justify-center text-sm font-bold flex-shrink-0">{attNotMarked}</span>
+                <p className="text-sm font-semibold text-[#235b46]">{attNotMarked} class{attNotMarked > 1 ? 'es haven\'t' : ' hasn\'t'} marked attendance today</p>
               </div>
               <button onClick={() => onNavigate?.('attendance')}
-                className="text-xs font-semibold text-blue-600 hover:text-blue-800 border border-blue-200 hover:border-blue-400 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0">
+                className="text-xs font-semibold text-[#235b46] hover:text-[#235b46] border border-blue-200 hover:border-blue-400 min-h-10 px-3 py-1.5 rounded-md transition-colors flex-shrink-0">
                 View →
               </button>
             </div>
           )}
           {hasFeeManagement && feeOverdue > 0 && (
-            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3">
+            <div className="bg-red-50 border border-red-200 rounded-md px-4 py-3 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <span className="w-7 h-7 rounded-full bg-red-100 text-red-600 flex items-center justify-center text-sm font-bold flex-shrink-0">{feeOverdue}</span>
                 <div>
@@ -205,7 +208,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
                 </div>
               </div>
               <button onClick={() => onNavigate?.('fee-management')}
-                className="text-xs font-semibold text-red-600 hover:text-red-800 border border-red-200 hover:border-red-400 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0">
+                className="text-xs font-semibold text-red-600 hover:text-red-800 border border-red-200 hover:border-red-400 min-h-10 px-3 py-1.5 rounded-md transition-colors flex-shrink-0">
                 Collect Fees →
               </button>
             </div>
@@ -216,18 +219,18 @@ export default function Overview({ schoolId, onNavigate }: Props) {
       {/* ── Quick actions ── */}
       {!loading && (() => {
         const quickActions = [
-          { label: 'Mark Attendance',  sub: 'Daily register',                 nav: 'attendance',      color: 'bg-blue-600',    show: hasAttendance },
+          { label: 'Mark Attendance',  sub: 'Daily register',                 nav: 'attendance',      color: 'bg-[#235b46]',    show: hasAttendance },
           { label: 'Collect Fees',     sub: feeOverdue > 0 ? `${feeOverdue} overdue` : 'Fee management', nav: 'fee-management', color: 'bg-amber-600', show: hasFeeManagement },
         ].filter(a => a.show)
 
         if (quickActions.length === 0) return null
         return (
-          <div className={`grid gap-3 ${quickActions.length <= 2 ? 'grid-cols-2' : quickActions.length === 3 ? 'grid-cols-3' : 'grid-cols-2 md:grid-cols-4'}`}>
-            {quickActions.map(({ label, sub, nav, color }) => (
+          <div className="flex flex-wrap gap-3">
+            {quickActions.map(({ label, sub, nav }, index) => (
               <button key={nav} onClick={() => onNavigate?.(nav)}
-                className={`${color} text-white rounded-2xl p-4 text-left hover:opacity-90 hover:shadow-lg hover:scale-[1.02] transition-all`}>
-                <p className="font-bold text-sm">{label}</p>
-                <p className="text-xs opacity-70 mt-0.5">{sub}</p>
+                className={`flex min-h-12 flex-1 items-center justify-between gap-6 rounded-md border px-4 py-3 text-left transition-colors sm:flex-none ${index === 0 ? 'border-[#235b46] bg-[#235b46] text-white hover:bg-[#1b4837]' : 'border-[#dce2db] bg-white text-[#235b46] hover:bg-[#eef2eb]'}`}>
+                <div><p className="font-semibold text-sm">{label}</p><p className={`text-xs mt-1 ${index === 0 ? 'text-[#dce9df]' : 'text-[#67736b]'}`}>{sub}</p></div>
+                <ArrowRight size={17} aria-hidden="true" className="shrink-0" />
               </button>
             ))}
           </div>
@@ -236,7 +239,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
 
       {/* ── Feature metric cards (attendance %, fees) ── */}
       {metricCards.length > 0 && (
-        <div className={`grid gap-4 ${metricCards.length === 1 ? 'grid-cols-1' : metricCards.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+        <div className={`grid border-y border-[#dce2db] divide-y divide-[#dce2db] sm:divide-x sm:divide-y-0 ${metricCards.length === 1 ? 'grid-cols-1' : metricCards.length === 2 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-3'}`}>
           {loading
             ? Array.from({ length: metricCards.length || 2 }).map((_, i) => <StatCardSkeleton key={i} />)
             : metricCards.map(card => (
@@ -250,16 +253,16 @@ export default function Overview({ schoolId, onNavigate }: Props) {
 
       {/* ── Health panels row (only panels for enabled features) ── */}
       {!loading && (hasAttendance || hasExams) && (
-        <div className={`grid gap-4 ${[hasAttendance, hasExams].filter(Boolean).length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        <div className={`grid gap-6 ${[hasAttendance, hasExams].filter(Boolean).length === 2 ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
 
           {hasAttendance && (
-            <div className="bg-white rounded-2xl border border-gray-200 p-5">
+            <section className="portal-panel p-4 sm:p-5">
               <div className="flex items-center justify-between mb-4">
-                <p className="font-bold text-gray-800 text-sm">Attendance Today</p>
-                <button onClick={() => onNavigate?.('attendance')} className="text-xs text-blue-500 hover:text-blue-700">View →</button>
+                <h2 className="font-semibold text-[#202a25] text-base">Attendance today</h2>
+                <button onClick={() => onNavigate?.('attendance')} className="text-xs text-[#235b46] hover:text-[#173e2f] min-h-10 inline-flex items-center">View →</button>
               </div>
               {attendance.length === 0 ? (
-                <p className="text-xs text-gray-400 text-center py-4">No attendance data yet</p>
+                <p className="text-xs text-[#67736b] text-center py-4">No attendance data yet</p>
               ) : (
                 <div className="space-y-2.5">
                   <div>
@@ -267,7 +270,7 @@ export default function Overview({ schoolId, onNavigate }: Props) {
                       <span>Classes marked</span>
                       <span className="font-semibold text-gray-700">{attMarked}/{attTotal}</span>
                     </div>
-                    <HealthBar value={attMarked} max={attTotal} color="bg-blue-400" />
+                    <HealthBar value={attMarked} max={attTotal} color="bg-[#5b8b65]" />
                   </div>
                   {attPct !== null && (
                     <div>
@@ -280,23 +283,23 @@ export default function Overview({ schoolId, onNavigate }: Props) {
                     </div>
                   )}
                   <div className="pt-2 border-t border-gray-50 grid grid-cols-3 gap-2 text-center">
-                    <div><p className="text-base font-black text-emerald-600">{attPresent}</p><p className="text-[10px] text-gray-400">Present</p></div>
-                    <div><p className="text-base font-black text-red-500">{attStudents - attPresent}</p><p className="text-[10px] text-gray-400">Absent</p></div>
-                    <div><p className="text-base font-black text-gray-500">{attNotMarked}</p><p className="text-[10px] text-gray-400">Unmarked</p></div>
+                    <div><p className="text-base font-semibold text-emerald-600">{attPresent}</p><p className="text-xs text-[#67736b]">Present</p></div>
+                    <div><p className="text-base font-semibold text-red-500">{attStudents - attPresent}</p><p className="text-xs text-[#67736b]">Absent</p></div>
+                    <div><p className="text-base font-semibold text-gray-500">{attNotMarked}</p><p className="text-xs text-[#67736b]">Unmarked</p></div>
                   </div>
                 </div>
               )}
-            </div>
+            </section>
           )}
 
           {hasExams && (
-            <div className="bg-white rounded-2xl border border-gray-200 p-5">
+            <section className="portal-panel p-4 sm:p-5">
               <div className="flex items-center justify-between mb-4">
-                <p className="font-bold text-gray-800 text-sm">Upcoming Exams</p>
-                <button onClick={() => onNavigate?.('exam-schedule')} className="text-xs text-blue-500 hover:text-blue-700">View all →</button>
+                <h2 className="font-semibold text-[#202a25] text-base">Upcoming exams</h2>
+                <button onClick={() => onNavigate?.('exam-schedule')} className="text-xs text-[#235b46] hover:text-[#173e2f] min-h-10 inline-flex items-center">View all →</button>
               </div>
               {upcomingExams.length === 0 ? (
-                <p className="text-xs text-gray-400 text-center py-4">No exams in next 7 days</p>
+                <p className="text-xs text-[#67736b] text-center py-4">No exams in next 7 days</p>
               ) : (
                 <div className="space-y-2">
                   {upcomingExams.map(e => {
@@ -305,29 +308,29 @@ export default function Overview({ schoolId, onNavigate }: Props) {
                     const isToday = e.exam_date.slice(0, 10) === new Date().toISOString().slice(0, 10)
                     return (
                       <div key={e.id} className={`flex items-center gap-3 p-2 rounded-lg ${isToday ? 'bg-blue-50 border border-blue-100' : 'hover:bg-gray-50'}`}>
-                        <div className={`w-10 h-10 rounded-lg flex flex-col items-center justify-center flex-shrink-0 ${isToday ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
-                          <span className="text-[10px] font-bold leading-none">{label.split(' ')[1]}</span>
-                          <span className="text-sm font-black leading-none">{label.split(' ')[0]}</span>
+                        <div className={`w-10 h-10 rounded-lg flex flex-col items-center justify-center flex-shrink-0 ${isToday ? 'bg-[#235b46] text-white' : 'bg-gray-100 text-gray-600'}`}>
+                          <span className="text-xs font-bold leading-none">{label.split(' ')[1]}</span>
+                          <span className="text-sm font-semibold leading-none">{label.split(' ')[0]}</span>
                         </div>
                         <div className="min-w-0">
                           <p className="text-xs font-semibold text-gray-800 truncate">{e.exam_name}</p>
-                          <p className="text-[10px] text-gray-400">Grade {e.grade} · {e.exam_type}</p>
+                          <p className="text-xs text-[#67736b]">Grade {e.grade} · {e.exam_type}</p>
                         </div>
-                        {isToday && <span className="text-[9px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded-full ml-auto flex-shrink-0">TODAY</span>}
+                        {isToday && <span className="text-[11px] font-bold bg-[#235b46] text-white px-1.5 py-0.5 rounded-full ml-auto flex-shrink-0">TODAY</span>}
                       </div>
                     )
                   })}
                 </div>
               )}
-            </div>
+            </section>
           )}
         </div>
       )}
 
       {/* ── Count cards (teachers / students / classes) at bottom ── */}
       <div>
-        <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-3">School Summary</p>
-        <div className="grid grid-cols-3 gap-4">
+        <h2 className="text-base text-[#202a25] font-semibold mb-3">School summary</h2>
+        <div className="grid grid-cols-1 divide-y divide-[#dce2db] border-y border-[#dce2db] sm:grid-cols-3 sm:divide-x sm:divide-y-0">
           {loading
             ? Array.from({ length: 3 }).map((_, i) => <StatCardSkeleton key={i} />)
             : countCards.map(card => (

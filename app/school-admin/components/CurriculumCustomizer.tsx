@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { INK, TEAL, BORDER, SURFACE } from '@/app/components/ulearn/theme'
 import { useConfirm } from '@/components/ui/use-confirm'
+import { InlineLoader } from '@/components/loaders'
 
 type Props = {
   schoolId: number
@@ -662,9 +663,8 @@ export default function CurriculumCustomizer({ schoolId }: Props) {
       )}
 
       {loading ? (
-        <div className="bg-white border rounded-3xl py-24 flex flex-col items-center justify-center gap-4" style={{ borderColor: BORDER }}>
-          <div className="w-10 h-10 border-2 rounded-full animate-spin" style={{ borderColor: TEAL, borderTopColor: 'transparent' }} />
-          <p className="text-xs text-gray-400 font-semibold">Loading curriculum overrides…</p>
+        <div className="rounded-lg border bg-white py-16" style={{ borderColor: BORDER }}>
+          <InlineLoader portal="school-admin" label="Loading curriculum overrides…" size="lg" />
         </div>
       ) : subjects.length === 0 ? (
         <div className="bg-white border border-dashed rounded-3xl py-24 text-center" style={{ borderColor: BORDER }}>

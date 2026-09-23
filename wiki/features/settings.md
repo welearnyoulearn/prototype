@@ -53,6 +53,7 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [School Settings](../../docs/product/features/18-school-settings.md)
 - [staff.md](staff.md)
 - [auth.md](auth.md)
 - [year-rollover.md](year-rollover.md)

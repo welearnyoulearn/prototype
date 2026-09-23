@@ -1,7 +1,7 @@
 # Feature: Fee Management
 
 **Portal:** School Admin (primary) / Parent (read-only view via `/api/parent/fees`)
-**Status:** Built (v2 rebuild in progress — see Known issues)
+**Status:** Built (v2 shipped, #127)
 **Last updated:** 2026-09-14
 
 ---
@@ -95,6 +95,10 @@ Fee routes live under `/api/fees/*` (structures, categories, generate, ledger, p
 | `passout_students` | Registry of students moved to the always-open passout ledger |
 | `academic_years` | Per-school academic years, `is_current` marks the active one |
 
+## Related
+
+- Deep dossier: [Fee Management](../../docs/product/features/13-fee-management.md)
+
 ## Status history
 
 | Date | Change | Issue |
@@ -113,7 +117,7 @@ Fee routes live under `/api/fees/*` (structures, categories, generate, ledger, p
 - [ ] Archive and Leavers don't auto-refresh after a Year-End action closes/carries/writes off a year (both fetch once on mount with no store subscription) — lower priority than Reports' equivalent gap (which was fixed) since both are read-only history/roster views with their own manual Refresh button, not screens an admin is likely to have open mid-year-end-workflow.
 - [ ] `closeOutBill`/`upsertCarryForwardBill` in `lib/feeRollover.ts` do 1-2 sequential queries per bill inside `year-end` apply's and `year-rollover`'s decision loops (an N+1 pattern, pre-existing before the consolidation, not introduced by it) — acceptable for now since these are rare, admin-only, roughly-once-a-year operations, but worth batching (`WHERE id = ANY($ids)` + multi-row INSERT) if a school's scale ever makes the transaction length (and the advisory lock's hold time) a problem.
 - [ ] The e2e suite (`e2e/workflow-fee-management.spec.ts`, 109 cases) was not run in this environment during the v2 rebuild work — it requires `E2E_PLATFORM_ADMIN_EMAIL`/`E2E_PLATFORM_ADMIN_PASSWORD` for a platform admin that already exists in the shared dev DB, which weren't available locally. Verified instead via `tsc --noEmit` (clean) and `eslint` (no new problem categories vs. the pre-existing baseline). Should be run before merging.
-- [ ] Online-payments (Cashfree) and WhatsApp reminder panels were left untouched in this pass, per the project rule against changing that code without separate explicit approval.
+- [x] There are **no** Cashfree or WhatsApp panels in the fee screens: online payment is the manual UPI-QR + self-report + admin-verify flow (see online-payments.md); gateway tables are scaffolding only.
 
 ## Notes
 

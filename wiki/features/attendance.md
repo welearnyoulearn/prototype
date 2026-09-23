@@ -51,6 +51,7 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [Attendance](../../docs/product/features/08-attendance-tracking.md)
 - [../../docs/ATTENDANCE.md](../../docs/ATTENDANCE.md)
 - [calendar.md](calendar.md)
 - [students.md](students.md)
