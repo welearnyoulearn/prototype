@@ -283,7 +283,7 @@ function TeacherPortal() {
       </header>
 
       <div className="portal-body">
-        <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} label="Teacher navigation">
+        <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} label="Teacher navigation" portal="teacher">
           <div className="portal-identity">
             <p className="text-base font-semibold tracking-tight text-[#235b46]">WeLearnYouLearn</p>
             <p className="mt-1 text-xs leading-relaxed text-[#647068]">{teacher.school_name}</p>

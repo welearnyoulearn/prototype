@@ -244,9 +244,35 @@ h1.portal-section-heading { margin-bottom: 8px; font-size: 26px; line-height: 1.
 .student-list-row:hover { background: rgb(168 95 22 / .045); }
 .student-success-flash { animation: student-success 520ms var(--ease-standard) both; }
 @keyframes student-success { 0% { box-shadow: inset 4px 0 0 #317157; background: rgb(49 113 87 / .12); } 100% { box-shadow: inset 0 0 0 transparent; background: transparent; } }
-.portal-drawer-overlay { position: fixed; inset: 0; z-index: var(--z-drawer); background: rgb(23 34 27 / .35); }
-.portal-drawer { position: fixed; inset: 0 auto 0 0; z-index: calc(var(--z-drawer) + 1); height: 100dvh; width: min(300px, 88vw); box-shadow: 8px 0 32px rgb(23 34 27 / .1); outline: none; }
-.portal-drawer-heading { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; padding: 8px 12px 8px 20px; border-bottom: 1px solid var(--border); }
+.portal-drawer-overlay { position: fixed; inset: 0; z-index: var(--z-drawer); background: rgb(18 29 23 / .52); }
+.portal-drawer {
+  --portal-accent: #245b46;
+  --portal-accent-deep: #173e2f;
+  --portal-accent-soft: #dce9dc;
+  --portal-sidebar: #edf2eb;
+  position: fixed;
+  inset: 0 auto 0 0;
+  isolation: isolate;
+  z-index: calc(var(--z-drawer) + 1);
+  height: 100dvh;
+  width: min(320px, calc(100vw - 48px));
+  max-width: 100%;
+  overflow: hidden;
+  background: var(--portal-sidebar);
+  color: var(--foreground);
+  border-right: 1px solid color-mix(in srgb, var(--portal-accent) 18%, var(--border));
+  box-shadow: 12px 0 36px rgb(18 29 23 / .22);
+  outline: none;
+  overscroll-behavior: contain;
+}
+.portal-drawer[data-portal="student"] { --portal-accent: #a85f16; --portal-accent-deep: #6f3b0b; --portal-accent-soft: #f1e2ca; --portal-sidebar: #f4efe5; }
+.portal-drawer[data-portal="teacher"] { --portal-accent: #21686a; --portal-accent-deep: #164749; --portal-accent-soft: #d9e9e7; --portal-sidebar: #eaf1ef; }
+.portal-drawer[data-portal="parent"] { --portal-accent: #a44f3c; --portal-accent-deep: #713126; --portal-accent-soft: #f0dcd6; --portal-sidebar: #f5ece8; }
+.portal-drawer[data-portal="school-admin"] { --portal-accent: #245b46; --portal-accent-deep: #173e2f; --portal-accent-soft: #dce9dc; --portal-sidebar: #edf2eb; }
+.portal-drawer[data-portal="platform-admin"] { --portal-accent: #773e48; --portal-accent-deep: #4f2830; --portal-accent-soft: #ead7da; --portal-sidebar: #f2e9ea; }
+.portal-drawer-heading { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; min-height: 60px; padding: 8px 10px 8px 20px; background: var(--portal-sidebar); border-bottom: 1px solid color-mix(in srgb, var(--portal-accent) 16%, var(--border)); }
+.portal-drawer > .portal-identity, .portal-drawer > .portal-account { flex-shrink: 0; background: var(--portal-sidebar); }
+.portal-drawer > nav { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--portal-accent) 28%, transparent) transparent; }
 .portal-drawer-overlay[data-state="open"] { animation: workspace-fade 160ms ease-out; }
 .portal-drawer[data-state="open"] { animation: workspace-drawer 200ms cubic-bezier(.2,.8,.2,1); }
 .portal-skip-link { position: fixed; z-index: 2000; top: 8px; left: 12px; padding: 10px 16px; background: var(--primary); color: white; border-radius: 6px; transform: translateY(-160%); }

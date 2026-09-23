@@ -489,7 +489,7 @@ function SchoolAdmin() {
       ) : (
         <div className="portal-body">
           {/* Sidebar */}
-          <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} label="School navigation">
+          <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} label="School navigation" portal="school-admin">
             {/* School branding */}
             <div className="portal-identity">
               <div className="flex items-center gap-3">

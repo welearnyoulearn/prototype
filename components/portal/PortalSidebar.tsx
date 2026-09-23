@@ -14,11 +14,14 @@ function subscribe(callback: () => void) {
 const getSnapshot = () => window.matchMedia(desktopQuery).matches
 const getServerSnapshot = () => false
 
+export type PortalKind = 'student' | 'teacher' | 'parent' | 'school-admin' | 'platform-admin'
+
 /** One navigation surface: a persistent rail on desktop, a modal drawer on phones. */
-export default function PortalSidebar({ open, onClose, label, children, className }: {
+export default function PortalSidebar({ open, onClose, label, portal, children, className }: {
   open: boolean
   onClose: () => void
   label: string
+  portal: PortalKind
   children: ReactNode
   className?: string
 }) {
@@ -34,6 +37,7 @@ export default function PortalSidebar({ open, onClose, label, children, classNam
         <Dialog.Overlay className="portal-drawer-overlay" />
         <Dialog.Content
           id="portal-navigation"
+          data-portal={portal}
           className={cn('portal-sidebar portal-drawer', className)}
           aria-describedby={undefined}
           onCloseAutoFocus={event => {

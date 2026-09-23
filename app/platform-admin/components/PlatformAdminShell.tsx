@@ -62,7 +62,7 @@ export default function PlatformAdminShell({ children }: { children: React.React
         </button>
       </header>
       <div className="portal-body">
-        <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} label="Platform navigation">
+        <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} label="Platform navigation" portal="platform-admin">
           <div className="portal-identity flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-md bg-[#235b46] font-semibold text-white" aria-hidden="true">W</div>
             <div className="min-w-0"><p className="text-sm font-semibold">Platform admin</p><p className="mt-0.5 text-xs text-[#67736b]">School operations</p></div>
