@@ -46,6 +46,32 @@ function nextAcademicYear(): string {
   return `${y}-${String(y + 1).slice(2)}`
 }
 
+// A "YYYY-YY" label far in the future, distinct per `offset` — for regression
+// tests (SECTION 12 below) that need their own academic year, isolated from
+// both AY and AY_NEXT and from EACH OTHER. AY itself is closed (YE-010, never
+// reopened after) and structure-locked (the first /api/fees/generate call,
+// hundreds of lines earlier, auto-locks the plan) by the time these tests run
+// — and even AY_NEXT is shared, so one test's /api/fees/generate call
+// auto-locks it for every test that runs after. A distinct year per test
+// avoids both problems and makes each test runnable in isolation via --grep,
+// without depending on YE-004 (which creates AY_NEXT) having run first.
+function testYear(offset: number): string {
+  const y = 3000 + offset
+  return `${y}-${String(y + 1).slice(2)}`
+}
+async function ensureTestYear(
+  api: (path: string, method: string, body?: object, cookie?: string) => Promise<{ status: number; data: unknown }>,
+  schoolId: number, adminCookie: string, label: string,
+): Promise<void> {
+  const y = parseInt(label.slice(0, 4))
+  const res = await api('/api/academic-years', 'POST', {
+    school_id: schoolId, label, start_date: `${y}-04-01`, end_date: `${y + 1}-03-31`,
+  }, adminCookie)
+  if (res.status !== 201 && res.status !== 409) {
+    throw new Error(`ensureTestYear(${label}) failed: ${res.status} ${JSON.stringify(res.data)}`)
+  }
+}
+
 // ─── Test suite ──────────────────────────────────────────────────────────────
 
 test.describe.serial('Fee Management — Full Lifecycle', () => {
@@ -1597,27 +1623,28 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
   // ══════════════════════════════════════════════════════════════════════════
 
   test('VER-101: Approving an online payment is blocked once an offline collection already covers the balance', async () => {
+    // Own dedicated academic year (see testYear's comment) — AY is closed +
+    // structure-locked by this point in the suite, and even AY_NEXT would get
+    // auto-locked by this test's own /api/fees/generate call below, blocking
+    // OWNER-101's structure creation if that test shared the same year.
+    const testAY = testYear(1)
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
     const catRes = await api('/api/fees/categories', 'POST', {
       school_id: schoolId, name: `Verify Overstate Test ${ts}`, frequency: 'annual', category_type: 'fixed',
     }, adminCookie)
     expect(catRes.status).toBe(201)
     const cat = catRes.data as { id: number }
     // studentA is grade 9 — this structure MUST match, or generate produces no
-    // bill for studentA and `entry` below is silently undefined. Uses AY_NEXT,
-    // not AY — AY is closed (YE-010) and structure-locked (auto-locked by the
-    // first /api/fees/generate call, way earlier in this suite) by this point,
-    // so a fresh POST /api/fees/structures for AY returns 409 and generate for
-    // AY is rejected too, leaving `entry` undefined either way. AY_NEXT (created
-    // in the YE-004 carry-forward setup) has never been locked or closed.
+    // bill for studentA and `entry` below is silently undefined.
     const structRes = await api('/api/fees/structures', 'POST', {
-      school_id: schoolId, academic_year: AY_NEXT,
+      school_id: schoolId, academic_year: testAY,
       structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
     }, adminCookie)
     expect(structRes.status).toBe(201)
-    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY_NEXT }, adminCookie)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie)
     expect(genRes.status).toBe(200)
     const { data: ledger } = await api(
-      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentA}&academic_year=${AY_NEXT}`, 'GET', undefined, adminCookie
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentA}&academic_year=${testAY}`, 'GET', undefined, adminCookie
     )
     const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
     expect(entry, 'bill for studentA must exist — category/structure/generate must have succeeded').toBeDefined()
@@ -1657,24 +1684,25 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
   })
 
   test('OWNER-101: Payment/waiver creation is rejected when ledger_id belongs to a different student', async () => {
+    // Own dedicated academic year — see the comment on testYear/VER-101 above.
+    const testAY = testYear(2)
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
     const catRes = await api('/api/fees/categories', 'POST', {
       school_id: schoolId, name: `Owner Check Test ${ts}`, frequency: 'annual', category_type: 'fixed',
     }, adminCookie)
     expect(catRes.status).toBe(201)
     const cat = catRes.data as { id: number }
     // studentA and studentB are both grade 9 — this structure MUST match, or
-    // generate produces no bill and `entry` below is silently undefined. Uses
-    // AY_NEXT, not AY — see the matching comment in VER-101 above (AY is
-    // closed + structure-locked by this point in the suite).
+    // generate produces no bill and `entry` below is silently undefined.
     const structRes = await api('/api/fees/structures', 'POST', {
-      school_id: schoolId, academic_year: AY_NEXT,
+      school_id: schoolId, academic_year: testAY,
       structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
     }, adminCookie)
     expect(structRes.status).toBe(201)
-    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY_NEXT }, adminCookie)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie)
     expect(genRes.status).toBe(200)
     const { data: ledger } = await api(
-      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentA}&academic_year=${AY_NEXT}`, 'GET', undefined, adminCookie
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentA}&academic_year=${testAY}`, 'GET', undefined, adminCookie
     )
     const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
     expect(entry, 'bill for studentA must exist — category/structure/generate must have succeeded').toBeDefined()
@@ -1695,7 +1723,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
 
     // studentA's own balance must be untouched by either rejected attempt.
     const { data: after } = await api(
-      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentA}&academic_year=${AY_NEXT}`, 'GET', undefined, adminCookie
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentA}&academic_year=${testAY}`, 'GET', undefined, adminCookie
     )
     const afterEntry = (after as Array<{ id: number; amount_paid: string; waiver_amount: string }>).find(e => e.id === entry.id)
     expect(parseFloat(String(afterEntry?.amount_paid))).toBe(0)
@@ -1703,6 +1731,9 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
   })
 
   test('WVCOR-101: Waiver correction is rejected when it would push the combined waived total past the bill', async () => {
+    // Own dedicated academic year — see the comment on testYear/VER-101 above.
+    const testAY = testYear(3)
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
     const catRes = await api('/api/fees/categories', 'POST', {
       school_id: schoolId, name: `Waiver Correction Test ${ts}`, frequency: 'annual', category_type: 'fixed',
     }, adminCookie)
@@ -1710,17 +1741,15 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
     const cat = catRes.data as { id: number }
     // studentC is grade 8 (not 9) — this structure MUST match, or generate
     // produces no bill for studentC and `entry` below is silently undefined.
-    // Uses AY_NEXT, not AY — see the matching comment in VER-101 above (AY is
-    // closed + structure-locked by this point in the suite).
     const structRes = await api('/api/fees/structures', 'POST', {
-      school_id: schoolId, academic_year: AY_NEXT,
+      school_id: schoolId, academic_year: testAY,
       structures: [{ fee_category_id: cat.id, grade: '8', amount: 1000, due_day: 10 }],
     }, adminCookie)
     expect(structRes.status).toBe(201)
-    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY_NEXT }, adminCookie)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie)
     expect(genRes.status).toBe(200)
     const { data: ledger } = await api(
-      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}&academic_year=${AY_NEXT}`, 'GET', undefined, adminCookie
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}&academic_year=${testAY}`, 'GET', undefined, adminCookie
     )
     const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
     expect(entry, 'bill for studentC must exist — category/structure/generate must have succeeded').toBeDefined()
@@ -1755,24 +1784,25 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
   })
 
   test('LEDGERAMT-101: Reducing a bill below payments + waivers combined is rejected', async () => {
+    // Own dedicated academic year — see the comment on testYear/VER-101 above.
+    const testAY = testYear(4)
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
     const catRes = await api('/api/fees/categories', 'POST', {
       school_id: schoolId, name: `Ledger Amount Edit Test ${ts}`, frequency: 'annual', category_type: 'fixed',
     }, adminCookie)
     expect(catRes.status).toBe(201)
     const cat = catRes.data as { id: number }
     // studentB is grade 9 — this structure MUST match, or generate produces no
-    // bill for studentB and `entry` below is silently undefined. Uses AY_NEXT,
-    // not AY — see the matching comment in VER-101 above (AY is closed +
-    // structure-locked by this point in the suite).
+    // bill for studentB and `entry` below is silently undefined.
     const structRes = await api('/api/fees/structures', 'POST', {
-      school_id: schoolId, academic_year: AY_NEXT,
+      school_id: schoolId, academic_year: testAY,
       structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
     }, adminCookie)
     expect(structRes.status).toBe(201)
-    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY_NEXT }, adminCookie)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie)
     expect(genRes.status).toBe(200)
     const { data: ledger } = await api(
-      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentB}&academic_year=${AY_NEXT}`, 'GET', undefined, adminCookie
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentB}&academic_year=${testAY}`, 'GET', undefined, adminCookie
     )
     const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
     expect(entry, 'bill for studentB must exist — category/structure/generate must have succeeded').toBeDefined()
@@ -1802,6 +1832,10 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
   })
 
   test('DAYCLOSE-101: Resubmitting day-close recalculates system_cash and totals, not just the difference', async () => {
+    // Own dedicated academic year — see the comment on testYear/VER-101 above.
+    // Day-close itself sums by paid_date, not academic_year, so this doesn't affect it.
+    const testAY = testYear(5)
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
     const dcDate = today()
     const catRes = await api('/api/fees/categories', 'POST', {
       school_id: schoolId, name: `Day Close Resubmit Test ${ts}`, frequency: 'annual', category_type: 'fixed',
@@ -1810,18 +1844,15 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
     const cat = catRes.data as { id: number }
     // studentC is grade 8 (not 9) — this structure MUST match, or generate
     // produces no bill for studentC and `entry` below is silently undefined.
-    // Uses AY_NEXT, not AY — see the matching comment in VER-101 above (AY is
-    // closed + structure-locked by this point in the suite). Day-close itself
-    // sums by paid_date, not academic_year, so this doesn't affect it.
     const structRes = await api('/api/fees/structures', 'POST', {
-      school_id: schoolId, academic_year: AY_NEXT,
+      school_id: schoolId, academic_year: testAY,
       structures: [{ fee_category_id: cat.id, grade: '8', amount: 1000, due_day: 10 }],
     }, adminCookie)
     expect(structRes.status).toBe(201)
-    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY_NEXT }, adminCookie)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie)
     expect(genRes.status).toBe(200)
     const { data: ledger } = await api(
-      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}&academic_year=${AY_NEXT}`, 'GET', undefined, adminCookie
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}&academic_year=${testAY}`, 'GET', undefined, adminCookie
     )
     const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
     expect(entry, 'bill for studentC must exist — category/structure/generate must have succeeded').toBeDefined()

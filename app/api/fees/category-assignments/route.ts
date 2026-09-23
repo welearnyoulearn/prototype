@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { lockYearClose } from '@/lib/feeRollover'
 
 // student_fee_category_assignments / student_fee_assignment_history table
 // creation lives in lib/db.ts's ensureDB() now (single source of truth); this
@@ -147,9 +148,19 @@ export async function POST(req: NextRequest) {
 
       await client.query('BEGIN')
 
+      // Serialize against year-end apply/close/reopen for this year — the SAME
+      // advisory lock those actions take (lib/feeRollover.ts), taken BEFORE any
+      // row lock below (consistent ordering with every other mutating fee
+      // route). Without this, a concurrent close could land between the check
+      // just below and this route's amount_due writes further down, leaving a
+      // closed year's balances inconsistent with the closure snapshot it just took.
+      await lockYearClose(client, school_id, academic_year)
+
       // Block assignment changes on a closed year — every other mutating fee
       // route already has this guard; this one writes amount_due directly
       // onto the ledger (below) just like structures/amend, so it needs it too.
+      // Re-checked here, now that the lock above is held, so this can't read a
+      // stale "not closed" state past a concurrent close that was waiting on it.
       const { rows: [closedYear] } = await client.query(
         `SELECT 1 FROM fee_year_close
          WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,

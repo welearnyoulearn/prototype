@@ -74,6 +74,25 @@ async function handlePOST(req: NextRequest) {
 
       await client.query('BEGIN')
 
+      // Unlocked pre-lookup of this payment's ledger year, ONLY for approve
+      // (reject never touches the ledger, so it never needs this lock — see the
+      // matching comment below). Taken BEFORE the fee_payments row lock just
+      // below — consistent lock ordering (year lock first, row locks second)
+      // matches payments/cancel and waivers PATCH/DELETE. Locking the row
+      // first here (as an earlier version of this fix did) and the year lock
+      // second would let a concurrent cancel/waiver-correction on the same
+      // payment/year — which take the SAME two locks in the opposite order —
+      // deadlock against this request instead of safely serializing.
+      if (action === 'approve') {
+        const { rows: [yearLookup] } = await client.query(
+          `SELECT l.academic_year FROM fee_payments fp JOIN student_fee_ledger l ON l.id = fp.ledger_id WHERE fp.id = $1`,
+          [payment_id]
+        )
+        if (yearLookup) {
+          await lockYearClose(client, pmtRow.school_id, yearLookup.academic_year)
+        }
+      }
+
       // FOR UPDATE: without this, two concurrent verify calls on the same
       // payment (double-click, or an approve racing a reject) can both pass
       // this check before either commits — the second writer then blindly
@@ -104,22 +123,6 @@ async function handlePOST(req: NextRequest) {
         if (!await schoolHasFeature(pmtRow.school_id, 'online-payments', client)) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
-        }
-
-        // Which academic year this payment's ledger row is in — needed to take
-        // lockYearClose BEFORE the row lock below (same order year-end itself
-        // uses). Unlocked read is fine here: the FOR UPDATE re-fetch just below
-        // is authoritative.
-        const { rows: [yearLookup] } = await client.query(
-          `SELECT academic_year FROM student_fee_ledger WHERE id = $1`, [payment.ledger_id]
-        )
-        if (yearLookup) {
-          // Serialize against year-end apply/close/reopen for this ledger row's
-          // year — the SAME advisory lock those actions take (lib/feeRollover.ts).
-          // The FOR UPDATE row lock just below alone would serialize this against
-          // year-end APPLY (which locks that same row), but not against a plain
-          // CLOSE, which doesn't touch any ledger row — only this shared lock does.
-          await lockYearClose(client, pmtRow.school_id, yearLookup.academic_year)
         }
 
         // Block crediting a closed year's ledger — reject doesn't touch the

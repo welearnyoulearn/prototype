@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { lockYearClose } from '@/lib/feeRollover'
 
 // POST /api/fees/generate
 // Generates ledger entries for all students in a grade/all grades for an academic year
@@ -26,9 +27,12 @@ export async function POST(req: NextRequest) {
       }
       const dueDate: string = yearRow.end_date
 
-      // Block generating/re-syncing bills on a closed year — both the new-ledger
-      // INSERT and the grade-resync UPDATE below write amount_due onto student
-      // ledgers, same as every other mutating fee route.
+      // Fast preliminary rejection (not authoritative — see the locked re-check
+      // inside the transaction below, which is what actually closes the race
+      // against a concurrent year-end close). Block generating/re-syncing bills
+      // on a closed year — both the new-ledger INSERT and the grade-resync
+      // UPDATE below write amount_due onto student ledgers, same as every
+      // other mutating fee route.
       const { rows: [closedYear] } = await pool.query(
         `SELECT 1 FROM fee_year_close
          WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
@@ -97,6 +101,23 @@ export async function POST(req: NextRequest) {
       let created = 0; let skipped = 0
       try {
         await client.query('BEGIN')
+
+        // Serialize against year-end apply/close/reopen for this year — the SAME
+        // advisory lock those actions take (lib/feeRollover.ts), taken BEFORE any
+        // row-level write below (consistent ordering with every other mutating
+        // fee route). Re-check closed-year state now that the lock is held, so
+        // this can't act on a stale "not closed" read past a concurrent close
+        // that landed between the preliminary check above and this point.
+        await lockYearClose(client, school_id, academic_year)
+        const { rows: [closedYearNow] } = await client.query(
+          `SELECT 1 FROM fee_year_close
+           WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
+          [school_id, academic_year]
+        )
+        if (closedYearNow) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({ error: 'This academic year is closed. Reopen it to generate bills.' }, { status: 409 })
+        }
 
         // Fixed categories → all students at fee_structures.amount
         for (const student of students) {

@@ -207,6 +207,25 @@ async function handlePATCH(req: NextRequest) {
     try {
       await client.query('BEGIN')
 
+      // Unlocked pre-lookup — school_id/academic_year, to take lockYearClose
+      // BEFORE any row lock below. This ordering matters: payments/verify and
+      // payments/cancel both lock a row first and lockYearClose second in
+      // earlier code, which could deadlock against a concurrent request that
+      // takes the SAME two locks in the opposite order on the same waiver/year.
+      // Every mutating fee route now takes lockYearClose FIRST, before any row
+      // lock, to keep one consistent global order.
+      const { rows: [preLookup] } = await client.query(
+        `SELECT w.school_id, w.ledger_id, l.academic_year
+         FROM fee_waivers w JOIN student_fee_ledger l ON l.id = w.ledger_id
+         WHERE w.id = $1`,
+        [id]
+      )
+      if (!preLookup) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'Waiver not found or already revoked' }, { status: 404 })
+      }
+      await lockYearClose(client, preLookup.school_id, preLookup.academic_year)
+
       // FOR UPDATE — without this, two concurrent corrections of the same waiver
       // can both pass the is_revoked=FALSE check below before either commits, both
       // soft-revoke it and insert a replacement, and both apply their delta against
@@ -225,20 +244,6 @@ async function handlePATCH(req: NextRequest) {
       // transaction; the default `pool` here would deadlock on a max:1 pool.
       const access = await requireFeeAccess(w0.school_id, client)
       if (!access) { await client.query('ROLLBACK'); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
-
-      // Serialize against year-end apply/close/reopen for this waiver's ledger
-      // year — the SAME advisory lock those actions take (lib/feeRollover.ts).
-      // The FOR UPDATE row lock on the ledger row below alone would serialize
-      // this against year-end APPLY (which locks that same row), but not
-      // against a plain CLOSE, which doesn't touch any ledger row — only this
-      // shared lock does. Unlocked lookup is fine here: the FOR UPDATE re-fetch
-      // at `lgCheck` below is what's authoritative.
-      const { rows: [yearLookup] } = await client.query(
-        `SELECT academic_year FROM student_fee_ledger WHERE id = $1`, [w0.ledger_id]
-      )
-      if (yearLookup) {
-        await lockYearClose(client, w0.school_id, yearLookup.academic_year)
-      }
 
       // Same reasoning as DELETE: correcting a carry_forward waiver's amount would
       // change the closed year's debt without touching the matching "Previous Year
