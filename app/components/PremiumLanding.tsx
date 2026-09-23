@@ -2,16 +2,16 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { motion, useReducedMotion } from 'framer-motion'
-import { useState } from 'react'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { useState, type CSSProperties } from 'react'
 import { ArrowRight, ArrowUpRight, BookOpen, Building2, Check, GraduationCap, LineChart, Presentation, ShieldCheck, UsersRound } from 'lucide-react'
 import PortalIdentityVisual, { type PortalIdentity } from './PortalIdentityVisual'
 
-const portals: Array<{ id: PortalIdentity; title: string; role: string; description: string; href: string; icon: typeof BookOpen; signal: string }> = [
-  { id: 'student', title: 'Student', role: 'Learn', description: 'Lessons, attendance, results and achievements in one personal learning rhythm.', href: '/student/login', icon: BookOpen, signal: 'Continue where you left off' },
-  { id: 'teacher', title: 'Teacher', role: 'Teach', description: 'Classes, attendance, syllabus and student signals arranged around the teaching day.', href: '/teacher/login', icon: Presentation, signal: 'See what needs attention' },
-  { id: 'parent', title: 'Parent', role: 'Stay close', description: 'A trusted view of progress, attendance, school updates and fees.', href: '/parent/login', icon: UsersRound, signal: 'Know what changed today' },
-  { id: 'admin', title: 'Institution', role: 'Operate', description: 'People, academics and operations coordinated from one dependable workspace.', href: '/login?role=school', icon: Building2, signal: 'Keep the school in rhythm' },
+const portals: Array<{ id: PortalIdentity; title: string; role: string; description: string; href: string; icon: typeof BookOpen; signal: string; scope: string }> = [
+  { id: 'student', title: 'Student', role: 'Learn', description: 'Lessons, attendance, results and achievements in one personal learning rhythm.', href: '/student/login', icon: BookOpen, signal: 'Continue where you left off', scope: 'Lessons · Attendance · Results' },
+  { id: 'teacher', title: 'Teacher', role: 'Teach', description: 'Classes, attendance, syllabus and student signals arranged around the teaching day.', href: '/teacher/login', icon: Presentation, signal: 'See what needs attention', scope: 'Classes · Attendance · Syllabus' },
+  { id: 'parent', title: 'Parent', role: 'Stay close', description: 'A trusted view of progress, attendance, school updates and fees.', href: '/parent/login', icon: UsersRound, signal: 'Know what changed today', scope: 'Progress · Updates · Fees' },
+  { id: 'admin', title: 'Institution', role: 'Operate', description: 'People, academics and operations coordinated from one dependable workspace.', href: '/login?role=school', icon: Building2, signal: 'Keep the school in rhythm', scope: 'People · Academics · Operations' },
 ]
 
 const reveal = { hidden: { opacity: 0, y: 24 }, show: { opacity: 1, y: 0 } }
@@ -20,17 +20,25 @@ export default function PremiumLanding() {
   const router = useRouter()
   const reduceMotion = useReducedMotion()
   const [transitioning, setTransitioning] = useState<PortalIdentity | null>(null)
+  const [activePortal, setActivePortal] = useState<PortalIdentity>('student')
+  const [transitionOrigin, setTransitionOrigin] = useState({ x: '78%', y: '75%' })
+  const selectedPortal = portals.find(portal => portal.id === activePortal) ?? portals[0]
 
   function enterPortal(event: React.MouseEvent<HTMLAnchorElement>, portal: PortalIdentity, href: string) {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
     event.preventDefault()
     if (reduceMotion) { router.push(href); return }
+    const bounds = event.currentTarget.getBoundingClientRect()
+    setTransitionOrigin({
+      x: `${event.clientX || bounds.left + bounds.width / 2}px`,
+      y: `${event.clientY || bounds.top + bounds.height / 2}px`,
+    })
     setTransitioning(portal)
     window.setTimeout(() => router.push(href), 260)
   }
 
   return (
-    <div className="landing-shell" data-transitioning={transitioning ?? undefined}>
+    <div className="landing-shell" data-transitioning={transitioning ?? undefined} style={{ '--transition-x': transitionOrigin.x, '--transition-y': transitionOrigin.y } as CSSProperties}>
       <a href="#portal-selection" className="landing-skip">Skip to portal selection</a>
       <header className="landing-header">
         <Link href="/" className="brand-lockup" aria-label="WeLearnYouLearn home"><span>W</span><b>WeLearnYouLearn</b></Link>
@@ -48,7 +56,7 @@ export default function PremiumLanding() {
             <div className="landing-trust"><ShieldCheck /><span>Private by design</span><i /><span>Built for real school workflows</span></div>
           </motion.div>
 
-          <motion.div className="product-stage" initial={false} aria-label="Product overview">
+          <motion.div className="product-stage" initial={reduceMotion ? false : { opacity: 0, y: 28, rotateY: -3 }} animate={{ opacity: 1, y: 0, rotateY: 0 }} transition={{ duration: .8, delay: .12, ease: [0.16, 1, 0.3, 1] }} whileHover={reduceMotion ? undefined : { y: -4 }} aria-label="Product overview">
             <div className="product-window">
               <div className="product-window-bar"><span className="product-mark">W</span><span>School overview</span><i /><i /><i /></div>
               <div className="product-layout">
@@ -82,31 +90,65 @@ export default function PremiumLanding() {
               ['02', 'The school view updates', 'Operations see completion and exceptions without chasing a report.'],
               ['03', 'Families receive context', 'Parents see a useful update in the same trusted record.'],
               ['04', 'The student stays focused', 'Their workspace keeps learning at the centre.'],
-            ].map(([n, title, text]) => <motion.article key={n} initial={false}><span>{n}</span><div><h3>{title}</h3><p>{text}</p></div></motion.article>)}
+            ].map(([n, title, text], index) => <motion.article key={n} initial={reduceMotion ? false : { opacity: 0, x: -18 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true, amount: .65 }} transition={{ duration: .45, delay: index * .06, ease: [0.16, 1, 0.3, 1] }}><span>{n}</span><div><h3>{title}</h3><p>{text}</p></div></motion.article>)}
           </div>
         </section>
 
         <section id="portal-selection" className="portal-ecosystem">
           <div className="portal-heading"><div><p className="landing-eyebrow"><span /> Choose your perspective</p><h2>One product.<br />Four distinct workspaces.</h2></div><p>Each portal has its own priorities, pace and visual language, while the school record remains connected underneath.</p></div>
-          <nav className="portal-grid" aria-label="School portals">
-            {portals.map((portal) => (
-              <motion.div key={portal.id} initial={false} className={`portal-entry portal-entry-${portal.id}`}>
-                <Link href={portal.href} onClick={event => enterPortal(event, portal.id, portal.href)} data-testid={`portal-card-${portal.id === 'admin' ? 'school-admin' : portal.id}`}>
-                  <span className="portal-entry-top"><i><portal.icon /></i><small>{portal.role}</small></span>
-                  <strong>{portal.title}</strong><p>{portal.description}</p>
-                  <span className="portal-entry-signal">{portal.signal}<ArrowRight /></span>
+          <motion.div className="portal-explorer" initial={reduceMotion ? false : { opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: .18 }} transition={{ duration: .6, ease: [0.16, 1, 0.3, 1] }}>
+            <nav className="portal-index" aria-label="School portals">
+              {portals.map((portal, index) => (
+                <Link
+                  key={portal.id}
+                  href={portal.href}
+                  onMouseEnter={() => setActivePortal(portal.id)}
+                  onFocus={() => setActivePortal(portal.id)}
+                  onClick={event => enterPortal(event, portal.id, portal.href)}
+                  data-active={activePortal === portal.id || undefined}
+                  data-portal={portal.id}
+                  data-testid={`portal-card-${portal.id === 'admin' ? 'school-admin' : portal.id}`}
+                >
+                  <span className="portal-index-number">0{index + 1}</span>
+                  <span className="portal-index-icon"><portal.icon /></span>
+                  <span className="portal-index-copy"><small>{portal.role}</small><strong>{portal.title}</strong></span>
+                  <ArrowRight className="portal-index-arrow" />
                 </Link>
-              </motion.div>
-            ))}
-          </nav>
+              ))}
+            </nav>
+
+            <div className="portal-preview" data-portal={selectedPortal.id}>
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.div
+                  key={selectedPortal.id}
+                  className="portal-preview-inner"
+                  initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={reduceMotion ? undefined : { opacity: 0, y: -8 }}
+                  transition={{ duration: .28, ease: [0.16, 1, 0.3, 1] }}
+                >
+                  <div className="portal-preview-visual"><PortalIdentityVisual portal={selectedPortal.id} compact /></div>
+                  <div className="portal-preview-copy">
+                    <p>{selectedPortal.role} workspace</p>
+                    <h3>{selectedPortal.signal}</h3>
+                    <span>{selectedPortal.description}</span>
+                    <small>{selectedPortal.scope}</small>
+                    <Link href={selectedPortal.href} onClick={event => enterPortal(event, selectedPortal.id, selectedPortal.href)}>Enter {selectedPortal.title} <ArrowRight /></Link>
+                  </div>
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          </motion.div>
         </section>
 
         <section id="capabilities" className="capability-section">
           <div className="capability-intro"><p className="landing-eyebrow"><span /> Designed around confidence</p><h2>Less searching.<br />More knowing what to do next.</h2></div>
           <div className="capability-lines">
-            <article><GraduationCap /><span>Learning continuity</span><h3>From syllabus to result, the story stays connected.</h3><p>Teachers teach, students learn and families follow progress from the same source of truth.</p></article>
-            <article><LineChart /><span>Operational clarity</span><h3>Signals appear before they become problems.</h3><p>Attendance, fees, staffing and school activity remain visible without turning the day into reporting work.</p></article>
-            <article><ShieldCheck /><span>Trusted access</span><h3>Each person sees the context meant for them.</h3><p>Role-specific workspaces keep sensitive school information clear, focused and appropriately scoped.</p></article>
+            {[
+              { icon: GraduationCap, label: 'Learning continuity', title: 'From syllabus to result, the story stays connected.', text: 'Teachers teach, students learn and families follow progress from the same source of truth.' },
+              { icon: LineChart, label: 'Operational clarity', title: 'Signals appear before they become problems.', text: 'Attendance, fees, staffing and school activity remain visible without turning the day into reporting work.' },
+              { icon: ShieldCheck, label: 'Trusted access', title: 'Each person sees the context meant for them.', text: 'Role-specific workspaces keep sensitive school information clear, focused and appropriately scoped.' },
+            ].map(({ icon: Icon, label, title, text }, index) => <motion.article key={label} initial={reduceMotion ? false : { opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: .55 }} transition={{ duration: .5, delay: index * .08, ease: [0.16, 1, 0.3, 1] }}><Icon /><span>{label}</span><h3>{title}</h3><p>{text}</p></motion.article>)}
           </div>
         </section>
 
