@@ -69,18 +69,16 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
   return (
     <div className="space-y-9">
       <motion.section initial={reduceMotion ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .42, ease: [0.16, 1, 0.3, 1] }} className="student-momentum" aria-labelledby="student-overview-title">
+        <img src="/student-icons/rocket.png" alt="" className="student-momentum-sticker" aria-hidden="true" />
         <div className="grid items-center gap-7 sm:grid-cols-[1fr_170px]">
         <div>
           <p className="mb-3 text-[10px] font-bold uppercase tracking-[.16em] text-[#f0bc72]">Your school day</p>
-          <h1 id="student-overview-title" className="max-w-xl text-3xl font-semibold leading-[1.08] tracking-[-.045em] text-white sm:text-4xl">{greeting}, {firstName}.</h1>
+          <h1 id="student-overview-title" className="max-w-xl text-4xl font-extrabold leading-[1.04] tracking-[-.03em] text-white sm:text-5xl">{greeting}, {firstName}.</h1>
           <p className="mt-4 text-sm text-white/65">
             Grade {student.grade} · Section {student.section}
             {student.roll_number && <span className="ml-2">· Roll {student.roll_number}</span>}
           </p>
-          <p className="mt-6 max-w-lg text-base leading-7 text-white/85">
-            Ready to make today count
-            <img src="/student-icons/rocket.png" alt="" className="student-hero-sticker" />? Pick a next step below and keep going.
-          </p>
+          <p className="mt-6 max-w-lg text-base leading-7 text-white/85">Ready to make today count? Pick a next step below and keep going.</p>
         </div>
         {engagementScore !== null && (
           <button type="button" data-testid="student-dashboard-attendance-tile" onClick={() => onNavigate?.('attendance')} className="rounded-md border border-white/15 bg-white/8 p-4 text-left transition hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f0bc72]">
@@ -106,7 +104,7 @@ export default function StudentDashboard({ student, classId, schoolId, onNavigat
         if (quickActions.length === 0) return null
         return (
           <section aria-labelledby="student-learning-title">
-            <div className="mb-3 flex items-end justify-between"><div><p className="student-section-kicker">Choose your next step</p><h2 id="student-learning-title" className="mt-1 text-lg font-semibold text-[#202a25]">Keep your momentum</h2></div><CalendarCheck2 size={20} className="text-[#a85f16]" aria-hidden="true" /></div>
+            <div className="mb-3 flex items-end justify-between"><div><p className="student-section-kicker">Choose your next step</p><h2 id="student-learning-title" className="mt-1 text-xl font-extrabold tracking-tight text-[#1a1410]">Keep your momentum</h2></div><CalendarCheck2 size={20} className="text-[#a85f16]" aria-hidden="true" /></div>
             <div className="student-quest-row">
               {quickActions.map((item, index) => (
                 <motion.button

@@ -208,7 +208,11 @@ h1.portal-section-heading { margin-bottom: 8px; font-size: 26px; line-height: 1.
 .portal-main :where(p, td, li) { text-wrap: pretty; }
 
 /* Student experience: academic progress presented as momentum, never invented rewards. */
-.portal-root[data-portal="student"] .portal-main { background: linear-gradient(180deg, #fbfaf6 0, #f7f5ee 100%); }
+.portal-root[data-portal="student"] .portal-main {
+  background-color: #faf6ea;
+  background-image: linear-gradient(#e6dcc2 1px, transparent 1px), linear-gradient(90deg, #e6dcc2 1px, transparent 1px);
+  background-size: 28px 28px;
+}
 .portal-root[data-portal="student"] .portal-sidebar { background: linear-gradient(180deg, #f7f1e5 0%, #f2eadb 100%); }
 .portal-root[data-portal="student"] .portal-identity { position: relative; overflow: hidden; }
 .portal-root[data-portal="student"] .portal-identity::after { content: ''; position: absolute; width: 82px; height: 82px; right: -38px; top: -36px; border: 1px solid rgb(168 95 22 / .2); border-radius: 50%; box-shadow: 0 0 0 18px rgb(168 95 22 / .05); }
@@ -229,9 +233,9 @@ h1.portal-section-heading { margin-bottom: 8px; font-size: 26px; line-height: 1.
 .student-empty-state p { max-width: 430px; margin-top: 7px; color: #748078; font-size: 13px; line-height: 1.6; }
 .student-text-action { display: inline-flex; align-items: center; gap: 7px; min-height: 42px; margin-top: 15px; color: var(--portal-accent-deep); font-size: 13px; font-weight: 700; }
 .student-text-action:hover svg { transform: translateX(3px); }
-.student-momentum { position: relative; overflow: hidden; padding: clamp(22px, 4vw, 38px); border-radius: 10px; background: #713f0f; color: white; }
-.student-momentum::before { content: ''; position: absolute; width: 260px; height: 260px; right: -110px; top: -140px; border: 1px solid rgb(255 255 255 / .1); border-radius: 50%; box-shadow: 0 0 0 46px rgb(255 255 255 / .035), 0 0 0 92px rgb(255 255 255 / .025); }
+.student-momentum { position: relative; overflow: visible; padding: clamp(22px, 4vw, 38px); border-radius: 26px; border: 3px solid #1a120a; background: #2a1608; color: white; box-shadow: 7px 7px 0 #1a120a; }
 .student-momentum > * { position: relative; }
+.student-momentum-sticker { position: absolute; top: -26px; right: 22px; width: 64px; height: 64px; transform: rotate(9deg); filter: drop-shadow(0 6px 6px rgb(0 0 0 / .28)); }
 .student-action-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid #dcd8cd; }
 .student-action { position: relative; min-height: 150px; padding: 23px 22px; text-align: left; }
 .student-action + .student-action { border-left: 1px solid #dcd8cd; }
@@ -251,21 +255,38 @@ h1.portal-section-heading { margin-bottom: 8px; font-size: 26px; line-height: 1.
 .portal-root[data-portal="student"] .portal-nav-item[aria-current="page"] img.portal-nav-sticker,
 .portal-root[data-portal="student"] nav[aria-label="Quick navigation"] button[aria-current="page"] img.portal-nav-sticker { transform: scale(1.08); }
 
-/* Dashboard "quest" tiles: playful sticker-icon cards for the student home screen only. */
-.student-hero-sticker { display: inline-block; width: 1.3em; height: 1.3em; margin: 0 .04em -.28em; vertical-align: baseline; }
-.student-quest-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
-.student-quest-card { position: relative; display: flex; align-items: flex-start; gap: 14px; min-height: 128px; padding: 18px; border-radius: 18px; text-align: left; background: var(--quest-bg); border: 1px solid var(--quest-border); }
-.student-quest-card:hover { background: var(--quest-bg-hover); }
-.student-quest-card[data-tone="gold"] { --quest-bg: #fdf1da; --quest-bg-hover: #fbe8bf; --quest-border: #f3dca4; }
-.student-quest-card[data-tone="sky"] { --quest-bg: #e6f0fd; --quest-bg-hover: #d7e6fc; --quest-border: #c5dafa; }
-.student-quest-card[data-tone="violet"] { --quest-bg: #f2e9fc; --quest-bg-hover: #e8daf9; --quest-border: #ddc7f4; }
-.student-quest-card[data-tone="mint"] { --quest-bg: #e3f5e9; --quest-bg-hover: #d2eedb; --quest-border: #bfe4cc; }
-.student-quest-icon { flex-shrink: 0; width: 44px; height: 44px; object-fit: contain; filter: drop-shadow(0 3px 5px rgb(0 0 0 / .12)); }
-.student-quest-label { font-size: 14px; font-weight: 700; color: #26251f; }
-.student-quest-description { margin-top: 3px; font-size: 12px; line-height: 1.5; color: #5c5748; }
-.student-quest-arrow { position: absolute; top: 16px; right: 16px; color: #7c8980; transition: transform var(--motion-micro) var(--ease-standard); }
-.student-quest-card:hover .student-quest-arrow { transform: translateX(3px); color: #4a4436; }
-@media (prefers-reduced-motion: reduce) { .student-quest-card:hover .student-quest-arrow { transform: none; } }
+/* Dashboard "quest" tiles: neubrutalist sticker-book cards for the student home screen only —
+   solid flat color, thick dark outline, hard offset shadow, sticker bleeding over the top edge. */
+.student-quest-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 22px 18px; padding-top: 14px; }
+.student-quest-card {
+  position: relative; display: flex; align-items: flex-start; gap: 14px;
+  min-height: 128px; padding: 22px 18px 18px; border-radius: 22px; text-align: left;
+  background: var(--quest-bg); color: #1a1410; border: 3px solid #1a1410;
+  box-shadow: 5px 5px 0 #1a1410;
+  transition: transform var(--motion-micro) var(--ease-standard), box-shadow var(--motion-micro) var(--ease-standard);
+}
+.student-quest-card:hover { transform: translate(-2px, -3px); box-shadow: 8px 8px 0 #1a1410; }
+.student-quest-card:active { transform: translate(1px, 1px); box-shadow: 3px 3px 0 #1a1410; }
+.student-quest-card[data-tone="gold"] { --quest-bg: #ffcf49; }
+.student-quest-card[data-tone="sky"] { --quest-bg: #7fb4ff; }
+.student-quest-card[data-tone="violet"] { --quest-bg: #c9a3f7; }
+.student-quest-card[data-tone="mint"] { --quest-bg: #7fe0ab; }
+.student-quest-icon {
+  flex-shrink: 0; width: 52px; height: 52px; object-fit: contain; margin-top: -30px;
+  filter: drop-shadow(0 4px 4px rgb(0 0 0 / .22));
+}
+.student-quest-card:nth-of-type(1) .student-quest-icon { transform: rotate(-8deg); }
+.student-quest-card:nth-of-type(2) .student-quest-icon { transform: rotate(6deg); }
+.student-quest-card:nth-of-type(3) .student-quest-icon { transform: rotate(-5deg); }
+.student-quest-card:nth-of-type(4) .student-quest-icon { transform: rotate(7deg); }
+.student-quest-label { font-size: 15px; font-weight: 800; color: #1a1410; }
+.student-quest-description { margin-top: 4px; font-size: 12.5px; line-height: 1.5; color: #362c1c; }
+.student-quest-arrow { position: absolute; top: 16px; right: 16px; color: #1a1410; transition: transform var(--motion-micro) var(--ease-standard); }
+.student-quest-card:hover .student-quest-arrow { transform: translateX(3px); }
+@media (prefers-reduced-motion: reduce) {
+  .student-quest-card:hover .student-quest-arrow { transform: none; }
+  .student-quest-card:hover, .student-quest-card:active { transform: none; }
+}
 .portal-drawer-overlay { position: fixed; inset: 0; z-index: var(--z-drawer); background: rgb(18 29 23 / .52); }
 .portal-drawer {
   --portal-accent: #245b46;
