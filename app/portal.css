@@ -245,6 +245,12 @@ h1.portal-section-heading { margin-bottom: 8px; font-size: 26px; line-height: 1.
 .student-success-flash { animation: student-success 520ms var(--ease-standard) both; }
 @keyframes student-success { 0% { box-shadow: inset 4px 0 0 #317157; background: rgb(49 113 87 / .12); } 100% { box-shadow: inset 0 0 0 transparent; background: transparent; } }
 
+/* Student nav: 3D sticker icons in the sidebar and mobile bottom bar, student portal only. */
+.portal-root[data-portal="student"] .portal-nav-item img.portal-nav-sticker,
+.portal-root[data-portal="student"] nav[aria-label="Quick navigation"] img.portal-nav-sticker { width: 22px; height: 22px; object-fit: contain; flex-shrink: 0; }
+.portal-root[data-portal="student"] .portal-nav-item[aria-current="page"] img.portal-nav-sticker,
+.portal-root[data-portal="student"] nav[aria-label="Quick navigation"] button[aria-current="page"] img.portal-nav-sticker { transform: scale(1.08); }
+
 /* Dashboard "quest" tiles: playful sticker-icon cards for the student home screen only. */
 .student-hero-sticker { display: inline-block; width: 1.3em; height: 1.3em; margin: 0 .04em -.28em; vertical-align: baseline; }
 .student-quest-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }

@@ -11,8 +11,13 @@ import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 import PortalSidebar from '@/components/portal/PortalSidebar'
-import { BookOpen, BookOpenText, CalendarDays, ChartNoAxesColumn, ClipboardCheck, Home, LogOut, Menu, MessagesSquare, Sparkles, UserRound } from 'lucide-react'
+import { CalendarDays, LogOut, Menu } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
+
+// 3D sticker icons (Fluent Emoji, MIT-licensed) — see public/student-icons/NOTICE.
+function NavSticker({ src, alt = '' }: { src: string; alt?: string }) {
+  return <img src={src} alt={alt} className="portal-nav-sticker" />
+}
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
 import StudentDashboard from './components/StudentDashboard'
@@ -53,29 +58,29 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'HOME',
     items: [
-      { key: 'dashboard', label: 'Overview', icon: <Home size={18} /> },
-      { key: 'syllabus', label: 'Syllabus', icon: <BookOpenText size={18} /> },
-      { key: 'library', label: 'Digital library', icon: <BookOpen size={18} /> },
+      { key: 'dashboard', label: 'Overview', icon: <NavSticker src="/student-icons/house.png" /> },
+      { key: 'syllabus', label: 'Syllabus', icon: <NavSticker src="/student-icons/graduation-cap.png" /> },
+      { key: 'library', label: 'Digital library', icon: <NavSticker src="/student-icons/open-book.png" /> },
     ],
   },
   {
     label: 'LEARNING',
     items: [
-      { key: 'class-circle', label: 'Class circle', icon: <MessagesSquare size={18} /> },
+      { key: 'class-circle', label: 'Class circle', icon: <NavSticker src="/student-icons/party-popper.png" /> },
     ],
   },
   {
     label: 'ACADEMIC',
     items: [
-      { key: 'my-marks', label: 'My marks', icon: <ChartNoAxesColumn size={18} /> },
-      { key: 'attendance', label: 'My attendance', icon: <ClipboardCheck size={18} /> },
-      { key: 'calendar', label: 'School calendar', icon: <CalendarDays size={18} /> },
+      { key: 'my-marks', label: 'My marks', icon: <NavSticker src="/student-icons/trophy.png" /> },
+      { key: 'attendance', label: 'My attendance', icon: <NavSticker src="/student-icons/clipboard.png" /> },
+      { key: 'calendar', label: 'School calendar', icon: <NavSticker src="/student-icons/calendar.png" /> },
     ],
   },
   {
     label: 'ACCOUNT',
     items: [
-      { key: 'profile', label: 'My profile', icon: <UserRound size={18} /> },
+      { key: 'profile', label: 'My profile', icon: <NavSticker src="/student-icons/bust-in-silhouette.png" /> },
     ],
   },
   {
@@ -83,7 +88,7 @@ const NAV_SECTIONS: NavSection[] = [
     // see isNavItemVisible('ai-hub') and the empty-section filter below.
     label: 'AI HUB',
     items: [
-      { key: 'ai-hub', label: 'AI Hub', icon: <Sparkles size={18} /> },
+      { key: 'ai-hub', label: 'AI Hub', icon: <NavSticker src="/student-icons/robot.png" /> },
     ],
   },
 ]
@@ -101,9 +106,9 @@ const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
 const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'my-marks', 'attendance', 'calendar'])
 
 const BOTTOM_NAV = [
-  { key: 'dashboard', label: 'Home', icon: <Home size={20} /> },
-  { key: 'my-marks', label: 'Marks', icon: <ChartNoAxesColumn size={20} /> },
-  { key: 'profile', label: 'Profile', icon: <UserRound size={20} /> },
+  { key: 'dashboard', label: 'Home', icon: <NavSticker src="/student-icons/house.png" /> },
+  { key: 'my-marks', label: 'Marks', icon: <NavSticker src="/student-icons/trophy.png" /> },
+  { key: 'profile', label: 'Profile', icon: <NavSticker src="/student-icons/bust-in-silhouette.png" /> },
 ]
 
 function StudentPortal() {
