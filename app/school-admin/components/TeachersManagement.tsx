@@ -247,14 +247,14 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300'
 
 
-  if (loading) return <div className="py-12 text-center text-gray-400">Loading staff...</div>
+  if (loading) return <div className="py-12 text-center text-muted-foreground">Loading staff...</div>
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-gray-900">Staff Directory</h2>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-400">{teachers.length} total staff</span>
+          <span className="text-sm text-muted-foreground">{teachers.length} total staff</span>
           <button onClick={loadTeachers} disabled={loading}
             title="Refresh staff list"
             data-testid="staff-refresh"
@@ -279,9 +279,9 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
         {(['teaching', 'non_teaching'] as const).map(t => (
           <button key={t} onClick={() => { setTab(t); setDeptFilter('all'); setStatusFilter('active') }}
             data-testid={`staff-type-tab-${t}`}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === t ? 'bg-white text-gray-900 ' : 'text-gray-500 hover:text-gray-700'}`}>
             {t === 'teaching' ? 'Teaching Staff' : 'Non-Teaching Staff'}
-            <span className="ml-1.5 text-xs text-gray-400">({teachers.filter(x => (x.staff_type || 'teaching') === t).length})</span>
+            <span className="ml-1.5 text-xs text-muted-foreground">({teachers.filter(x => (x.staff_type || 'teaching') === t).length})</span>
           </button>
         ))}
       </div>
@@ -299,10 +299,10 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
             return (
               <button key={s} onClick={() => setStatusFilter(s as typeof statusFilter)}
                 data-testid={`staff-status-filter-${s}`}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${statusFilter === s ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${statusFilter === s ? 'bg-white text-gray-900 ' : 'text-gray-500 hover:text-gray-700'}`}>
                 {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
                 {count > 0 && (
-                  <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[10px] ${s === 'removed' ? 'bg-red-100 text-red-600' : 'bg-gray-200 text-gray-600'}`}>{count}</span>
+                  <span className={`ml-1 rounded-full px-1.5 py-0.5 text-xs ${s === 'removed' ? 'bg-red-100 text-red-600' : 'bg-gray-200 text-gray-600'}`}>{count}</span>
                 )}
               </button>
             )
@@ -333,7 +333,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       ) : tab === 'teaching' ? (
         <div className="space-y-5">
           {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([dept, members]) => (
-            <div key={dept} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div key={dept} className="bg-white rounded-md border border-gray-200 overflow-hidden">
               <div className="px-5 py-3 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
                 <span className="font-semibold text-blue-800 text-sm">{dept}</span>
                 <span className="text-xs text-blue-500">{members.length} teacher{members.length !== 1 ? 's' : ''}</span>
@@ -350,7 +350,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
           ))}
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
           <div className="divide-y divide-gray-100">
             {filtered.map(t => (
               <TeacherCard key={t.id} teacher={t}
@@ -365,7 +365,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       {/* ── Full-screen Detail Modal ── */}
       {selected && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl w-full max-w-3xl my-6 shadow-2xl">
+          <div className="bg-white rounded-lg w-full max-w-3xl my-6 shadow-2xl">
 
             {/* Modal header */}
             <div className="flex items-center gap-4 px-6 py-4 border-b border-gray-100">
@@ -382,10 +382,10 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                     </span>
                   )}
                 </div>
-                <p className="text-sm text-gray-400 mt-0.5">{selected.employee_id}</p>
+                <p className="text-sm text-muted-foreground mt-0.5">{selected.employee_id}</p>
               </div>
               <button onClick={() => { setSelected(null); setEditing(false) }}
-                className="text-gray-400 hover:text-gray-600 text-2xl leading-none flex-shrink-0 ml-2">×</button>
+                className="text-muted-foreground hover:text-gray-600 text-2xl leading-none flex-shrink-0 ml-2">×</button>
             </div>
 
             {/* Sub-tabs */}
@@ -416,7 +416,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                         { label: 'Teaches Grades', value: selected.teaches_grades },
                       ].map(({ label, value }) => value ? (
                         <div key={label}>
-                          <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+                          <p className="text-xs text-muted-foreground mb-0.5">{label}</p>
                           <p className="text-gray-800 font-medium">{value}</p>
                         </div>
                       ) : null)}
@@ -468,7 +468,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                             {subscribedSubjectNames.length > 0 && (
                               <button type="button" title="Pick from the subject list"
                                 onClick={() => setSubjectInputMode('dropdown')}
-                                className="text-[10px] text-blue-500 hover:text-blue-700 flex-shrink-0">↺</button>
+                                className="text-xs text-blue-500 hover:text-blue-700 flex-shrink-0">↺</button>
                             )}
                           </div>
                         )}
@@ -501,7 +501,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
 
               {detailTab === 'analytics' && (
                   <div className="space-y-4">
-                    <div className="bg-gray-50 rounded-xl p-4 grid grid-cols-2 gap-3 text-sm">
+                    <div className="bg-gray-50 rounded-md p-4 grid grid-cols-2 gap-3 text-sm">
                       {[
                         { label: 'Subject', value: selected.subject },
                         { label: 'Department', value: selected.department },
@@ -509,7 +509,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                         { label: 'Class Teacher', value: selected.class_grade ? `Gr.${selected.class_grade}-${selected.class_section}` : null },
                       ].map(({ label, value }) => value ? (
                         <div key={label}>
-                          <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+                          <p className="text-xs text-muted-foreground mb-0.5">{label}</p>
                           <p className="font-medium text-gray-700">{value}</p>
                         </div>
                       ) : null)}
@@ -542,7 +542,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                     <>
                       <button onClick={handleSave} disabled={saving}
                         data-testid="staff-save-edit"
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
+                        className="bg-primary hover:bg-primary/90 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
                         {saving ? 'Saving...' : 'Save Changes'}
                       </button>
                       <button onClick={() => { setEditing(false); setEditForm({}) }}
@@ -554,7 +554,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                   ) : (
                     <button onClick={() => setEditing(true)}
                       data-testid="staff-edit-details"
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors">
+                      className="bg-primary hover:bg-primary/90 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors">
                       Edit Details
                     </button>
                   )}
@@ -577,21 +577,21 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
 
       {/* ── Remove impact toast ── */}
       {removeToast && (
-        <div className="fixed bottom-5 right-5 z-[70] bg-gray-900 text-white rounded-xl shadow-2xl px-5 py-4 max-w-sm w-full animate-in slide-in-from-bottom-4">
+        <div className="fixed bottom-5 right-5 z-[70] bg-gray-900 text-white rounded-md shadow-2xl px-5 py-4 max-w-sm w-full animate-in slide-in-from-bottom-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold">{removeToast.name} removed</p>
               {removeToast.summary.length > 0 ? (
                 <ul className="mt-1.5 space-y-0.5">
                   {removeToast.summary.map((s, i) => (
-                    <li key={i} className="text-xs text-gray-400 flex items-center gap-1.5">
+                    <li key={i} className="text-xs text-muted-foreground flex items-center gap-1.5">
                       <span className="w-1 h-1 rounded-full bg-orange-400 flex-shrink-0" />
                       {s}
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="text-xs text-gray-400 mt-1">No active assignments were affected.</p>
+                <p className="text-xs text-muted-foreground mt-1">No active assignments were affected.</p>
               )}
             </div>
             <button onClick={() => setRemoveToast(null)} className="text-gray-500 hover:text-gray-300 flex-shrink-0 mt-0.5">✕</button>
@@ -602,14 +602,14 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       {/* ── Remove Consequences Dialog ── */}
       {showRemoveDialog && (
         <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+          <div className="bg-white rounded-lg w-full max-w-md shadow-2xl">
             <div className="px-6 py-4 border-b border-gray-100">
               <h3 className="font-bold text-gray-900">Remove {selected?.name}?</h3>
               <p className="text-xs text-gray-500 mt-0.5">Their record is kept for history. All assignments will be unlinked.</p>
             </div>
             <div className="px-6 py-4 space-y-3 max-h-80 overflow-y-auto">
               {loadingConsequences ? (
-                <div className="py-6 text-center text-gray-400 text-sm">Checking impact...</div>
+                <div className="py-6 text-center text-muted-foreground text-sm">Checking impact...</div>
               ) : removeConsequences ? (
                 <>
                   {removeConsequences.class_teacher_of.length > 0 && (
@@ -667,7 +667,7 @@ function TeacherCard({ teacher, onClick, onToggle, onDelete }:
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className={`font-medium text-sm ${isRemoved ? 'line-through text-gray-400' : 'text-gray-900'}`}>{teacher.name}</span>
+          <span className={`font-medium text-sm ${isRemoved ? 'line-through text-muted-foreground' : 'text-gray-900'}`}>{teacher.name}</span>
           {teacher.class_grade && !isRemoved && (
             <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">
               CT: Gr.{teacher.class_grade}-{teacher.class_section}
@@ -682,7 +682,7 @@ function TeacherCard({ teacher, onClick, onToggle, onDelete }:
           {isRemoved && <span className="text-xs bg-red-100 text-red-500 px-1.5 py-0.5 rounded font-medium">Removed</span>}
         </div>
         <div className="flex items-center gap-2 mt-0.5">
-          {teacher.employee_id && <span className="text-xs text-gray-400 font-mono">{teacher.employee_id}</span>}
+          {teacher.employee_id && <span className="text-xs text-muted-foreground font-mono">{teacher.employee_id}</span>}
           {teacher.subject && <span className="text-xs text-gray-500">· {teacher.subject}</span>}
           {/* Show staff type label */}
           <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${

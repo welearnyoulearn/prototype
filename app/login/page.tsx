@@ -113,18 +113,18 @@ function LoginForm() {
       {showLastCard && lastAccount && (
         <div className="mb-5 space-y-3">
           <button type="button" data-testid="btn-last-used-account" onClick={pickLastAccount}
-            className="w-full text-left flex items-center gap-3 border border-stone-200 hover:border-blue-400 hover:bg-blue-50/50 rounded-xl px-4 py-3 transition">
-            <span className="w-10 h-10 shrink-0 rounded-full bg-blue-600 text-white font-semibold flex items-center justify-center">
+            className="auth-account-choice w-full text-left flex items-center gap-3 border rounded-lg px-4 py-3 transition">
+            <span className="auth-account-avatar w-10 h-10 shrink-0 rounded-full text-white font-semibold flex items-center justify-center">
               {lastAccount.name.trim().charAt(0).toUpperCase() || '?'}
             </span>
             <span className="min-w-0">
-              <span className="block text-xs text-stone-400">Last used</span>
+              <span className="block text-xs text-muted-foreground">Last used</span>
               <span data-testid="last-used-name" className="block text-sm font-semibold text-stone-800 truncate">{lastAccount.name}</span>
               <span data-testid="last-used-email" className="block text-xs text-stone-500 truncate">{lastAccount.email}</span>
             </span>
           </button>
           <button type="button" data-testid="btn-use-different-account" onClick={useDifferentAccount}
-            className="text-sm text-stone-400 hover:text-stone-600 transition">
+            className="text-sm text-muted-foreground hover:text-primary transition">
             Use a different account
           </button>
         </div>
@@ -133,7 +133,7 @@ function LoginForm() {
       {!showLastCard && (
       <form onSubmit={handleSubmit} data-testid="login-form" className="space-y-4">
         {pickedLast && lastAccount ? (
-          <div className="flex items-center justify-between gap-3 bg-stone-50 border border-stone-200 rounded-xl px-4 py-3">
+          <div className="auth-account-picked flex items-center justify-between gap-3 border rounded-lg px-4 py-3">
             <span className="min-w-0">
               <span className="block text-sm font-semibold text-stone-800 truncate">{lastAccount.name}</span>
               <span className="block text-xs text-stone-500 truncate">{lastAccount.email}</span>
@@ -162,7 +162,7 @@ function LoginForm() {
           autoComplete="current-password"
         />
         <div className="flex justify-end">
-          <Link href="/forgot-password" className="text-sm text-stone-400 hover:text-stone-600 transition">
+          <Link href="/forgot-password" className="text-sm text-muted-foreground hover:text-primary transition">
             Forgot password?
           </Link>
         </div>
@@ -170,7 +170,7 @@ function LoginForm() {
       </form>
       )}
       <div className="mt-5 pt-5 border-t border-stone-200 text-center">
-        <Link href="/" className="text-sm text-stone-400 hover:text-stone-600 transition">← Back to portal selection</Link>
+        <Link href="/" className="text-sm text-muted-foreground hover:text-primary transition">← Back to portal selection</Link>
       </div>
     </AuthShell>
   )
@@ -178,7 +178,7 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-[#faf6ef] flex items-center justify-center"><div className="text-stone-400">Loading...</div></div>}>
+    <Suspense fallback={<div className="min-h-screen bg-[#faf6ef] flex items-center justify-center"><div className="text-muted-foreground">Loading...</div></div>}>
       <LoginForm />
     </Suspense>
   )

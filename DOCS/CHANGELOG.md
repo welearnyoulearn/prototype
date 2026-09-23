@@ -27,6 +27,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 -->
 
 ## [Unreleased]
+- **Documentation rebuilt from the code:** per-feature dossiers, architecture, roles/plans and deck storyline in `docs/product/features/`; factbook and wiki corrected (per-exam report card exists, exam flow is class-teacher review + admin release, auth all Built, no Cashfree/WhatsApp panels in fee screens); stale docs removed (old handbook, testing guide, four feature READMEs, admin guide, syllabus integration plan, database ERD, four portal pages, task log rewritten).
 - **Admin Student Leaderboard** deleted, and the unauthenticated `GET /api/students/{id}/rewards` route with it (#180). **Year-in-Review**, **Parent Engagement** and **Class Analytics** (with the Student Management performance tab) taken out of `dev` and preserved on their own feature branches (#181, #182, #183). The feature keys `leaderboard`, `year-review`, `parent-engagement` and `class-analytics` are gone from the Platform Admin feature config. Tables untouched.
 - **Daily Briefing** (screen and `GET /api/admin/briefing`), **Student-Teacher Analysis** and the **Notification Center** page taken out of `dev` and preserved on their own branches (#188, #189, #190): none was linked from any menu. Feature keys `briefing`, `analysis`, `notifications` removed from the Platform Admin config. The header notification bell is unchanged.
 

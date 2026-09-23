@@ -46,6 +46,7 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [Online Payments (UPI)](../../docs/product/features/14-online-fee-payments-upi.md)
 - [fee-management.md](fee-management.md)
 - [parent-portal.md](parent-portal.md)
 

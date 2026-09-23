@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { InlineLoader } from '@/components/loaders'
 
 type Teacher = {
   id: number
@@ -80,9 +81,7 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-      </div>
+      <InlineLoader portal="teacher" label="Loading your classes…" size="lg" className="min-h-64" />
     )
   }
 
@@ -96,7 +95,7 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
             </svg>
           </div>
           <h3 className="text-lg font-semibold text-gray-700 mb-2">No Classes Assigned</h3>
-          <p className="text-gray-400 text-sm">Ask your school admin to assign you a subject in Class Management.</p>
+          <p className="text-muted-foreground text-sm">Ask your school admin to assign you a subject in Class Management.</p>
         </div>
       </div>
     )
@@ -114,25 +113,25 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
           <div key={cls.id} className="flex flex-col">
             {/* ── Own class card (Class Teacher) ── */}
             {isOwn ? (
-              <div className="bg-white rounded-xl border-2 border-blue-200 p-5 shadow-sm flex flex-col gap-3">
+              <div className="bg-white rounded-md border-2 border-blue-200 p-5  flex flex-col gap-3">
                 <div className="flex items-start justify-between">
                   <div>
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-3xl font-bold text-gray-900">{cls.grade}-{cls.section}</span>
-                      <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide">Your Class</span>
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide">Your Class</span>
                     </div>
                     <p className="text-xs text-gray-500">Class Teacher</p>
                   </div>
                   <div className="text-right">
                     <p className="text-2xl font-bold text-blue-600">{cls.student_count}</p>
-                    <p className="text-[10px] text-gray-400">Students</p>
+                    <p className="text-xs text-muted-foreground">Students</p>
                   </div>
                 </div>
 
                 {subjects.length > 0 && (
                   <div className="flex flex-wrap gap-1">
                     {subjects.map(s => (
-                      <span key={s} className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{s}</span>
+                      <span key={s} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{s}</span>
                     ))}
                   </div>
                 )}
@@ -140,7 +139,7 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
                 <div className="flex gap-2 mt-auto">
                   <button
                     onClick={() => onViewClass({ id: cls.id, grade: cls.grade, section: cls.section, class_teacher_name: cls.class_teacher_name })}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
+                    className="flex-1 bg-primary hover:bg-primary/90 text-white text-sm font-semibold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -161,13 +160,13 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
               </div>
             ) : (
               /* ── Other class card (Subject Teacher) ── */
-              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
                 <div className="p-5">
                   <div className="flex items-start justify-between">
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-3xl font-bold text-gray-900">{cls.grade}-{cls.section}</span>
-                        <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide">Subject Teacher</span>
+                        <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide">Subject Teacher</span>
                       </div>
                       <p className="text-xs text-gray-500">
                         {cls.class_teacher_name ? `Class Teacher: ${cls.class_teacher_name}` : 'No class teacher assigned'}
@@ -175,15 +174,15 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
                     </div>
                     <div className="text-right">
                       <p className="text-xl font-bold text-gray-700">{cls.student_count}</p>
-                      <p className="text-[10px] text-gray-400">Students</p>
+                      <p className="text-xs text-muted-foreground">Students</p>
                     </div>
                   </div>
 
                   <div className="flex flex-wrap gap-1 mt-3">
                     {subjects.length > 0 ? subjects.map(s => (
-                      <span key={s} className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-medium">{s}</span>
+                      <span key={s} className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-medium">{s}</span>
                     )) : (
-                      <span className="text-xs text-gray-400">No subject assigned</span>
+                      <span className="text-xs text-muted-foreground">No subject assigned</span>
                     )}
                   </div>
 

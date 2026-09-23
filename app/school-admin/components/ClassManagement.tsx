@@ -208,20 +208,20 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
         )}
 
         {showAdd && (
-          <form onSubmit={addClass} className="mx-3 mt-3 bg-violet-50 border border-violet-200 rounded-xl p-3 space-y-2">
+          <form onSubmit={addClass} className="mx-3 mt-3 bg-violet-50 border border-violet-200 rounded-md p-3 space-y-2">
             <div className="flex gap-2">
               <div className="flex-1">
-                <label className="block text-[10px] font-medium text-gray-500 mb-0.5">Grade*</label>
+                <label className="block text-xs font-medium text-gray-500 mb-0.5">Grade*</label>
                 <input required value={newClass.grade} onChange={e => setNewClass(f => ({ ...f, grade: e.target.value }))}
                   className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-violet-300 w-full" placeholder="10" />
               </div>
               <div className="w-14">
-                <label className="block text-[10px] font-medium text-gray-500 mb-0.5">Sec*</label>
+                <label className="block text-xs font-medium text-gray-500 mb-0.5">Sec*</label>
                 <input required value={newClass.section} onChange={e => setNewClass(f => ({ ...f, section: e.target.value }))}
                   className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-900 bg-white focus:outline-none focus:ring-1 focus:ring-violet-300 w-full" placeholder="A" />
               </div>
             </div>
-            <p className="text-[10px] text-gray-400">Assign class teacher after creating from the class overview</p>
+            <p className="text-xs text-muted-foreground">Assign class teacher after creating from the class overview</p>
             <div className="flex gap-1.5">
               <button type="submit" disabled={addingClass}
                 className="flex-1 bg-violet-600 text-white text-xs py-1.5 rounded-lg font-medium hover:bg-violet-700 disabled:opacity-50">
@@ -237,11 +237,11 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
 
         <div className="flex-1 overflow-y-auto py-2">
           {classes.length === 0 ? (
-            <p className="text-xs text-gray-400 text-center py-6 px-3">No classes yet.<br/>Click + to add one.</p>
+            <p className="text-xs text-muted-foreground text-center py-6 px-3">No classes yet.<br/>Click + to add one.</p>
           ) : (
             sortedGrades.map(grade => (
               <div key={grade} className="mb-1">
-                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-4 py-1">Grade {grade}</p>
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider px-4 py-1">Grade {grade}</p>
                 {byGrade[grade].map(cls => (
                   <div key={cls.id}
                     id={`class-item-${cls.id}`}
@@ -253,17 +253,17 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
                       <p className={`text-sm font-semibold ${selectedId === cls.id ? 'text-violet-700' : 'text-gray-800'}`}>
                         {cls.grade}-{cls.section}
                       </p>
-                      <p className="text-[10px] text-gray-400 truncate">
+                      <p className="text-xs text-muted-foreground truncate">
                         {cls.student_count} student{cls.student_count !== 1 ? 's' : ''}
                       </p>
                       {cls.class_teacher_name
-                        ? <p className="text-[10px] text-indigo-500 font-medium truncate">CT: {cls.class_teacher_name}</p>
-                        : <p className="text-[10px] text-amber-400">No class teacher</p>}
+                        ? <p className="text-xs text-indigo-500 font-medium truncate">CT: {cls.class_teacher_name}</p>
+                        : <p className="text-xs text-amber-400">No class teacher</p>}
                     </div>
                     <button onClick={e => openDeleteModal(e, cls)} data-testid={`delete-class-${cls.id}`}
                       title={`Remove Grade ${cls.grade} – ${cls.section}`}
                       aria-label={`Remove Grade ${cls.grade} – ${cls.section}`}
-                      className="w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors flex-shrink-0">
+                      className="w-6 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:text-red-600 hover:bg-red-50 transition-colors flex-shrink-0">
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                       </svg>
@@ -279,7 +279,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
         {removedClasses.length > 0 && (
           <div className="border-t border-gray-100 mt-1">
             <button onClick={() => setShowRemoved(v => !v)}
-              className="w-full flex items-center justify-between px-4 py-2 text-[10px] font-bold text-red-400 uppercase tracking-wider hover:bg-red-50 transition-colors">
+              className="w-full flex items-center justify-between px-4 py-2 text-xs font-bold text-red-400 uppercase tracking-wider hover:bg-red-50 transition-colors">
               <span>Removed ({removedClasses.length})</span>
               <span>{showRemoved ? '▲' : '▼'}</span>
             </button>
@@ -289,9 +289,9 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
                   <div key={rc.id} className="flex items-center justify-between px-4 py-2 opacity-60">
                     <div>
                       <p className="text-xs font-medium text-gray-500 line-through">{rc.grade}-{rc.section}</p>
-                      <p className="text-[10px] text-gray-400">{rc.student_count} student{Number(rc.student_count) !== 1 ? 's' : ''} deactivated</p>
+                      <p className="text-xs text-muted-foreground">{rc.student_count} student{Number(rc.student_count) !== 1 ? 's' : ''} deactivated</p>
                     </div>
-                    <span className="text-[9px] text-red-300 bg-red-50 px-1.5 py-0.5 rounded-full">Removed</span>
+                    <span className="text-xs text-red-300 bg-red-50 px-1.5 py-0.5 rounded-full">Removed</span>
                   </div>
                 ))}
               </div>
@@ -313,13 +313,13 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full py-24 text-center px-8">
-            <div className="w-16 h-16 bg-violet-50 rounded-2xl flex items-center justify-center mb-4">
+            <div className="w-16 h-16 bg-violet-50 rounded-lg flex items-center justify-center mb-4">
               <svg className="w-8 h-8 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
               </svg>
             </div>
             <p className="text-gray-500 font-medium">Select a class</p>
-            <p className="text-gray-400 text-sm mt-1">Choose a class from the left to manage subjects and students</p>
+            <p className="text-muted-foreground text-sm mt-1">Choose a class from the left to manage subjects and students</p>
           </div>
         )}
       </div>
@@ -328,7 +328,7 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
       {deleteTarget && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
           onClick={() => !deletingClass && setDeleteTarget(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-lg shadow-2xl p-6 max-w-md w-full" onClick={e => e.stopPropagation()}>
             <div className="flex items-start gap-3 mb-4">
               <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
                 <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -348,23 +348,23 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
 
             {deleteTarget.student_count > 0 && (
               <div className="space-y-2 mb-4">
-                <label className="flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors"
+                <label className="flex items-start gap-2.5 p-3 rounded-md border cursor-pointer transition-colors"
                   style={{ borderColor: deleteMode === 'deactivate' ? '#7c3aed' : '#e5e7eb', background: deleteMode === 'deactivate' ? '#f5f3ff' : 'white' }}>
                   <input type="radio" name="deleteMode" checked={deleteMode === 'deactivate'} onChange={() => setDeleteMode('deactivate')}
                     className="mt-0.5" data-testid="delete-mode-deactivate" />
                   <div>
                     <p className="text-sm font-medium text-gray-800">Deactivate these students</p>
-                    <p className="text-xs text-gray-400">They&rsquo;re marked inactive — no longer counted as enrolled, portal access is revoked.</p>
+                    <p className="text-xs text-muted-foreground">They&rsquo;re marked inactive — no longer counted as enrolled, portal access is revoked.</p>
                   </div>
                 </label>
 
-                <label className="flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors"
+                <label className="flex items-start gap-2.5 p-3 rounded-md border cursor-pointer transition-colors"
                   style={{ borderColor: deleteMode === 'reassign' ? '#7c3aed' : '#e5e7eb', background: deleteMode === 'reassign' ? '#f5f3ff' : 'white' }}>
                   <input type="radio" name="deleteMode" checked={deleteMode === 'reassign'} onChange={() => setDeleteMode('reassign')}
                     className="mt-0.5" data-testid="delete-mode-reassign" />
                   <div className="flex-1">
                     <p className="text-sm font-medium text-gray-800">Move them to another section</p>
-                    <p className="text-xs text-gray-400 mb-2">Same grade only — pick which section.</p>
+                    <p className="text-xs text-muted-foreground mb-2">Same grade only — pick which section.</p>
                     {deleteMode === 'reassign' && (
                       <select value={deleteTargetClassId} onChange={e => setDeleteTargetClassId(e.target.value)}
                         data-testid="delete-reassign-target"
@@ -378,13 +378,13 @@ export default function ClassManagement({ schoolId, onNavigate }: Props) {
                   </div>
                 </label>
 
-                <label className="flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors"
+                <label className="flex items-start gap-2.5 p-3 rounded-md border cursor-pointer transition-colors"
                   style={{ borderColor: deleteMode === 'manual' ? '#7c3aed' : '#e5e7eb', background: deleteMode === 'manual' ? '#f5f3ff' : 'white' }}>
                   <input type="radio" name="deleteMode" checked={deleteMode === 'manual'} onChange={() => setDeleteMode('manual')}
                     className="mt-0.5" data-testid="delete-mode-manual" />
                   <div>
                     <p className="text-sm font-medium text-gray-800">I&rsquo;ll handle it myself</p>
-                    <p className="text-xs text-gray-400">Deactivate or move them from Students first — the class won&rsquo;t delete until none are active here.</p>
+                    <p className="text-xs text-muted-foreground">Deactivate or move them from Students first — the class won&rsquo;t delete until none are active here.</p>
                   </div>
                 </label>
               </div>
@@ -621,7 +621,7 @@ function ClassDetail({
                   </button>
                 </div>
               )}
-              <span className="text-xs text-gray-400">{subjects.length} subjects · {totalPPW} periods/week</span>
+              <span className="text-xs text-muted-foreground">{subjects.length} subjects · {totalPPW} periods/week</span>
             </div>
           </div>
         </div>
@@ -629,7 +629,7 @@ function ClassDetail({
         {/* Class teacher conflict modal */}
         {ctConflict && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setCtConflict(null)}>
-            <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-lg shadow-2xl p-6 max-w-sm w-full" onClick={e => e.stopPropagation()}>
               <div className="flex items-start gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
                   <svg className="w-5 h-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -682,7 +682,7 @@ function ClassDetail({
         {tab === 'overview' && (
           <div className="space-y-5">
             {/* Class Teacher Banner */}
-            <div className={`rounded-xl border p-4 flex items-center justify-between gap-4 ${
+            <div className={`rounded-md border p-4 flex items-center justify-between gap-4 ${
               cls.class_teacher_name ? 'bg-violet-50 border-violet-200' : 'bg-amber-50 border-amber-200'
             }`}>
               <div className="flex items-center gap-3">
@@ -692,7 +692,7 @@ function ClassDetail({
                   {cls.class_teacher_name ? cls.class_teacher_name.charAt(0).toUpperCase() : '?'}
                 </div>
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Class Teacher</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Class Teacher</p>
                   {cls.class_teacher_name
                     ? <p className="font-bold text-gray-900 text-sm">{cls.class_teacher_name}</p>
                     : <p className="font-semibold text-amber-700 text-sm">Not assigned yet</p>}
@@ -710,19 +710,19 @@ function ClassDetail({
 
             {/* Summary cards */}
             <div className={`grid gap-3 grid-cols-2`}>
-              <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 text-center">
-                <p className="text-3xl font-black text-violet-700">{cls.student_count}</p>
+              <div className="bg-violet-50 border border-violet-200 rounded-md p-4 text-center">
+                <p className="text-3xl font-semibold text-violet-700">{cls.student_count}</p>
                 <p className="text-xs text-violet-600 mt-1">Students</p>
               </div>
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center">
-                <p className="text-3xl font-black text-blue-700">{subjects.length}</p>
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-4 text-center">
+                <p className="text-3xl font-semibold text-blue-700">{subjects.length}</p>
                 <p className="text-xs text-blue-600 mt-1">Subjects</p>
               </div>
             </div>
 
             {/* Teachers & Subjects */}
             {subjects.length > 0 && (
-              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
                 <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50">
                   <p className="text-xs font-semibold text-gray-600">Teachers & Subjects</p>
                 </div>
@@ -732,7 +732,7 @@ function ClassDetail({
                       <div className="flex items-center gap-2.5">
                         <div className="w-1.5 h-1.5 rounded-full bg-violet-400" />
                         <span className="text-sm font-medium text-gray-800">{s.subject_name}</span>
-                        <span className="text-xs text-gray-400">{s.periods_per_week}/wk</span>
+                        <span className="text-xs text-muted-foreground">{s.periods_per_week}/wk</span>
                       </div>
                       {s.teacher_name
                         ? <span className="text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">{s.teacher_name}</span>
@@ -745,15 +745,15 @@ function ClassDetail({
 
             {/* Attendance last 7 days — only when the school has the Attendance Tracking feature */}
             {hasAttendance && (
-              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+              <div className="bg-white border border-gray-200 rounded-md overflow-hidden">
                 <div className="px-4 py-2.5 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
                   <p className="text-xs font-semibold text-gray-600">Attendance — Last 7 Days</p>
-                  <button onClick={loadAttendanceSummary} className="text-xs text-gray-400 hover:text-gray-600">Refresh</button>
+                  <button onClick={loadAttendanceSummary} className="text-xs text-muted-foreground hover:text-gray-600">Refresh</button>
                 </div>
                 {attLoading ? (
-                  <div className="py-6 text-center text-gray-400 text-xs">Loading...</div>
+                  <div className="py-6 text-center text-muted-foreground text-xs">Loading...</div>
                 ) : attSummary.length === 0 ? (
-                  <div className="py-6 text-center text-gray-400 text-xs">No attendance marked in the last 7 days</div>
+                  <div className="py-6 text-center text-muted-foreground text-xs">No attendance marked in the last 7 days</div>
                 ) : (
                   <div className="divide-y divide-gray-50">
                     {attSummary.map(row => {
@@ -775,7 +775,7 @@ function ClassDetail({
                           </div>
                           <div className="text-right w-24 flex-shrink-0">
                             <span className={`text-xs font-bold ${pct >= 80 ? 'text-green-600' : pct >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>{pct}%</span>
-                            <span className="text-xs text-gray-400 ml-2">{row.present}/{total}</span>
+                            <span className="text-xs text-muted-foreground ml-2">{row.present}/{total}</span>
                           </div>
                         </div>
                       )
@@ -788,14 +788,14 @@ function ClassDetail({
             {/* Quick actions */}
             <div className={`grid gap-3 grid-cols-2`}>
               <button onClick={() => setTab('subjects')}
-                className="border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors">
+                className="border border-gray-200 rounded-md p-3 text-left hover:bg-gray-50 transition-colors">
                 <p className="text-sm font-semibold text-gray-700">Manage Subjects</p>
-                <p className="text-xs text-gray-400 mt-0.5">{subjects.length} assigned</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{subjects.length} assigned</p>
               </button>
               <button onClick={() => setTab('students')}
-                className="border border-gray-200 rounded-xl p-3 text-left hover:bg-gray-50 transition-colors">
+                className="border border-gray-200 rounded-md p-3 text-left hover:bg-gray-50 transition-colors">
                 <p className="text-sm font-semibold text-gray-700">Student List</p>
-                <p className="text-xs text-gray-400 mt-0.5">{cls.student_count} enrolled</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{cls.student_count} enrolled</p>
               </button>
             </div>
           </div>
@@ -811,15 +811,15 @@ function ClassDetail({
             )}
 
             {/* Current subjects */}
-            <div className="bg-gray-50 rounded-xl border border-gray-100 overflow-hidden">
+            <div className="bg-gray-50 rounded-md border border-gray-100 overflow-hidden">
               <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
                 <span className="text-xs font-semibold text-gray-600">Assigned Subjects</span>
-                {subjects.length > 0 && <span className="text-xs text-gray-400">{totalPPW} periods/week</span>}
+                {subjects.length > 0 && <span className="text-xs text-muted-foreground">{totalPPW} periods/week</span>}
               </div>
               {subLoading ? (
-                <div className="py-6 text-center text-gray-400 text-xs">Loading...</div>
+                <div className="py-6 text-center text-muted-foreground text-xs">Loading...</div>
               ) : subjects.length === 0 ? (
-                <div className="py-8 text-center text-gray-400 text-sm">No subjects yet. Apply defaults or add from suggestions below.</div>
+                <div className="py-8 text-center text-muted-foreground text-sm">No subjects yet. Apply defaults or add from suggestions below.</div>
               ) : (
                 <div className="divide-y divide-gray-100">
                   {subjects.map(s => (
@@ -828,7 +828,7 @@ function ClassDetail({
                         <div className="w-1.5 h-1.5 rounded-full bg-violet-400 flex-shrink-0" />
                         <div>
                           <p className="font-medium text-gray-900 text-sm">{s.subject_name}</p>
-                          <p className="text-xs text-gray-400">{s.periods_per_week} per week</p>
+                          <p className="text-xs text-muted-foreground">{s.periods_per_week} per week</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
@@ -856,7 +856,7 @@ function ClassDetail({
                             <button onClick={() => assignTeacherInline(s.id)} disabled={!inlineTeacher}
                               className="text-xs px-2 py-1 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">✓</button>
                             <button onClick={() => { setAssigningTeacherId(null); setInlineTeacher('') }}
-                              className="text-xs text-gray-400 hover:text-gray-600">✕</button>
+                              className="text-xs text-muted-foreground hover:text-gray-600">✕</button>
                           </div>
                         ) : s.teacher_name ? (
                           <button onClick={() => { setAssigningTeacherId(s.id); setInlineTeacher('') }}
@@ -888,7 +888,7 @@ function ClassDetail({
                 here anymore. A one-time migration backfilled any gap that
                 existed from before this was fixed. */}
             {!subscribedSubjects && (
-              <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 flex items-center justify-between gap-3 flex-wrap">
+              <div className="bg-violet-50 border border-violet-200 rounded-md p-4 flex items-center justify-between gap-3 flex-wrap">
                 <div>
                   <p className="text-sm font-medium text-violet-800">No subjects subscribed for Grade {cls.grade} yet</p>
                   <p className="text-xs text-violet-500 mt-0.5">Subscribe subjects in Syllabus Customizer — they&rsquo;ll be added here automatically with a teacher auto-assigned.</p>
@@ -906,11 +906,11 @@ function ClassDetail({
         {/* ── STUDENTS ── */}
         {tab === 'students' && (
           <div className="space-y-3">
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
               <div className="px-4 py-3 border-b border-gray-100 flex justify-between items-center">
                 <div>
                   <span className="text-xs font-semibold text-gray-600">Students in {cls.grade}-{cls.section}</span>
-                  <span className="text-xs text-gray-400 ml-2">{students.length} enrolled</span>
+                  <span className="text-xs text-muted-foreground ml-2">{students.length} enrolled</span>
                 </div>
                 <button
                   onClick={() => onNavigate?.('students', 'onboard')}
@@ -928,7 +928,7 @@ function ClassDetail({
                   <InlineLoader portal="school-admin" label="" />
                 </div>
               ) : students.length === 0 ? (
-                <div className="py-8 text-center text-gray-400 text-sm">
+                <div className="py-8 text-center text-muted-foreground text-sm">
                   No students enrolled yet.
                   <button onClick={() => onNavigate?.('students', 'onboard')} className="block mx-auto mt-2 text-violet-500 hover:text-violet-700 underline text-xs">
                     Add the first student →
@@ -942,9 +942,9 @@ function ClassDetail({
                       <button type="button" onClick={() => setProfileId(s.id)} data-testid={`class-student-${s.id}`}
                         className="flex-1 min-w-0 text-left" aria-label={`Open full profile of ${s.name}`}>
                         <p className="font-medium text-violet-700 hover:underline text-sm">{s.name}</p>
-                        <p className="text-xs text-gray-400">Roll: {s.roll_number || '—'}</p>
+                        <p className="text-xs text-muted-foreground">Roll: {s.roll_number || '—'}</p>
                       </button>
-                      {s.phone && <span className="text-xs text-gray-400">{s.phone}</span>}
+                      {s.phone && <span className="text-xs text-muted-foreground">{s.phone}</span>}
                       <button type="button" onClick={() => setProfileId(s.id)} data-testid={`class-student-profile-${s.id}`}
                         className="text-xs font-semibold text-violet-600 border border-violet-200 rounded-lg px-2.5 py-1 hover:bg-violet-50">Profile →</button>
                     </div>

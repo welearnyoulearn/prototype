@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import DigitalLibrary from '../../components/library/DigitalLibrary'
+import { InlineLoader } from '@/components/loaders'
 
 type Teacher = {
   id: number
@@ -73,9 +74,7 @@ export default function TeacherLibrary({ teacher, schoolId }: Props) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-      </div>
+      <InlineLoader portal="teacher" label="Loading your library…" size="lg" className="min-h-64" />
     )
   }
 

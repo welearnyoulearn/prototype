@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { SESSION_LABEL, longDate, timeOf, type OverviewClass, type Session, type Sheet } from './types'
+import { Skeleton } from '@/components/ui/skeleton'
 
 // Read-only look-back: pick a class and a past date, see Morning and Afternoon — who marked
 // each, and who was absent or late. Any teacher can look; nothing here can change a record.
@@ -55,7 +56,7 @@ export default function HistoryView({ classes, today }: { classes: OverviewClass
           <button type="button" onClick={() => setReload(r => r + 1)} className="text-xs font-semibold border border-red-300 rounded-lg px-3 py-1.5">Try again</button>
         </div>
       )}
-      {loading && classId && <div className="h-40 bg-gray-100 rounded-2xl animate-pulse" aria-busy="true" />}
+      {loading && classId && <div role="status" aria-live="polite" aria-busy="true"><span className="sr-only">Loading attendance history</span><Skeleton className="h-40" /></div>}
 
       {!loading && nw && (
         <div data-testid="att-history-holiday" className="bg-red-50 border border-red-200 rounded-2xl px-4 py-4 text-sm text-red-800">

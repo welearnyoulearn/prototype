@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { SESSION_LABEL, longDate, timeOf, type Session, type Sheet, type Status } from './types'
+import { Skeleton } from '@/components/ui/skeleton'
 
 // Step 2 — one class, one date, one session.
 //   open        → mark everyone (all Present by default), tap the exceptions, review, submit
@@ -154,7 +155,7 @@ export default function MarkSheet({ classId, date, session: initialSession, onBa
       {/* Header */}
       <div className="flex items-center gap-3">
         <button type="button" onClick={onBack} data-testid="att-back" aria-label="Back to classes"
-          className="w-10 h-10 rounded-xl border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-lg">‹</button>
+          className="w-10 h-10 rounded-md border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 text-lg">‹</button>
         <div className="min-w-0">
           <h2 className="text-lg font-bold text-gray-900 truncate">{title}</h2>
           <p className="text-xs text-gray-500">{longDate(date)}</p>
@@ -162,24 +163,25 @@ export default function MarkSheet({ classId, date, session: initialSession, onBa
       </div>
 
       {/* Session switch */}
-      <div className="grid grid-cols-2 gap-2 bg-gray-100 p-1 rounded-xl" role="tablist" aria-label="Session">
+      <div className="grid grid-cols-2 gap-2 bg-gray-100 p-1 rounded-md" role="tablist" aria-label="Session">
         {(['morning', 'afternoon'] as Session[]).map(s => (
           <button key={s} type="button" role="tab" aria-selected={session === s} onClick={() => switchSession(s)} data-testid={`att-session-${s}`}
-            className={`py-2 rounded-lg text-sm font-semibold transition ${session === s ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            className={`py-2 rounded-lg text-sm font-semibold transition ${session === s ? 'bg-white text-gray-900 ' : 'text-gray-500 hover:text-gray-700'}`}>
             {s === 'morning' ? '🌅' : '🌆'} {SESSION_LABEL[s]}
           </button>
         ))}
       </div>
 
       {loading && (
-        <div className="space-y-3 animate-pulse" aria-busy="true" data-testid="att-sheet-loading">
-          <div className="h-16 bg-gray-100 rounded-2xl" />
-          {[1, 2, 3, 4].map(i => <div key={i} className="h-16 bg-gray-100 rounded-2xl" />)}
+        <div className="space-y-3" role="status" aria-live="polite" aria-busy="true" data-testid="att-sheet-loading">
+          <span className="sr-only">Loading attendance sheet</span>
+          <Skeleton className="h-16" />
+          {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-16" />)}
         </div>
       )}
 
       {loadError && (
-        <div role="alert" data-testid="att-sheet-error" className="bg-red-50 border border-red-200 rounded-2xl px-4 py-4 text-sm text-red-700 flex items-center justify-between gap-3">
+        <div role="alert" data-testid="att-sheet-error" className="bg-red-50 border border-red-200 rounded-lg px-4 py-4 text-sm text-red-700 flex items-center justify-between gap-3">
           <span>{loadError}</span>
           <button type="button" onClick={() => setReload(r => r + 1)} className="text-xs font-semibold border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-100">Try again</button>
         </div>
@@ -187,14 +189,14 @@ export default function MarkSheet({ classId, date, session: initialSession, onBa
 
       {notice && (
         <div role={notice.tone === 'error' ? 'alert' : 'status'} data-testid="att-notice"
-          className={`rounded-2xl px-4 py-3 text-sm border ${notice.tone === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
+          className={`rounded-lg px-4 py-3 text-sm border ${notice.tone === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-blue-50 border-blue-200 text-blue-800'}`}>
           {notice.text}
         </div>
       )}
 
       {/* ── Holiday ── */}
       {sheet?.nonWorking && (
-        <div data-testid="att-holiday" role="status" className="bg-red-50 border border-red-200 rounded-2xl px-5 py-5 flex items-start gap-3">
+        <div data-testid="att-holiday" role="status" className="bg-red-50 border border-red-200 rounded-lg px-5 py-5 flex items-start gap-3">
           <span className="text-3xl" aria-hidden>🎉</span>
           <div>
             <p className="text-base font-bold text-red-800">{sheet.nonWorking.kind === 'holiday' ? `Holiday — ${sheet.nonWorking.title}` : 'Weekly off'}</p>
@@ -205,7 +207,7 @@ export default function MarkSheet({ classId, date, session: initialSession, onBa
 
       {/* ── Done ── */}
       {phase === 'done' && done && (
-        <div data-testid="att-done" className="bg-white border border-green-200 rounded-2xl px-5 py-8 text-center space-y-3">
+        <div data-testid="att-done" className="bg-white border border-green-200 rounded-lg px-5 py-8 text-center space-y-3">
           <div className="w-14 h-14 bg-green-100 rounded-full flex items-center justify-center mx-auto text-2xl" aria-hidden>✓</div>
           <p className="text-lg font-bold text-gray-900">
             {done.offline ? 'Saved on this device' : done.edited ? 'Attendance updated' : 'Attendance saved'}
@@ -217,8 +219,8 @@ export default function MarkSheet({ classId, date, session: initialSession, onBa
           </p>
           <div className="flex gap-2 justify-center flex-wrap pt-2">
             <button type="button" onClick={() => switchSession(session === 'morning' ? 'afternoon' : 'morning')} data-testid="att-done-other-session"
-              className="text-sm font-semibold border border-gray-200 rounded-xl px-4 py-2.5 hover:bg-gray-50">Mark {session === 'morning' ? 'Afternoon' : 'Morning'}</button>
-            <button type="button" onClick={onBack} data-testid="att-done-back" className="text-sm font-semibold bg-blue-600 text-white rounded-xl px-4 py-2.5">Back to classes</button>
+              className="text-sm font-semibold border border-gray-200 rounded-md px-4 py-2.5 hover:bg-gray-50">Mark {session === 'morning' ? 'Afternoon' : 'Morning'}</button>
+            <button type="button" onClick={onBack} data-testid="att-done-back" className="text-sm font-semibold bg-blue-600 text-white rounded-md px-4 py-2.5">Back to classes</button>
           </div>
         </div>
       )}
@@ -226,7 +228,7 @@ export default function MarkSheet({ classId, date, session: initialSession, onBa
       {/* ── Locked / read-only ── */}
       {sheet && !sheet.nonWorking && sheet.lock && phase !== 'done' && phase !== 'mark' && phase !== 'review' && (
         <div data-testid="att-already-marked" role="status"
-          className={`rounded-2xl px-4 py-4 border ${sheet.lock.byMe ? 'bg-blue-50 border-blue-200' : 'bg-amber-50 border-amber-200'}`}>
+          className={`rounded-lg px-4 py-4 border ${sheet.lock.byMe ? 'bg-blue-50 border-blue-200' : 'bg-amber-50 border-amber-200'}`}>
           <p className={`text-sm font-bold ${sheet.lock.byMe ? 'text-blue-900' : 'text-amber-900'}`}>
             🔒 {sheet.lock.byMe ? 'You marked this session' : `Already marked by ${sheet.lock.markedBy}`}
             <span className="font-normal"> at {timeOf(sheet.lock.markedAt)}</span>
@@ -253,7 +255,7 @@ export default function MarkSheet({ classId, date, session: initialSession, onBa
             <div className="mt-3 space-y-2" data-testid="att-report-form">
               <textarea value={reportNote} onChange={e => setReportNote(e.target.value)} rows={3} maxLength={500} data-testid="att-report-note"
                 placeholder="What looks wrong? e.g. “Ravi was present but is marked absent.”"
-                className="w-full border border-amber-300 rounded-xl px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-300" />
+                className="w-full border border-amber-300 rounded-md px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-300" />
               <div className="flex items-center gap-3">
                 <button type="button" onClick={() => void sendReport()} disabled={reportState.sending || reportNote.trim().length < 5} data-testid="att-report-send"
                   className="text-sm font-semibold bg-amber-600 text-white rounded-lg px-3.5 py-2 disabled:opacity-50">{reportState.sending ? 'Sending…' : 'Send to admin'}</button>
@@ -266,7 +268,7 @@ export default function MarkSheet({ classId, date, session: initialSession, onBa
 
       {/* Marking window closed / class empty (not locked, cannot mark) */}
       {sheet && !sheet.nonWorking && !sheet.lock && !sheet.canMark && phase !== 'done' && (
-        <div data-testid="att-cannot-mark" role="status" className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-4 text-sm text-amber-900">
+        <div data-testid="att-cannot-mark" role="status" className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-4 text-sm text-amber-900">
           {!sheet.window.ok ? sheet.window.message : sheet.students.length === 0 ? 'This class has no active students to mark.' : 'This session cannot be marked.'}
         </div>
       )}
@@ -276,9 +278,9 @@ export default function MarkSheet({ classId, date, session: initialSession, onBa
         <>
           <div className="grid grid-cols-3 gap-2" data-testid="att-counts">
             {([['present', counts.present, 'text-green-700 bg-green-50 border-green-200'], ['absent', counts.absent, 'text-red-700 bg-red-50 border-red-200'], ['late', counts.late, 'text-amber-700 bg-amber-50 border-amber-200']] as const).map(([k, n, cls]) => (
-              <div key={k} className={`rounded-xl border px-3 py-2 text-center ${cls}`}>
+              <div key={k} className={`rounded-md border px-3 py-2 text-center ${cls}`}>
                 <p className="text-xl font-bold" data-testid={`att-count-${k}`}>{phase === 'view' ? sheet.counts[k] : n}</p>
-                <p className="text-[11px] font-medium capitalize">{k}</p>
+                <p className="text-xs font-medium capitalize">{k}</p>
               </div>
             ))}
           </div>
@@ -291,7 +293,7 @@ export default function MarkSheet({ classId, date, session: initialSession, onBa
                 <button type="button" onClick={() => void copyLastDay()} data-testid="att-copy-last"
                   className="text-xs font-semibold border border-gray-200 text-gray-600 rounded-lg px-3 py-1.5 hover:bg-gray-50">Copy last day</button>
               )}
-              {copiedFrom && <span className="text-xs text-gray-400">Copied from {copiedFrom} — check before submitting</span>}
+              {copiedFrom && <span className="text-xs text-muted-foreground">Copied from {copiedFrom} — check before submitting</span>}
               {sheet.students.length > 12 && (
                 <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Find a student" data-testid="att-filter"
                   className="ml-auto border border-gray-200 rounded-lg px-3 py-1.5 text-sm w-40 focus:outline-none focus:ring-2 focus:ring-blue-200" />
@@ -304,20 +306,20 @@ export default function MarkSheet({ classId, date, session: initialSession, onBa
               const current = phase === 'view' ? s.status : statuses[s.id]
               return (
                 <li key={s.id} data-testid={`att-student-${s.id}`} data-status={current ?? ''}
-                  className="bg-white border border-gray-200 rounded-2xl px-3 py-3 flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3">
+                  className="bg-white border border-gray-200 rounded-lg px-3 py-3 flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-gray-900 truncate">{s.name}</p>
-                    {s.roll_number && <p className="text-[11px] text-gray-400">Roll {s.roll_number}</p>}
+                    {s.roll_number && <p className="text-xs text-muted-foreground">Roll {s.roll_number}</p>}
                   </div>
                   {phase === 'view' ? (
-                    <span className={`self-start sm:self-auto text-xs font-semibold rounded-full px-3 py-1 capitalize ${current ? STATUS_CHIP[current] : 'bg-gray-100 text-gray-400'}`}>{current ?? 'not recorded'}</span>
+                    <span className={`self-start sm:self-auto text-xs font-semibold rounded-full px-3 py-1 capitalize ${current ? STATUS_CHIP[current] : 'bg-gray-100 text-muted-foreground'}`}>{current ?? 'not recorded'}</span>
                   ) : (
                     <div className="grid grid-cols-3 gap-1.5 sm:w-72" role="radiogroup" aria-label={`Attendance for ${s.name}`}>
                       {(['present', 'absent', 'late'] as Status[]).map(st => (
                         <button key={st} type="button" role="radio" aria-checked={current === st}
                           data-testid={`att-status-${s.id}-${st}`}
                           onClick={() => setStatuses(prev => ({ ...prev, [s.id]: st }))}
-                          className={`py-2.5 rounded-xl border text-sm font-semibold transition ${current === st ? STATUS_BTN[st].on : STATUS_BTN[st].off}`}>
+                          className={`py-2.5 rounded-md border text-sm font-semibold transition ${current === st ? STATUS_BTN[st].on : STATUS_BTN[st].off}`}>
                           {STATUS_BTN[st].label}
                         </button>
                       ))}
@@ -326,19 +328,19 @@ export default function MarkSheet({ classId, date, session: initialSession, onBa
                 </li>
               )
             })}
-            {shown.length === 0 && <li className="text-sm text-gray-400 text-center py-6">No student matches “{filter}”.</li>}
+            {shown.length === 0 && <li className="text-sm text-muted-foreground text-center py-6">No student matches “{filter}”.</li>}
           </ul>
         </>
       )}
 
       {/* ── Review ── */}
       {phase === 'review' && sheet && (
-        <div data-testid="att-review" className="bg-white border border-gray-200 rounded-2xl p-5 space-y-4">
+        <div data-testid="att-review" className="bg-white border border-gray-200 rounded-lg p-5 space-y-4">
           <p className="text-base font-bold text-gray-900">Check before you submit</p>
           <div className="grid grid-cols-3 gap-2 text-center">
-            <div className="bg-green-50 rounded-xl py-3"><p className="text-2xl font-bold text-green-700">{counts.present}</p><p className="text-xs text-green-700">Present</p></div>
-            <div className="bg-red-50 rounded-xl py-3"><p className="text-2xl font-bold text-red-700">{counts.absent}</p><p className="text-xs text-red-700">Absent</p></div>
-            <div className="bg-amber-50 rounded-xl py-3"><p className="text-2xl font-bold text-amber-700">{counts.late}</p><p className="text-xs text-amber-700">Late</p></div>
+            <div className="bg-green-50 rounded-md py-3"><p className="text-2xl font-bold text-green-700">{counts.present}</p><p className="text-xs text-green-700">Present</p></div>
+            <div className="bg-red-50 rounded-md py-3"><p className="text-2xl font-bold text-red-700">{counts.absent}</p><p className="text-xs text-red-700">Absent</p></div>
+            <div className="bg-amber-50 rounded-md py-3"><p className="text-2xl font-bold text-amber-700">{counts.late}</p><p className="text-xs text-amber-700">Late</p></div>
           </div>
           {counts.absent > 0 && (
             <div data-testid="att-review-absent"><p className="text-xs font-semibold text-red-700 mb-1">Absent — parents will be told</p>
@@ -363,9 +365,9 @@ export default function MarkSheet({ classId, date, session: initialSession, onBa
             {phase === 'review' ? (
               <>
                 <button type="button" onClick={() => setPhase('mark')} disabled={saving} data-testid="att-review-back"
-                  className="text-sm font-semibold border border-gray-200 rounded-xl px-4 py-3 hover:bg-gray-50 disabled:opacity-50">Back</button>
+                  className="text-sm font-semibold border border-gray-200 rounded-md px-4 py-3 hover:bg-gray-50 disabled:opacity-50">Back</button>
                 <button type="button" onClick={() => void submit()} disabled={saving} data-testid="att-submit"
-                  className="flex-1 text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-4 py-3 disabled:opacity-50">
+                  className="flex-1 text-sm font-bold bg-primary hover:bg-primary/90 text-white rounded-md px-4 py-3 disabled:opacity-50">
                   {saving ? 'Saving…' : sheet.lock ? 'Save changes' : 'Submit attendance'}
                 </button>
               </>
@@ -373,11 +375,11 @@ export default function MarkSheet({ classId, date, session: initialSession, onBa
               <>
                 {sheet.lock && (
                   <button type="button" onClick={() => { setPhase('view'); setReload(r => r + 1) }} data-testid="att-cancel-edit"
-                    className="text-sm font-semibold border border-gray-200 rounded-xl px-4 py-3 hover:bg-gray-50">Cancel</button>
+                    className="text-sm font-semibold border border-gray-200 rounded-md px-4 py-3 hover:bg-gray-50">Cancel</button>
                 )}
                 <p className="text-xs text-gray-500 hidden sm:block">{counts.present} present · {counts.absent} absent · {counts.late} late</p>
                 <button type="button" onClick={() => setPhase('review')} data-testid="att-review-btn"
-                  className="flex-1 sm:flex-none sm:ml-auto text-sm font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl px-6 py-3">Review & submit</button>
+                  className="flex-1 sm:flex-none sm:ml-auto text-sm font-bold bg-primary hover:bg-primary/90 text-white rounded-md px-6 py-3">Review & submit</button>
               </>
             )}
           </div>

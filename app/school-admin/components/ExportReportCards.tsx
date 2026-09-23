@@ -179,7 +179,7 @@ export default function ExportReportCards({ schoolId }: { schoolId: number }) {
     <div className="space-y-5">
       {/* Header */}
       <div>
-        <h2 className="text-lg font-bold text-gray-800">Report cards</h2>
+        <h2 className="text-lg font-semibold text-gray-900">Report cards</h2>
         <p className="text-sm text-gray-400 mt-0.5">Pick a released exam and print report cards</p>
       </div>
 
@@ -187,11 +187,11 @@ export default function ExportReportCards({ schoolId }: { schoolId: number }) {
       {(
         <div className="space-y-5">
           {/* Selector */}
-          <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-5 flex items-end gap-4">
+          <div className="bg-white border-y border-gray-200 py-5 flex flex-col items-stretch gap-4 sm:flex-row sm:items-end">
             <div className="flex-1">
               <label className="block text-xs font-semibold text-gray-500 mb-1.5">Select Exam</label>
               <select
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#245b46]/20 focus:border-[#245b46]"
                 value={rcExam}
                 onChange={e => { setRcExam(e.target.value); setRcData(null) }}
               >
@@ -206,14 +206,14 @@ export default function ExportReportCards({ schoolId }: { schoolId: number }) {
             <button
               onClick={loadReportCard}
               disabled={!rcExam || rcLoading}
-              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+              className="px-5 py-2 bg-[#245b46] hover:bg-[#173e2f] text-white text-sm font-medium rounded-md transition-colors disabled:opacity-50"
             >
               {rcLoading ? 'Loading…' : 'Generate'}
             </button>
             {rcData && (
               <button
                 onClick={handlePrint}
-                className="px-5 py-2 bg-gray-800 hover:bg-gray-900 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
+                className="px-5 py-2 bg-gray-800 hover:bg-gray-900 text-white text-sm font-medium rounded-md transition-colors flex items-center gap-2"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
@@ -240,10 +240,10 @@ export default function ExportReportCards({ schoolId }: { schoolId: number }) {
 
               {rcData.student_results.map((student, idx) => (
                 <div key={student.student_id}
-                  className="print-page bg-white border-2 border-gray-200 rounded-2xl overflow-hidden shadow-sm">
+                  className="print-page bg-white border border-gray-300 rounded-md overflow-hidden">
 
                   {/* Report card header */}
-                  <div className="bg-indigo-700 text-white px-8 py-5 flex items-center justify-between">
+                  <div className="bg-[#173e2f] text-white px-8 py-5 flex items-center justify-between">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-widest opacity-75">Report Card</p>
                       <h3 className="text-xl font-bold mt-0.5">{schoolName || 'School'}</h3>
@@ -325,7 +325,7 @@ export default function ExportReportCards({ schoolId }: { schoolId: number }) {
                           <td className="py-3 font-bold text-gray-800">Total</td>
                           <td className="py-3 text-center font-bold text-gray-800">{student.total_max}</td>
                           <td className="py-3 text-center font-bold text-gray-800">{student.total_obtained}</td>
-                          <td className="py-3 text-center font-bold text-indigo-700">{student.percentage}%</td>
+                          <td className="py-3 text-center font-bold text-[#245b46]">{student.percentage}%</td>
                           <td className="py-3 text-center">
                             <span className={`text-sm font-black px-3 py-1 rounded-full ${
                               student.grade_label === 'F' ? 'bg-red-100 text-red-600' :

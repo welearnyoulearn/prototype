@@ -47,6 +47,7 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [Expenses](../../docs/product/features/15-expense-tracking.md)
 - [fee-management.md](fee-management.md)
 - [export.md](export.md)
 

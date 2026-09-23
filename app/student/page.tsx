@@ -10,6 +10,9 @@ import { useFeatureTracking } from '@/lib/useFeatureTracking'
 import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
+import PortalSidebar from '@/components/portal/PortalSidebar'
+import { BookOpen, BookOpenText, CalendarDays, ChartNoAxesColumn, ClipboardCheck, Home, LogOut, Menu, MessagesSquare, Sparkles, UserRound } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
 import StudentDashboard from './components/StudentDashboard'
@@ -20,12 +23,13 @@ import StudentProfile from './components/StudentProfile'
 // Lazy-loaded — only downloaded when first opened
 function ModuleSkeleton() {
   return (
-    <div className="space-y-4 animate-pulse">
-      <div className="h-8 bg-gray-100 rounded-xl w-48" />
-      <div className="grid grid-cols-3 gap-4">
-        {[1,2,3].map(i => <div key={i} className="h-28 bg-gray-100 rounded-2xl" />)}
+    <div className="space-y-4" role="status" aria-live="polite" aria-busy="true">
+      <div><p className="student-eyebrow">Getting things ready</p><p className="mt-2 text-sm text-[#68736b]">Preparing this part of your workspace…</p></div>
+      <Skeleton className="h-8 w-48 rounded-md" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {[1,2,3].map(i => <Skeleton key={i} className="h-28" />)}
       </div>
-      <div className="h-64 bg-gray-100 rounded-2xl" />
+      <Skeleton className="h-64" />
     </div>
   )
 }
@@ -42,36 +46,36 @@ type Student = {
   school_id: number; school_name: string; date_of_birth?: string | null
 }
 
-type NavItem    = { key: string; label: string; icon: string; comingSoon?: boolean }
+type NavItem    = { key: string; label: string; icon: React.ReactNode; comingSoon?: boolean }
 type NavSection = { label: string; items: NavItem[] }
 
 const NAV_SECTIONS: NavSection[] = [
   {
     label: 'HOME',
     items: [
-      { key: 'dashboard', label: 'Dashboard',    icon: '🏠' },
-      { key: 'syllabus',  label: 'Syllabus',     icon: '📚' },
-      { key: 'library',   label: 'Digital Library', icon: '📖' },
+      { key: 'dashboard', label: 'Overview', icon: <Home size={18} /> },
+      { key: 'syllabus', label: 'Syllabus', icon: <BookOpenText size={18} /> },
+      { key: 'library', label: 'Digital library', icon: <BookOpen size={18} /> },
     ],
   },
   {
     label: 'LEARNING',
     items: [
-      { key: 'class-circle', label: 'Class Circle', icon: '🎈' },
+      { key: 'class-circle', label: 'Class circle', icon: <MessagesSquare size={18} /> },
     ],
   },
   {
     label: 'ACADEMIC',
     items: [
-      { key: 'my-marks', label: 'My Marks', icon: '📊' },
-      { key: 'attendance', label: 'My Attendance', icon: '✅' },
-      { key: 'calendar', label: 'School Calendar', icon: '📅' },
+      { key: 'my-marks', label: 'My marks', icon: <ChartNoAxesColumn size={18} /> },
+      { key: 'attendance', label: 'My attendance', icon: <ClipboardCheck size={18} /> },
+      { key: 'calendar', label: 'School calendar', icon: <CalendarDays size={18} /> },
     ],
   },
   {
     label: 'ACCOUNT',
     items: [
-      { key: 'profile', label: 'My Profile', icon: '👤' },
+      { key: 'profile', label: 'My profile', icon: <UserRound size={18} /> },
     ],
   },
   {
@@ -79,7 +83,7 @@ const NAV_SECTIONS: NavSection[] = [
     // see isNavItemVisible('ai-hub') and the empty-section filter below.
     label: 'AI HUB',
     items: [
-      { key: 'ai-hub', label: 'AI Hub', icon: '🤖' },
+      { key: 'ai-hub', label: 'AI Hub', icon: <Sparkles size={18} /> },
     ],
   },
 ]
@@ -97,9 +101,9 @@ const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
 const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'my-marks', 'attendance', 'calendar'])
 
 const BOTTOM_NAV = [
-  { key: 'dashboard', label: 'Home',    emoji: '🏠' },
-  { key: 'my-marks',  label: 'Marks',   emoji: '📊' },
-  { key: 'profile',   label: 'Profile', emoji: '👤' },
+  { key: 'dashboard', label: 'Home', icon: <Home size={20} /> },
+  { key: 'my-marks', label: 'Marks', icon: <ChartNoAxesColumn size={20} /> },
+  { key: 'profile', label: 'Profile', icon: <UserRound size={20} /> },
 ]
 
 function StudentPortal() {
@@ -217,194 +221,98 @@ function StudentPortal() {
   const currentItem = NAV_ITEMS.find(i => i.key === activeNav)
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50">
-
-      {/* ── Top Bar ─────────────────────────────────────────────────── */}
-      <header className="bg-white border-b border-gray-100 px-4 sm:px-6 h-14 flex items-center justify-between flex-shrink-0 z-30">
-        <div className="flex items-center gap-3">
-          {/* Hamburger */}
-          <button
-            onClick={() => setSidebarOpen(o => !o)}
-            className="lg:hidden p-2 -ml-1 rounded-xl text-gray-400 hover:bg-gray-100 active:scale-90 transition-all"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
+    <div className="portal-root" data-portal="student">
+      <a href="#student-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-white focus:p-3">Skip to content</a>
+      <header className="portal-topbar">
+        <div className="flex min-w-0 items-center gap-3">
+          <button onClick={() => setSidebarOpen(o => !o)} className="portal-icon-button lg:hidden" aria-label="Open navigation" aria-controls="portal-navigation" aria-expanded={sidebarOpen}>
+            <Menu size={20} aria-hidden="true" />
           </button>
-          {/* Logo */}
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-orange-500 flex items-center justify-center shadow-sm shadow-orange-200 flex-shrink-0">
-              <span className="text-white text-xs font-black">W</span>
-            </div>
-            <span className="hidden sm:block font-black text-gray-900 text-sm">WLYL</span>
-          </div>
-          {/* Page title */}
-          <div className="hidden sm:flex items-center gap-1.5 text-sm text-gray-400">
-            <span>/</span>
-            <span className="text-base leading-none">{currentItem?.icon}</span>
-            <span className="text-gray-700 font-semibold">{currentItem?.label}</span>
-          </div>
+          <span className="hidden sm:block text-sm font-semibold text-[#8b4a10]">Student workspace</span>
+          <span className="hidden sm:block text-[#a5afa8]" aria-hidden="true">/</span>
+          <span className="truncate text-sm font-medium text-[#202a25]">{currentItem?.label || 'Overview'}</span>
         </div>
-
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-4">
           {academicYear && (
-            <span
-              data-testid="academic-year-badge"
-              title="Active academic year — all data on this screen is scoped to this year"
-              className="hidden sm:inline-flex items-center gap-1 bg-gray-100 border border-gray-200 text-gray-500 text-[10px] font-medium px-2.5 py-1 rounded-full"
-            >
-              📅 {academicYear}
+            <span data-testid="academic-year-badge" title="Active academic year — all data on this screen is scoped to this year" className="hidden items-center gap-1.5 text-xs text-[#647068] sm:inline-flex">
+              <CalendarDays size={14} aria-hidden="true" /> {academicYear}
             </span>
           )}
-          {/* Student name — desktop */}
-          <div className="hidden sm:flex items-center gap-2 border border-gray-200 rounded-full pl-1.5 pr-3 py-1">
-            <div className="w-6 h-6 rounded-full bg-orange-500 flex items-center justify-center flex-shrink-0">
-              <span className="text-white text-[10px] font-black">{firstName.charAt(0)}</span>
-            </div>
-            <span className="text-xs font-semibold text-gray-700">{firstName}</span>
-            <span className="text-[10px] text-gray-400">Gr {student.grade}{student.section}</span>
-          </div>
           <NotificationBell studentId={student.id} onNavigate={navigateTo} />
-          <button
-            onClick={handleLogout}
-            className="text-xs text-gray-400 hover:text-red-500 px-2.5 py-1.5 rounded-lg border border-gray-200 hover:border-red-200 transition-all"
-          >
-            Logout
+          <button onClick={handleLogout} className="portal-icon-button text-[#647068] hover:text-red-700" aria-label="Sign out">
+            <LogOut size={18} aria-hidden="true" />
           </button>
         </div>
       </header>
 
-      <div className="flex flex-1 min-h-0 relative">
-
-        {/* Mobile backdrop */}
-        {sidebarOpen && (
-          <div className="fixed inset-0 z-30 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} />
-        )}
-
-        {/* ── Sidebar ──────────────────────────────────────────────── */}
-        <aside className={`
-          fixed inset-y-0 left-0 z-40 w-60
-          lg:relative lg:inset-y-auto lg:left-auto
-          bg-[#0f172a] flex-shrink-0 flex flex-col
-          transform transition-transform duration-300 ease-in-out
-          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        `}>
-
-          {/* Student info */}
-          <div className="px-5 py-5 border-b border-white/[0.06]">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-orange-900/50">
-                <span className="text-white text-lg font-black">{firstName.charAt(0)}</span>
-              </div>
-              <div className="min-w-0">
-                <p className="text-white font-bold text-sm leading-tight truncate">{student.name}</p>
-                <p className="text-slate-400 text-xs mt-0.5">Grade {student.grade}-{student.section}</p>
-              </div>
-            </div>
-            <p className="text-slate-600 text-[10px] mt-3 truncate">{student.school_name}</p>
+      <div className="portal-body">
+        <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} label="Student navigation">
+          <div className="portal-identity">
+            <p className="text-base font-semibold tracking-tight text-[#713f0f]">WeLearnYouLearn</p>
+            <p className="mt-1 text-xs leading-relaxed text-[#647068]">{student.school_name}</p>
           </div>
-
-          {/* Nav */}
-          <nav className="flex-1 px-3 py-3 overflow-y-auto">
+          <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Student sections">
             {NAV_SECTIONS.map(section => {
               const visibleItems = section.items.filter(item => isNavItemVisible(item.key))
               if (visibleItems.length === 0) return null
               return (
-              <div key={section.label} className="mb-1">
-                <p className="px-3 pt-4 pb-1 text-[9px] font-bold text-slate-600 uppercase tracking-[0.15em]">
-                  {section.label}
-                </p>
-                {visibleItems.map(item => (
-                  <button
-                    key={item.key}
-                    onClick={() => { if (!item.comingSoon) navigateTo(item.key) }}
-                    className={`
-                      w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-left mb-0.5
-                      transition-all duration-200 ease-out
-                      ${item.comingSoon
-                        ? 'text-slate-700 cursor-not-allowed'
-                        : activeNav === item.key
-                          ? 'bg-orange-500 text-white font-semibold shadow-lg shadow-orange-900/40 scale-[1.02]'
-                          : 'text-slate-400 hover:text-white hover:bg-white/[0.07] hover:translate-x-0.5'
-                      }
-                    `}
-                  >
-                    <span className="text-base leading-none w-5 flex-shrink-0 text-center">{item.icon}</span>
-                    <span className="flex-1">{item.label}</span>
-                    {item.comingSoon && (
-                      <span className="text-[9px] bg-white/5 text-slate-600 px-1.5 py-0.5 rounded font-bold">SOON</span>
-                    )}
-                  </button>
-                ))}
-              </div>
+                <div key={section.label} className="mb-4">
+                  <p className="portal-nav-label">{section.label}</p>
+                  {visibleItems.map(item => (
+                    <button key={item.key} onClick={() => { if (!item.comingSoon) navigateTo(item.key) }} className="portal-nav-item" aria-current={activeNav === item.key ? 'page' : undefined} disabled={item.comingSoon}>
+                      <span className="shrink-0" aria-hidden="true">{item.icon}</span>
+                      <span className="flex-1">{item.label}</span>
+                      {item.comingSoon && <span className="text-xs">Soon</span>}
+                    </button>
+                  ))}
+                </div>
               )
             })}
           </nav>
-
-          {/* Footer */}
-          <div className="px-3 py-3 border-t border-white/[0.06]">
-            <button
-              onClick={handleLogout}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-all text-sm"
-            >
-              <span className="text-base leading-none w-5 text-center">👋</span>
-              <span>Sign Out</span>
-            </button>
+          <div className="portal-account">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#f1e2ca] text-sm font-semibold text-[#713f0f]" aria-hidden="true">{firstName.charAt(0)}</span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-[#202a25]">{student.name}</p>
+                <p className="mt-0.5 text-xs text-[#647068]">Grade {student.grade} · Section {student.section}</p>
+              </div>
+            </div>
           </div>
-        </aside>
+        </PortalSidebar>
 
         {/* ── Main Content ──────────────────────────────────────────── */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 pb-24 lg:pb-6 scroll-smooth">
-          <div className="max-w-3xl mx-auto">
+        <main id="student-content" tabIndex={-1} className="portal-main">
+          <div className="mx-auto w-full max-w-5xl">
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} isNavItemVisible={isNavItemVisible} /></div>}
             {visitedNav.has('class-circle') && <div hidden={activeNav !== 'class-circle'}><StudentClassCircle /></div>}
             {visitedNav.has('attendance') && isNavItemVisible('attendance') && (
               <div hidden={activeNav !== 'attendance'}>
-                <h2 className="text-lg font-bold text-gray-900 mb-4">My Attendance</h2>
                 <AttendanceCalendar endpoint="/api/student/attendance" who="student" />
               </div>
             )}
             {visitedNav.has('calendar') && isNavItemVisible('calendar') && (
               <div hidden={activeNav !== 'calendar'}>
-                <h2 className="text-lg font-bold text-gray-900 mb-4">School Calendar</h2>
-                <SchoolCalendarView />
+                <SchoolCalendarView experience="student" />
               </div>
             )}
             {visitedNav.has('my-marks')    && <div hidden={activeNav !== 'my-marks'}><StudentMarks studentId={student.id} schoolId={student.school_id} classId={classId} /></div>}
             {visitedNav.has('syllabus') && isNavItemVisible('syllabus') && <div hidden={activeNav !== 'syllabus'}><StudentSyllabus schoolId={student.school_id} classId={classId} grade={student.grade} /></div>}
-            {visitedNav.has('library') && isNavItemVisible('library') && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}`} /></div>}
+            {visitedNav.has('library') && isNavItemVisible('library') && <div hidden={activeNav !== 'library'}><DigitalLibrary apiUrl={`/api/school/library?school_id=${student.school_id}`} experience="student" /></div>}
             {visitedNav.has('profile')     && <div hidden={activeNav !== 'profile'}><StudentProfile student={student} /></div>}
             {visitedNav.has('ai-hub') && isNavItemVisible('ai-hub') && <div hidden={activeNav !== 'ai-hub'}><StudentAiHub tier={aiAccessTier} /></div>}
           </div>
         </main>
       </div>
 
-      {/* ── Bottom Navigation — mobile ────────────────────────────── */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-30">
+      <nav className="shrink-0 border-t border-[#dde3dd] bg-white pb-[env(safe-area-inset-bottom)] lg:hidden" aria-label="Quick navigation">
         <div className="flex">
-          {BOTTOM_NAV.map(item => {
+          {BOTTOM_NAV.filter(item => isNavItemVisible(item.key)).map(item => {
             const isActive = activeNav === item.key
             return (
-              <button
-                key={item.key}
-                onClick={() => navigateTo(item.key)}
-                className="flex-1 relative flex flex-col items-center py-2.5 gap-0.5 transition-all duration-200 active:scale-75"
-              >
-                {/* Active top line — slides in */}
-                <span className={`absolute top-0 left-1/4 right-1/4 h-[2.5px] rounded-full transition-all duration-300 ${
-                  isActive ? 'bg-orange-500 opacity-100' : 'bg-transparent opacity-0'
-                }`} />
-                {/* Emoji — bounces when active */}
-                <span className={`text-xl leading-none transition-all duration-200 ${
-                  isActive ? 'scale-125 -translate-y-0.5' : 'opacity-40 scale-100'
-                }`}>
-                  {item.emoji}
-                </span>
-                <span className={`text-[9px] font-bold transition-all duration-200 ${
-                  isActive ? 'text-orange-500 opacity-100' : 'text-gray-400 opacity-70'
-                }`}>
-                  {item.label}
-                </span>
+              <button key={item.key} onClick={() => navigateTo(item.key)} aria-current={isActive ? 'page' : undefined}
+                className={`relative flex min-h-16 flex-1 flex-col items-center justify-center gap-1 border-t-2 text-xs font-medium transition-colors motion-reduce:transition-none ${isActive ? 'border-[#a85f16] bg-[#f7efe3] text-[#713f0f]' : 'border-transparent text-[#647068] hover:bg-[#f8f5ef]'}`}>
+                <span aria-hidden="true">{item.icon}</span>
+                <span>{item.label}</span>
               </button>
             )
           })}

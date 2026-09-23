@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import { CheckCircle2, Lock } from 'lucide-react'
 import { INK, GREEN, CORAL, SURFACE, BORDER } from '@/app/components/ulearn/theme'
 import { Pills, ProgressBar, UlearnCard, StatusPill } from '@/app/components/ulearn/primitives'
+import { Skeleton } from '@/components/ui/skeleton'
 
 type Topic = {
   id: number
@@ -72,11 +73,12 @@ export default function ParentSyllabus({ schoolId, classId, studentName, grade, 
 
   if (loading) {
     return (
-      <div className="max-w-2xl space-y-4 animate-pulse" data-testid="parent-syllabus-loading">
-        <div className="h-14 bg-gray-100 rounded-2xl" />
-        <div className="h-10 bg-gray-100 rounded-2xl w-2/3" />
-        <div className="h-20 bg-gray-100 rounded-2xl" />
-        <div className="h-32 bg-gray-100 rounded-2xl" />
+      <div className="max-w-2xl space-y-4" role="status" aria-live="polite" aria-busy="true" data-testid="parent-syllabus-loading">
+        <span className="sr-only">Loading syllabus progress</span>
+        <Skeleton className="h-14" />
+        <Skeleton className="h-10 w-2/3" />
+        <Skeleton className="h-20" />
+        <Skeleton className="h-32" />
       </div>
     )
   }
@@ -184,7 +186,7 @@ export default function ParentSyllabus({ schoolId, classId, studentName, grade, 
                   <div className="flex-1 min-w-[140px]">
                     <p className="text-sm truncate" style={{ color: INK }}>{t.topic_name}</p>
                     {t.covered_date && (
-                      <p className="text-[10px] text-gray-400 mt-0.5">
+                      <p className="mt-0.5 text-xs text-gray-500">
                         Taught {new Date(t.covered_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                         {t.covered_by_name && ` · ${t.covered_by_name}`}
                       </p>

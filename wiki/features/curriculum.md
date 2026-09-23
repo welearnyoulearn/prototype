@@ -17,9 +17,9 @@ Platform admin (master catalog), school admin (customise, analytics), teachers (
 
 ## How it works
 
-- The platform keeps a **master catalog** (subjects → chapters → topics → tasks). A school subscribes and gets its **own copy**, which it can edit.
-- Classes get a subject + teacher; teachers mark topics covered with a date; coverage analytics and trend charts for the admin.
-- Teachers can type names in English letters and convert them to Telugu/Hindi script.
+- Three layers: the platform's **master catalog** (board → grade → subject → chapter → topic) → the school's own **copy** made when it subscribes → a per-class **Class Syllabus Setup** (which chapters/topics that class uses, semester groups) run by the class's teacher.
+- Teachers mark topics covered with a date; progress is **chapter-weighted**; the admin gets coverage analytics, a weekly trend and a nudge-teacher action.
+- Teachers can type names in English letters and convert them to Telugu/Hindi script (a public Google Input Tools endpoint through a server proxy — not AI).
 
 ## Rules and limits
 
@@ -58,6 +58,7 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [Syllabus](../../docs/product/features/09-syllabus-customizer.md)
 - [syllabus-module-workflow.md](syllabus-module-workflow.md)
 - [../../docs/SYLLABUS-FEATURE-README.md](../../docs/SYLLABUS-FEATURE-README.md)
 

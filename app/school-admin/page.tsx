@@ -13,6 +13,8 @@ import { useFeatureTracking } from '@/lib/useFeatureTracking'
 import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { ALL_FEATURES, PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
+import PortalSidebar from '@/components/portal/PortalSidebar'
+import { Skeleton } from '@/components/ui/skeleton'
 
 // Always-loaded (small, needed immediately)
 import Overview from './components/Overview'
@@ -21,12 +23,12 @@ import StaffProfile from './components/StaffProfile'
 // Lazy-loaded — only downloaded when first opened
 function ModuleSkeleton() {
   return (
-    <div className="space-y-4 animate-pulse">
-      <div className="h-8 bg-gray-100 rounded-xl w-48" />
-      <div className="grid grid-cols-3 gap-4">
-        {[1,2,3].map(i => <div key={i} className="h-28 bg-gray-100 rounded-2xl" />)}
+    <div role="status" aria-label="Loading section" className="space-y-5">
+      <Skeleton className="h-7 w-48" />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {[1,2,3].map(i => <Skeleton key={i} className="h-24" />)}
       </div>
-      <div className="h-64 bg-gray-100 rounded-2xl" />
+      <Skeleton className="h-56" />
     </div>
   )
 }
@@ -403,11 +405,12 @@ function SchoolAdmin() {
 
   return (
     <MotionConfig reducedMotion="user">
-    <div className="h-screen flex flex-col overflow-hidden bg-slate-50">
+    <div className="portal-root" data-portal="school-admin">
+      <a href="#portal-main" className="portal-skip-link">Skip to content</a>
       {/* Top bar */}
-      <div className="bg-white border-b border-slate-200 px-3 sm:px-5 py-3 flex items-center justify-between flex-shrink-0 z-50 relative shadow-sm">
-        <div className="flex items-center gap-3">
-          <motion.button whileTap={{ scale: 0.9 }} onClick={() => setSidebarOpen(o => !o)} className="lg:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
+      <header className="portal-topbar">
+        <div className="flex min-w-0 items-center gap-3">
+          <motion.button whileTap={{ scale: 0.98 }} onClick={() => setSidebarOpen(o => !o)} aria-label="Open school navigation" aria-controls="portal-navigation" aria-expanded={sidebarOpen} className="portal-icon-button lg:hidden">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
           </motion.button>
           <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm hidden sm:inline">← Home</Link>
@@ -415,9 +418,8 @@ function SchoolAdmin() {
 
           {/* School name */}
           {selectedSchool && (
-            <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-800 px-3 py-1.5 rounded-lg text-sm font-medium">
-              <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
-              {selectedSchool.name}
+            <div className="min-w-0 text-sm font-semibold text-[#202a25]">
+              <span className="block truncate">{selectedSchool.name}</span>
             </div>
           )}
 
@@ -426,20 +428,16 @@ function SchoolAdmin() {
             <span
               data-testid="academic-year-badge"
               title="Active academic year — all data on this screen is scoped to this year"
-              className="hidden sm:inline-flex items-center gap-1 bg-slate-100 border border-slate-200 text-slate-600 text-xs font-medium px-2.5 py-1 rounded-full"
+              className="hidden xl:inline-flex whitespace-nowrap border-l border-[#dce2db] pl-3 text-xs text-[#67736b]"
             >
-              📅 {academicYear}
+              {academicYear}
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           {tier !== 'none' && (
-            <span className={`hidden sm:inline-flex text-xs font-medium px-2.5 py-1 rounded-full capitalize ${
-              tier === 'basic' ? 'bg-green-100 text-green-700' :
-              tier === 'standard' ? 'bg-blue-100 text-blue-700' :
-              'bg-purple-100 text-purple-700'
-            }`}>
+            <span className="hidden xl:inline-flex px-2 text-xs text-[#67736b] capitalize">
               {tier} plan
             </span>
           )}
@@ -458,23 +456,23 @@ function SchoolAdmin() {
             Search
             <kbd className="text-[10px] bg-gray-100 px-1 rounded font-mono">Ctrl K</kbd>
           </motion.button>
-          <span className="hidden sm:inline-flex bg-blue-100 text-blue-700 text-xs font-medium px-3 py-1 rounded-full">
+          <span className="hidden xl:inline-flex text-xs font-medium px-3 text-[#67736b]">
             {myRole === 'principal' ? 'Principal' : myRole === 'vice_principal' ? 'Vice Principal' : 'School Admin'}
           </span>
           <motion.button
             whileHover={{ y: -1 }}
             whileTap={{ scale: 0.97 }}
             onClick={handleLogout}
-            className="text-sm text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition-colors">
+            className="min-h-10 text-sm text-gray-600 hover:text-red-700 px-3 rounded-md transition-colors">
             Logout
           </motion.button>
         </div>
-      </div>
+      </header>
 
       {error && (
         <div className="bg-red-50 border-b border-red-200 text-red-700 px-6 py-3 text-sm flex justify-between">
           <span>{error}</span>
-          <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 ml-4">✕</button>
+          <button onClick={() => setError('')} aria-label="Dismiss error" className="portal-icon-button text-red-700 ml-4">✕</button>
         </div>
       )}
 
@@ -483,40 +481,39 @@ function SchoolAdmin() {
           <div className="text-center">
             <p className="text-gray-400 text-lg">No active schools available.</p>
             <p className="text-gray-300 text-sm mt-2">Go to Platform Admin to create and activate a school first.</p>
-            <Link href="/platform-admin" className="inline-block mt-4 bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
+            <Link href="/platform-admin" className="inline-block mt-4 bg-[#235b46] text-white px-4 py-2 rounded-lg text-sm font-medium">
               Go to Platform Admin
             </Link>
           </div>
         </div>
       ) : (
-        <div className="flex flex-1 overflow-hidden relative">
-          {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+        <div className="portal-body">
           {/* Sidebar */}
-          <aside className={`fixed inset-y-0 left-0 z-40 lg:relative lg:inset-y-auto lg:left-auto w-60 bg-slate-900 flex-shrink-0 flex flex-col shadow-xl transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+          <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} label="School navigation">
             {/* School branding */}
-            <div className="px-4 py-4 border-b border-slate-700/60">
+            <div className="portal-identity">
               <div className="flex items-center gap-3">
                 {selectedSchool.logo_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={selectedSchool.logo_url}
                     alt={selectedSchool.name}
-                    className="w-9 h-9 rounded-xl object-cover flex-shrink-0 shadow-lg bg-white"
+                    className="w-9 h-9 rounded-md object-cover flex-shrink-0 shadow-lg bg-white"
                   />
                 ) : (
-                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white font-bold text-base flex-shrink-0 shadow-lg">
+                  <div className="w-9 h-9 rounded-md bg-[#235b46] flex items-center justify-center text-white font-semibold text-base flex-shrink-0">
                     {selectedSchool.name.charAt(0).toUpperCase()}
                   </div>
                 )}
                 <div className="min-w-0">
-                  <p className="text-sm font-bold text-white leading-tight truncate">{selectedSchool.name}</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5 truncate">{[selectedSchool.city, selectedSchool.country].filter(Boolean).join(', ') || selectedSchool.type || 'School'}</p>
+                  <p className="text-sm font-semibold text-foreground leading-tight truncate">{selectedSchool.name}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 truncate">{[selectedSchool.city, selectedSchool.country].filter(Boolean).join(', ') || selectedSchool.type || 'School'}</p>
                 </div>
               </div>
             </div>
 
             {/* Nav */}
-            <nav className="flex-1 py-3 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700">
+            <nav className="flex-1 min-h-0 px-3 py-3 overflow-y-auto" aria-label="School sections">
               {tier === 'none' ? (
                 <div className="px-4 py-4">
                   <div className="flex items-start gap-2">
@@ -524,7 +521,7 @@ function SchoolAdmin() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
                     </svg>
                     <div>
-                      <p className="text-xs text-slate-300 font-medium">No plan assigned</p>
+                      <p className="text-xs text-foreground font-medium">No plan assigned</p>
                       <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">Contact WLYL Admin to activate a plan for your school.</p>
                     </div>
                   </div>
@@ -538,28 +535,20 @@ function SchoolAdmin() {
                     if (sectionEnabled.length === 0) return null
                     return (
                       <div key={section.label} className="mb-1">
-                        <p className="px-4 pt-4 pb-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-[0.15em]">{section.label}</p>
+                        <p className="portal-nav-label">{section.label}</p>
                         {sectionEnabled.map(item => {
                           const isActive = activeNav === item.key
                           return (
                             <motion.button
                               key={item.key}
                               onClick={() => navigateTo(item.key)}
-                              whileHover={{ x: isActive ? 0 : 2 }}
+
                               whileTap={{ scale: 0.98 }}
-                              className={`relative w-full flex items-center gap-3 px-3 mx-1 py-2 text-sm text-left rounded-lg ${
-                                isActive ? 'text-white font-semibold' : 'text-slate-300 hover:bg-slate-800/70 hover:text-white'
-                              }`}
-                              style={{ width: 'calc(100% - 8px)' }}
+                              className="portal-nav-item"
+                              aria-current={isActive ? 'page' : undefined}
                             >
-                              {isActive && (
-                                <motion.span
-                                  layoutId="school-admin-nav-pill"
-                                  className="absolute inset-0 rounded-lg bg-indigo-600 shadow-md"
-                                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-                                />
-                              )}
-                              <span className={`relative flex-shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`}>
+
+                              <span className="relative flex-shrink-0">
                                 {item.icon}
                               </span>
                               <span className="relative truncate">{item.label}</span>
@@ -577,28 +566,20 @@ function SchoolAdmin() {
                     if (unsectioned.length === 0) return null
                     return (
                       <div className="mb-1">
-                        <p className="px-4 pt-4 pb-1.5 text-[9px] font-bold text-slate-500 uppercase tracking-[0.15em]">MORE</p>
+                        <p className="portal-nav-label">MORE</p>
                         {unsectioned.map(item => {
                           const isActive = activeNav === item.key
                           return (
                             <motion.button
                               key={item.key}
                               onClick={() => navigateTo(item.key)}
-                              whileHover={{ x: isActive ? 0 : 2 }}
+
                               whileTap={{ scale: 0.98 }}
-                              className={`relative w-full flex items-center gap-3 px-3 mx-1 py-2 text-sm text-left rounded-lg ${
-                                isActive ? 'text-white font-semibold' : 'text-slate-300 hover:bg-slate-800/70 hover:text-white'
-                              }`}
-                              style={{ width: 'calc(100% - 8px)' }}
+                              className="portal-nav-item"
+                              aria-current={isActive ? 'page' : undefined}
                             >
-                              {isActive && (
-                                <motion.span
-                                  layoutId="school-admin-nav-pill"
-                                  className="absolute inset-0 rounded-lg bg-indigo-600 shadow-md"
-                                  transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-                                />
-                              )}
-                              <span className={`relative ${isActive ? 'text-white' : 'text-slate-400'}`}>{item.icon}</span>
+
+                              <span className="relative">{item.icon}</span>
                               <span className="relative truncate">{item.label}</span>
                             </motion.button>
                           )
@@ -609,11 +590,11 @@ function SchoolAdmin() {
 
                   {/* Locked features */}
                   {NAV_ITEMS.filter(item => isSchoolAdminScoped(item.key) && !navEnabled(item.key)).length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-slate-800">
-                      <p className="px-4 pb-1.5 text-[9px] font-bold text-slate-600 uppercase tracking-[0.15em]">Upgrade to Unlock</p>
+                    <div className="mt-4 pt-4 border-t border-[#dce2db]">
+                      <p className="portal-nav-label">Upgrade to Unlock</p>
                       {NAV_ITEMS.filter(item => isSchoolAdminScoped(item.key) && !navEnabled(item.key)).map(item => (
-                        <div key={item.key} className="flex items-center gap-3 px-4 py-1.5 text-sm text-slate-600 cursor-not-allowed select-none">
-                          <svg className="w-4 h-4 flex-shrink-0 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <div key={item.key} className="flex items-center gap-3 px-3 py-2 text-sm text-[#737d75] select-none">
+                          <svg className="w-4 h-4 flex-shrink-0 text-[#737d75]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                           </svg>
                           <span className="truncate text-[13px]">{item.label}</span>
@@ -626,37 +607,27 @@ function SchoolAdmin() {
             </nav>
 
             {/* Sidebar footer */}
-            <div className="px-3 py-3 border-t border-slate-700/60 space-y-1">
+            <div className="portal-account">
               {isStaffAccount && (
                 <motion.button
                   onClick={() => navigateTo('profile')}
-                  whileHover={{ x: activeNav === 'profile' ? 0 : 2 }}
+
                   whileTap={{ scale: 0.98 }}
-                  className={`relative w-full flex items-center gap-3 px-3 py-2 text-sm rounded-lg text-left ${
-                    activeNav === 'profile'
-                      ? 'text-white font-semibold'
-                      : 'text-slate-300 hover:bg-slate-800/70 hover:text-white'
-                  }`}
+                  className="portal-nav-item" aria-current={activeNav === 'profile' ? 'page' : undefined}
                 >
-                  {activeNav === 'profile' && (
-                    <motion.span
-                      layoutId="school-admin-nav-pill"
-                      className="absolute inset-0 rounded-lg bg-indigo-600 shadow-md"
-                      transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-                    />
-                  )}
+
                   <svg className="relative w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
                   <span className="relative">My Profile</span>
                 </motion.button>
               )}
-              <p className="text-[10px] text-slate-600 text-center pt-1">WLYL School Management</p>
+              <p className="text-xs text-[#67736b] pt-1">WLYL School Management</p>
             </div>
-          </aside>
+          </PortalSidebar>
 
           {/* Main content */}
-          <main className="flex-1 overflow-y-auto p-3 sm:p-6">
+          <main id="portal-main" tabIndex={-1} className="portal-main">
             {tier === 'none' ? (
               <div className="flex items-center justify-center h-full min-h-[400px]">
                 <div className="text-center max-w-sm">
@@ -672,8 +643,8 @@ function SchoolAdmin() {
                   <p className="text-gray-400 text-sm mb-5">
                     Please contact <span className="font-semibold text-gray-600">WLYL Admin</span> to activate a plan and unlock all features.
                   </p>
-                  <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-500">
-                    📧 <a href="mailto:support@welearnyoulearn.com" className="text-indigo-600 hover:underline font-medium">support@welearnyoulearn.com</a>
+                  <div className="bg-gray-50 border border-gray-200 rounded-md px-4 py-3 text-sm text-gray-500">
+                    <a href="mailto:support@welearnyoulearn.com" className="text-[#235b46] hover:underline font-medium">support@welearnyoulearn.com</a>
                   </div>
                 </div>
               </div>
@@ -687,10 +658,10 @@ function SchoolAdmin() {
                   <div hidden={activeNav !== 'staff'}>
                     <div className="mb-5">
                       <h2 className="text-xl font-bold text-gray-900 mb-1">Staff</h2>
-                      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+                      <div className="flex max-w-full gap-1 overflow-x-auto border-b border-[#dce2db]">
                         {([['directory', 'Staff Directory'], ['onboard', 'Onboard Staff']] as const).map(([key, label]) => (
                           <button key={key} onClick={() => setStaffSubTab(key)}
-                            className={`px-5 py-1.5 rounded-lg text-sm font-medium transition-all ${staffSubTab === key ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                            aria-pressed={staffSubTab === key} className={`min-h-11 whitespace-nowrap border-b-2 px-4 text-sm font-medium transition-colors ${staffSubTab === key ? 'border-[#235b46] text-[#235b46]' : 'border-transparent text-gray-600 hover:text-gray-900'}`}>
                             {label}
                           </button>
                         ))}
@@ -706,10 +677,10 @@ function SchoolAdmin() {
                   <div hidden={activeNav !== 'students'}>
                     <div className="mb-5">
                       <h2 className="text-xl font-bold text-gray-900 mb-1">Student Management</h2>
-                      <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-fit">
+                      <div className="flex max-w-full gap-1 overflow-x-auto border-b border-[#dce2db]">
                         {([['list', 'Student List'], ['onboard', 'Onboard Students']] as const).map(([key, label]) => (
                           <button key={key} onClick={() => setStudentsSubTab(key)}
-                            className={`px-5 py-1.5 rounded-lg text-sm font-medium transition-all ${studentsSubTab === key ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                            aria-pressed={studentsSubTab === key} className={`min-h-11 whitespace-nowrap border-b-2 px-4 text-sm font-medium transition-colors ${studentsSubTab === key ? 'border-[#235b46] text-[#235b46]' : 'border-transparent text-gray-600 hover:text-gray-900'}`}>
                             {label}
                           </button>
                         ))}

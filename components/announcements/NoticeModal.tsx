@@ -7,9 +7,9 @@ import { localised, type Lang, type NoticeItem } from './types'
 
 const TYPE_LABEL: Record<string, string> = { general: 'General', circular: 'Circular', event: 'Event', alert: 'Alert' }
 const T = {
-  en: { close: 'Close', thanks: 'Thank you 🙏', ack: '✓ I have read this', acked: 'Acknowledged ✓', needsAck: 'Please confirm you have read this', by: 'Posted by', expires: 'Valid until', pinned: 'Pinned', urgent: 'Urgent', high: 'Important' },
-  te: { close: 'మూసివేయి', thanks: 'ధన్యవాదాలు 🙏', ack: '✓ నేను చదివాను', acked: 'ధృవీకరించబడింది ✓', needsAck: 'దయచేసి మీరు చదివినట్లు నిర్ధారించండి', by: 'పంపినవారు', expires: 'చెల్లుబాటు తేదీ', pinned: 'పిన్ చేయబడింది', urgent: 'అత్యవసరం', high: 'ముఖ్యమైనది' },
-  hi: { close: 'बंद करें', thanks: 'धन्यवाद 🙏', ack: '✓ मैंने पढ़ लिया', acked: 'पुष्टि हो गई ✓', needsAck: 'कृपया पुष्टि करें कि आपने इसे पढ़ लिया है', by: 'भेजने वाले', expires: 'मान्य तिथि', pinned: 'पिन किया गया', urgent: 'अत्यावश्यक', high: 'महत्वपूर्ण' },
+  en: { close: 'Close', thanks: 'Thank you', ack: 'I have read this', acked: 'Acknowledged', needsAck: 'Please confirm you have read this', by: 'Posted by', expires: 'Valid until', pinned: 'Pinned', urgent: 'Urgent', high: 'Important' },
+  te: { close: 'మూసివేయి', thanks: 'ధన్యవాదాలు', ack: 'నేను చదివాను', acked: 'ధృవీకరించబడింది', needsAck: 'దయచేసి మీరు చదివినట్లు నిర్ధారించండి', by: 'పంపినవారు', expires: 'చెల్లుబాటు తేదీ', pinned: 'పిన్ చేయబడింది', urgent: 'అత్యవసరం', high: 'ముఖ్యమైనది' },
+  hi: { close: 'बंद करें', thanks: 'धन्यवाद', ack: 'मैंने पढ़ लिया', acked: 'पुष्टि हो गई', needsAck: 'कृपया पुष्टि करें कि आपने इसे पढ़ लिया है', by: 'भेजने वाले', expires: 'मान्य तिथि', pinned: 'पिन किया गया', urgent: 'अत्यावश्यक', high: 'महत्वपूर्ण' },
 } as const
 
 function fmt(s: string) {
@@ -46,7 +46,7 @@ export default function NoticeModal({
         <div className="space-y-2">
           <p className="text-xs text-amber-700 text-center">{tx.needsAck}</p>
           <button data-testid="notice-ack" onClick={() => onAck?.(notice.id)}
-            className="w-full py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-lg shadow-indigo-200 transition-colors">
+            className="w-full py-3 rounded-md bg-[#245b46] hover:bg-[#173e2f] text-white font-semibold text-sm transition-colors">
             {tx.ack}
           </button>
         </div>
@@ -61,19 +61,19 @@ export default function NoticeModal({
             <GreetingCard template={template} headline={headline} message={content} schoolName={schoolName} />
             {ackButton}
             <button data-testid="notice-close" onClick={onClose}
-              className="w-full py-3 rounded-2xl bg-white/95 hover:bg-white text-gray-800 font-bold text-sm shadow-lg transition-colors">
+              className="w-full py-3 rounded-md bg-white/95 hover:bg-white text-gray-800 font-semibold text-sm transition-colors">
               {tx.thanks}
             </button>
           </div>
         ) : (
-          <div className="bg-white rounded-3xl shadow-2xl overflow-hidden">
+          <div className="bg-white rounded-lg shadow-2xl overflow-hidden">
             {template && <GreetingCard template={template} headline={headline} variant="banner" />}
             <div className="p-6 space-y-4">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider bg-gray-100 text-gray-600">{TYPE_LABEL[notice.announcement_type] ?? notice.announcement_type}</span>
                 {notice.priority === 'urgent' && <span className="text-[10px] font-bold uppercase text-red-600">● {tx.urgent}</span>}
                 {notice.priority === 'high' && <span className="text-[10px] font-bold uppercase text-amber-600">● {tx.high}</span>}
-                {notice.pinned && <span className="text-[10px] font-bold uppercase text-indigo-600">📌 {tx.pinned}</span>}
+                {notice.pinned && <span className="text-xs font-semibold uppercase text-[#245b46]">{tx.pinned}</span>}
               </div>
               {!template && <h2 className="text-lg font-extrabold text-gray-900 leading-snug">{title}</h2>}
               <p data-testid="notice-body" className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{content}</p>
@@ -83,7 +83,7 @@ export default function NoticeModal({
               </div>
               {ackButton}
               <button data-testid="notice-close" onClick={onClose}
-                className="w-full py-2.5 rounded-2xl border border-gray-200 text-gray-600 font-semibold text-sm hover:bg-gray-50 transition-colors">
+                className="w-full py-2.5 rounded-md border border-gray-200 text-gray-600 font-semibold text-sm hover:bg-gray-50 transition-colors">
                 {tx.close}
               </button>
             </div>

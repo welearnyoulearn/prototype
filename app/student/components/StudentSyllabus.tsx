@@ -1,11 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
-import { BookOpen, Check, Lock } from 'lucide-react'
+import { motion, useReducedMotion } from 'framer-motion'
+import { BookOpen, Check, Lock, Route } from 'lucide-react'
 import TopicContentViewer from '@/app/components/TopicContentViewer'
-import { INK, GREEN, BORDER, SURFACE, CREAM } from '@/app/components/ulearn/theme'
-import { Pills, ProgressBar, UlearnCard, StatusPill } from '@/app/components/ulearn/primitives'
+import { INK, SURFACE } from '@/app/components/ulearn/theme'
+import { Pills, StatusPill } from '@/app/components/ulearn/primitives'
+import { Skeleton } from '@/components/ui/skeleton'
+import { StudentEmptyState, StudentPageIntro, StudentProgressTrack } from './StudentExperience'
 
 type Resource = { id: number; title: string; url: string; resource_type: string }
 
@@ -55,6 +57,8 @@ type Props = {
   grade: string
 }
 
+const STUDENT_ACCENT = '#8B4A10'
+
 export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [loading, setLoading] = useState(true)
@@ -64,6 +68,7 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
   const [activeClassSemester, setActiveClassSemester] = useState('')
   const [activeTopic, setActiveTopic] = useState<Topic | null>(null)
   const [materials, setMaterials] = useState<Material[]>([])
+  const reduceMotion = useReducedMotion()
 
   useEffect(() => {
     setLoading(true)
@@ -91,24 +96,21 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-pulse max-w-3xl mx-auto">
-        <div className="h-9 rounded-xl w-64" style={{ background: BORDER }} />
+      <div className="mx-auto max-w-3xl space-y-5" role="status" aria-live="polite" aria-busy="true">
+        <span className="sr-only">Preparing your learning path…</span>
+        <Skeleton className="h-28 rounded-md" />
         <div className="flex gap-2">
-          {[1, 2, 3].map(i => <div key={i} className="h-9 w-24 rounded-lg" style={{ background: BORDER }} />)}
+          {[1, 2, 3].map(i => <Skeleton key={i} className="h-9 w-24" />)}
         </div>
-        <div className="h-20 rounded-2xl" style={{ background: BORDER }} />
-        {[1, 2].map(i => <div key={i} className="h-32 rounded-2xl" style={{ background: BORDER }} />)}
+        <Skeleton className="h-20" />
+        {[1, 2].map(i => <Skeleton key={i} className="h-32" />)}
       </div>
     )
   }
 
   if (subjects.length === 0) {
     return (
-      <UlearnCard className="max-w-md mx-auto text-center py-16 px-6" borderColor={BORDER}>
-        <p className="text-4xl mb-3">📚</p>
-        <p className="font-semibold" style={{ color: INK }}>No syllabus yet</p>
-        <p className="text-xs text-gray-400 mt-1">Your teacher hasn&apos;t mapped the syllabus for your class yet.</p>
-      </UlearnCard>
+      <StudentEmptyState icon={<BookOpen size={22} />} title="Your learning path is not ready yet" description="Your teacher has not mapped the syllabus for this class. It will appear here when it is available." />
     )
   }
 
@@ -143,81 +145,78 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
   const allLocked = subject.chapters.every(c => c.topics.every(t => t.status !== 'covered'))
 
   return (
-    <div className="max-w-3xl mx-auto space-y-5">
-      <div className="rounded-3xl p-4 sm:p-5" style={{ background: CREAM, border: `1px solid ${BORDER}` }}>
-        <h2 className="text-lg font-semibold" style={{ color: INK }}>My learning</h2>
-        <p className="text-sm text-gray-500 mt-0.5">Topics unlock as your teacher teaches them. Take the quiz once one&apos;s unlocked.</p>
-      </div>
+    <div className="max-w-3xl mx-auto space-y-6">
+      <StudentPageIntro eyebrow="Your learning path" title="Syllabus" description="Follow what has been taught, open available study material, and see what comes next in each subject." aside={
+        <div className="flex items-center gap-2 text-xs font-medium text-[#68736b]"><Route size={17} className="text-[#a85f16]" aria-hidden="true" />Grade {grade}</div>
+      } />
 
-      <Pills items={subjectNames} value={activeSubject} onChange={setActiveSubject} color={GREEN} />
+      <Pills items={subjectNames} value={activeSubject} onChange={setActiveSubject} color={STUDENT_ACCENT} />
 
       {classSemesterChoices.length > 0 && (
         <Pills
           items={classSemesterChoices}
           value={effectiveClassSemester}
           onChange={setActiveClassSemester}
-          color={GREEN}
+          color={STUDENT_ACCENT}
         />
       )}
 
-      <motion.div key={subject.subject} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
-        <UlearnCard className="p-4 flex items-center justify-between gap-4" borderColor={BORDER}>
+      <motion.div key={subject.subject} initial={reduceMotion ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+        <div className="grid gap-4 border-y border-[#dcd8cd] bg-white/55 px-4 py-5 sm:grid-cols-[1fr_auto] sm:items-center">
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium mb-1.5 truncate" style={{ color: INK }}>
-              {subject.subject} &middot; {subject.covered}/{subject.total} topics taught
-            </div>
-            <ProgressBar pct={subject.completion_pct} color={GREEN} className="w-full" />
+            <div className="mb-2 text-sm font-semibold truncate" style={{ color: INK }}>{subject.subject}</div>
+            <StudentProgressTrack value={subject.completion_pct} label={`${subject.covered} of ${subject.total} topics taught`} />
           </div>
           <div className="text-right shrink-0">
             <motion.div
               key={subject.completion_pct}
               initial={{ scale: 0.85, opacity: 0.5 }}
               animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
               className="text-2xl font-semibold"
               style={{ color: INK }}
             >
               {subject.completion_pct}%
             </motion.div>
-            <div className="text-xs text-gray-400">covered</div>
+            <div className="text-xs text-gray-500">subject coverage</div>
           </div>
-        </UlearnCard>
+        </div>
       </motion.div>
 
       {materials.length > 0 && (
-        <UlearnCard className="p-4" borderColor={BORDER}>
-          <div className="text-sm font-medium mb-2" style={{ color: INK }}>Textbook</div>
+        <div className="border-l-2 border-[#a85f16] bg-[#f6efe4] p-4">
+          <div className="text-sm font-semibold mb-2" style={{ color: INK }}>Textbook for {subject.subject}</div>
           <div className="space-y-2">
             {materials.map(m => (
-              <a key={m.id} href={m.file_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg hover:underline" style={{ background: SURFACE, color: GREEN }}>
+              <a key={m.id} href={m.file_url} target="_blank" rel="noopener noreferrer" className="flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm hover:bg-white/70 hover:underline" style={{ color: '#6f3b0b' }}>
                 <BookOpen size={14} className="shrink-0" /> {m.title}
               </a>
             ))}
           </div>
-        </UlearnCard>
+        </div>
       )}
 
       {allLocked && (
-        <UlearnCard className="p-4 text-center text-sm text-gray-400" borderColor={BORDER}>
+        <div className="border-y border-[#dcd8cd] px-4 py-5 text-center text-sm text-gray-500">
           Nothing unlocked in {subject.subject} yet — your teacher hasn&apos;t marked any topics as taught.
-        </UlearnCard>
+        </div>
       )}
 
       {semesterGroups.map(group => (
         <div key={group.semester ?? '__none__'} className="space-y-4">
           {group.semester && (
-            <h3 className="text-xs font-bold uppercase tracking-widest px-1" style={{ color: GREEN }}>{group.semester}</h3>
+            <h3 className="text-xs font-bold uppercase tracking-widest px-1" style={{ color: STUDENT_ACCENT }}>{group.semester}</h3>
           )}
           {group.chapters.map((ch, i) => (
         <motion.div
           key={ch.chapter_name}
-          initial={{ opacity: 0, y: 10 }}
+          initial={reduceMotion ? false : { opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: Math.min(i * 0.05, 0.3), duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
         >
-        <UlearnCard className="p-4" borderColor={BORDER}>
+        <section className="border-b border-[#dcd8cd] px-1 py-5">
           <div className="flex items-center gap-2 mb-3">
-            <BookOpen size={16} style={{ color: GREEN }} />
+            <BookOpen size={16} style={{ color: STUDENT_ACCENT }} />
             <span className="font-medium text-sm" style={{ color: INK }}>{ch.chapter_name}</span>
             <span className="text-xs text-gray-400 ml-auto">{ch.covered}/{ch.topics.length} taught</span>
           </div>
@@ -245,7 +244,7 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
               }
               return (
                 <div key={t.id} className="flex items-center gap-3 rounded-lg px-3 py-2 flex-wrap" style={{ background: SURFACE }}>
-                  <Check size={14} style={{ color: GREEN }} className="shrink-0" />
+                  <Check size={14} style={{ color: STUDENT_ACCENT }} className="shrink-0" />
                   <button
                     data-testid={`topic-study-${t.id}`}
                     onClick={() => setActiveTopic(t)}
@@ -259,7 +258,7 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
               )
             })}
           </div>
-        </UlearnCard>
+        </section>
         </motion.div>
           ))}
         </div>

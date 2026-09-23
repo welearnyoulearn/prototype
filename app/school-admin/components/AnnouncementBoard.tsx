@@ -4,8 +4,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { useConfirm } from '@/components/ui/use-confirm'
 import AnnouncementComposer, { type ClassRow } from '@/components/announcements/AnnouncementComposer'
 import NoticeModal from '@/components/announcements/NoticeModal'
-import { getTemplate } from '@/lib/announcementTemplates'
 import type { NoticeItem } from '@/components/announcements/types'
+import { Archive, CheckCircle2, Clock3, Eye, FileText, Megaphone, Pencil, Pin, Plus, Send, Trash2, Undo2 } from 'lucide-react'
 
 type Tab = 'live' | 'scheduled' | 'drafts' | 'archive' | 'deleted'
 type Stats = {
@@ -16,23 +16,23 @@ type Stats = {
   history: Array<{ action: string; by_name: string | null; created_at: string; details: Record<string, unknown> | null }>
 }
 
-const TABS: Array<{ key: Tab; label: string; icon: string }> = [
-  { key: 'live', label: 'Live', icon: '📣' },
-  { key: 'scheduled', label: 'Scheduled', icon: '🕒' },
-  { key: 'drafts', label: 'Drafts', icon: '📝' },
-  { key: 'archive', label: 'Archive', icon: '🗄️' },
-  { key: 'deleted', label: 'Deleted', icon: '🗑' },
+const TABS: Array<{ key: Tab; label: string; icon: typeof Megaphone }> = [
+  { key: 'live', label: 'Live', icon: Megaphone },
+  { key: 'scheduled', label: 'Scheduled', icon: Clock3 },
+  { key: 'drafts', label: 'Drafts', icon: FileText },
+  { key: 'archive', label: 'Archive', icon: Archive },
+  { key: 'deleted', label: 'Deleted', icon: Trash2 },
 ]
 const PRIORITY_META: Record<string, { label: string; color: string }> = {
   urgent: { label: 'Urgent', color: 'text-red-600' },
   high: { label: 'High', color: 'text-amber-600' },
   normal: { label: 'Normal', color: 'text-gray-500' },
 }
-const TYPE_META: Record<string, { label: string; color: string; bg: string; icon: string }> = {
-  general: { label: 'General', color: 'text-gray-600', bg: 'bg-gray-100', icon: '📋' },
-  circular: { label: 'Circular', color: 'text-blue-600', bg: 'bg-blue-50', icon: '📄' },
-  event: { label: 'Event', color: 'text-purple-600', bg: 'bg-purple-50', icon: '🎉' },
-  alert: { label: 'Alert', color: 'text-red-600', bg: 'bg-red-50', icon: '🚨' },
+const TYPE_META: Record<string, { label: string; color: string }> = {
+  general: { label: 'General', color: 'text-gray-600' },
+  circular: { label: 'Circular', color: 'text-[#245b46]' },
+  event: { label: 'Event', color: 'text-[#21686a]' },
+  alert: { label: 'Alert', color: 'text-red-700' },
 }
 const AUDIENCE_META: Record<string, { label: string; cls: string }> = {
   all: { label: 'Everyone', cls: 'bg-indigo-50 text-indigo-700 border-indigo-100' },
@@ -149,23 +149,23 @@ export default function AnnouncementBoard({ schoolId, schoolName = 'Your School'
     <div className="space-y-5 max-w-4xl">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-lg font-bold text-gray-800">Announcement Board</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-gray-900">Announcement board</h2>
           <p className="text-sm text-gray-400 mt-0.5">
             {loading ? 'Loading…' : `${items.length} in ${TABS.find(t => t.key === tab)?.label}`}
             {urgentCount > 0 && <span className="ml-2 text-red-500 font-semibold">· {urgentCount} urgent</span>}
           </p>
         </div>
         <button data-testid="ann-tab-create" onClick={() => { setEditing(null); setEditingScheduled(false); setMode('compose') }}
-          className="px-4 py-2 rounded-xl text-sm font-semibold bg-indigo-600 text-white shadow-sm shadow-indigo-200 hover:bg-indigo-700 flex items-center gap-1.5">
-          <span className="text-base leading-none">＋</span> New announcement
+          className="flex min-h-10 items-center gap-2 rounded-md bg-[#245b46] px-4 py-2 text-sm font-semibold text-white hover:bg-[#173e2f]">
+          <Plus size={16} aria-hidden="true" /> New announcement
         </button>
       </div>
 
-      <div className="flex gap-2 flex-wrap">
+      <div className="flex gap-5 overflow-x-auto border-b border-gray-200" role="tablist" aria-label="Announcement status">
         {TABS.map(t => (
-          <button key={t.key} data-testid={`ann-tab-${t.key}`} onClick={() => { setTab(t.key); setExpanded(null) }}
-            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${tab === t.key ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-200' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-            {t.icon} {t.label}
+          <button key={t.key} role="tab" aria-selected={tab === t.key} data-testid={`ann-tab-${t.key}`} onClick={() => { setTab(t.key); setExpanded(null) }}
+            className={`flex min-h-11 shrink-0 items-center gap-2 border-b-2 px-1 text-sm font-semibold transition-colors ${tab === t.key ? 'border-[#245b46] text-[#173e2f]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
+            <t.icon size={15} aria-hidden="true" /> {t.label}
           </button>
         ))}
       </div>
@@ -183,39 +183,38 @@ export default function AnnouncementBoard({ schoolId, schoolName = 'Your School'
       </div>
 
       {!loading && filtered.length === 0 && (
-        <div className="bg-white border border-dashed border-gray-200 rounded-2xl py-16 text-center">
-          <p className="text-4xl mb-2">{TABS.find(t => t.key === tab)?.icon}</p>
-          <p className="text-sm text-gray-500">{tab === 'live' ? 'No live announcements. Click “New announcement” to post one.' : `Nothing in ${TABS.find(t => t.key === tab)?.label}.`}</p>
+        <div className="border-y border-dashed border-gray-300 py-14 text-center">
+          <Megaphone className="mx-auto mb-3 h-6 w-6 text-gray-400" aria-hidden="true" />
+          <p className="text-sm font-medium text-gray-700">{tab === 'live' ? 'No live announcements' : `Nothing in ${TABS.find(t => t.key === tab)?.label}`}</p>
+          <p className="mt-1 text-xs text-gray-400">{tab === 'live' ? 'Create an announcement when your school has something to share.' : 'Items will appear here when their status changes.'}</p>
         </div>
       )}
 
-      <div className="space-y-2.5">
+      <div className="divide-y border-y border-gray-200">
         {filtered.map(a => {
           const pm = PRIORITY_META[a.priority] ?? PRIORITY_META.normal
           const tm = TYPE_META[a.announcement_type] ?? TYPE_META.general
-          const tpl = getTemplate(a.template_key)
           const isOpen = expanded === a.id
           const st = stats[a.id]
           const cl = classesLabel(a.target_classes)
           const scheduled = tab === 'scheduled' && !!a.publish_at
           return (
             <div key={a.id} data-testid={`ann-card-${a.id}`}
-              className={`bg-white border rounded-2xl shadow-sm overflow-hidden ${a.priority === 'urgent' ? 'border-red-200' : a.priority === 'high' ? 'border-amber-200' : 'border-gray-100'}`}>
+              className={`${a.priority === 'urgent' ? 'border-l-2 border-l-red-600' : a.priority === 'high' ? 'border-l-2 border-l-amber-500' : ''}`}>
               <div className="flex items-start gap-3.5 px-5 py-4 cursor-pointer hover:bg-gray-50/60" onClick={() => toggleExpand(a)}>
-                <div className="text-2xl leading-none mt-0.5" aria-hidden>{tpl?.emoji ?? tm.icon}</div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap mb-1.5">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${tm.bg} ${tm.color}`}>{tm.label}</span>
+                    <span className={`text-xs font-semibold uppercase tracking-[.06em] ${tm.color}`}>{tm.label}</span>
                     {a.target_audience.split(',').map(x => x.trim()).map(x => {
                       const m = AUDIENCE_META[x] ?? AUDIENCE_META.all
                       return <span key={x} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${m.cls}`}>{m.label}</span>
                     })}
                     {cl && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-700 border border-orange-100">{cl}</span>}
                     {a.priority !== 'normal' && <span className={`text-[10px] font-bold uppercase ${pm.color}`}>● {pm.label}</span>}
-                    {a.pinned && <span className="text-[10px] font-bold text-indigo-600">📌 Pinned</span>}
-                    {a.requires_ack && <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full">✅ Needs acknowledgement</span>}
+                    {a.pinned && <span className="inline-flex items-center gap-1 text-xs font-semibold text-[#245b46]"><Pin size={12} aria-hidden="true" />Pinned</span>}
+                    {a.requires_ack && <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-800"><CheckCircle2 size={12} aria-hidden="true" />Needs acknowledgement</span>}
                     {a.status === 'draft' && <span className="text-[10px] font-bold text-gray-600 bg-gray-100 px-1.5 py-0.5 rounded-full">Draft</span>}
-                    {scheduled && <span className="text-[10px] font-bold text-sky-700 bg-sky-100 px-1.5 py-0.5 rounded-full">🕒 {fmtDateTime(a.publish_at as string)}</span>}
+                    {scheduled && <span className="inline-flex items-center gap-1 text-xs font-semibold text-sky-800"><Clock3 size={12} aria-hidden="true" />{fmtDateTime(a.publish_at as string)}</span>}
                   </div>
                   <p className="text-sm font-semibold text-gray-900 leading-snug">{a.title}</p>
                   <div className="flex items-center gap-2 mt-1.5 text-xs text-gray-400 flex-wrap">
@@ -223,7 +222,7 @@ export default function AnnouncementBoard({ schoolId, schoolName = 'Your School'
                     <span>·</span>
                     <span>{fmtDate(a.published_at ?? a.created_at)}</span>
                     {a.expires_at && <><span>·</span><span className="text-amber-500">Expires {fmtDate(a.expires_at)}</span></>}
-                    {a.status === 'published' && tab !== 'deleted' && <><span>·</span><span data-testid={`ann-seen-${a.id}`}>👁 {a.seen_count ?? 0} seen</span></>}
+                    {a.status === 'published' && tab !== 'deleted' && <><span>·</span><span className="inline-flex items-center gap-1" data-testid={`ann-seen-${a.id}`}><Eye size={12} aria-hidden="true" />{a.seen_count ?? 0} seen</span></>}
                   </div>
                 </div>
                 <span className={`text-gray-300 mt-1.5 transition-transform ${isOpen ? 'rotate-180' : ''}`}>⌄</span>
@@ -235,7 +234,7 @@ export default function AnnouncementBoard({ schoolId, schoolName = 'Your School'
 
                   {/* Who has seen it */}
                   {tab !== 'deleted' && a.status !== 'draft' && (
-                    <div data-testid={`ann-stats-${a.id}`} className="rounded-xl bg-gray-50 p-4 space-y-3">
+                    <div data-testid={`ann-stats-${a.id}`} className="border-l-2 border-[#dce9dc] bg-[#f6f8f4] p-4 space-y-3">
                       {!st || st === 'loading' ? <p className="text-xs text-gray-400">Loading reach…</p> : (
                         <>
                           <div className="flex items-center justify-between text-sm">
@@ -248,7 +247,7 @@ export default function AnnouncementBoard({ schoolId, schoolName = 'Your School'
                               <span key={k} className="capitalize">{k}: {v.seen}/{v.recipients}</span>
                             ))}
                           </div>
-                          {st.requires_ack && <p data-testid={`ann-acks-${a.id}`} className="text-sm font-semibold text-amber-700">✅ Acknowledged by {st.acknowledged ?? 0} of {st.recipients}</p>}
+                          {st.requires_ack && <p data-testid={`ann-acks-${a.id}`} className="text-sm font-semibold text-amber-700">Acknowledged by {st.acknowledged ?? 0} of {st.recipients}</p>}
                           {st.not_seen_total > 0 && (
                             <details data-testid={`ann-notseen-${a.id}`}>
                               <summary className="text-xs font-semibold text-indigo-600 cursor-pointer">{st.not_seen_total} have not seen it yet</summary>
@@ -280,12 +279,12 @@ export default function AnnouncementBoard({ schoolId, schoolName = 'Your School'
 
                   {tab !== 'deleted' && (
                     <div className="flex justify-end gap-2 flex-wrap pt-3 border-t border-gray-50">
-                      <button data-testid={`ann-preview-${a.id}`} onClick={() => setPreview(a)} className="text-xs text-gray-600 border border-gray-200 hover:bg-gray-50 px-4 py-1.5 rounded-lg font-medium">👁 Preview</button>
-                      {a.status === 'draft' && <button data-testid={`ann-publish-${a.id}`} onClick={() => change(a, { status: 'published', publish_at: null }, 'Announcement published!')} className="text-xs text-white bg-indigo-600 hover:bg-indigo-700 px-4 py-1.5 rounded-lg font-medium">📣 Publish</button>}
-                      {a.status === 'published' && <button data-testid={`ann-pin-${a.id}`} onClick={() => change(a, { pinned: !a.pinned }, a.pinned ? 'Unpinned.' : 'Pinned to the top.')} className="text-xs text-gray-600 border border-gray-200 hover:bg-gray-50 px-4 py-1.5 rounded-lg font-medium">{a.pinned ? '📌 Unpin' : '📌 Pin'}</button>}
-                      {a.status === 'published' && <button data-testid={`ann-unpublish-${a.id}`} onClick={() => change(a, { status: 'draft' }, 'Moved to drafts.')} className="text-xs text-gray-600 border border-gray-200 hover:bg-gray-50 px-4 py-1.5 rounded-lg font-medium">↩ Unpublish</button>}
-                      <button data-testid={`ann-edit-${a.id}`} onClick={() => { setEditing(a); setEditingScheduled(tab === 'scheduled'); setMode('compose') }} className="text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 hover:bg-indigo-50 px-4 py-1.5 rounded-lg font-medium">✏ Edit</button>
-                      <button data-testid={`ann-delete-${a.id}`} onClick={() => handleDelete(a)} className="text-xs text-red-500 hover:text-red-700 border border-red-200 hover:bg-red-50 px-4 py-1.5 rounded-lg font-medium">🗑 Delete</button>
+                      <button data-testid={`ann-preview-${a.id}`} onClick={() => setPreview(a)} className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"><Eye size={13} />Preview</button>
+                      {a.status === 'draft' && <button data-testid={`ann-publish-${a.id}`} onClick={() => change(a, { status: 'published', publish_at: null }, 'Announcement published!')} className="inline-flex items-center gap-1.5 rounded-md bg-[#245b46] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#173e2f]"><Send size={13} />Publish</button>}
+                      {a.status === 'published' && <button data-testid={`ann-pin-${a.id}`} onClick={() => change(a, { pinned: !a.pinned }, a.pinned ? 'Unpinned.' : 'Pinned to the top.')} className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"><Pin size={13} />{a.pinned ? 'Unpin' : 'Pin'}</button>}
+                      {a.status === 'published' && <button data-testid={`ann-unpublish-${a.id}`} onClick={() => change(a, { status: 'draft' }, 'Moved to drafts.')} className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"><Undo2 size={13} />Unpublish</button>}
+                      <button data-testid={`ann-edit-${a.id}`} onClick={() => { setEditing(a); setEditingScheduled(tab === 'scheduled'); setMode('compose') }} className="inline-flex items-center gap-1.5 rounded-md border border-[#c7d8cc] px-3 py-1.5 text-xs font-medium text-[#245b46] hover:bg-[#edf2eb]"><Pencil size={13} />Edit</button>
+                      <button data-testid={`ann-delete-${a.id}`} onClick={() => handleDelete(a)} className="inline-flex items-center gap-1.5 rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"><Trash2 size={13} />Delete</button>
                     </div>
                   )}
                 </div>

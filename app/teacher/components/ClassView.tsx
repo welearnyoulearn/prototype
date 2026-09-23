@@ -140,21 +140,21 @@ function SubjectTeacherOverview({
   return (
     <div className="space-y-4">
       {/* Role banner */}
-      <div className="bg-gradient-to-r from-indigo-600 to-blue-600 rounded-xl p-4 text-white flex items-center justify-between">
+      <div className="bg-[#164749] border-l-4 border-[#63aaa6] rounded-md p-4 text-white flex items-center justify-between">
         <div>
           <p className="text-indigo-200 text-xs font-semibold uppercase tracking-wide">Subject Teacher</p>
           <p className="text-white font-bold text-base mt-0.5">{teacher.subject} · Grade {grade}-{section}</p>
           <p className="text-indigo-200 text-xs mt-0.5">{teacher.department}</p>
         </div>
         <div className="text-center">
-          <div className={`text-xl font-black ${pendingExams.length > 0 ? 'text-amber-300' : 'text-white'}`}>{pendingExams.length}</div>
-          <div className="text-indigo-200 text-[10px]">Pending Marks</div>
+          <div className={`text-xl font-semibold ${pendingExams.length > 0 ? 'text-amber-300' : 'text-white'}`}>{pendingExams.length}</div>
+          <div className="text-indigo-200 text-xs">Pending Marks</div>
         </div>
       </div>
 
       {/* Pending marks entry — urgent alert */}
       {pendingExams.length > 0 && (
-        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4">
+        <div className="bg-amber-50 border border-amber-300 rounded-md p-4">
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-2">
@@ -166,18 +166,18 @@ function SubjectTeacherOverview({
               <div className="space-y-1.5">
                 {pendingExams.map(e => (
                   <div key={`${e.id}-${e.subject_name}`} className="flex items-center gap-2">
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${EXAM_COLORS[e.exam_type] || 'bg-gray-100 text-gray-600'}`}>
+                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${EXAM_COLORS[e.exam_type] || 'bg-gray-100 text-gray-600'}`}>
                       {EXAM_LABELS[e.exam_type] || e.exam_type}
                     </span>
                     <span className="text-xs text-amber-800 font-medium">{e.exam_name}</span>
                     <span className="text-xs text-amber-600">— {e.subject_name}</span>
-                    {e.exam_date && <span className="text-[10px] text-amber-500 ml-auto">{e.exam_date}</span>}
+                    {e.exam_date && <span className="text-xs text-amber-500 ml-auto">{e.exam_date}</span>}
                   </div>
                 ))}
               </div>
             </div>
             <button onClick={onGoToMarks}
-              className="shrink-0 bg-amber-600 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-amber-700 whitespace-nowrap">
+              className="shrink-0 bg-amber-600 text-white text-xs font-bold px-4 py-2 rounded-md hover:bg-amber-700 whitespace-nowrap">
               Enter Marks →
             </button>
           </div>
@@ -187,14 +187,14 @@ function SubjectTeacherOverview({
       {/* Quick action tiles */}
       <div className="grid grid-cols-1 gap-3">
         <button onClick={onGoToMarks}
-          className={`rounded-xl p-4 text-left transition-all group border ${pendingExams.length > 0 ? 'bg-amber-50 border-amber-200 hover:border-amber-400' : 'bg-white border-gray-200 hover:border-orange-300 hover:bg-orange-50'}`}>
+          className={`rounded-md p-4 text-left transition-all group border ${pendingExams.length > 0 ? 'bg-amber-50 border-amber-200 hover:border-amber-400' : 'bg-white border-gray-200 hover:border-orange-300 hover:bg-orange-50'}`}>
           <div className={`w-9 h-9 rounded-lg flex items-center justify-center mb-3 ${pendingExams.length > 0 ? 'bg-amber-100' : 'bg-orange-100'}`}>
             <svg className={`w-5 h-5 ${pendingExams.length > 0 ? 'text-amber-700' : 'text-orange-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
           </div>
           <p className="text-sm font-bold text-gray-800">Marks Entry</p>
-          <p className={`text-xs mt-0.5 font-medium ${pendingExams.length > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+          <p className={`text-xs mt-0.5 font-medium ${pendingExams.length > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
             {pendingExams.length > 0 ? `${pendingExams.length} pending` : submittedExams.length > 0 ? 'All submitted ✓' : 'No exams yet'}
           </p>
         </button>
@@ -202,14 +202,14 @@ function SubjectTeacherOverview({
 
       {/* Submitted exams */}
       {submittedExams.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <div className="bg-white rounded-md border border-gray-200 p-4">
           <p className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-3">Submitted Marks</p>
           <div className="space-y-2">
             {submittedExams.map(e => (
               <div key={`${e.id}-sub`} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
                 <div>
                   <p className="text-sm font-medium text-gray-700">{e.exam_name}</p>
-                  <p className="text-xs text-gray-400">{e.subject_name} · {EXAM_LABELS[e.exam_type] || e.exam_type}{e.exam_date ? ` · ${e.exam_date}` : ''}</p>
+                  <p className="text-xs text-muted-foreground">{e.subject_name} · {EXAM_LABELS[e.exam_type] || e.exam_type}{e.exam_date ? ` · ${e.exam_date}` : ''}</p>
                 </div>
                 <span className="text-xs font-bold text-green-700 bg-green-50 px-2.5 py-1 rounded-full">✓ Submitted</span>
               </div>
@@ -367,7 +367,7 @@ function TranslitControl({ value, onPick, subject, testId }: {
         <div className="basis-full flex gap-1.5 flex-wrap items-center text-xs">
           {error ? <span role="alert" className="text-red-500">{error}</span> : (
             <>
-              <span className="text-gray-400">Other spellings:</span>
+              <span className="text-muted-foreground">Other spellings:</span>
               {options.map((opt, i) => (
                 <button
                   key={opt}
@@ -1133,17 +1133,17 @@ export function SyllabusTracking({
   if (loading) return (
     <div className="py-16 text-center">
       <Loader2 size={22} className="animate-spin mx-auto mb-3" style={{ color: GOLD }} />
-      <p className="text-gray-400 text-sm">Loading syllabus...</p>
+      <p className="text-muted-foreground text-sm">Loading syllabus...</p>
     </div>
   )
 
   if (subjects.length === 0) return (
-    <div className="bg-white rounded-2xl border border-dashed py-14 text-center" style={{ borderColor: BORDER }}>
-      <div className="w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-3" style={{ background: '#FCEBDB' }}>
+    <div className="bg-white rounded-lg border border-dashed py-14 text-center" style={{ borderColor: BORDER }}>
+      <div className="w-12 h-12 rounded-md flex items-center justify-center mx-auto mb-3" style={{ background: '#FCEBDB' }}>
         <BookOpen size={22} style={{ color: GOLD }} />
       </div>
       <p className="font-medium mb-1" style={{ color: INK }}>No syllabus loaded yet</p>
-      <p className="text-gray-400 text-sm">Ask the school admin to load the board syllabus in School Settings.</p>
+      <p className="text-muted-foreground text-sm">Ask the school admin to load the board syllabus in School Settings.</p>
     </div>
   )
 
@@ -1159,7 +1159,7 @@ export function SyllabusTracking({
               <button key={s.subject}
                 onClick={() => { setSelectedSubject(s.subject); setExpandedChapter(null); setShowInactiveChapters(false); setInactiveChaptersTree(null) }}
                 data-testid={`syllabus-subject-${s.subject}`}
-                className="px-4 py-2 rounded-xl text-sm font-medium border transition-colors"
+                className="px-4 py-2 rounded-md text-sm font-medium border transition-colors"
                 style={{ background: active ? GOLD : 'white', color: active ? 'white' : INK, borderColor: active ? GOLD : BORDER }}>
                 {s.subject}
                 <span className="ml-2 text-xs" style={{ color: active ? 'white' : '#9ca3af', opacity: active ? 0.85 : 1 }}>
@@ -1176,13 +1176,13 @@ export function SyllabusTracking({
           Setup for this subject. "No" falls through to the exact same
           blank first-time flow as before this feature existed. */}
       {setupMode === 'sibling-prompt' && currentSubject && (
-        <div className="mb-5 bg-white rounded-2xl border shadow-sm" style={{ borderColor: PURPLE }}>
+        <div className="mb-5 bg-white rounded-lg border " style={{ borderColor: PURPLE }}>
           <div className="px-5 py-4 border-b" style={{ borderColor: BORDER }}>
             <div className="text-sm font-semibold flex items-center gap-2" style={{ color: INK }}>
               <BookOpen size={15} style={{ color: PURPLE }} />
               Already set up for this grade
             </div>
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs text-muted-foreground mt-1">
               {siblingSetups.length === 1
                 ? `${siblingSetups[0].setup_by_name ?? 'A teacher'} already set up ${selectedSubject} for Grade ${siblingSetups[0].grade} (Section ${siblingSetups[0].section}). Use the same setup for this class?`
                 : `${siblingSetups.length} other sections of Grade ${siblingSetups[0]?.grade} already have ${selectedSubject} set up. Copy one of them, or set up this class on your own.`}
@@ -1190,10 +1190,10 @@ export function SyllabusTracking({
           </div>
           <div className="p-5 space-y-2">
             {siblingSetups.map(s => (
-              <div key={s.class_id} className="flex items-center justify-between gap-3 rounded-xl border px-4 py-3" style={{ borderColor: BORDER }}>
+              <div key={s.class_id} className="flex items-center justify-between gap-3 rounded-md border px-4 py-3" style={{ borderColor: BORDER }}>
                 <div>
                   <p className="text-sm font-semibold" style={{ color: INK }}>Section {s.section}{s.setup_by_name ? ` — ${s.setup_by_name}` : ''}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
+                  <p className="text-xs text-muted-foreground mt-0.5">
                     {s.active_chapters} chapter{s.active_chapters === 1 ? '' : 's'}{s.semester_mode && s.semester_count ? ` · ${s.semester_count} semesters` : ''}
                   </p>
                 </div>
@@ -1221,22 +1221,22 @@ export function SyllabusTracking({
           per-class Setup drill-down, so the teacher sees exactly what
           they're about to copy before confirming. */}
       {setupMode === 'sibling-preview' && previewSibling && currentSubject && (
-        <div className="mb-5 bg-white rounded-2xl border shadow-sm" style={{ borderColor: PURPLE }}>
+        <div className="mb-5 bg-white rounded-lg border " style={{ borderColor: PURPLE }}>
           <div className="px-5 py-4 border-b flex items-center justify-between gap-3" style={{ borderColor: BORDER }}>
             <div>
               <div className="text-sm font-semibold flex items-center gap-2" style={{ color: INK }}>
                 <BookOpen size={15} style={{ color: PURPLE }} />
                 Section {previewSibling.section}&apos;s setup — {selectedSubject}
               </div>
-              <p className="text-xs text-gray-400 mt-1">Read-only preview. Confirm to copy this exact setup to your class.</p>
+              <p className="text-xs text-muted-foreground mt-1">Read-only preview. Confirm to copy this exact setup to your class.</p>
             </div>
-            <button onClick={() => setSetupMode('sibling-prompt')} className="p-1 rounded hover:bg-gray-100 text-gray-400 flex-shrink-0" aria-label="Back">
+            <button onClick={() => setSetupMode('sibling-prompt')} className="p-1 rounded hover:bg-gray-100 text-muted-foreground flex-shrink-0" aria-label="Back">
               <X size={15} />
             </button>
           </div>
           <div className="p-5 space-y-3">
             {previewLoading || !previewTree ? (
-              <p className="text-xs text-gray-400 py-4">Loading…</p>
+              <p className="text-xs text-muted-foreground py-4">Loading…</p>
             ) : (() => {
               const active = previewTree.filter(ch => ch.is_active).sort((a, b) => a.chapter_order - b.chapter_order)
               const inactive = previewTree.filter(ch => !ch.is_active).sort((a, b) => a.chapter_order - b.chapter_order)
@@ -1244,17 +1244,17 @@ export function SyllabusTracking({
                 <>
                   <div className="space-y-2 max-h-96 overflow-y-auto">
                     {active.map(ch => (
-                      <div key={ch.school_chapter_id} className="rounded-xl border p-3" style={{ borderColor: BORDER, background: SURFACE }}>
+                      <div key={ch.school_chapter_id} className="rounded-md border p-3" style={{ borderColor: BORDER, background: SURFACE }}>
                         <div className="flex items-center justify-between gap-2 mb-1.5">
                           <span className="text-xs font-semibold" style={{ color: INK }}>{ch.chapter_name}</span>
-                          <span className="text-[10px] text-gray-400 flex-shrink-0">
+                          <span className="text-xs text-muted-foreground flex-shrink-0">
                             {ch.topics.filter(t => t.is_active).length}/{ch.topics.length} topics
                             {ch.semester_label ? ` · ${ch.semester_label}` : ''}
                           </span>
                         </div>
                         <div className="space-y-1">
                           {ch.topics.filter(t => t.is_active).sort((a, b) => a.topic_order - b.topic_order).map(t => (
-                            <div key={t.school_topic_id} className="text-[11px] px-2 py-1 rounded-lg" style={{ background: 'white', color: INK }}>
+                            <div key={t.school_topic_id} className="text-xs px-2 py-1 rounded-lg" style={{ background: 'white', color: INK }}>
                               {t.topic_name}
                             </div>
                           ))}
@@ -1264,12 +1264,12 @@ export function SyllabusTracking({
                   </div>
                   {inactive.length > 0 && (
                     <details className="text-xs">
-                      <summary className="cursor-pointer font-medium text-gray-400 select-none">
+                      <summary className="cursor-pointer font-medium text-muted-foreground select-none">
                         {inactive.length} inactive chapter{inactive.length === 1 ? '' : 's'}
                       </summary>
                       <div className="mt-1.5 space-y-0.5">
                         {inactive.map(ch => (
-                          <div key={ch.school_chapter_id} className="line-through text-gray-400 text-[11px]">{ch.chapter_name}</div>
+                          <div key={ch.school_chapter_id} className="line-through text-muted-foreground text-xs">{ch.chapter_name}</div>
                         ))}
                       </div>
                     </details>
@@ -1281,11 +1281,11 @@ export function SyllabusTracking({
           <div className="px-5 py-4 border-t flex items-center gap-2" style={{ borderColor: BORDER }}>
             <button onClick={confirmSiblingCopy} disabled={copyingSibling || previewLoading}
               data-testid="setup-sibling-confirm"
-              className="text-sm font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-50"
+              className="text-sm font-semibold px-4 py-2 rounded-md text-white disabled:opacity-50"
               style={{ background: PURPLE }}>
               {copyingSibling ? 'Applying…' : 'Use this setup'}
             </button>
-            <button onClick={() => setSetupMode('sibling-prompt')} className="text-sm px-3 py-2 rounded-xl border" style={{ borderColor: BORDER, color: INK }}>
+            <button onClick={() => setSetupMode('sibling-prompt')} className="text-sm px-3 py-2 rounded-md border" style={{ borderColor: BORDER, color: INK }}>
               Back
             </button>
           </div>
@@ -1302,26 +1302,26 @@ export function SyllabusTracking({
       {(setupMode === 'first-time' || setupMode === 'edit') && currentSubject && (
         <div className="mb-5">
           {setupLoading || !setupTree ? (
-            <div className="bg-white rounded-2xl border py-10 text-center" style={{ borderColor: BORDER }}>
+            <div className="bg-white rounded-lg border py-10 text-center" style={{ borderColor: BORDER }}>
               <Loader2 size={20} className="animate-spin mx-auto mb-2" style={{ color: PURPLE }} />
-              <p className="text-gray-400 text-sm">Loading syllabus setup…</p>
+              <p className="text-muted-foreground text-sm">Loading syllabus setup…</p>
             </div>
           ) : (
-            <div className="bg-white rounded-2xl border shadow-sm" style={{ borderColor: PURPLE }}>
+            <div className="bg-white rounded-lg border " style={{ borderColor: PURPLE }}>
               <div className="px-5 py-4 border-b flex items-start justify-between gap-3" style={{ borderColor: BORDER }}>
                 <div>
                   <div className="text-sm font-semibold flex items-center gap-2" style={{ color: INK }}>
                     <BookOpen size={15} style={{ color: PURPLE }} />
                     {setupMode === 'first-time' ? `Set up ${selectedSubject} for this class` : `Edit syllabus setup — ${selectedSubject}`}
                   </div>
-                  <p className="text-xs text-gray-400 mt-1">
+                  <p className="text-xs text-muted-foreground mt-1">
                     {setupMode === 'first-time'
                       ? 'Pick which chapters and topics your class should see. Nothing is shown to you or students until you Apply — the import isn’t always accurate, so start from what actually applies here.'
                       : 'Your class’s current selection is pre-filled below. Change anything and Apply to update it.'}
                   </p>
                 </div>
                 {setupMode === 'edit' && (
-                  <button onClick={cancelSetup} className="p-1 rounded hover:bg-gray-100 text-gray-400 flex-shrink-0" aria-label="Cancel">
+                  <button onClick={cancelSetup} className="p-1 rounded hover:bg-gray-100 text-muted-foreground flex-shrink-0" aria-label="Cancel">
                     <X size={15} />
                   </button>
                 )}
@@ -1337,7 +1337,7 @@ export function SyllabusTracking({
                   organizes itself; the select/deselect flow is identical
                   either way. */}
               <div className="px-5 pt-4 flex items-center gap-2 flex-wrap">
-                <div className="flex gap-1 p-1 rounded-xl w-fit" style={{ background: SURFACE }}>
+                <div className="flex gap-1 p-1 rounded-md w-fit" style={{ background: SURFACE }}>
                   {(['full', 'semester'] as const).map(mode => (
                     <button key={mode} type="button"
                       onClick={() => setSetupOrg(mode)}
@@ -1430,7 +1430,7 @@ export function SyllabusTracking({
                           className="w-4 h-4 rounded flex-shrink-0" style={{ accentColor: PURPLE }} />
                         <span className="text-sm font-medium flex-1" style={{ color: INK }}>{ch.chapter_name}</span>
                         {setupOrg === 'semester' && assignedLabel && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0" style={{ background: '#EDE9FB', color: PURPLE }}>
+                          <span className="text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0" style={{ background: '#EDE9FB', color: PURPLE }}>
                             {assignedLabel}
                           </span>
                         )}
@@ -1447,7 +1447,7 @@ export function SyllabusTracking({
                             {semesterChoices.map(s => <option key={s} value={s}>{s}</option>)}
                           </select>
                         )}
-                        <span className="text-xs text-gray-400 flex-shrink-0">{ch.topics.length} topic{ch.topics.length === 1 ? '' : 's'}</span>
+                        <span className="text-xs text-muted-foreground flex-shrink-0">{ch.topics.length} topic{ch.topics.length === 1 ? '' : 's'}</span>
                       </label>
                       {ch.topics.length > 0 && (
                         <div className="mt-2 ml-7 space-y-1.5">
@@ -1495,31 +1495,31 @@ export function SyllabusTracking({
                   <>
                     <div className="px-5 pt-3 grid gap-2" style={{ gridTemplateColumns: `repeat(${semesterChoices.length + 1}, minmax(0,1fr))` }}>
                       {semesterChoices.map(label => (
-                        <div key={label} className="rounded-xl p-3 text-center transition-colors"
+                        <div key={label} className="rounded-md p-3 text-center transition-colors"
                           style={dropBoxStyle(label)}
                           onDragOver={e => { e.preventDefault(); if (draggedChapterId != null) setDragOverLabel(label) }}
                           onDragLeave={() => setDragOverLabel(prev => (prev === label ? null : prev))}
                           onDrop={dropOn(label)}
                           data-testid={`setup-semester-dropzone-${label.replace(/\s+/g, '-')}`}
                         >
-                          <div className="text-[10px] font-bold uppercase tracking-widest" style={{ color: PURPLE }}>{label}</div>
+                          <div className="text-xs font-bold uppercase tracking-widest" style={{ color: PURPLE }}>{label}</div>
                           <div className="text-lg font-semibold mt-0.5" style={{ color: INK }}>{counts.get(label) || 0}</div>
-                          <div className="text-[10px] text-gray-400">chapter{(counts.get(label) || 0) === 1 ? '' : 's'}</div>
+                          <div className="text-xs text-muted-foreground">chapter{(counts.get(label) || 0) === 1 ? '' : 's'}</div>
                         </div>
                       ))}
-                      <div className="rounded-xl p-3 text-center transition-colors"
+                      <div className="rounded-md p-3 text-center transition-colors"
                         style={dropBoxStyle('__unassigned__')}
                         onDragOver={e => { e.preventDefault(); if (draggedChapterId != null) setDragOverLabel('__unassigned__') }}
                         onDragLeave={() => setDragOverLabel(prev => (prev === '__unassigned__' ? null : prev))}
                         onDrop={dropOn(null)}
                         data-testid="setup-semester-dropzone-unassigned"
                       >
-                        <div className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Unassigned</div>
+                        <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Unassigned</div>
                         <div className="text-lg font-semibold mt-0.5" style={{ color: INK }}>{unassignedCount}</div>
-                        <div className="text-[10px] text-gray-400">chapter{unassignedCount === 1 ? '' : 's'}</div>
+                        <div className="text-xs text-muted-foreground">chapter{unassignedCount === 1 ? '' : 's'}</div>
                       </div>
                     </div>
-                    <p className="px-5 pt-2 text-[11px] text-gray-400">Drag a chapter&apos;s ⠿ handle up into a box, or use its own dropdown below.</p>
+                    <p className="px-5 pt-2 text-xs text-muted-foreground">Drag a chapter&apos;s ⠿ handle up into a box, or use its own dropdown below.</p>
                     <div className="mt-2 max-h-[420px] overflow-y-auto divide-y" style={{ borderColor: BORDER }}>
                       {setupTree.map(renderChapterRow)}
                     </div>
@@ -1530,12 +1530,12 @@ export function SyllabusTracking({
               <div className="px-5 py-4 border-t flex items-center gap-2" style={{ borderColor: BORDER }}>
                 <button onClick={applySetup} disabled={applyingSetup}
                   data-testid="setup-apply-btn"
-                  className="text-sm font-semibold px-4 py-2 rounded-xl text-white disabled:opacity-50"
+                  className="text-sm font-semibold px-4 py-2 rounded-md text-white disabled:opacity-50"
                   style={{ background: PURPLE }}>
                   {applyingSetup ? 'Applying…' : 'Apply'}
                 </button>
                 {setupMode === 'edit' && (
-                  <button onClick={cancelSetup} className="text-sm px-3 py-2 rounded-xl border" style={{ borderColor: BORDER, color: INK }}>
+                  <button onClick={cancelSetup} className="text-sm px-3 py-2 rounded-md border" style={{ borderColor: BORDER, color: INK }}>
                     Cancel
                   </button>
                 )}
@@ -1585,11 +1585,11 @@ export function SyllabusTracking({
           open, same as the pattern needsSetup already uses for the Setup
           screen itself. */}
       {setupMode === 'closed' && !needsSetup && showInactiveChapters && currentSubject && (
-        <div className="bg-white rounded-2xl border px-5 py-4 mb-5" style={{ borderColor: BORDER }}>
+        <div className="bg-white rounded-lg border px-5 py-4 mb-5" style={{ borderColor: BORDER }}>
           <div className="flex items-center justify-between mb-3">
             <div>
               <p className="font-semibold text-sm" style={{ color: INK }}>Inactive chapters</p>
-              <p className="text-xs text-gray-400 mt-0.5">Excluded from {selectedSubject} via Syllabus Setup — hidden from students, parents and school admin.</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Excluded from {selectedSubject} via Syllabus Setup — hidden from students, parents and school admin.</p>
             </div>
             {!readOnly && (
               <button onClick={openEditSetup} data-testid="inactive-chapters-edit-setup-btn"
@@ -1599,18 +1599,18 @@ export function SyllabusTracking({
             )}
           </div>
           {inactiveChaptersLoading ? (
-            <p className="text-sm text-gray-400 py-4">Loading…</p>
+            <p className="text-sm text-muted-foreground py-4">Loading…</p>
           ) : (() => {
             const inactive = (inactiveChaptersTree ?? []).filter(ch => !ch.is_active).sort((a, b) => a.chapter_order - b.chapter_order)
             if (inactive.length === 0) {
-              return <p className="text-sm text-gray-400 py-4">Every chapter in {selectedSubject} is currently active.</p>
+              return <p className="text-sm text-muted-foreground py-4">Every chapter in {selectedSubject} is currently active.</p>
             }
             return (
               <div className="space-y-2">
                 {inactive.map(ch => (
                   <div key={ch.school_chapter_id} className="flex items-center justify-between gap-2 rounded-lg px-3 py-2" style={{ background: SURFACE }}>
                     <span className="text-sm" style={{ color: INK }}>{ch.chapter_name}</span>
-                    <span className="text-xs text-gray-400 flex-shrink-0">{ch.topics.length} topic{ch.topics.length === 1 ? '' : 's'}</span>
+                    <span className="text-xs text-muted-foreground flex-shrink-0">{ch.topics.length} topic{ch.topics.length === 1 ? '' : 's'}</span>
                   </div>
                 ))}
               </div>
@@ -1621,7 +1621,7 @@ export function SyllabusTracking({
 
       {/* Overall progress bar */}
       {setupMode === 'closed' && !needsSetup && !showInactiveChapters && currentSubject && (
-        <div className="bg-white rounded-2xl border px-5 py-4 mb-5" style={{ borderColor: BORDER }}>
+        <div className="bg-white rounded-lg border px-5 py-4 mb-5" style={{ borderColor: BORDER }}>
           <div className="flex items-center justify-between mb-2">
             <span className="font-semibold" style={{ color: INK }}>{selectedSubject}</span>
             <div className="flex items-center gap-3">
@@ -1635,20 +1635,20 @@ export function SyllabusTracking({
             </div>
           </div>
           <ProgressBar pct={currentSubject.completion_pct} color={GOLD} className="w-full" />
-          <p className="text-xs text-gray-400 mt-1.5">{currentSubject.completion_pct}% complete · {currentSubject.chapters.length} chapters</p>
+          <p className="text-xs text-muted-foreground mt-1.5">{currentSubject.completion_pct}% complete · {currentSubject.chapters.length} chapters</p>
         </div>
       )}
 
       {/* Textbooks & handbooks for this subject */}
       {setupMode === 'closed' && !needsSetup && !showInactiveChapters && materials.length > 0 && (
-        <div className="bg-white rounded-2xl border px-5 py-4 mb-5" style={{ borderColor: BORDER }}>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Textbooks & Handbooks</p>
+        <div className="bg-white rounded-lg border px-5 py-4 mb-5" style={{ borderColor: BORDER }}>
+          <p className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-2">Textbooks & Handbooks</p>
           <div className="flex flex-wrap gap-2">
             {materials.map(m => (
               <a key={m.id} href={m.file_url} target="_blank" rel="noopener noreferrer"
                 className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border hover:bg-gray-50" style={{ borderColor: BORDER, color: INK }}>
                 <BookOpen size={12} style={{ color: GOLD }} /> {m.title}
-                <span className="text-[9px] uppercase opacity-60">({m.material_type})</span>
+                <span className="text-xs uppercase opacity-60">({m.material_type})</span>
               </a>
             ))}
           </div>
@@ -1663,24 +1663,24 @@ export function SyllabusTracking({
       {currentSubject && currentSubject.chapters.length === 0 && !readOnly && (
         <div className="mb-5">
           {bootstrapMode === 'none' && (
-            <div className="bg-white rounded-2xl border border-dashed py-10 px-6 text-center" style={{ borderColor: BORDER }}>
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-3" style={{ background: '#FCEBDB' }}>
+            <div className="bg-white rounded-lg border border-dashed py-10 px-6 text-center" style={{ borderColor: BORDER }}>
+              <div className="w-12 h-12 rounded-md flex items-center justify-center mx-auto mb-3" style={{ background: '#FCEBDB' }}>
                 <BookOpen size={22} style={{ color: GOLD }} />
               </div>
               <p className="font-medium mb-1" style={{ color: INK }}>No chapters yet for {selectedSubject}</p>
-              <p className="text-gray-400 text-sm mb-4">Get started by importing a syllabus or laying down chapter placeholders.</p>
+              <p className="text-muted-foreground text-sm mb-4">Get started by importing a syllabus or laying down chapter placeholders.</p>
               <div className="flex items-center justify-center gap-2 flex-wrap">
                 <button
                   onClick={() => { setBootstrapError(''); setBootstrapMode('import') }}
                   data-testid="syllabus-bootstrap-import-btn"
-                  className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl text-white"
+                  className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-md text-white"
                   style={{ background: PURPLE }}>
                   <Upload size={14} /> Import from ChatGPT / JSON
                 </button>
                 <button
                   onClick={() => { setBootstrapError(''); setBootstrapMode('count') }}
                   data-testid="syllabus-bootstrap-count-btn"
-                  className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-xl border"
+                  className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-md border"
                   style={{ borderColor: BORDER, color: INK }}>
                   <Hash size={14} /> Enter chapter count
                 </button>
@@ -1688,7 +1688,7 @@ export function SyllabusTracking({
               <button
                 onClick={() => setAddingChapter(true)}
                 data-testid="syllabus-bootstrap-manual-btn"
-                className="text-xs text-gray-400 hover:text-gray-600 mt-3 underline">
+                className="text-xs text-muted-foreground hover:text-gray-600 mt-3 underline">
                 Or add chapters one at a time
               </button>
             </div>
@@ -1710,16 +1710,16 @@ export function SyllabusTracking({
           )}
 
           {bootstrapMode === 'count' && (
-            <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-3" style={{ borderColor: PURPLE }}>
+            <div className="bg-white rounded-lg border  p-4 space-y-3" style={{ borderColor: PURPLE }}>
               <div className="flex items-center justify-between">
                 <div className="text-sm font-medium flex items-center gap-2" style={{ color: INK }}>
                   <Hash size={14} style={{ color: PURPLE }} /> How many chapters does {selectedSubject} have?
                 </div>
-                <button onClick={() => setBootstrapMode('none')} className="p-1 rounded hover:bg-gray-100 text-gray-400" aria-label="Close">
+                <button onClick={() => setBootstrapMode('none')} className="p-1 rounded hover:bg-gray-100 text-muted-foreground" aria-label="Close">
                   <X size={15} />
                 </button>
               </div>
-              <p className="text-xs text-gray-400">Creates that many placeholder chapters (&ldquo;Chapter 1&rdquo;, &ldquo;Chapter 2&rdquo;, ...) for you to rename and fill in with subtopics.</p>
+              <p className="text-xs text-muted-foreground">Creates that many placeholder chapters (&ldquo;Chapter 1&rdquo;, &ldquo;Chapter 2&rdquo;, ...) for you to rename and fill in with subtopics.</p>
               <div className="flex items-center gap-2 flex-wrap">
                 <input
                   autoFocus
@@ -1738,7 +1738,7 @@ export function SyllabusTracking({
                   onClick={handleBootstrapCount}
                   disabled={bootstrapping || !chapterCount.trim()}
                   data-testid="syllabus-bootstrap-count-submit"
-                  className="text-sm px-3 py-1.5 rounded-lg text-white font-medium shadow-sm disabled:opacity-50"
+                  className="text-sm px-3 py-1.5 rounded-lg text-white font-medium  disabled:opacity-50"
                   style={{ background: PURPLE }}>
                   {bootstrapping ? 'Creating…' : 'Create chapters'}
                 </button>
@@ -1771,12 +1771,12 @@ export function SyllabusTracking({
             const isRenaming = renamingChapterId === ch.school_chapter_id
 
             return (
-              <div key={ch.chapter_name} className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor: BORDER }}>
+              <div key={ch.chapter_name} className="bg-white rounded-lg border overflow-hidden" style={{ borderColor: BORDER }}>
                 {/* Chapter header */}
                 <div className="w-full px-5 py-4 flex items-center gap-4 hover:bg-gray-50 transition-colors">
                   {isRenaming ? (
                     <div className="flex-1 flex items-center gap-2 min-w-0 flex-wrap">
-                      <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-black flex-shrink-0"
+                      <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-semibold flex-shrink-0"
                         style={{ background: pct === 100 ? '#E1F5EE' : '#FCEBDB', color: pct === 100 ? '#085041' : '#8A4B12' }}>
                         {chIdx + 1}
                       </div>
@@ -1800,7 +1800,7 @@ export function SyllabusTracking({
                       </button>
                       <button
                         onClick={() => setRenamingChapterId(null)}
-                        className="text-xs text-gray-400 hover:text-gray-600 px-2 flex-shrink-0">
+                        className="text-xs text-muted-foreground hover:text-gray-600 px-2 flex-shrink-0">
                         Cancel
                       </button>
                     </div>
@@ -1810,21 +1810,21 @@ export function SyllabusTracking({
                       data-testid={`syllabus-chapter-toggle-${chIdx}`}
                       className="flex-1 flex items-center gap-4 text-left min-w-0">
                       {/* Chapter number badge */}
-                      <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-black flex-shrink-0"
+                      <div className="w-9 h-9 rounded-lg flex items-center justify-center text-sm font-semibold flex-shrink-0"
                         style={{ background: pct === 100 ? '#E1F5EE' : '#FCEBDB', color: pct === 100 ? '#085041' : '#8A4B12' }}>
                         {chIdx + 1}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-gray-400 font-medium">Ch {chIdx + 1}</span>
+                          <span className="text-xs text-muted-foreground font-medium">Ch {chIdx + 1}</span>
                           <span className="font-semibold text-sm truncate" style={{ color: INK }}>{ch.chapter_name}</span>
                           {pct === 100 && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0" style={{ background: '#E1F5EE', color: '#085041' }}>Done</span>
+                            <span className="text-xs px-1.5 py-0.5 rounded-full font-semibold flex-shrink-0" style={{ background: '#E1F5EE', color: '#085041' }}>Done</span>
                           )}
                         </div>
                         <div className="flex items-center gap-3 mt-1.5">
                           <ProgressBar pct={pct} color={pct === 100 ? GREEN : GOLD} className="flex-1 max-w-[160px]" />
-                          <span className="text-xs text-gray-400">{ch.covered}/{ch.total}</span>
+                          <span className="text-xs text-muted-foreground">{ch.covered}/{ch.total}</span>
                         </div>
                       </div>
                     </button>
@@ -1856,14 +1856,14 @@ export function SyllabusTracking({
                     <button
                       onClick={() => setExpandedChapter(isExpanded ? null : ch.chapter_name)}
                       className="flex-shrink-0">
-                      <ChevronDown size={16} className="text-gray-400 transition-transform" style={{ transform: isExpanded ? 'rotate(180deg)' : undefined }} />
+                      <ChevronDown size={16} className="text-muted-foreground transition-transform" style={{ transform: isExpanded ? 'rotate(180deg)' : undefined }} />
                     </button>
                   )}
                 </div>
 
                 {/* Topics list */}
                 {isExpanded && ch.topics.length === 0 && (
-                  <div className="border-t px-5 py-4 text-xs text-gray-400 italic" style={{ borderColor: BORDER }}>
+                  <div className="border-t px-5 py-4 text-xs text-muted-foreground italic" style={{ borderColor: BORDER }}>
                     No topics added to this chapter yet.
                   </div>
                 )}
@@ -1899,7 +1899,7 @@ export function SyllabusTracking({
                               </button>
                               <button
                                 onClick={() => setRenamingTopicId(null)}
-                                className="text-xs text-gray-400 hover:text-gray-600 px-1.5 flex-shrink-0">
+                                className="text-xs text-muted-foreground hover:text-gray-600 px-1.5 flex-shrink-0">
                                 Cancel
                               </button>
                             </div>
@@ -1919,7 +1919,7 @@ export function SyllabusTracking({
                                     disabled={isMarking || readOnly}
                                     title={readOnly ? 'Read-only — viewing a past academic year' : isCovered ? 'Mark as pending' : 'Mark as complete'}
                                     data-testid={`syllabus-mark-taught-${topic.id}`}
-                                    className="text-[10px] px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1"
+                                    className="text-xs px-2 py-0.5 rounded-lg font-bold transition-all flex items-center gap-1"
                                     style={{
                                       color: isCovered ? GREEN : 'white',
                                       background: isCovered ? '#E8F8EF' : GREEN,
@@ -1930,7 +1930,7 @@ export function SyllabusTracking({
                                   </button>
                                 </div>
                                 {isCovered && topic.covered_date && (
-                                  <p className="text-[10px] mt-0.5 ml-5" style={{ color: GREEN }}>
+                                  <p className="text-xs mt-0.5 ml-5" style={{ color: GREEN }}>
                                     Taught {topic.covered_date}{topic.covered_by_name ? ` · ${topic.covered_by_name}` : ''}
                                   </p>
                                 )}
@@ -1996,7 +1996,7 @@ export function SyllabusTracking({
                         </button>
                         <button
                           onClick={() => { setAddTopicChapter(null); setNewTopicName('') }}
-                          className="text-xs text-gray-400 hover:text-gray-600 px-2">
+                          className="text-xs text-muted-foreground hover:text-gray-600 px-2">
                           Done
                         </button>
                       </div>
@@ -2028,7 +2028,7 @@ export function SyllabusTracking({
         && (currentSubject.chapters.length > 0 || addingChapter) && (
         <div className="pt-1 mt-4">
             {addingChapter ? (
-              <div className="bg-white rounded-2xl border px-5 py-3 flex gap-2 items-center flex-wrap" style={{ borderColor: BORDER }}>
+              <div className="bg-white rounded-lg border px-5 py-3 flex gap-2 items-center flex-wrap" style={{ borderColor: BORDER }}>
                 <input
                   autoFocus
                   value={newChapterName}
@@ -2050,7 +2050,7 @@ export function SyllabusTracking({
                 </button>
                 <button
                   onClick={() => { setAddingChapter(false); setNewChapterName('') }}
-                  className="text-xs text-gray-400 hover:text-gray-600 px-2">
+                  className="text-xs text-muted-foreground hover:text-gray-600 px-2">
                   Cancel
                 </button>
               </div>
@@ -2058,7 +2058,7 @@ export function SyllabusTracking({
               <button
                 onClick={() => { setAddingChapter(true); setNewChapterName('') }}
                 data-testid="syllabus-add-chapter-btn"
-                className="w-full text-sm font-semibold px-4 py-3 rounded-2xl border border-dashed transition-colors hover:bg-gray-50"
+                className="w-full text-sm font-semibold px-4 py-3 rounded-lg border border-dashed transition-colors hover:bg-gray-50"
                 style={{ borderColor: BORDER, color: INK }}>
                 + Add Chapter
               </button>
@@ -2176,7 +2176,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   }, [monthlyData])
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><p className="text-gray-400">Loading class data...</p></div>
+    return <div className="flex items-center justify-center h-64"><p className="text-muted-foreground">Loading class data...</p></div>
   }
 
   const className = `Class ${grade}${section}`
@@ -2219,20 +2219,20 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
     if (status === 'present') return <span className="text-green-600 font-bold text-xs">✓</span>
     if (status === 'absent')  return <span className="text-red-500 text-xs">○</span>
     if (status === 'late')    return <span className="text-yellow-500 text-xs">↗</span>
-    return <span className="text-gray-400 text-xs">·</span>
+    return <span className="text-muted-foreground text-xs">·</span>
   }
 
   return (
     <div>
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-gray-400 mb-4">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
         <button onClick={onBack} className="hover:text-blue-600 transition-colors">Smart Snapshot</button>
         <span>/</span>
         <span className="text-gray-700 font-medium">{className}</span>
       </div>
 
       {/* Header card */}
-      <div className="bg-white rounded-xl border border-gray-200 px-6 py-5 mb-4">
+      <div className="bg-white rounded-md border border-gray-200 px-6 py-5 mb-4">
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-3 mb-1">
@@ -2288,8 +2288,8 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
             {/* Today's attendance — morning + afternoon 1st period */}
-            <div className="bg-white rounded-xl border border-gray-200 px-4 py-4 sm:col-span-2">
-              <p className="text-xs text-gray-400 uppercase tracking-wide mb-3">Today&apos;s Attendance</p>
+            <div className="bg-white rounded-md border border-gray-200 px-4 py-4 sm:col-span-2">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-3">Today&apos;s Attendance</p>
               <div className="grid grid-cols-2 gap-3">
                 {/* Morning */}
                 {(() => {
@@ -2303,11 +2303,11 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                       </div>
                       {s.total > 0 ? (
                         <>
-                          <p className="text-lg font-bold text-gray-900">{s.present}<span className="text-sm text-gray-400">/{s.total}</span></p>
+                          <p className="text-lg font-bold text-gray-900">{s.present}<span className="text-sm text-muted-foreground">/{s.total}</span></p>
                           <div className="flex gap-2 mt-1">
-                            <span className="text-[10px] text-green-600">{pct}% present</span>
-                            {s.absent > 0 && <span className="text-[10px] text-red-500">{s.absent} absent</span>}
-                            {s.late > 0 && <span className="text-[10px] text-yellow-600">{s.late} late</span>}
+                            <span className="text-xs text-green-600">{pct}% present</span>
+                            {s.absent > 0 && <span className="text-xs text-red-500">{s.absent} absent</span>}
+                            {s.late > 0 && <span className="text-xs text-yellow-600">{s.late} late</span>}
                           </div>
                         </>
                       ) : (
@@ -2328,11 +2328,11 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                       </div>
                       {s.total > 0 ? (
                         <>
-                          <p className="text-lg font-bold text-gray-900">{s.present}<span className="text-sm text-gray-400">/{s.total}</span></p>
+                          <p className="text-lg font-bold text-gray-900">{s.present}<span className="text-sm text-muted-foreground">/{s.total}</span></p>
                           <div className="flex gap-2 mt-1">
-                            <span className="text-[10px] text-green-600">{pct}% present</span>
-                            {s.absent > 0 && <span className="text-[10px] text-red-500">{s.absent} absent</span>}
-                            {s.late > 0 && <span className="text-[10px] text-yellow-600">{s.late} late</span>}
+                            <span className="text-xs text-green-600">{pct}% present</span>
+                            {s.absent > 0 && <span className="text-xs text-red-500">{s.absent} absent</span>}
+                            {s.late > 0 && <span className="text-xs text-yellow-600">{s.late} late</span>}
                           </div>
                         </>
                       ) : (
@@ -2344,15 +2344,15 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
               </div>
             </div>
 
-            <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
-              <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">Class Average</p>
+            <div className="bg-white rounded-md border border-gray-200 px-5 py-4">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">Class Average</p>
               <p className="text-3xl font-bold text-gray-900">—</p>
-              <p className="text-xs text-gray-400 mt-0.5">Across all subjects</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Across all subjects</p>
             </div>
-            <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
-              <p className="text-xs text-gray-400 uppercase tracking-wide mb-2">At Risk Students</p>
+            <div className="bg-white rounded-md border border-gray-200 px-5 py-4">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide mb-2">At Risk Students</p>
               <p className="text-3xl font-bold text-gray-900">—</p>
-              <p className="text-xs text-gray-400 mt-0.5">Marks needed</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Marks needed</p>
             </div>
           </div>
 
@@ -2360,39 +2360,39 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           {subjects.length > 0 && (
             <div className={`grid gap-4 grid-cols-2 ${subjects.length <= 3 ? 'sm:grid-cols-3' : subjects.length === 4 ? 'sm:grid-cols-4' : 'sm:grid-cols-5'}`}>
               {subjects.map(subj => (
-                <div key={subj.id} className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+                <div key={subj.id} className="bg-white rounded-md border border-gray-200 px-5 py-4">
                   <div className="flex items-start justify-between mb-1">
                     <p className="font-semibold text-gray-800 text-sm leading-tight">{subj.subject_name}</p>
                     <span className="text-sm font-bold text-gray-300 ml-2">—</span>
                   </div>
-                  <p className="text-xs text-gray-400 mb-3">{subj.teacher_name || 'No teacher assigned'}</p>
+                  <p className="text-xs text-muted-foreground mb-3">{subj.teacher_name || 'No teacher assigned'}</p>
                   <div className="w-full bg-gray-100 rounded-full h-1.5"><div className="h-1.5 rounded-full bg-gray-300 w-0" /></div>
-                  <p className="text-[10px] text-gray-400 mt-1.5">{subj.periods_per_week} periods/week · No marks yet</p>
+                  <p className="text-xs text-muted-foreground mt-1.5">{subj.periods_per_week} periods/week · No marks yet</p>
                 </div>
               ))}
             </div>
           )}
           {subjects.length === 0 && (
-            <div className="bg-white rounded-xl border border-gray-200 py-8 text-center text-sm text-gray-400">
+            <div className="bg-white rounded-md border border-gray-200 py-8 text-center text-sm text-muted-foreground">
               No subjects assigned — add via Class Management
             </div>
           )}
 
           {/* Student overview + right panels */}
           <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
-            <div className="sm:col-span-3 bg-white rounded-xl border border-gray-200">
+            <div className="sm:col-span-3 bg-white rounded-md border border-gray-200">
               <div className="px-5 py-4 border-b border-gray-100">
                 <h3 className="font-semibold text-gray-800 text-sm">Student Overview</h3>
               </div>
               {students.length === 0 ? (
-                <div className="py-12 text-center text-sm text-gray-400">No students enrolled</div>
+                <div className="py-12 text-center text-sm text-muted-foreground">No students enrolled</div>
               ) : (
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100">
-                      <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Student</th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Today</th>
-                      <th className="text-left px-3 py-3 text-xs font-semibold text-gray-400 uppercase tracking-wide">Avg Score</th>
+                      <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Student</th>
+                      <th className="text-left px-3 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Today</th>
+                      <th className="text-left px-3 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Avg Score</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2407,7 +2407,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                               </div>
                               <div>
                                 <p className="font-medium text-gray-800">{student.name}</p>
-                                {student.roll_number && <p className="text-xs text-gray-400">Roll #{student.roll_number}</p>}
+                                {student.roll_number && <p className="text-xs text-muted-foreground">Roll #{student.roll_number}</p>}
                               </div>
                             </div>
                           </td>
@@ -2418,9 +2418,9 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                                 attRec.status === 'absent'  ? 'bg-red-100 text-red-700' :
                                 'bg-yellow-100 text-yellow-700'
                               }`}>{attRec.status}</span>
-                            ) : <span className="text-xs text-gray-400">—</span>}
+                            ) : <span className="text-xs text-muted-foreground">—</span>}
                           </td>
-                          <td className="px-3 py-3 text-gray-400 text-sm">—</td>
+                          <td className="px-3 py-3 text-muted-foreground text-sm">—</td>
                         </tr>
                       )
                     })}
@@ -2429,17 +2429,17 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
               )}
             </div>
             <div className="sm:col-span-2 space-y-4">
-              <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+              <div className="bg-white rounded-md border border-gray-200 px-5 py-4">
                 <h3 className="font-semibold text-gray-800 text-sm mb-3">Attendance Heatmap</h3>
                 <div className="grid grid-cols-7 gap-1 mb-2">
                   {Array.from({ length: 35 }).map((_, i) => <div key={i} className="w-full aspect-square rounded-sm bg-gray-100" />)}
                 </div>
-                <p className="text-xs text-gray-400">No attendance data yet</p>
+                <p className="text-xs text-muted-foreground">No attendance data yet</p>
               </div>
-              <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+              <div className="bg-white rounded-md border border-gray-200 px-5 py-4">
                 <h3 className="font-semibold text-gray-800 text-sm mb-3">Recent Exam Results</h3>
                 <div className="py-6 text-center">
-                  <p className="text-xs text-gray-400">No exams published yet</p>
+                  <p className="text-xs text-muted-foreground">No exams published yet</p>
                 </div>
               </div>
             </div>
@@ -2459,29 +2459,29 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
       )}
 
       {activeTab === 'Students' && !detailStudent && (
-        <div className="bg-white rounded-xl border border-gray-200">
+        <div className="bg-white rounded-md border border-gray-200">
           <div className="px-5 py-4 border-b border-gray-100">
             <h3 className="font-semibold text-gray-800">All Students — {className}</h3>
           </div>
           {students.length === 0 ? (
-            <div className="py-12 text-center text-sm text-gray-400">No students enrolled yet</div>
+            <div className="py-12 text-center text-sm text-muted-foreground">No students enrolled yet</div>
           ) : (
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-100">
-                  <th className="text-left px-5 py-3 text-xs font-semibold text-gray-400 uppercase">#</th>
-                  <th className="text-left px-3 py-3 text-xs font-semibold text-gray-400 uppercase">Name</th>
-                  <th className="text-left px-3 py-3 text-xs font-semibold text-gray-400 uppercase">Roll No.</th>
-                  <th className="text-left px-3 py-3 text-xs font-semibold text-gray-400 uppercase">Email</th>
-                  <th className="text-left px-3 py-3 text-xs font-semibold text-gray-400 uppercase">Parent</th>
-                  <th className="text-left px-3 py-3 text-xs font-semibold text-gray-400 uppercase">Parent Phone</th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground uppercase">#</th>
+                  <th className="text-left px-3 py-3 text-xs font-semibold text-muted-foreground uppercase">Name</th>
+                  <th className="text-left px-3 py-3 text-xs font-semibold text-muted-foreground uppercase">Roll No.</th>
+                  <th className="text-left px-3 py-3 text-xs font-semibold text-muted-foreground uppercase">Email</th>
+                  <th className="text-left px-3 py-3 text-xs font-semibold text-muted-foreground uppercase">Parent</th>
+                  <th className="text-left px-3 py-3 text-xs font-semibold text-muted-foreground uppercase">Parent Phone</th>
                 </tr>
               </thead>
               <tbody>
                 {students.map((student, idx) => (
                   <tr key={student.id} onClick={() => setDetailStudent(student)}
                     className="border-b border-gray-50 hover:bg-gray-50 cursor-pointer">
-                    <td className="px-5 py-3 text-gray-400">{idx + 1}</td>
+                    <td className="px-5 py-3 text-muted-foreground">{idx + 1}</td>
                     <td className="px-3 py-3">
                       <div className="flex items-center gap-2">
                         <div className="w-7 h-7 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold text-xs">
@@ -2533,7 +2533,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           {/* ── DAY-WISE VIEW — Morning + Afternoon session cards ── */}
           {attView === 'day' && (
             attDayLoading ? (
-              <div className="py-16 text-center text-gray-400 text-sm">Loading attendance data...</div>
+              <div className="py-16 text-center text-muted-foreground text-sm">Loading attendance data...</div>
             ) : (
               <div className="grid grid-cols-2 gap-4">
                 {(['morning', 'afternoon'] as const).map(sess => {
@@ -2545,7 +2545,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                   const isMarked = !!(info && markedTime)
                   const isMorning = sess === 'morning'
                   return (
-                    <div key={sess} className={`rounded-2xl border-2 overflow-hidden ${
+                    <div key={sess} className={`rounded-lg border-2 overflow-hidden ${
                       isMarked
                         ? isMorning ? 'border-orange-200' : 'border-purple-200'
                         : 'border-gray-200'
@@ -2562,7 +2562,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                             {isMorning ? 'Morning Session' : 'Afternoon Session'}
                           </p>
                           {isMarked && (
-                            <span className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            <span className={`ml-auto text-xs font-bold px-2 py-0.5 rounded-full ${
                               isMorning ? 'bg-orange-200 text-orange-700' : 'bg-purple-200 text-purple-700'
                             }`}>MARKED</span>
                           )}
@@ -2572,7 +2572,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                             <p className="text-sm text-gray-700">
                               Marked by{' '}
                               <span className="font-semibold text-gray-900">{info!.marked_by_name || 'Unknown'}</span>
-                              <span className="text-gray-400 mx-1">at</span>
+                              <span className="text-muted-foreground mx-1">at</span>
                               <span className={`font-bold ${isMorning ? 'text-orange-600' : 'text-purple-600'}`}>{markedTime}</span>
                             </p>
                             <div className="flex items-center gap-3 mt-2">
@@ -2585,11 +2585,11 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                                   <span className="text-sm font-semibold text-yellow-500">Late: {info!.late}</span>
                                 </>
                               )}
-                              <span className="text-xs text-gray-400 ml-auto">of {info!.total}</span>
+                              <span className="text-xs text-muted-foreground ml-auto">of {info!.total}</span>
                             </div>
                           </>
                         ) : (
-                          <p className="text-sm text-gray-400 mt-1">Attendance not marked yet</p>
+                          <p className="text-sm text-muted-foreground mt-1">Attendance not marked yet</p>
                         )}
                       </div>
 
@@ -2605,7 +2605,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                                   status === 'present' ? 'bg-green-50 text-green-800' :
                                   status === 'absent'  ? 'bg-red-50 text-red-700' :
                                   status === 'late'    ? 'bg-yellow-50 text-yellow-700' :
-                                  'bg-gray-50 text-gray-400'
+                                  'bg-gray-50 text-muted-foreground'
                                 }`}>
                                   <span className="font-bold flex-shrink-0">
                                     {status === 'present' ? '✓' : status === 'absent' ? '✗' : status === 'late' ? '↗' : '—'}
@@ -2631,9 +2631,9 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           {/* ── MONTHLY VIEW ───────────────────────────────────────────────── */}
           {attView === 'monthly' && (
             monthlyLoading ? (
-              <div className="py-16 text-center text-gray-400 text-sm">Loading monthly data...</div>
+              <div className="py-16 text-center text-muted-foreground text-sm">Loading monthly data...</div>
             ) : (
-              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
                 <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
                   <h3 className="font-semibold text-gray-800 text-sm">
                     {new Date(attMonth + '-01').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })} — {className}
@@ -2646,7 +2646,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                   </div>
                 </div>
                 {monthStudents.length === 0 ? (
-                  <div className="py-12 text-center text-sm text-gray-400">No attendance data for this month</div>
+                  <div className="py-12 text-center text-sm text-muted-foreground">No attendance data for this month</div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="text-xs border-collapse min-w-max w-full">
@@ -2659,7 +2659,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                             return (
                               <th key={d} className={`px-1 py-2 text-center font-semibold min-w-[36px] ${isWeekend ? 'text-gray-300' : 'text-gray-600'}`}>
                                 <span className="block">{d}</span>
-                                <span className="block font-normal text-[9px] text-gray-400">{dateObj.toLocaleDateString('en-IN', { weekday: 'narrow' })}</span>
+                                <span className="block font-normal text-xs text-muted-foreground">{dateObj.toLocaleDateString('en-IN', { weekday: 'narrow' })}</span>
                                 {!isWeekend && (
                                   <div className="flex justify-center gap-0.5 mt-1">
                                     <span className="text-[8px] text-orange-400 font-normal">M</span>
@@ -2679,7 +2679,7 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                             <tr key={student.id} className={`border-b border-gray-50 ${idx % 2 === 0 ? '' : 'bg-gray-50/50'}`}>
                               <td className="sticky left-0 bg-white px-4 py-2 font-medium text-gray-800 border-r border-gray-100">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-gray-400 text-[10px] w-5 flex-shrink-0">{student.roll || idx + 1}</span>
+                                  <span className="text-muted-foreground text-xs w-5 flex-shrink-0">{student.roll || idx + 1}</span>
                                   <span className="truncate max-w-[110px]">{student.name}</span>
                                 </div>
                               </td>
@@ -2713,13 +2713,13 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
                       </tbody>
                     </table>
                     {/* Legend */}
-                    <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 flex items-center gap-4 text-[10px] text-gray-500">
+                    <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 flex items-center gap-4 text-xs text-gray-500">
                       <span className="font-semibold">Each cell = M (morning) + A (afternoon)</span>
                       <span className="flex items-center gap-1"><span className="text-green-600 font-bold">✓</span> Present</span>
                       <span className="flex items-center gap-1"><span className="text-red-500">○</span> Absent</span>
                       <span className="flex items-center gap-1"><span className="text-yellow-500">↗</span> Late (counts as 50%)</span>
                       <span className="flex items-center gap-1"><span className="text-gray-300">·</span> Not recorded</span>
-                      <span className="ml-auto text-gray-400">% = present sessions / total sessions taken</span>
+                      <span className="ml-auto text-muted-foreground">% = present sessions / total sessions taken</span>
                     </div>
                   </div>
                 )}
@@ -2742,8 +2742,8 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
         />
       )}
       {activeTab === 'Marks & Results' && !teacher && (
-        <div className="bg-white rounded-xl border border-gray-200 py-10 text-center">
-          <p className="text-sm text-gray-400">Loading teacher info...</p>
+        <div className="bg-white rounded-md border border-gray-200 py-10 text-center">
+          <p className="text-sm text-muted-foreground">Loading teacher info...</p>
         </div>
       )}
 

@@ -13,15 +13,15 @@ export default function ParentProfile({ parentInfo }: Props) {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="bg-gradient-to-r from-pink-500 to-rose-500 px-6 py-8 text-white">
+      <div className="bg-white rounded-lg border border-border overflow-hidden">
+        <div className="border-b border-border px-6 py-6 text-foreground">
           <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center text-2xl font-bold">
+            <div className="w-12 h-12 shrink-0 rounded-md bg-secondary text-primary flex items-center justify-center text-xl font-semibold" aria-hidden="true">
               {parentInfo.name.charAt(0).toUpperCase()}
             </div>
             <div>
               <h2 className="text-xl font-bold">{parentInfo.name}</h2>
-              <p className="text-pink-100 text-sm">{parentInfo.school_name}</p>
+              <p className="text-muted-foreground text-sm">{parentInfo.school_name}</p>
             </div>
           </div>
         </div>
@@ -51,9 +51,9 @@ export default function ParentProfile({ parentInfo }: Props) {
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-gray-50 rounded-xl px-4 py-3">
+    <div className="border-b border-border py-3">
       <p className="text-xs text-gray-500 mb-0.5">{label}</p>
-      <p className="text-sm font-medium text-gray-800">{value}</p>
+      <p className="break-words text-sm font-medium text-foreground">{value}</p>
     </div>
   )
 }

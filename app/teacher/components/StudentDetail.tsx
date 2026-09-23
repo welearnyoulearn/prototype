@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { InlineLoader } from '@/components/loaders'
 
 export type StudentDetailData = {
   id: number
@@ -94,9 +95,7 @@ export default function StudentDetail({
       </button>
 
       {loading ? (
-        <div className="flex items-center justify-center h-64">
-          <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        </div>
+        <InlineLoader portal="teacher" label="Loading student details…" size="lg" className="min-h-64" />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
@@ -104,7 +103,7 @@ export default function StudentDetail({
           <div className="lg:col-span-1 flex flex-col gap-4">
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <div className="flex flex-col items-center text-center mb-4">
-                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-2xl font-bold mb-3">
+                <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-green-800 text-2xl font-semibold text-white">
                   {student.name.charAt(0).toUpperCase()}
                 </div>
                 <h2 className="text-lg font-bold text-gray-900">{student.name}</h2>

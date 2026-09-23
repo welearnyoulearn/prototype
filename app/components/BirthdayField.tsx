@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { validateBirthDate, type BirthdayKind } from '@/lib/birthday'
+import { ButtonLoader } from '@/components/loaders'
 
 // Shared by all three roles, in both contexts: the one-time onboarding
 // prompt (showSkip) and the "add/edit later" section on each profile page
@@ -19,7 +20,7 @@ type Props = {
 }
 
 export default function BirthdayField({
-  value, endpoint, kind, ring, accentGradient = 'from-gray-700 to-gray-900', onSaved, showSkip, onSkip,
+  value, endpoint, kind, ring, onSaved, showSkip, onSkip,
 }: Props) {
   const [editing, setEditing] = useState(!value)
   const [date, setDate]       = useState(value ?? '')
@@ -49,7 +50,7 @@ export default function BirthdayField({
 
   if (!editing && value) {
     return (
-      <div className="bg-gray-50 rounded-xl px-4 py-3 flex items-center justify-between">
+      <div className="flex items-center justify-between rounded-md border border-border bg-muted/50 px-4 py-3">
         <div>
           <p className="text-xs text-gray-500 mb-0.5">Birthday</p>
           <p className="text-sm font-medium text-gray-800">
@@ -59,7 +60,7 @@ export default function BirthdayField({
         <button
           onClick={() => { setEditing(true); setDate(value); setError('') }}
           data-testid="birthday-edit-btn"
-          className="text-xs text-gray-400 hover:text-gray-700 underline underline-offset-2"
+          className="min-h-10 rounded-sm px-2 text-xs font-medium text-primary hover:bg-accent"
         >
           Edit
         </button>
@@ -68,31 +69,32 @@ export default function BirthdayField({
   }
 
   return (
-    <div className="space-y-2">
-      {error && <p className="text-xs text-red-600">{error}</p>}
+    <div className="space-y-3">
+      {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
       <input
         type="date"
         value={date}
         onChange={e => setDate(e.target.value)}
         max={new Date().toISOString().slice(0, 10)}
         data-testid="birthday-date-input"
-        className={`w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 ${ring} focus:border-transparent transition`}
+        aria-label="Date of birth"
+        className={`min-h-12 w-full rounded-md border border-input bg-white px-4 py-2.5 text-sm text-gray-900 transition-colors focus:border-primary focus:outline-none focus:ring-2 ${ring}`}
       />
       <div className="flex gap-2">
         <button
           onClick={handleSave}
           disabled={saving}
           data-testid="birthday-save-btn"
-          className={`flex-1 bg-gradient-to-r ${accentGradient} text-white text-sm font-medium py-2.5 rounded-xl transition-all disabled:opacity-50`}
+          className="auth-submit flex-1"
         >
-          {saving ? 'Saving…' : 'Save Birthday'}
+          {saving ? <ButtonLoader label="Saving…" /> : 'Save birthday'}
         </button>
         {showSkip && (
           <button
             type="button"
             onClick={onSkip}
             data-testid="birthday-skip-btn"
-            className="px-4 py-2.5 rounded-xl text-sm text-gray-500 hover:text-gray-700 border border-gray-200 transition-colors"
+            className="min-h-12 rounded-md border border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             Skip for now
           </button>
@@ -101,7 +103,7 @@ export default function BirthdayField({
           <button
             type="button"
             onClick={() => { setEditing(false); setDate(value); setError('') }}
-            className="px-4 py-2.5 rounded-xl text-sm text-gray-500 hover:text-gray-700 border border-gray-200 transition-colors"
+            className="min-h-12 rounded-md border border-border px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             Cancel
           </button>

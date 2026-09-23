@@ -4,6 +4,7 @@ import { useEffect, useState, Fragment, type Dispatch, type SetStateAction, type
 import { GRADE_SEQUENCE } from '@/lib/grades'
 import type { FeeCategory, FeeStructure, StructureLock, Amendment, ApplStudent, ApplCategory, FeeStats } from './types'
 import { LoadErrorBanner } from './LoadErrorBanner'
+import { Skeleton } from '@/components/ui/skeleton'
 
 const GRADES = GRADE_SEQUENCE
 function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
@@ -635,14 +636,15 @@ export default function FeeSetupTab({
           <LoadErrorBanner message={setupError} onRetry={onRetrySetup} testId="btn-load-error-retry-setup" />
 
           {setupLoading && (
-            <div className="space-y-4 animate-pulse">
+            <div className="space-y-4" role="status" aria-live="polite" aria-busy="true">
+              <span className="sr-only">Loading fee setup</span>
               <div className="bg-white rounded-xl border border-gray-100 p-4">
-                <div className="h-4 bg-gray-200 rounded w-48 mb-4" />
+                <Skeleton className="mb-4 h-4 w-48" />
                 <div className="flex items-center gap-2">
-                  {[1,2,3,4,5].map(i => <div key={i} className="h-8 bg-gray-100 rounded flex-1" />)}
+                  {[1,2,3,4,5].map(i => <Skeleton key={i} className="h-8 flex-1" />)}
                 </div>
               </div>
-              {[1,2,3].map(i => <div key={i} className="bg-white rounded-xl border border-gray-100 p-5 h-20" />)}
+              {[1,2,3].map(i => <Skeleton key={i} className="h-20" />)}
             </div>
           )}
 

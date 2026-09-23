@@ -17,6 +17,9 @@ import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 import NotificationBell from '../components/NotificationBell'
 import AttendanceCalendar from '../components/AttendanceCalendar'
 import SchoolCalendarView from '../components/SchoolCalendarView'
+import PortalSidebar from '@/components/portal/PortalSidebar'
+import { CalendarDays } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Child = { id: number; name: string; grade: string; section: string; roll_number: string; school_id: number }
@@ -459,27 +462,27 @@ function ParentDashboard() {
   if (loading) return <FullPageLoader portal="parent" message="Loading parent dashboard" sub="Fetching your child's progress…" />
 
   if (showChildPicker && parentInfo) return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-50 via-white to-purple-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-6">
-          <div className="w-14 h-14 bg-pink-100 rounded-2xl flex items-center justify-center mx-auto mb-3">
-            <svg className="w-7 h-7 text-pink-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="w-14 h-14 bg-secondary rounded-lg flex items-center justify-center mx-auto mb-3">
+            <svg className="w-7 h-7 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </div>
           <h2 className="text-xl font-bold text-gray-900">Select a Child</h2>
           <p className="text-sm text-gray-500 mt-1">Welcome back, {parentInfo.name}</p>
         </div>
-        <div className="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100 shadow-sm overflow-hidden">
           {parentInfo.children.map(child => (
             <button key={child.id} onClick={() => selectChild(child)}
-              className="w-full flex items-center gap-4 px-5 py-4 hover:bg-pink-50 transition-colors text-left">
-              <div className="w-10 h-10 bg-pink-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <span className="text-pink-600 font-bold text-sm">{child.name.charAt(0)}</span>
+              className="w-full flex items-center gap-4 px-5 py-4 hover:bg-accent transition-colors text-left">
+              <div className="w-10 h-10 bg-secondary rounded-full flex items-center justify-center flex-shrink-0">
+                <span className="text-primary font-bold text-sm">{child.name.charAt(0)}</span>
               </div>
               <div className="min-w-0">
                 <p className="font-semibold text-gray-900 text-sm">{child.name}</p>
-                <p className="text-xs text-gray-400">Grade {child.grade}-{child.section} · Roll {child.roll_number}</p>
+                <p className="text-xs text-muted-foreground">Grade {child.grade}-{child.section} · Roll {child.roll_number}</p>
               </div>
               <svg className="w-4 h-4 text-gray-300 ml-auto flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
@@ -488,7 +491,7 @@ function ParentDashboard() {
           ))}
         </div>
         <button onClick={handleLogout}
-          className="w-full mt-4 text-sm text-gray-400 hover:text-red-500 py-2 transition-colors">
+          className="w-full mt-4 text-sm text-muted-foreground hover:text-red-500 py-2 transition-colors">
           Sign out
         </button>
       </div>
@@ -503,28 +506,29 @@ function ParentDashboard() {
     ? Math.round((latestResult.total_obtained! / latestResult.total_max!) * 100) : null
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="portal-root" data-portal="parent">
+      <a href="#parent-content" className="portal-skip-link">Skip to content</a>
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3.5 flex items-center justify-between">
-        <div className="flex items-center gap-3 sm:gap-4">
-          <button onClick={() => setSidebarOpen(o => !o)} aria-label="Open menu" data-testid="parent-menu-toggle" className="lg:hidden p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 flex-shrink-0">
+      <header className="portal-topbar">
+        <div className="flex min-w-0 max-sm:w-full items-center gap-3">
+          <button onClick={() => setSidebarOpen(o => !o)} aria-label="Open navigation" aria-expanded={sidebarOpen} aria-controls="portal-navigation" data-testid="parent-menu-toggle" className="portal-icon-button lg:hidden">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
-          <Link href="/" className="text-gray-400 hover:text-gray-600 text-sm hidden sm:inline">{T.home}</Link>
+          <Link href="/" className="text-muted-foreground hover:text-gray-600 text-sm hidden sm:inline">{T.home}</Link>
           <span className="text-gray-300 hidden sm:inline">|</span>
-          <div>
+          <div className="min-w-0">
             <p className="text-sm font-bold text-gray-900">{student.name}</p>
-            <p className="text-xs text-gray-400">{T.grade} {student.grade}-{student.section} · {parentInfo?.school_name}</p>
+            <p className="text-xs text-muted-foreground truncate">{T.grade} {student.grade}-{student.section} · {parentInfo?.school_name}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 max-sm:w-full">
           {feeAcYear && (
             <span
               data-testid="academic-year-badge"
               title="Active academic year — all data on this screen is scoped to this year"
-              className="hidden sm:inline-flex items-center gap-1 bg-gray-100 border border-gray-200 text-gray-500 text-[10px] font-medium px-2.5 py-1 rounded-full"
+              className="hidden sm:inline-flex items-center gap-1 bg-gray-100 border border-gray-200 text-gray-500 text-xs font-medium px-2.5 py-1 rounded-full"
             >
-              📅 {feeAcYear}
+              <CalendarDays size={14} aria-hidden="true" /> {feeAcYear}
             </span>
           )}
           {isNavItemVisible('results') && summary?.unacknowledged_count ? (
@@ -542,71 +546,78 @@ function ParentDashboard() {
           {parentInfo?.id && <NotificationBell parentId={parentInfo.id} onNavigate={key => navigateTo(key)} />}
           <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
             {(['en', 'te'] as Lang[]).map(l => (
-              <button key={l} onClick={() => changeLang(l)}
-                className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${lang === l ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              <button key={l} onClick={() => changeLang(l)} aria-pressed={lang === l} aria-label={l === 'en' ? 'English' : 'తెలుగు'}
+                className={`min-h-10 min-w-10 px-2.5 rounded-md text-xs font-semibold transition-colors ${lang === l ? 'bg-white text-primary' : 'text-muted-foreground hover:text-foreground'}`}>
                 {l === 'en' ? 'EN' : 'తె'}
               </button>
             ))}
           </div>
           {(parentInfo?.children?.length ?? 0) > 1 && (
             <button onClick={() => setShowChildPicker(true)}
-              className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 px-3 py-1.5 rounded-lg">
+              className="text-xs text-muted-foreground hover:text-gray-600 border border-gray-200 px-3 py-1.5 rounded-lg">
               {T.switchChild}
             </button>
           )}
           <button onClick={handleLogout}
-            className="text-xs text-gray-400 hover:text-red-500 border border-gray-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition-colors">
+            className="text-xs text-muted-foreground hover:text-red-500 border border-gray-200 hover:border-red-200 px-3 py-1.5 rounded-lg transition-colors">
             Logout
           </button>
         </div>
-      </div>
+      </header>
 
-      <div className="flex h-[calc(100vh-57px)] relative">
-        {sidebarOpen && <div className="fixed inset-0 z-30 bg-black/50 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+      <div className="portal-body">
         {/* Sidebar */}
-        <nav className={`fixed inset-y-0 left-0 z-40 lg:relative lg:inset-y-auto lg:left-auto w-48 bg-white border-r border-gray-100 flex flex-col py-3 shrink-0 overflow-y-auto transform transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+        <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} label={lang === 'te' ? 'నావిగేషన్' : 'Parent navigation'}>
+          <div className="portal-identity">
+            <p className="text-sm font-semibold tracking-tight">WeLearnYouLearn</p>
+            <p className="mt-1 text-xs text-muted-foreground">{parentInfo?.school_name}</p>
+          </div>
+          <nav className="flex-1 overflow-y-auto p-3" aria-label={lang === 'te' ? 'నావిగేషన్' : 'Parent workspace'}>
           {NAV.filter(item => isNavItemVisible(item.key)).map(item => (
-            <button key={item.key} onClick={() => navigateTo(item.key)}
-              className={`flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium transition-colors mx-2 rounded-lg ${
-                activeNav === item.key ? 'bg-pink-50 text-pink-700' : 'text-gray-600 hover:bg-gray-50'
-              }`}>
+            <button key={item.key} onClick={() => navigateTo(item.key)} aria-current={activeNav === item.key ? 'page' : undefined}
+              className="portal-nav-item">
               <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={item.icon} />
               </svg>
               {T.nav[item.key as keyof typeof T.nav]}
               {item.key === 'fees' && (feeSummary?.overdue_count ?? 0) > 0 && (
-                <span className="ml-auto bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                <span className="ml-auto bg-red-500 text-white text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">
                   {feeSummary!.overdue_count}
                 </span>
               )}
               {item.key === 'results' && (summary?.unacknowledged_count ?? 0) > 0 && (
-                <span className="ml-auto bg-amber-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+                <span className="ml-auto bg-amber-500 text-white text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">
                   {summary!.unacknowledged_count}
                 </span>
               )}
             </button>
           ))}
-        </nav>
+          </nav>
+          <div className="portal-account">
+            <p className="truncate text-sm font-medium">{parentInfo?.name}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{T.yourChild}: {student.name}</p>
+          </div>
+        </PortalSidebar>
 
         {/* Main */}
-        <main className="flex-1 overflow-y-auto p-3 sm:p-6">
+        <main id="parent-content" tabIndex={-1} className="portal-main">
 
           {/* ── OVERVIEW ───────────────────────────────────────────────────── */}
           {visited.has('overview') && (
-          <div hidden={activeNav !== 'overview'} className="max-w-3xl space-y-5">
+          <div hidden={activeNav !== 'overview'} className="max-w-5xl space-y-6">
             {/* Hero card */}
-            <div className="bg-gradient-to-r from-pink-500 to-purple-600 rounded-2xl p-5 text-white">
-              <div className="flex items-center justify-between">
+            <div className="border-b border-border pb-6">
+              <div className="flex flex-wrap items-start justify-between gap-5">
                 <div>
-                  <p className="text-pink-200 text-xs font-semibold uppercase tracking-wide mb-1">{T.yourChild}</p>
-                  <h2 className="text-xl font-black">{student.name}</h2>
-                  <p className="text-pink-200 text-sm mt-0.5">{T.grade} {student.grade} · {T.section} {student.section} · {T.roll} {student.roll_number}</p>
+                  <p className="text-muted-foreground text-xs font-medium mb-2">{T.yourChild}</p>
+                  <h1 className="text-2xl font-semibold tracking-tight">{student.name}</h1>
+                  <p className="text-muted-foreground text-sm mt-2">{T.grade} {student.grade} · {T.section} {student.section} · {T.roll} {student.roll_number}</p>
                 </div>
                 <div className="text-right">
                   {isNavItemVisible('attendance') && summary?.attendance_pct !== null && summary?.attendance_pct !== undefined && (
                     <div>
-                      <div className="text-3xl font-black">{summary.attendance_pct}%</div>
-                      <div className="text-pink-200 text-xs">{T.thisMonth}</div>
+                      <div className="text-2xl font-semibold tabular-nums text-primary">{summary.attendance_pct}%</div>
+                      <div className="text-muted-foreground text-xs">{T.nav.attendance} · {T.thisMonth}</div>
                     </div>
                   )}
                 </div>
@@ -616,24 +627,24 @@ function ParentDashboard() {
             {/* Quick stats — each tile deep-links to a nav section, so it's
                 hidden right alongside that section rather than pointing
                 somewhere the school's plan doesn't actually include. */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="flex flex-wrap divide-x divide-border border-y border-border bg-white">
               {isNavItemVisible('exams') && (
-                <button onClick={() => navigateTo('exams')} className="bg-white rounded-xl border border-gray-200 p-4 text-center hover:border-pink-300 transition-colors group">
-                  <div className="text-2xl font-black text-purple-600 group-hover:text-pink-600">{summary?.upcoming_exams?.length ?? 0}</div>
+                <button onClick={() => navigateTo('exams')} className="portal-metric min-w-36 flex-1 transition-colors">
+                  <div className="text-2xl font-semibold tabular-nums text-foreground">{summary?.upcoming_exams?.length ?? 0}</div>
                   <div className="text-xs text-gray-500 mt-1">{T.upcomingExams}</div>
                 </button>
               )}
               {isNavItemVisible('results') && (
-                <button onClick={() => navigateTo('results')} className={`bg-white rounded-xl border p-4 text-center hover:border-pink-300 transition-colors group ${summary?.unacknowledged_count ? 'border-red-200 bg-red-50' : 'border-gray-200'}`}>
-                  <div className={`text-2xl font-black group-hover:text-pink-600 ${summary?.unacknowledged_count ? 'text-red-600' : 'text-gray-400'}`}>
+                <button onClick={() => navigateTo('results')} className="portal-metric min-w-36 flex-1 transition-colors">
+                  <div className={`text-2xl font-semibold tabular-nums ${summary?.unacknowledged_count ? 'text-red-700' : 'text-foreground'}`}>
                     {summary?.unacknowledged_count ?? 0}
                   </div>
                   <div className="text-xs text-gray-500 mt-1">{T.pendingSignoff}</div>
                 </button>
               )}
               {isNavItemVisible('fees') && (
-                <button onClick={() => navigateTo('fees')} className={`bg-white rounded-xl border p-4 text-center hover:border-pink-300 transition-colors group ${(feeSummary?.overdue_count ?? 0) > 0 ? 'border-amber-200 bg-amber-50' : 'border-gray-200'}`}>
-                  <div className={`text-lg font-black group-hover:text-pink-600 ${(feeSummary?.overdue_count ?? 0) > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+                <button onClick={() => navigateTo('fees')} className="portal-metric min-w-36 flex-1 transition-colors">
+                  <div className={`text-2xl font-semibold tabular-nums ${(feeSummary?.overdue_count ?? 0) > 0 ? 'text-amber-700' : 'text-foreground'}`}>
                     {feeSummary ? fmt(feeSummary.total_outstanding) : '—'}
                   </div>
                   <div className="text-xs text-gray-500 mt-1">{T.outstandingFees}</div>
@@ -644,27 +655,27 @@ function ParentDashboard() {
 
             {/* Latest result */}
             {isNavItemVisible('results') && latestResult && (
-              <div className="bg-white rounded-xl border border-gray-200 p-4">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{T.latestResult}</p>
+              <section className="border-y border-gray-200 py-5" aria-labelledby="parent-latest-result">
+                <p id="parent-latest-result" className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">{T.latestResult}</p>
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-semibold text-gray-800">{latestResult.exam_name}</p>
-                    <p className="text-xs text-gray-400">{EXAM_TYPE_LABELS[latestResult.exam_type] || latestResult.exam_type} · {latestResult.exam_date}</p>
+                    <p className="text-xs text-muted-foreground">{EXAM_TYPE_LABELS[latestResult.exam_type] || latestResult.exam_type} · {latestResult.exam_date}</p>
                   </div>
                   <div className="text-right">
-                    <div className={`text-2xl font-black ${latestPct !== null ? (latestPct >= latestResult.passing_pct ? 'text-green-600' : 'text-red-600') : 'text-gray-400'}`}>
+                    <div className={`text-2xl font-semibold ${latestPct !== null ? (latestPct >= latestResult.passing_pct ? 'text-green-600' : 'text-red-600') : 'text-muted-foreground'}`}>
                       {latestPct !== null ? `${latestPct}%` : '—'}
                     </div>
-                    {latestResult.total_obtained !== null && <div className="text-xs text-gray-400">{latestResult.total_obtained}/{latestResult.total_max}</div>}
+                    {latestResult.total_obtained !== null && <div className="text-xs text-muted-foreground">{latestResult.total_obtained}/{latestResult.total_max}</div>}
                   </div>
                 </div>
-              </div>
+              </section>
             )}
 
             {/* Upcoming exams */}
             {isNavItemVisible('exams') && summary?.upcoming_exams && summary.upcoming_exams.length > 0 && (
-              <div className="bg-white rounded-xl border border-gray-200 p-4">
-                <p className="text-sm font-bold text-gray-800 mb-3">{T.upcomingExams}</p>
+              <section className="border-y border-gray-200 py-5" aria-labelledby="parent-upcoming-exams">
+                <p id="parent-upcoming-exams" className="text-sm font-semibold text-gray-800 mb-3">{T.upcomingExams}</p>
                 <div className="space-y-2">
                   {summary.upcoming_exams.slice(0, 5).map(e => {
                     const days = Math.round((new Date(e.exam_date).getTime() - new Date().setHours(0,0,0,0)) / 86400000)
@@ -672,11 +683,11 @@ function ParentDashboard() {
                       <div key={e.id} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
                         <div>
                           <p className="text-sm font-semibold text-gray-800">{e.exam_name}</p>
-                          <p className="text-xs text-gray-400">{e.subjects.slice(0,3).join(', ')}{e.subjects.length > 3 ? ` +${e.subjects.length - 3}` : ''}</p>
+                          <p className="text-xs text-muted-foreground">{e.subjects.slice(0,3).join(', ')}{e.subjects.length > 3 ? ` +${e.subjects.length - 3}` : ''}</p>
                         </div>
                         <div className="text-right">
                           <p className="text-xs font-semibold text-gray-600">{new Date(e.exam_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
-                          <p className={`text-[10px] font-bold ${days <= 3 ? 'text-red-600' : days <= 7 ? 'text-orange-500' : 'text-gray-400'}`}>
+                          <p className={`text-xs font-bold ${days <= 3 ? 'text-red-600' : days <= 7 ? 'text-orange-500' : 'text-muted-foreground'}`}>
                             {days === 0 ? T.today : days === 1 ? T.tomorrow : T.daysAway(days)}
                           </p>
                         </div>
@@ -684,21 +695,21 @@ function ParentDashboard() {
                     )
                   })}
                 </div>
-                <button onClick={() => navigateTo('exams')} className="mt-3 text-xs text-pink-600 font-semibold hover:underline">{T.viewFullCalendar}</button>
-              </div>
+                <button onClick={() => navigateTo('exams')} className="mt-3 text-xs text-primary font-semibold hover:underline">{T.viewFullCalendar}</button>
+              </section>
             )}
 
             {/* Sign-off alerts */}
             {isNavItemVisible('results') && summary?.released_results.filter(r => !r.parent_acknowledged).map(r => {
               const p = r.total_obtained !== null && r.total_max ? Math.round((r.total_obtained / r.total_max) * 100) : null
               return (
-                <div key={r.id} className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start justify-between gap-3">
+                <div key={r.id} className="bg-amber-50 border-l-2 border-amber-600 px-4 py-3 flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-bold text-amber-900">{r.exam_name} — {T.signOffNeeded}</p>
                     <p className="text-xs text-amber-700 mt-0.5">{EXAM_TYPE_LABELS[r.exam_type] || r.exam_type} · {r.exam_date}{p !== null ? ` · Score: ${p}%` : ''}</p>
                   </div>
                   <button onClick={() => { setAckingId(r.id); navigateTo('results') }}
-                    className="shrink-0 bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-amber-700">
+                    className="shrink-0 bg-amber-700 text-white text-xs font-semibold px-3 py-2 rounded-md hover:bg-amber-800">
                     {T.signNow}
                   </button>
                 </div>
@@ -766,13 +777,13 @@ function ParentDashboard() {
                   className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white">
                   {feeAcYears.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
-                <button onClick={() => loadFees(student, feeAcYear)} className="text-xs text-pink-600 border border-pink-200 px-3 py-1.5 rounded-lg">{T.refresh}</button>
+                <button onClick={() => loadFees(student, feeAcYear)} className="text-xs text-primary border border-input px-3 py-1.5 rounded-lg">{T.refresh}</button>
               </div>
             </div>
 
             {/* Pay success — Receipt */}
             {paySuccess && (
-              <div className="bg-white border-2 border-green-200 rounded-2xl overflow-hidden shadow-sm">
+              <div className="bg-white border-2 border-green-200 rounded-lg overflow-hidden shadow-sm">
                 <div className="bg-green-500 px-5 py-4 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
@@ -782,15 +793,15 @@ function ParentDashboard() {
                 </div>
                 <div className="px-5 py-4">
                   <p className="text-xs text-gray-500 mb-1">Receipt Number</p>
-                  <p className="text-xl font-black font-mono text-gray-800 tracking-wide">{paySuccess.receipt_number}</p>
+                  <p className="text-xl font-semibold font-mono text-gray-800 tracking-wide">{paySuccess.receipt_number}</p>
                   <div className="mt-3 pt-3 border-t border-dashed border-gray-200 flex items-center justify-between">
                     <div>
-                      <p className="text-xs text-gray-400">Amount Paid</p>
+                      <p className="text-xs text-muted-foreground">Amount Paid</p>
                       <p className="text-base font-bold text-gray-700">{fmt(paySuccess.total_amount)}</p>
                     </div>
                     {paySuccess.entries_count > 1 && (
                       <div className="text-right">
-                        <p className="text-xs text-gray-400">Entries</p>
+                        <p className="text-xs text-muted-foreground">Entries</p>
                         <p className="text-base font-bold text-gray-700">{paySuccess.entries_count}</p>
                       </div>
                     )}
@@ -804,31 +815,32 @@ function ParentDashboard() {
             )}
 
             {feeLoading ? (
-              <div className="space-y-2">{[...Array(4)].map((_, i) => (
-                <div key={i} className="bg-white rounded-xl border border-gray-100 p-4 animate-pulse h-16" />
-              ))}</div>
+              <div className="space-y-2" role="status" aria-live="polite" aria-busy="true">
+                <span className="sr-only">Loading fee details</span>
+                {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-16" />)}
+              </div>
             ) : (
               <>
                 {/* Summary */}
                 {feeSummary && (
                   <div className={`grid gap-3 ${feeSummary.total_waived > 0 ? 'grid-cols-4' : 'grid-cols-3'}`}>
                     <div className="bg-white border border-gray-100 rounded-xl p-4 text-center">
-                      <p className="text-xs text-gray-400">{T.totalDue}</p>
-                      <p className="text-xl font-black text-gray-800 mt-1">{fmt(feeSummary.total_due)}</p>
+                      <p className="text-xs text-muted-foreground">{T.totalDue}</p>
+                      <p className="text-xl font-semibold text-gray-800 mt-1">{fmt(feeSummary.total_due)}</p>
                     </div>
                     <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center">
                       <p className="text-xs text-green-600">{T.paid}</p>
-                      <p className="text-xl font-black text-green-700 mt-1">{fmt(feeSummary.total_paid)}</p>
+                      <p className="text-xl font-semibold text-green-700 mt-1">{fmt(feeSummary.total_paid)}</p>
                     </div>
                     {feeSummary.total_waived > 0 && (
                       <div className="bg-purple-50 border border-purple-100 rounded-xl p-4 text-center">
                         <p className="text-xs text-purple-600">Waived</p>
-                        <p className="text-xl font-black text-purple-700 mt-1">{fmt(feeSummary.total_waived)}</p>
+                        <p className="text-xl font-semibold text-purple-700 mt-1">{fmt(feeSummary.total_waived)}</p>
                       </div>
                     )}
                     <div className={`${feeSummary.total_outstanding > 0 ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'} border rounded-xl p-4 text-center`}>
-                      <p className={`text-xs ${feeSummary.total_outstanding > 0 ? 'text-red-500' : 'text-gray-400'}`}>{T.outstanding}</p>
-                      <p className={`text-xl font-black mt-1 ${feeSummary.total_outstanding > 0 ? 'text-red-600' : 'text-gray-400'}`}>{fmt(feeSummary.total_outstanding)}</p>
+                      <p className={`text-xs ${feeSummary.total_outstanding > 0 ? 'text-red-500' : 'text-muted-foreground'}`}>{T.outstanding}</p>
+                      <p className={`text-xl font-semibold mt-1 ${feeSummary.total_outstanding > 0 ? 'text-red-600' : 'text-muted-foreground'}`}>{fmt(feeSummary.total_outstanding)}</p>
                     </div>
                   </div>
                 )}
@@ -864,7 +876,7 @@ function ParentDashboard() {
 
                 {/* Payment form (multi or single) */}
                 {hasOnlinePayments && payingLedger && (
-                  <div className="bg-white border border-blue-200 rounded-2xl overflow-hidden shadow-sm">
+                  <div className="bg-white border border-blue-200 rounded-lg overflow-hidden shadow-sm">
                     {/* Payment header */}
                     <div className="bg-blue-600 px-5 py-4">
                       {selectedLedgerIds.size > 0 ? (
@@ -896,7 +908,7 @@ function ParentDashboard() {
                             <input type="number" value={payAmount} onChange={e => setPayAmount(e.target.value)}
                               placeholder="Enter amount"
                               className="w-full border border-gray-200 rounded-xl px-4 py-3 text-lg font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400" />
-                            <p className="text-xs text-gray-400 mt-1">Enter less for partial payment</p>
+                            <p className="text-xs text-muted-foreground mt-1">Enter less for partial payment</p>
                           </div>
                           <div className="flex gap-2">
                             <button
@@ -939,11 +951,11 @@ function ParentDashboard() {
                                 alt="UPI QR Code"
                                 width={220}
                                 height={220}
-                                className={`rounded-2xl border-2 border-gray-200 transition-all duration-500 ${!qrRevealed ? 'blur-xl scale-95' : 'blur-0 scale-100'}`}
+                                className={`rounded-lg border-2 border-gray-200 transition-all duration-500 ${!qrRevealed ? 'blur-xl scale-95' : 'blur-0 scale-100'}`}
                               />
                               {!qrRevealed && (
-                                <div className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl">
-                                  <div className="w-14 h-14 bg-white rounded-2xl shadow-lg flex items-center justify-center border border-gray-200">
+                                <div className="absolute inset-0 flex flex-col items-center justify-center rounded-lg">
+                                  <div className="w-14 h-14 bg-white rounded-lg shadow-lg flex items-center justify-center border border-gray-200">
                                     <svg className="w-7 h-7 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                                     </svg>
@@ -963,7 +975,7 @@ function ParentDashboard() {
                               {upiInfo?.upi_id && (
                                 <div className="flex items-center justify-between gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5">
                                   <div className="min-w-0">
-                                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Or pay manually to</p>
+                                    <p className="text-xs text-muted-foreground uppercase tracking-wide">Or pay manually to</p>
                                     <p className="text-sm font-mono font-semibold text-gray-800 truncate">{upiInfo.upi_id}</p>
                                   </div>
                                   <button
@@ -985,10 +997,10 @@ function ParentDashboard() {
                               </button>
                             </div>
                           ) : (
-                            <p className="text-xs text-gray-400 text-center">Tap the QR above to reveal</p>
+                            <p className="text-xs text-muted-foreground text-center">Tap the QR above to reveal</p>
                           )}
 
-                          <button onClick={() => { setPayStep('form'); setQrRevealed(false) }} className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
+                          <button onClick={() => { setPayStep('form'); setQrRevealed(false) }} className="text-xs text-muted-foreground hover:text-gray-600 flex items-center gap-1">
                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
                             Back
                           </button>
@@ -1003,7 +1015,7 @@ function ParentDashboard() {
                               <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
                             </div>
                             <p className="text-sm font-bold text-gray-800">Payment Done! Enter Transaction ID</p>
-                            <p className="text-xs text-gray-400 mt-1">Copy the UPI transaction ID from your GPay / PhonePe / Paytm receipt and paste it below</p>
+                            <p className="text-xs text-muted-foreground mt-1">Copy the UPI transaction ID from your GPay / PhonePe / Paytm receipt and paste it below</p>
                           </div>
 
                           <div>
@@ -1015,7 +1027,7 @@ function ParentDashboard() {
                               onChange={e => setPayUPI(e.target.value)}
                               className="w-full border border-gray-300 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-400"
                             />
-                            <p className="text-xs text-gray-400 mt-1">Found in your UPI app under payment history / receipt</p>
+                            <p className="text-xs text-muted-foreground mt-1">Found in your UPI app under payment history / receipt</p>
                           </div>
 
                           <div className="bg-gray-50 rounded-xl p-3 text-xs text-gray-500 space-y-1">
@@ -1035,7 +1047,7 @@ function ParentDashboard() {
                             </button>
                           </div>
 
-                          <p className="text-xs text-gray-400 text-center">School admin will verify your transaction ID and confirm the payment</p>
+                          <p className="text-xs text-muted-foreground text-center">School admin will verify your transaction ID and confirm the payment</p>
                         </div>
                       )}
                     </div>
@@ -1045,7 +1057,7 @@ function ParentDashboard() {
                 {/* Ledger with checkboxes */}
                 {feeLedger.length === 0 ? (
                   <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-                    <p className="text-gray-400 text-sm">{T.noFeeEntries(feeAcYear)}</p>
+                    <p className="text-muted-foreground text-sm">{T.noFeeEntries(feeAcYear)}</p>
                   </div>
                 ) : (
                   <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
@@ -1085,7 +1097,7 @@ function ParentDashboard() {
                             {(!hasOnlinePayments || !isPending || payingLedger) && <div className="w-4 flex-shrink-0" />}
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium text-gray-800">{entry.category_name}</p>
-                              <p className="text-xs text-gray-400">{entry.period_label} · {T.dueDate} {entry.due_date}</p>
+                              <p className="text-xs text-muted-foreground">{entry.period_label} · {T.dueDate} {entry.due_date}</p>
                             </div>
                             <div className="flex items-center gap-3 flex-shrink-0">
                               <div className="text-right">
@@ -1120,11 +1132,11 @@ function ParentDashboard() {
                         <div key={w.id} className="px-4 py-3 flex items-center justify-between">
                           <div>
                             <p className="text-sm font-medium text-gray-800">{w.category_name} · {w.period_label}</p>
-                            <p className="text-xs text-gray-400">{w.reason}{w.granted_by_name ? ` · Approved by ${w.granted_by_name}` : ''}</p>
+                            <p className="text-xs text-muted-foreground">{w.reason}{w.granted_by_name ? ` · Approved by ${w.granted_by_name}` : ''}</p>
                           </div>
                           <div className="text-right">
                             <p className="text-sm font-bold text-purple-700">−{fmt(w.waiver_amount)}</p>
-                            <p className="text-[10px] text-purple-400 capitalize">{w.waiver_type.replace('_', ' ')} waiver</p>
+                            <p className="text-xs text-purple-400 capitalize">{w.waiver_type.replace('_', ' ')} waiver</p>
                           </div>
                         </div>
                       ))}
@@ -1144,7 +1156,7 @@ function ParentDashboard() {
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium text-gray-800">{pmt.category_name} · {pmt.period_label}</p>
-                              <p className="text-xs text-gray-400">{pmt.paid_date} · {pmt.payment_mode.toUpperCase()}{pmt.transaction_ref ? ` · ${pmt.transaction_ref}` : ''}</p>
+                              <p className="text-xs text-muted-foreground">{pmt.paid_date} · {pmt.payment_mode.toUpperCase()}{pmt.transaction_ref ? ` · ${pmt.transaction_ref}` : ''}</p>
                               {pmt.payment_status === 'rejected' && pmt.rejection_reason && (
                                 <p className="text-xs text-red-600 mt-1 font-medium">Rejected: {pmt.rejection_reason}</p>
                               )}
@@ -1153,10 +1165,10 @@ function ParentDashboard() {
                               )}
                             </div>
                             <div className="text-right flex-shrink-0">
-                              <p className={`text-sm font-bold ${pmt.payment_status === 'cancelled' ? 'text-gray-400 line-through' : 'text-green-700'}`}>{fmt(pmt.amount)}</p>
+                              <p className={`text-sm font-bold ${pmt.payment_status === 'cancelled' ? 'text-muted-foreground line-through' : 'text-green-700'}`}>{fmt(pmt.amount)}</p>
                               <div className="flex items-center gap-1.5 justify-end mt-0.5">
-                                <span className="text-[10px] font-mono text-gray-400">{pmt.receipt_number}</span>
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                                <span className="text-xs font-mono text-muted-foreground">{pmt.receipt_number}</span>
+                                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
                                   pmt.payment_status === 'completed'           ? 'bg-green-100 text-green-700' :
                                   pmt.payment_status === 'rejected'            ? 'bg-red-100 text-red-600' :
                                   pmt.payment_status === 'cancelled'           ? 'bg-gray-200 text-gray-600' :
@@ -1170,7 +1182,7 @@ function ParentDashboard() {
                               {pmt.payment_status === 'completed' && (
                                 <button
                                   onClick={() => printParentReceipt(pmt)}
-                                  className="mt-1 text-[10px] text-blue-600 hover:text-blue-800 underline"
+                                  className="mt-1 text-xs text-blue-600 hover:text-blue-800 underline"
                                 >
                                   Download Receipt
                                 </button>
@@ -1200,18 +1212,18 @@ function ParentDashboard() {
                       <div className="flex items-start justify-between">
                         <div>
                           <p className="font-semibold text-gray-800">{e.exam_name}</p>
-                          <p className="text-xs text-gray-400 mt-0.5">{EXAM_TYPE_LABELS[e.exam_type] || e.exam_type} · Grade {student.grade}-{student.section}</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">{EXAM_TYPE_LABELS[e.exam_type] || e.exam_type} · Grade {student.grade}-{student.section}</p>
                           {e.subjects.length > 0 && (
                             <div className="flex flex-wrap gap-1 mt-2">
                               {e.subjects.map(s => (
-                                <span key={s} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{s}</span>
+                                <span key={s} className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{s}</span>
                               ))}
                             </div>
                           )}
                         </div>
                         <div className="text-right shrink-0 ml-3">
                           <p className="text-sm font-bold text-gray-700">{new Date(e.exam_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
-                          <p className={`text-xs font-bold mt-0.5 ${days === 0 ? 'text-red-600' : days <= 3 ? 'text-red-500' : days <= 7 ? 'text-amber-500' : 'text-gray-400'}`}>
+                          <p className={`text-xs font-bold mt-0.5 ${days === 0 ? 'text-red-600' : days <= 3 ? 'text-red-500' : days <= 7 ? 'text-amber-500' : 'text-muted-foreground'}`}>
                             {days === 0 ? `${T.today}!` : days === 1 ? T.tomorrow : T.daysAway(days)}
                           </p>
                         </div>
@@ -1222,7 +1234,7 @@ function ParentDashboard() {
               </div>
             ) : (
               <div className="bg-white rounded-xl border border-dashed border-gray-200 p-12 text-center">
-                <p className="text-gray-400 text-sm">{T.noUpcomingExams}</p>
+                <p className="text-muted-foreground text-sm">{T.noUpcomingExams}</p>
               </div>
             )}
           </div>
@@ -1234,7 +1246,7 @@ function ParentDashboard() {
             <h2 className="text-base font-bold text-gray-800">{T.nav.results} & {T.parentSignoff}</h2>
             {(!summary?.released_results || summary.released_results.length === 0) ? (
               <div className="bg-white rounded-xl border border-gray-200 py-16 text-center">
-                <p className="text-gray-400 text-sm">{T.noResults}</p>
+                <p className="text-muted-foreground text-sm">{T.noResults}</p>
               </div>
             ) : summary.released_results.map(r => {
               const p = r.total_obtained !== null && r.total_max ? Math.round((r.total_obtained / r.total_max) * 100) : null
@@ -1244,12 +1256,12 @@ function ParentDashboard() {
                   <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
                     <div>
                       <p className="font-semibold text-gray-800 text-sm">{r.exam_name}</p>
-                      <p className="text-xs text-gray-400">{EXAM_TYPE_LABELS[r.exam_type] || r.exam_type} · {r.exam_date}</p>
+                      <p className="text-xs text-muted-foreground">{EXAM_TYPE_LABELS[r.exam_type] || r.exam_type} · {r.exam_date}</p>
                     </div>
                     <div className="text-right">
                       {p !== null && (
                         <>
-                          <div className={`text-xl font-black ${pass ? 'text-green-600' : 'text-red-600'}`}>{p}%</div>
+                          <div className={`text-xl font-semibold ${pass ? 'text-green-600' : 'text-red-600'}`}>{p}%</div>
                           <div className={`text-xs font-bold ${pass ? 'text-green-500' : 'text-red-400'}`}>{pass ? T.passing.toUpperCase() : 'FAIL'} · {r.total_obtained}/{r.total_max}</div>
                         </>
                       )}

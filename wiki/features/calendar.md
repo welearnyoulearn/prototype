@@ -43,6 +43,7 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [Academic Calendar](../../docs/product/features/16-academic-calendar.md)
 - [../../docs/ATTENDANCE.md](../../docs/ATTENDANCE.md)
 - [attendance.md](attendance.md)
 

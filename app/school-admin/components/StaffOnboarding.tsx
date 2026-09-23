@@ -232,11 +232,11 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
             <p className="text-sm text-gray-500 mt-0.5">Assign class teachers from Class Management after onboarding</p>
           </div>
           {staffCount !== null && (
-            <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2">
-              <span className="text-2xl font-black text-blue-600">{staffCount}</span>
+            <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-md px-4 py-2">
+              <span className="text-2xl font-semibold text-blue-600">{staffCount}</span>
               <div>
                 <p className="text-xs font-semibold text-blue-700 leading-none">Staff</p>
-                <button onClick={fetchStaffCount} className="text-[10px] text-blue-400 hover:text-blue-600">refresh</button>
+                <button onClick={fetchStaffCount} className="text-xs text-blue-400 hover:text-blue-600">refresh</button>
               </div>
             </div>
           )}
@@ -301,7 +301,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
         </div>
       )}
 
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="bg-gray-50 border-b border-gray-200">
@@ -309,14 +309,14 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-8">#</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[130px]">Name <span className="text-red-400">*</span></th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-700 min-w-[140px] bg-blue-50">Email <span className="text-red-400">*</span></th>
-                  <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Subject <span className="text-red-400">*</span> <span className="text-gray-400 text-[10px]">(teaching only)</span></th>
+                  <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Subject <span className="text-red-400">*</span> <span className="text-muted-foreground text-xs">(teaching only)</span></th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[100px]">Phone</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Department</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[120px]">Qualification</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Joining Date</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">Staff Type</th>
                   <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[130px]">
-                    Teaches Grades <span className="text-amber-500 text-[10px] font-semibold">← important</span>
+                    Teaches Grades <span className="text-amber-500 text-xs font-semibold">← important</span>
                   </th>
                   <th className="px-3 py-2.5 w-8"></th>
                 </tr>
@@ -326,7 +326,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                   const errs = showErrors ? rowErrors(row) : []
                   return (
                     <tr key={i} className={`hover:bg-gray-50 ${errs.length > 0 ? 'bg-red-50/30' : ''}`}>
-                      <td className="px-3 py-2 text-gray-400">{i + 1}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
                       <td className="px-3 py-2">
                         <input data-testid={`staff-row-name-${i}`} className={cellCls(row, 'name')} placeholder="Full name *" value={row.name} onChange={e => updateRow(i, 'name', e.target.value)} />
                       </td>
@@ -356,7 +356,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                             {subscribedSubjectNames.length > 0 && (
                               <button type="button" title="Pick from the subject list"
                                 onClick={() => setSubjectInputMode(prev => ({ ...prev, [i]: 'dropdown' }))}
-                                className="text-[10px] text-blue-500 hover:text-blue-700 flex-shrink-0">↺</button>
+                                className="text-xs text-blue-500 hover:text-blue-700 flex-shrink-0">↺</button>
                             )}
                           </div>
                         )}
@@ -384,7 +384,7 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
                               panelWidth={240}
                             />
                             {!row.teaches_grades.trim() && row.name.trim() && (
-                              <p className="text-[10px] text-amber-500 leading-tight">
+                              <p className="text-xs text-amber-500 leading-tight">
                                 ⚠ No grades = teaches all
                               </p>
                             )}
@@ -404,25 +404,25 @@ export default function StaffOnboarding({ schoolId, onRefresh }: Props) {
           </div>
           <div className="px-4 py-2 bg-blue-50/30 border-t border-blue-100 flex items-center gap-4 flex-wrap">
             <p className="text-xs text-blue-600 font-medium">Email (blue) is required — login credentials are sent there</p>
-            <p className="text-xs text-gray-400">Phone is required for all staff</p>
-            <p className="text-xs text-gray-400">Subject required for teaching staff only</p>
+            <p className="text-xs text-muted-foreground">Phone is required for all staff</p>
+            <p className="text-xs text-muted-foreground">Subject required for teaching staff only</p>
             <p className="text-xs text-amber-600">Teaches Grades — leave blank for all grades</p>
           </div>
           <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 flex items-center gap-2">
-            <svg className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <p className="text-xs text-gray-400">
+            <p className="text-xs text-muted-foreground">
               <strong className="text-gray-500">Teaches Grades</strong> — use the dropdown to select grades, or leave blank to teach all grades.
             </p>
           </div>
           <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
             <button onClick={addRow} data-testid="staff-add-row" className="text-sm text-blue-600 hover:text-blue-800 font-medium">+ Add Row</button>
             <div className="flex items-center gap-3">
-              <span className="text-xs text-gray-400">{rows.filter(r => r.name.trim()).length} of {rows.length} rows ready</span>
+              <span className="text-xs text-muted-foreground">{rows.filter(r => r.name.trim()).length} of {rows.length} rows ready</span>
               <button onClick={handleSubmit} disabled={submitting || rows.every(r => !r.name.trim())}
                 data-testid="staff-onboard-submit"
-                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
+                className="bg-primary hover:bg-primary/90 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
                 {submitting ? 'Onboarding...' : 'Onboard Staff'}
               </button>
             </div>

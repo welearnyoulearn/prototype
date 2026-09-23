@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import NoticeCenter from '@/components/announcements/NoticeCenter'
+import { Skeleton } from '@/components/ui/skeleton'
+import { ArrowRight } from 'lucide-react'
 
 type Teacher = {
   id: number
@@ -98,31 +100,18 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
   })
 
   return (
-    <div className="space-y-6">
-
-      {/* Stats row */}
-      <div className={`grid grid-cols-2 gap-4 sm:grid-cols-2`}>
-        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
-          <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Role</p>
-          {isClassTeacher ? (
-            <>
-              <p className="text-base font-bold text-blue-700">Class Teacher</p>
-              <p className="text-xs text-blue-500 mt-0.5">Grade {teacher.class_teacher_grade} – Sec {teacher.class_teacher_section}</p>
-            </>
-          ) : (
-            <>
-              <p className="text-base font-bold text-gray-700">Subject Teacher</p>
-              <p className="text-xs text-gray-400 mt-0.5">{teacher.subject || 'No subject set'}</p>
-            </>
-          )}
+    <div className="space-y-8">
+      <header className="border-b border-[#dde3dd] pb-7">
+        <p className="mb-2 text-xs font-medium uppercase tracking-[0.1em] text-[#647068]">Your teaching day</p>
+        <h1 className="text-2xl font-semibold leading-tight tracking-tight text-[#202a25] sm:text-3xl">Welcome, {teacher.name.split(' ')[0]}.</h1>
+        <p className="mt-2 max-w-xl text-sm leading-relaxed text-[#647068]">Open a class to review its students, attendance, and learning progress.</p>
+        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-[#647068]">
+          <span className="font-medium text-[#235b46]">{isClassTeacher ? `Class teacher · Grade ${teacher.class_teacher_grade}, Section ${teacher.class_teacher_section}` : 'Subject teacher'}</span>
+          {teacher.subject && <span>{teacher.subject}</span>}
+          {teacher.department && <span>{teacher.department}</span>}
+          {teacher.employee_id && <span>Staff ID {teacher.employee_id}</span>}
         </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
-          <p className="text-xs text-gray-400 uppercase tracking-wide mb-1">Department</p>
-          <p className="text-base font-bold text-gray-900">{teacher.department || '—'}</p>
-          <p className="text-xs text-gray-400 mt-0.5">{teacher.employee_id}</p>
-        </div>
-      </div>
+      </header>
 
       {/* Class Health Summary — only for class teachers */}
       {isClassTeacher && (classHealth || classHealthLoading) && (
@@ -137,14 +126,14 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
           {classHealthLoading && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {[1,2,3,4].map(i => (
-                <div key={i} className="bg-gray-100 rounded-xl p-4 animate-pulse h-20" />
+                <Skeleton key={i} className="h-20" />
               ))}
             </div>
           )}
 
           {/* Doubt pattern warning */}
           {classHealth && classHealth.doubt_patterns.length > 0 && (
-            <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-3 flex items-start gap-2">
+            <div className="bg-red-50 border border-red-200 rounded-md p-3 mb-3 flex items-start gap-2">
               <svg className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
@@ -196,7 +185,7 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
                 bg: (classHealth.doubts.open + classHealth.doubts.in_progress) > 5 ? 'bg-orange-50' : 'bg-gray-50',
               },
             ].map(item => (
-              <div key={item.label} className={`${item.bg} rounded-xl p-4`}>
+              <div key={item.label} className={`${item.bg} rounded-md p-4`}>
                 <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide mb-1">{item.label}</p>
                 <p className={`text-2xl font-bold ${item.color}`}>{item.value}</p>
                 <p className="text-[10px] text-gray-400 mt-0.5">{item.sub}</p>
@@ -206,55 +195,47 @@ export default function SmartSnapshot({ teacher, schoolId, onNavigate, onViewCla
         </div>
       )}
 
-      {/* My Classes */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-base font-bold text-gray-900">My Classes</h3>
-          <p className="text-xs text-gray-400">
-            {isClassTeacher ? 'Your class → full view · Others → class view' : 'Click to open class view'}
-          </p>
+      <section aria-labelledby="teacher-classes-title">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 id="teacher-classes-title" className="text-base font-semibold text-[#202a25]">My classes</h2>
+          {!loading && <span className="text-xs text-[#647068]">{myClasses.length} assigned</span>}
         </div>
-        {myClasses.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 py-8 text-center text-sm text-gray-400">
-            No class assignments yet — ask school admin to assign you a subject in Class Management
+        {loading ? (
+          <div className="space-y-2 rounded-md border border-[#dde3dd] bg-white p-4" role="status" aria-live="polite" aria-busy="true" aria-label="Loading your classes">
+            <span className="sr-only">Loading your classes…</span>
+            {[1, 2, 3].map(i => <Skeleton key={i} className="h-16" />)}
+          </div>
+        ) : myClasses.length === 0 ? (
+          <div className="rounded-md border border-dashed border-[#cbd5ca] px-5 py-8">
+            <p className="text-sm font-semibold text-[#202a25]">Your classes will appear here</p>
+            <p className="mt-2 max-w-lg text-sm leading-relaxed text-[#647068]">Ask your school administrator to assign your classes and subjects in Class Management.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="overflow-hidden rounded-md border border-[#dde3dd] bg-white divide-y divide-[#e8ece6]">
+            <div className="hidden grid-cols-[minmax(120px,1fr)_2fr_1fr_24px] gap-4 bg-[#f4f6f1] px-5 py-2.5 text-xs font-medium text-[#647068] md:grid" aria-hidden="true">
+              <span>Class</span><span>Your subjects</span><span>Your role</span><span />
+            </div>
             {myClasses.map(cls => {
               const isClassTeacherFor = isClassTeacher &&
                 cls.grade === teacher.class_teacher_grade &&
                 cls.section === teacher.class_teacher_section
               return (
-                <button
-                  key={`${cls.grade}-${cls.section}`}
+                <button key={`${cls.grade}-${cls.section}`} disabled={!cls.classInfo}
                   onClick={() => {
                     if (!cls.classInfo) return
                     onViewClass(cls.classInfo)
                   }}
-                  className="text-left bg-white rounded-xl border border-gray-200 p-4 transition-all hover:shadow-md hover:border-blue-200">
-                  <div className="flex items-start justify-between mb-2">
-                    <p className="text-2xl font-bold text-gray-900">{cls.grade}-{cls.section}</p>
-                    {isClassTeacherFor && (
-                      <span className="text-[10px] bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">★ CT</span>
-                    )}
-                  </div>
-                  {cls.subjects.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {cls.subjects.slice(0, 3).map(s => (
-                        <span key={s} className="text-[10px] bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full">{s}</span>
-                      ))}
-                      {cls.subjects.length > 3 && <span className="text-[10px] text-gray-400">+{cls.subjects.length - 3}</span>}
-                    </div>
-                  )}
-                  <p className="text-xs text-gray-400 mt-2">
-                    {isClassTeacherFor ? '★ Class Teacher · click for full view' : 'Subject Teacher · click for class view'}
-                  </p>
+                  className="group grid min-h-20 w-full grid-cols-[1fr_24px] items-center gap-x-4 gap-y-1 px-4 py-4 text-left transition-colors hover:bg-[#f2f6f0] disabled:cursor-default disabled:opacity-60 motion-reduce:transition-none md:grid-cols-[minmax(120px,1fr)_2fr_1fr_24px] md:px-5">
+                  <span className="text-base font-semibold text-[#202a25]">Grade {cls.grade}<span className="ml-2 font-normal text-[#647068]">{cls.section}</span></span>
+                  <span className="col-start-1 row-start-2 text-sm leading-relaxed text-[#647068] md:col-start-auto md:row-start-auto">{cls.subjects.length > 0 ? cls.subjects.join(', ') : 'Class overview'}</span>
+                  <span className={`col-start-1 row-start-3 mt-1 text-xs md:col-start-auto md:row-start-auto md:mt-0 ${isClassTeacherFor ? 'font-medium text-[#235b46]' : 'text-[#647068]'}`}>{isClassTeacherFor ? 'Class teacher' : 'Subject teacher'}</span>
+                  <ArrowRight size={18} className="col-start-2 row-start-1 row-end-4 text-[#7c8980] group-hover:text-[#235b46] md:col-start-auto md:row-start-auto md:row-end-auto" aria-hidden="true" />
                 </button>
               )
             })}
           </div>
         )}
-      </div>
+      </section>
 
       {/* Notices: unread marks, animated greeting cards, acknowledgement */}
       <NoticeCenter schoolId={schoolId} />

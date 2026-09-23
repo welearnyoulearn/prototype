@@ -45,6 +45,7 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [Digital Library](../../docs/product/features/07-digital-library.md)
 - [curriculum.md](curriculum.md)
 - [platform-admin.md](platform-admin.md)
 

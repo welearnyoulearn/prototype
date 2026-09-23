@@ -47,6 +47,7 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [Class Management](../../docs/product/features/04-class-management.md)
 - [students.md](students.md)
 - [curriculum.md](curriculum.md)
 

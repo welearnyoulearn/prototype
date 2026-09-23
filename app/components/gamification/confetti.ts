@@ -8,6 +8,7 @@ import confetti from 'canvas-confetti'
 const BRAND_COLORS = ['#f97316', '#fb923c', '#f59e0b', '#facc15', '#fde047']
 
 export function burstFrom(el: HTMLElement | null) {
+  if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
   const origin = el
     ? (() => {
         const r = el.getBoundingClientRect()
@@ -27,6 +28,7 @@ export function burstFrom(el: HTMLElement | null) {
 }
 
 export function celebrate() {
+  if (typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
   const duration = 1200
   const end = Date.now() + duration
   ;(function frame() {

@@ -4,10 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import type { Catalog, CatalogEntry, ExportFormat, FilterDef } from '@/lib/dataExport/types'
 import ExportReportCards from './ExportReportCards'
+import { BookOpen, CalendarDays, DatabaseBackup, Download, GraduationCap, Megaphone, ReceiptIndianRupee, Search, ShieldCheck, UsersRound, WalletCards } from 'lucide-react'
 
 type LogRow = { id: number; export_key: string; format: string; filters: Record<string, string> | null; row_count: number; by_name: string | null; created_at: string }
 
-const GROUP_ICON: Record<string, string> = { people: '👥', academics: '🎓', attendance: '🗓️', fees: '💰', expenses: '🧾', other: '📣', backup: '🛡️' }
+const GROUP_ICON: Record<string, typeof UsersRound> = { people: UsersRound, academics: GraduationCap, attendance: CalendarDays, fees: WalletCards, expenses: ReceiptIndianRupee, other: Megaphone, backup: DatabaseBackup }
 
 const monthNow = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 7)
 const todayNow = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
@@ -27,7 +28,7 @@ function fmtWhen(s: string) {
 }
 
 function FilterField({ exportKey, f, value, onChange, catalog }: { exportKey: string; f: FilterDef; value: string; onChange: (v: string) => void; catalog: Catalog }) {
-  const cls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white'
+  const cls = 'w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#245b46]/20 focus:border-[#245b46] bg-white'
   const id = `export-filter-${exportKey}-${f.key}`
   let control: React.ReactNode
   if (f.kind === 'date') control = <input data-testid={id} type="date" className={cls} value={value} onChange={e => onChange(e.target.value)} />
@@ -94,14 +95,14 @@ function ExportCard({ e, catalog, schoolId, onDone }: { e: CatalogEntry; catalog
   }
 
   return (
-    <div data-testid={`export-card-${e.key}`} className={`rounded-2xl border shadow-sm overflow-hidden ${backup ? 'border-indigo-200 bg-gradient-to-br from-indigo-50 to-white' : 'border-gray-100 bg-white'}`}>
+    <div data-testid={`export-card-${e.key}`} className={`border-b overflow-hidden ${backup ? 'border-[#9bb7a4] bg-[#edf2eb]' : 'border-gray-200 bg-white'}`}>
       <button data-testid={`export-open-${e.key}`} onClick={() => setOpen(o => !o)} className="w-full text-left px-5 py-4 flex items-start gap-3 hover:bg-gray-50/60">
         <div className="flex-1 min-w-0">
           <p className="text-sm font-bold text-gray-900">{e.label}</p>
           <p className="text-xs text-gray-500 mt-1 leading-relaxed">{e.description}</p>
           <div className="flex gap-1.5 mt-2 flex-wrap">
             {e.formats.map(f => <span key={f} className="text-[10px] font-bold uppercase text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">{f === 'xlsx' ? 'Excel' : 'CSV'}</span>)}
-            {e.personal && <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded">🔒 Personal data</span>}
+            {e.personal && <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-800"><ShieldCheck size={12} aria-hidden="true" />Personal data</span>}
           </div>
         </div>
         <span className={`text-gray-300 mt-1 transition-transform ${open ? 'rotate-180' : ''}`}>⌄</span>
@@ -125,8 +126,8 @@ function ExportCard({ e, catalog, schoolId, onDone }: { e: CatalogEntry; catalog
               </div>
             )}
             <button data-testid={`export-download-${e.key}`} onClick={download} disabled={busy}
-              className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold disabled:opacity-60">
-              {busy ? 'Preparing…' : '⬇ Download'}
+              className="inline-flex items-center gap-2 rounded-md bg-[#245b46] px-5 py-2 text-sm font-semibold text-white hover:bg-[#173e2f] disabled:opacity-60">
+              {busy ? 'Preparing…' : <><Download size={15} aria-hidden="true" />Download</>}
             </button>
           </div>
           {error && <p data-testid={`export-error-${e.key}`} className="text-sm text-red-600">{error}</p>}
@@ -174,7 +175,7 @@ export default function ExportCenter({ schoolId }: { schoolId: number }) {
   return (
     <div className="space-y-5 max-w-5xl">
       <div>
-        <h2 className="text-lg font-bold text-gray-800">Export Data</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-gray-900">Export data</h2>
         <p className="text-sm text-gray-400 mt-0.5">Download your school’s records as Excel or CSV. Every download is recorded.</p>
       </div>
 
@@ -188,7 +189,7 @@ export default function ExportCenter({ schoolId }: { schoolId: number }) {
       {tab === 'report-cards' && <ExportReportCards schoolId={schoolId} />}
 
       {tab === 'log' && (
-        <div data-testid="export-log" className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+        <div data-testid="export-log" className="bg-white border-y border-gray-200 overflow-x-auto">
           {log === null ? <p className="p-6 text-sm text-gray-400">Loading…</p> : log.length === 0 ? <p className="p-8 text-sm text-gray-400 text-center">Nothing has been downloaded yet.</p> : (
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs text-gray-500 uppercase bg-gray-50"><th className="px-4 py-2">When</th><th className="px-4 py-2">Export</th><th className="px-4 py-2">By</th><th className="px-4 py-2">Format</th><th className="px-4 py-2 text-right">Rows</th></tr></thead>
@@ -214,25 +215,28 @@ export default function ExportCenter({ schoolId }: { schoolId: number }) {
           {!catalog && !error && <p className="text-sm text-gray-400">Loading…</p>}
           {catalog && (
             <>
-              <div className="flex gap-2 flex-wrap items-center">
+              <div className="flex flex-col gap-3 border-b border-gray-200 pb-4 sm:flex-row sm:flex-wrap sm:items-center">
                 <button data-testid="export-group-all" onClick={() => setGroup('all')}
-                  className={`px-4 py-2 rounded-xl text-sm font-semibold ${group === 'all' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>All</button>
+                  className={`min-h-10 border-b-2 px-2 text-sm font-semibold ${group === 'all' ? 'border-[#245b46] text-[#173e2f]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>All</button>
                 {catalog.groups.map(g => (
                   <button key={g.key} data-testid={`export-group-${g.key}`} onClick={() => setGroup(g.key)} title={g.description}
-                    className={`px-4 py-2 rounded-xl text-sm font-semibold ${group === g.key ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
-                    {GROUP_ICON[g.key]} {g.label}
+                    className={`inline-flex min-h-10 items-center gap-1.5 border-b-2 px-2 text-sm font-semibold ${group === g.key ? 'border-[#245b46] text-[#173e2f]' : 'border-transparent text-gray-500 hover:text-gray-800'}`}>
+                    {(() => { const Icon = GROUP_ICON[g.key] ?? BookOpen; return <Icon size={14} aria-hidden="true" /> })()} {g.label}
                   </button>
                 ))}
-                <input data-testid="export-search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search downloads…"
-                  className="ml-auto border border-gray-200 rounded-xl px-3 py-2 text-sm w-56 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                <label className="relative sm:ml-auto">
+                  <span className="sr-only">Search downloads</span><Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden="true" />
+                  <input data-testid="export-search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search downloads…"
+                    className="w-full rounded-md border border-gray-200 py-2 pl-9 pr-3 text-sm focus:border-[#245b46] focus:outline-none focus:ring-2 focus:ring-[#245b46]/20 sm:w-60" />
+                </label>
               </div>
 
               {visible.length === 0 ? <p className="text-sm text-gray-400 py-10 text-center">No downloads match.</p> : (
-                <div className="grid md:grid-cols-2 gap-3 items-start">
+                <div className="border-t border-gray-200">
                   {visible.map(e => <ExportCard key={e.key} e={e} catalog={catalog} schoolId={schoolId} onDone={() => { if (tab === 'downloads') setLog(null) }} />)}
                 </div>
               )}
-              <p className="text-xs text-gray-400">Exports containing 🔒 personal data are for school use only. Keep downloaded files safe and delete them when no longer needed.</p>
+              <p className="flex items-start gap-2 text-xs leading-relaxed text-gray-500"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-[#245b46]" aria-hidden="true" />Exports marked as personal data are for school use only. Keep downloaded files safe and delete them when no longer needed.</p>
             </>
           )}
         </>

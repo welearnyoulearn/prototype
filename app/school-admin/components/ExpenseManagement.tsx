@@ -123,7 +123,7 @@ export default function ExpenseManagement({ schoolId }: Props) {
           <button
             onClick={() => setShowForm(true)}
             data-testid="expenses-quick-add-btn"
-            className="bg-gradient-to-br from-indigo-600 to-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all duration-150 flex items-center gap-1.5"
+            className="bg-[#245b46] text-white px-4 py-2 rounded-md text-sm font-semibold hover:bg-[#173e2f] active:translate-y-px transition-colors duration-150 flex items-center gap-1.5"
           >
             <span className="text-base leading-none">+</span> Add Expense
           </button>
@@ -169,8 +169,8 @@ export default function ExpenseManagement({ schoolId }: Props) {
         {toasts.map(t => (
           <div
             key={t.id}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium text-white animate-[fadeIn_0.15s_ease-out] ${
-              t.type === 'success' ? 'bg-emerald-600' : 'bg-red-600'
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-md border text-sm font-medium animate-[fadeIn_0.15s_ease-out] ${
+              t.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800'
             }`}
           >
             <span className="text-base leading-none">{t.type === 'success' ? '✓' : '⚠'}</span>
@@ -236,7 +236,6 @@ function DashboardView({ schoolId, refreshKey }: { schoolId: number; refreshKey:
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
               <div className="flex items-center gap-2 mb-1">
-                <span className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center text-sm">💰</span>
                 <p className="text-xs text-gray-400">Total Spent</p>
               </div>
               <p className="text-2xl font-bold text-gray-800">{fmt(metrics.total_spent)}</p>
@@ -250,7 +249,6 @@ function DashboardView({ schoolId, refreshKey }: { schoolId: number; refreshKey:
             </div>
             <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
               <div className="flex items-center gap-2 mb-1">
-                <span className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center text-sm">🏷️</span>
                 <p className="text-xs text-gray-400">Top Category</p>
               </div>
               <p className="text-lg font-bold text-gray-800 truncate">{metrics.top_category?.name || '—'}</p>
@@ -678,10 +676,9 @@ function ExpenseFormModal({ schoolId, categories, adminName, adminId, editing, o
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-gradient-to-r from-indigo-50 via-white to-white rounded-t-2xl">
-          <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
-            <span className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm">💸</span>
+      <div role="dialog" aria-modal="true" className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+          <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
             {editing ? 'Edit Expense' : 'Add Expense'}
           </h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>
@@ -690,14 +687,14 @@ function ExpenseFormModal({ schoolId, categories, adminName, adminId, editing, o
           {error && <div className="bg-red-50 border border-red-200 text-red-600 text-sm px-3 py-2 rounded-lg">{error}</div>}
 
           <div>
-            <label className="text-xs font-medium text-gray-600">📝 Title *</label>
+            <label className="text-xs font-medium text-gray-600">Title *</label>
             <input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Petrol, March Electricity Bill"
               className={`${inputBase} border-gray-200 focus:border-indigo-400 focus:ring-indigo-100`} data-testid="expense-form-title" />
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs font-medium text-gray-600">🏷️ Category *</label>
+              <label className="text-xs font-medium text-gray-600">Category *</label>
               <select value={categoryId} onChange={e => setCategoryId(e.target.value)}
                 className={`${inputBase} border-gray-200 focus:border-amber-400 focus:ring-amber-100`} data-testid="expense-form-category">
                 {categories
@@ -706,7 +703,7 @@ function ExpenseFormModal({ schoolId, categories, adminName, adminId, editing, o
               </select>
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600">💰 Amount (₹) *</label>
+              <label className="text-xs font-medium text-gray-600">Amount (₹) *</label>
               <input type="number" min="0" value={amount} onChange={e => setAmount(e.target.value)}
                 className={`${inputBase} border-gray-200 focus:border-emerald-400 focus:ring-emerald-100`} data-testid="expense-form-amount" />
             </div>
@@ -719,7 +716,7 @@ function ExpenseFormModal({ schoolId, categories, adminName, adminId, editing, o
                 className={`${inputBase} border-gray-200 focus:border-sky-400 focus:ring-sky-100`} data-testid="expense-form-payee" />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600">📅 Date</label>
+              <label className="text-xs font-medium text-gray-600">Date</label>
               <input type="date" value={date} onChange={e => setDate(e.target.value)}
                 className={`${inputBase} border-gray-200 focus:border-violet-400 focus:ring-violet-100`} data-testid="expense-form-date" />
             </div>
@@ -734,27 +731,27 @@ function ExpenseFormModal({ schoolId, categories, adminName, adminId, editing, o
               </select>
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-600">🔖 Reference / Cheque No.</label>
+              <label className="text-xs font-medium text-gray-600">Reference / Cheque No.</label>
               <input value={ref} onChange={e => setRef(e.target.value)}
                 className={`${inputBase} border-gray-200 focus:border-teal-400 focus:ring-teal-100`} data-testid="expense-form-ref" />
             </div>
           </div>
 
           <div>
-            <label className="text-xs font-medium text-gray-600">🗒️ Notes</label>
+            <label className="text-xs font-medium text-gray-600">Notes</label>
             <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
               className={`${inputBase} border-gray-200 focus:border-indigo-400 focus:ring-indigo-100`} data-testid="expense-form-notes" />
           </div>
 
           <div>
-            <label className="text-xs font-medium text-gray-600">📎 Attach Bills (optional, multiple allowed)</label>
+            <label className="text-xs font-medium text-gray-600">Attach bills <span className="font-normal text-gray-400">(optional)</span></label>
             <FileDropzone files={files} onChange={setFiles} />
           </div>
 
           <div className="flex gap-2 pt-2">
             <button onClick={handleSubmit} disabled={saving || categories.length === 0}
               title={categories.length === 0 ? 'Loading categories…' : undefined}
-              className="flex-1 bg-gradient-to-br from-indigo-600 to-indigo-700 text-white py-2.5 rounded-lg text-sm font-semibold shadow-sm hover:shadow-md hover:-translate-y-0.5 active:translate-y-0 transition-all duration-150 disabled:opacity-50 disabled:hover:translate-y-0" data-testid="expense-form-submit">
+              className="flex-1 bg-[#245b46] text-white py-2.5 rounded-md text-sm font-semibold hover:bg-[#173e2f] active:translate-y-px transition-colors duration-150 disabled:opacity-50" data-testid="expense-form-submit">
               {saving ? 'Saving…' : categories.length === 0 ? 'Loading…' : editing ? 'Save Changes' : 'Add Expense'}
             </button>
             <button onClick={onClose} className="px-4 py-2.5 text-sm text-gray-500">Cancel</button>
@@ -811,7 +808,7 @@ ${expense.notes ? `<div class="val" style="margin-top:8px"><span class="lbl">Not
 
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" className="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
           <h3 className="text-base font-bold text-gray-800">Expense Detail</h3>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">×</button>

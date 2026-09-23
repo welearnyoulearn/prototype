@@ -17,10 +17,10 @@ School admin (create/review/release), teachers (enter marks), students and paren
 
 ## How it works
 
-- Admin creates an exam for a class, adds subjects with maximum marks.
-- Teachers enter marks per subject and submit; the admin reviews, can reopen a subject, then **releases** results.
-- Students see marks; parents see results and can **acknowledge** them; the admin sees who has not (nudge parents).
-- A scheduled job updates exam statuses.
+- The admin **schedules** an exam across one or many classes; each class's subjects and subject teachers are copied from that class's own subject list.
+- Status flow: `scheduled` → `collecting` (a nightly job opens it the day after the exam date) → `teacher_reviewed` (the **class teacher** reviews and forwards) → `released` (the **admin** releases; irreversible).
+- Subject teachers enter and submit marks for their own subject; the class teacher may reopen a submitted subject **only before review**.
+- Students and parents see results **only after release**; parents **acknowledge**, and the admin sees who has not and can nudge.
 
 ## Rules and limits
 
@@ -55,6 +55,7 @@ API routes these screens call (all exist):
 
 ## Related
 
+- Deep dossier: [Exam Schedule & Marks](../../docs/product/features/10-exam-schedule-and-marks.md)
 - [students.md](students.md)
 - [export.md](export.md)
 

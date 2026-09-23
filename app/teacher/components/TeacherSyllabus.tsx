@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { SyllabusTracking, type TeacherObj } from './ClassView'
 import { INK, GOLD, BORDER, CREAM } from '@/app/components/ulearn/theme'
 import { Pills, UlearnCard } from '@/app/components/ulearn/primitives'
+import { Skeleton } from '@/components/ui/skeleton'
 
 type ClassOption = {
   id: number
@@ -68,7 +69,14 @@ export default function TeacherSyllabus({
     }).finally(() => setLoading(false))
   }, [teacher.id, teacher.class_teacher_grade, teacher.class_teacher_section, schoolId])
 
-  if (loading) return <div className="text-sm text-gray-400 p-4">Loading your classes…</div>
+  if (loading) return (
+    <div className="space-y-4" role="status" aria-live="polite" aria-busy="true">
+      <span className="sr-only">Loading your classes</span>
+      <Skeleton className="h-20 w-full" />
+      <div className="flex gap-2"><Skeleton className="h-10 w-24" /><Skeleton className="h-10 w-24" /></div>
+      <Skeleton className="h-48 w-full" />
+    </div>
+  )
 
   if (classes.length === 0) {
     return (
@@ -87,7 +95,7 @@ export default function TeacherSyllabus({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-3xl p-4 sm:p-5" style={{ background: CREAM, border: `1px solid ${BORDER}` }}>
+      <div className="rounded-lg border-l-4 p-4 sm:p-5" style={{ background: CREAM, borderColor: BORDER, borderLeftColor: GOLD }}>
         <h2 className="text-lg font-semibold" style={{ color: INK }}>Syllabus</h2>
         <p className="text-sm text-gray-500 mt-0.5">
           Pick a class to track what&apos;s been taught and mark topics as covered.

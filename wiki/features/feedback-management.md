@@ -80,6 +80,10 @@ Lets a school collect feedback from parents, students, teachers, and visitors vi
 | `feedback_submissions` | One row per public submission: role, identity (or anonymous), free text, voice key, IP hash for rate limiting |
 | `feedback_submission_ratings` | One row per (submission, category) rating — the unit the issue pipeline operates on |
 
+## Related
+
+- Deep dossier: [Feedback](../../docs/product/features/12-feedback-management.md)
+
 ## Status history
 
 | Date | Change | Issue |

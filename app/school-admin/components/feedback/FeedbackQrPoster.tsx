@@ -116,8 +116,8 @@ export default function FeedbackQrPoster({ schoolId }: { schoolId: number }) {
 
       <div className="rounded-xl border border-gray-200 bg-white p-5">
         <h3 className="mb-3 text-sm font-bold text-gray-900">QR Poster</h3>
-        <div ref={posterRef} className="mx-auto max-w-[280px] rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 to-white p-5 text-center">
-          <p className="mb-1 text-sm font-extrabold text-slate-900">We&apos;d love your feedback! 💬</p>
+        <div ref={posterRef} className="mx-auto max-w-[280px] rounded-md border border-gray-200 bg-white p-5 text-center">
+          <p className="mb-1 text-sm font-semibold text-slate-900">We&apos;d value your feedback</p>
           <p className="mb-3 text-xs text-slate-500">Scan the code below</p>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img

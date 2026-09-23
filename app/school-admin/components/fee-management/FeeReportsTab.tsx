@@ -5,6 +5,7 @@ import { GRADE_SEQUENCE } from '@/lib/grades'
 import type { ReportData } from './types'
 import { useFeeStore } from '@/lib/stores/feeStore'
 import { LoadErrorBanner } from './LoadErrorBanner'
+import { Skeleton } from '@/components/ui/skeleton'
 
 const GRADES = GRADE_SEQUENCE
 function gradeLabel(g: string): string { return /^\d+$/.test(g) ? `Grade ${g}` : g }
@@ -295,7 +296,10 @@ export default function FeeReportsTab({
       </div>
 
       {reportLoading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{[...Array(4)].map((_, i) => <div key={i} className="h-24 bg-white rounded-xl border border-gray-100 animate-pulse" />)}</div>
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4" role="status" aria-live="polite" aria-busy="true">
+          <span className="sr-only">Loading fee reports</span>
+          {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24" />)}
+        </div>
       ) : reportData ? (
         <>
           {/* Balance sheet */}

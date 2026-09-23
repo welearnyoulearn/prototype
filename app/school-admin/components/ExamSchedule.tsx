@@ -76,7 +76,7 @@ export default function ExamSchedule({ schoolId }: Props) {
           ] as const).map(({ key, label }) => (
             <button key={key} data-testid={`exam-tab-${key}`}
               onClick={() => setView(key)}
-              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${view === key ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+              className={`px-4 py-2 rounded-md text-sm font-semibold transition-colors ${view === key ? 'bg-indigo-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
               {label}
             </button>
           ))}
@@ -180,7 +180,7 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
 
   if (saveSuccess) {
     return (
-      <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-8 text-center">
+      <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-8 text-center">
         <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-3">
           <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
         </div>
@@ -202,30 +202,30 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
             <div className={`flex items-center gap-2 ${i > 0 ? 'flex-1' : ''}`}>
               {i > 0 && <div className={`h-0.5 flex-1 ${step > i ? 'bg-indigo-500' : 'bg-gray-200'}`} />}
               <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
-                step === n ? 'bg-indigo-600 text-white' : step > n ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100 text-gray-400'
+                step === n ? 'bg-indigo-600 text-white' : step > n ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-100 text-muted-foreground'
               }`}>
                 {step > n ? '✓' : n}
               </div>
-              <span className={`text-xs font-semibold whitespace-nowrap ${step === n ? 'text-indigo-700' : 'text-gray-400'}`}>{label}</span>
+              <span className={`text-xs font-semibold whitespace-nowrap ${step === n ? 'text-indigo-700' : 'text-muted-foreground'}`}>{label}</span>
             </div>
           </div>
         ))}
       </div>
 
       {step === 1 && (
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 space-y-4">
+        <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-4">
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1">Exam Name *</label>
             <input type="text" placeholder="e.g. Half Yearly Examination 2025" value={form.exam_name}
               onChange={e => setForm(f => ({ ...f, exam_name: e.target.value }))}
               data-testid="exam-name-input"
-              className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+              className="w-full border border-gray-200 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
           </div>
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Exam Type *</label>
               <select value={form.exam_type} onChange={e => setForm(f => ({ ...f, exam_type: e.target.value }))}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                className="w-full border border-gray-200 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
                 {EXAM_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
               </select>
             </div>
@@ -233,19 +233,19 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
               <label className="block text-xs font-semibold text-gray-600 mb-1">Exam Date *</label>
               <input type="date" value={form.exam_date} onChange={e => setForm(f => ({ ...f, exam_date: e.target.value }))}
                 data-testid="exam-date-input"
-                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                className="w-full border border-gray-200 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
             </div>
             <div>
               <label className="block text-xs font-semibold text-gray-600 mb-1">Passing %</label>
               <input type="number" min={0} max={100} value={form.passing_pct}
                 onChange={e => setForm(f => ({ ...f, passing_pct: parseInt(e.target.value) || 35 }))}
-                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+                className="w-full border border-gray-200 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
             </div>
           </div>
-          <p className="text-xs text-gray-400">Marks entry opens automatically for subject teachers once this date passes — no manual unlock needed.</p>
+          <p className="text-xs text-muted-foreground">Marks entry opens automatically for subject teachers once this date passes — no manual unlock needed.</p>
           <div className="flex justify-end pt-2">
             <button onClick={() => setStep(2)} disabled={!step1Valid} data-testid="wizard-next-1"
-              className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-bold disabled:opacity-40 hover:bg-indigo-700 transition-colors">
+              className="px-6 py-2.5 bg-indigo-600 text-white rounded-md text-sm font-bold disabled:opacity-40 hover:bg-indigo-700 transition-colors">
               Next: Pick Classes →
             </button>
           </div>
@@ -254,15 +254,15 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
 
       {step === 2 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-white rounded-2xl border border-gray-200 p-5">
+          <div className="bg-white rounded-lg border border-gray-200 p-5">
             <h3 className="text-sm font-bold text-gray-800 mb-1">Select Classes *</h3>
-            <p className="text-xs text-gray-400 mb-3">Pick one class, several, or a whole grade — every class gets exactly the subjects it teaches.</p>
+            <p className="text-xs text-muted-foreground mb-3">Pick one class, several, or a whole grade — every class gets exactly the subjects it teaches.</p>
             <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
               {Object.entries(byGrade).sort().map(([grade, gradeClasses]) => (
                 <div key={grade}>
                   <div className="flex items-center justify-between mb-1.5">
                     <p className="text-xs font-semibold text-gray-500">{grade}</p>
-                    <button className="text-[10px] text-indigo-500 font-semibold" onClick={() => toggleGrade(gradeClasses)}>
+                    <button className="text-xs text-indigo-500 font-semibold" onClick={() => toggleGrade(gradeClasses)}>
                       {gradeClasses.every(c => selectedClasses.includes(c.id)) ? 'Deselect all' : 'Select all'}
                     </button>
                   </div>
@@ -281,9 +281,9 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-gray-200 p-5">
+          <div className="bg-white rounded-lg border border-gray-200 p-5">
             <h3 className="text-sm font-bold text-gray-800 mb-1">Subject Preview</h3>
-            <p className="text-xs text-gray-400 mb-3">Exactly what each selected class already teaches — nothing custom or shared across grades.</p>
+            <p className="text-xs text-muted-foreground mb-3">Exactly what each selected class already teaches — nothing custom or shared across grades.</p>
             {selectedClasses.length === 0 ? (
               <p className="text-sm text-gray-300 text-center py-10">Select a class to preview its subjects</p>
             ) : (
@@ -291,10 +291,10 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
                 {selectedClasses.map(id => {
                   const preview = subjectPreviews[id]
                   return (
-                    <div key={id} className="border border-gray-100 rounded-xl p-3">
+                    <div key={id} className="border border-gray-100 rounded-md p-3">
                       <div className="flex items-center justify-between mb-1.5">
                         <p className="text-xs font-bold text-gray-700">{classLabel(id)}</p>
-                        <button onClick={() => toggleClass(id)} className="text-[10px] text-red-400 hover:text-red-600">remove</button>
+                        <button onClick={() => toggleClass(id)} className="text-xs text-red-400 hover:text-red-600">remove</button>
                       </div>
                       {preview === 'loading' ? (
                         <p className="text-xs text-gray-300">Loading…</p>
@@ -305,7 +305,7 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
                       ) : Array.isArray(preview) ? (
                         <div className="flex flex-wrap gap-1">
                           {preview.map(s => (
-                            <span key={s.id} className="text-[10px] bg-gray-50 border border-gray-200 text-gray-600 px-1.5 py-0.5 rounded">{s.subject_name}</span>
+                            <span key={s.id} className="text-xs bg-gray-50 border border-gray-200 text-gray-600 px-1.5 py-0.5 rounded">{s.subject_name}</span>
                           ))}
                         </div>
                       ) : null}
@@ -319,7 +319,7 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
           <div className="lg:col-span-2 flex justify-between pt-1">
             <button onClick={() => setStep(1)} className="px-5 py-2.5 text-sm font-semibold text-gray-500 hover:text-gray-700">← Back</button>
             <button onClick={() => setStep(3)} disabled={!step2Valid} data-testid="wizard-next-2"
-              className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-bold disabled:opacity-40 hover:bg-indigo-700 transition-colors">
+              className="px-6 py-2.5 bg-indigo-600 text-white rounded-md text-sm font-bold disabled:opacity-40 hover:bg-indigo-700 transition-colors">
               Next: Review →
             </button>
           </div>
@@ -327,14 +327,14 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
       )}
 
       {step === 3 && (
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 space-y-5">
+        <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-5">
           <div>
             <h3 className="text-sm font-bold text-gray-800 mb-3">Review</h3>
             <div className="grid grid-cols-2 gap-3 text-sm">
-              <div><span className="text-gray-400">Exam:</span> <span className="font-semibold text-gray-800">{form.exam_name}</span></div>
-              <div><span className="text-gray-400">Type:</span> <span className="font-semibold text-gray-800">{EXAM_TYPE_LABELS[form.exam_type]}</span></div>
-              <div><span className="text-gray-400">Date:</span> <span className="font-semibold text-gray-800">{new Date(form.exam_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</span></div>
-              <div><span className="text-gray-400">Passing:</span> <span className="font-semibold text-gray-800">{form.passing_pct}%</span></div>
+              <div><span className="text-muted-foreground">Exam:</span> <span className="font-semibold text-gray-800">{form.exam_name}</span></div>
+              <div><span className="text-muted-foreground">Type:</span> <span className="font-semibold text-gray-800">{EXAM_TYPE_LABELS[form.exam_type]}</span></div>
+              <div><span className="text-muted-foreground">Date:</span> <span className="font-semibold text-gray-800">{new Date(form.exam_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</span></div>
+              <div><span className="text-muted-foreground">Passing:</span> <span className="font-semibold text-gray-800">{form.passing_pct}%</span></div>
             </div>
           </div>
 
@@ -352,7 +352,7 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
             )}
           </div>
 
-          <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+          <div className="bg-blue-50 border border-blue-100 rounded-md p-4">
             <p className="text-xs font-bold text-blue-800 mb-2">What happens next:</p>
             <ul className="space-y-1 text-xs text-blue-700">
               <li>✓ Every student and their parent(s) in these classes are notified now</li>
@@ -362,12 +362,12 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
             </ul>
           </div>
 
-          {saveError && <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">{saveError}</div>}
+          {saveError && <div className="bg-red-50 border border-red-200 rounded-md px-4 py-3 text-sm text-red-600">{saveError}</div>}
 
           <div className="flex justify-between pt-1">
             <button onClick={() => setStep(2)} className="px-5 py-2.5 text-sm font-semibold text-gray-500 hover:text-gray-700">← Back</button>
             <button onClick={handleSubmit} disabled={saving} data-testid="exam-create-submit"
-              className="px-6 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-bold disabled:opacity-50 hover:bg-indigo-700 transition-colors">
+              className="px-6 py-2.5 bg-indigo-600 text-white rounded-md text-sm font-bold disabled:opacity-50 hover:bg-indigo-700 transition-colors">
               {saving ? 'Creating…' : `Create ${selectedClasses.length} Exam(s)`}
             </button>
           </div>
@@ -426,10 +426,10 @@ function ResultsAndRelease({ schoolId }: { schoolId: number }) {
     <div className="flex gap-5">
       <div className="w-60 flex-shrink-0">
         {examsLoading ? (
-          <div className="py-12 text-center text-gray-400 text-sm">Loading exams...</div>
+          <div className="py-12 text-center text-muted-foreground text-sm">Loading exams...</div>
         ) : examList.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 py-10 text-center">
-            <p className="text-sm text-gray-400">No exams scheduled yet.</p>
+          <div className="bg-white rounded-md border border-gray-200 py-10 text-center">
+            <p className="text-sm text-muted-foreground">No exams scheduled yet.</p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -441,7 +441,7 @@ function ResultsAndRelease({ schoolId }: { schoolId: number }) {
                 return acc
               }, {})
             ).map(([type, exams]) => (
-              <div key={type} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div key={type} className="bg-white rounded-md border border-gray-200 overflow-hidden">
                 <div className="px-4 py-2 bg-indigo-50 border-b border-indigo-100">
                   <span className="text-xs font-bold text-indigo-700 uppercase tracking-wide">{type}</span>
                 </div>
@@ -449,12 +449,12 @@ function ResultsAndRelease({ schoolId }: { schoolId: number }) {
                   <button key={e.id} onClick={() => loadMarks(e)} data-testid={`exam-list-item-${e.id}`}
                     className={`w-full text-left px-3 py-2.5 border-b border-gray-50 last:border-b-0 transition-colors ${selectedExam?.id === e.id ? 'bg-indigo-50 border-l-2 border-l-indigo-500' : 'hover:bg-gray-50'}`}>
                     <p className={`text-xs font-semibold truncate ${selectedExam?.id === e.id ? 'text-indigo-700' : 'text-gray-800'}`}>{e.exam_name}</p>
-                    <p className="text-[10px] text-gray-400 mt-0.5">Gr.{e.grade}-{e.section} · {new Date(e.exam_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Gr.{e.grade}-{e.section} · {new Date(e.exam_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</p>
                     <div className="flex items-center gap-1.5 mt-1">
-                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${STATUS_LABELS[e.status]?.color ?? 'bg-gray-100 text-gray-500'}`}>
+                      <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${STATUS_LABELS[e.status]?.color ?? 'bg-gray-100 text-gray-500'}`}>
                         {STATUS_LABELS[e.status]?.label ?? e.status}
                       </span>
-                      <span className="text-[9px] text-gray-400">{e.submitted_subjects}/{e.total_subjects} subjects</span>
+                      <span className="text-xs text-muted-foreground">{e.submitted_subjects}/{e.total_subjects} subjects</span>
                     </div>
                   </button>
                 ))}
@@ -466,42 +466,42 @@ function ResultsAndRelease({ schoolId }: { schoolId: number }) {
 
       <div className="flex-1 min-w-0">
         {!selectedExam ? (
-          <div className="bg-white rounded-xl border border-gray-200 py-24 text-center">
-            <p className="text-gray-400 text-sm">Select an exam to view results</p>
+          <div className="bg-white rounded-md border border-gray-200 py-24 text-center">
+            <p className="text-muted-foreground text-sm">Select an exam to view results</p>
           </div>
         ) : marksLoading ? (
-          <div className="bg-white rounded-xl border border-gray-200 py-24 text-center">
+          <div className="bg-white rounded-md border border-gray-200 py-24 text-center">
             <div className="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto" />
           </div>
         ) : !marksData ? (
-          <div className="bg-white rounded-xl border border-gray-200 py-24 text-center">
-            <p className="text-gray-400 text-sm">No marks entered yet for this exam.</p>
+          <div className="bg-white rounded-md border border-gray-200 py-24 text-center">
+            <p className="text-muted-foreground text-sm">No marks entered yet for this exam.</p>
           </div>
         ) : (
           <div className="space-y-4">
             {marksData.exam.status === 'teacher_reviewed' && (
-              <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 flex items-center justify-between gap-4">
+              <div className="bg-violet-50 border border-violet-200 rounded-md p-4 flex items-center justify-between gap-4">
                 <div>
                   <p className="text-sm font-bold text-violet-800">Reviewed by the class teacher — ready to release</p>
                   <p className="text-xs text-violet-600 mt-0.5">Releasing sends results to every student and parent in this class. This cannot be undone.</p>
                 </div>
                 {!releaseConfirm ? (
                   <button onClick={() => setReleaseConfirm(true)} data-testid="exam-release-button"
-                    className="px-5 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-bold hover:bg-violet-700 transition-colors flex-shrink-0">
+                    className="px-5 py-2.5 bg-violet-600 text-white rounded-md text-sm font-bold hover:bg-violet-700 transition-colors flex-shrink-0">
                     Release to Students &amp; Parents
                   </button>
                 ) : (
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button onClick={() => setReleaseConfirm(false)} className="px-3 py-2 text-xs font-semibold text-gray-500">Cancel</button>
                     <button onClick={handleRelease} disabled={releasing} data-testid="exam-release-confirm"
-                      className="px-5 py-2.5 bg-violet-600 text-white rounded-xl text-sm font-bold hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                      className="px-5 py-2.5 bg-violet-600 text-white rounded-md text-sm font-bold hover:bg-violet-700 disabled:opacity-50 transition-colors">
                       {releasing ? 'Releasing…' : 'Confirm Release'}
                     </button>
                   </div>
                 )}
               </div>
             )}
-            {releaseError && <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-600">{releaseError}</div>}
+            {releaseError && <div className="bg-red-50 border border-red-200 rounded-md px-4 py-3 text-sm text-red-600">{releaseError}</div>}
             {marksData.exam.status === 'released' && <AckTracker examId={marksData.exam.id} schoolId={schoolId} />}
             <ExamAnalysisPanel data={marksData} />
           </div>
@@ -538,13 +538,13 @@ function AckTracker({ examId, schoolId }: { examId: number; schoolId: number }) 
     } finally { setNudging(null) }
   }
 
-  if (loading) return <div className="bg-white rounded-xl border border-gray-200 py-8 text-center text-sm text-gray-400">Loading acknowledgements…</div>
+  if (loading) return <div className="bg-white rounded-md border border-gray-200 py-8 text-center text-sm text-muted-foreground">Loading acknowledgements…</div>
   if (!data) return null
 
   const pct = data.total > 0 ? Math.round((data.acknowledged / data.total) * 100) : 0
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+    <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
       <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
         <p className="font-bold text-gray-800 text-sm">Parent Acknowledgements</p>
         <span className={`text-xs font-bold px-2 py-1 rounded-full ${pct === 100 ? 'bg-emerald-100 text-emerald-700' : pct >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
@@ -559,7 +559,7 @@ function AckTracker({ examId, schoolId }: { examId: number; schoolId: number }) 
                 <span className="w-2 h-2 bg-red-400 rounded-full flex-shrink-0" />
                 <div className="min-w-0">
                   <p className="text-xs font-semibold text-gray-800 truncate">{s.student_name}</p>
-                  <p className="text-[10px] text-gray-400">{s.roll_number}{s.last_nudged_at ? ` · nudged ${timeAgo(s.last_nudged_at)}` : ''}</p>
+                  <p className="text-xs text-muted-foreground">{s.roll_number}{s.last_nudged_at ? ` · nudged ${timeAgo(s.last_nudged_at)}` : ''}</p>
                 </div>
               </div>
               <button onClick={() => nudge(s.student_id)} disabled={nudging === s.student_id} data-testid={`nudge-parent-${s.student_id}`}
@@ -600,15 +600,15 @@ function ExamAnalysisPanel({ data }: { data: MarksData }) {
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
+      <div className="bg-white rounded-md border border-gray-200 px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h3 className="font-bold text-gray-900">{exam.exam_name}</h3>
-            <p className="text-xs text-gray-400 mt-0.5">
+            <p className="text-xs text-muted-foreground mt-0.5">
               Grade {exam.grade} – Section {exam.section} · {new Date(exam.exam_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })} · Passing: {exam.passing_pct}%
             </p>
           </div>
-          <span className={`text-[10px] font-bold px-2 py-1 rounded-full flex-shrink-0 ${STATUS_LABELS[exam.status]?.color ?? 'bg-gray-100 text-gray-500'}`}>
+          <span className={`text-xs font-bold px-2 py-1 rounded-full flex-shrink-0 ${STATUS_LABELS[exam.status]?.color ?? 'bg-gray-100 text-gray-500'}`}>
             {(STATUS_LABELS[exam.status]?.label ?? exam.status).toUpperCase()}
           </span>
         </div>
@@ -622,16 +622,16 @@ function ExamAnalysisPanel({ data }: { data: MarksData }) {
           { label: 'Class Avg', value: classAvg !== null ? `${classAvg}%` : '—', color: classAvg !== null ? (classAvg >= 60 ? 'text-emerald-600' : classAvg >= 40 ? 'text-amber-500' : 'text-red-500') : 'text-gray-300' },
           { label: 'Topper', value: topper ? `${topper.percentage}%` : '—', color: 'text-indigo-600', sub: topper?.name },
         ].map(({ label, value, color, sub }) => (
-          <div key={label} className="bg-white rounded-xl border border-gray-200 p-4 text-center">
-            <p className={`text-2xl font-black ${color}`}>{value}</p>
-            {sub && <p className="text-[10px] text-gray-500 truncate mt-0.5">{sub}</p>}
-            <p className="text-[10px] text-gray-400 mt-1">{label}</p>
+          <div key={label} className="bg-white rounded-md border border-gray-200 p-4 text-center">
+            <p className={`text-2xl font-semibold ${color}`}>{value}</p>
+            {sub && <p className="text-xs text-gray-500 truncate mt-0.5">{sub}</p>}
+            <p className="text-xs text-muted-foreground mt-1">{label}</p>
           </div>
         ))}
       </div>
 
       {pass_count + fail_count > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 px-5 py-3">
+        <div className="bg-white rounded-md border border-gray-200 px-5 py-3">
           <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5">
             <span>Pass Rate</span>
             <span className="font-semibold">{Math.round(pass_count / (pass_count + fail_count) * 100)}%</span>
@@ -640,7 +640,7 @@ function ExamAnalysisPanel({ data }: { data: MarksData }) {
             <div className="h-full bg-emerald-500 rounded-full transition-all"
               style={{ width: `${Math.round(pass_count / (pass_count + fail_count) * 100)}%` }} />
           </div>
-          <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+          <div className="flex justify-between text-xs text-muted-foreground mt-1">
             <span>{pass_count} passed</span>
             <span>{fail_count} failed</span>
           </div>
@@ -648,7 +648,7 @@ function ExamAnalysisPanel({ data }: { data: MarksData }) {
       )}
 
       {subject_stats.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
           <div className="px-5 py-3 border-b border-gray-100">
             <p className="font-bold text-gray-800 text-sm">Subject-wise Analysis</p>
           </div>
@@ -685,7 +685,7 @@ function ExamAnalysisPanel({ data }: { data: MarksData }) {
                       </td>
                       <td className="px-4 py-2.5 text-center text-xs font-semibold text-emerald-600">{s.pass_count}</td>
                       <td className="px-4 py-2.5 text-center text-xs font-semibold text-red-500">{s.fail_count}</td>
-                      <td className="px-4 py-2.5 text-center text-xs text-gray-400">{s.absent_count}</td>
+                      <td className="px-4 py-2.5 text-center text-xs text-muted-foreground">{s.absent_count}</td>
                       <td className="px-4 py-2.5 text-center">
                         {passPct !== null ? (
                           <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${passPct >= 80 ? 'bg-emerald-100 text-emerald-700' : passPct >= 50 ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-600'}`}>
@@ -702,10 +702,10 @@ function ExamAnalysisPanel({ data }: { data: MarksData }) {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
         <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
           <p className="font-bold text-gray-800 text-sm">Student Results</p>
-          <span className="text-xs text-gray-400">{students.length} students</span>
+          <span className="text-xs text-muted-foreground">{students.length} students</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -714,7 +714,7 @@ function ExamAnalysisPanel({ data }: { data: MarksData }) {
                 <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 sticky left-0 bg-gray-50">Student</th>
                 {subjects.map(s => (
                   <th key={s.subject_name} className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500 whitespace-nowrap">
-                    {s.subject_name}<br/><span className="text-[9px] font-normal text-gray-400">/{s.max_marks}</span>
+                    {s.subject_name}<br/><span className="text-xs font-normal text-muted-foreground">/{s.max_marks}</span>
                   </th>
                 ))}
                 <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500">Total</th>
@@ -730,17 +730,17 @@ function ExamAnalysisPanel({ data }: { data: MarksData }) {
                   <tr key={s.student_id} className={`hover:bg-gray-50/40 ${s.pass === false ? 'bg-red-50/20' : ''}`}>
                     <td className="px-4 py-2.5 sticky left-0 bg-white">
                       <div className="flex items-center gap-2">
-                        {rank > 0 && <span className="text-[10px] text-gray-300 w-4">#{rank}</span>}
+                        {rank > 0 && <span className="text-xs text-gray-300 w-4">#{rank}</span>}
                         <div>
                           <p className="text-xs font-semibold text-gray-800">{s.name}</p>
-                          <p className="text-[10px] text-gray-400">{s.roll_number}</p>
+                          <p className="text-xs text-muted-foreground">{s.roll_number}</p>
                         </div>
                       </div>
                     </td>
                     {subjects.map(sub => {
                       const m = s.subjects[sub.subject_name]
                       if (!m) return <td key={sub.subject_name} className="px-3 py-2.5 text-center text-xs text-gray-200">—</td>
-                      if (m.is_absent) return <td key={sub.subject_name} className="px-3 py-2.5 text-center"><span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">AB</span></td>
+                      if (m.is_absent) return <td key={sub.subject_name} className="px-3 py-2.5 text-center"><span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">AB</span></td>
                       const subPct = m.marks_obtained !== null ? (m.marks_obtained / sub.max_marks) * 100 : null
                       return (
                         <td key={sub.subject_name} className="px-3 py-2.5 text-center">
@@ -760,11 +760,11 @@ function ExamAnalysisPanel({ data }: { data: MarksData }) {
                         </span>
                       ) : <span className="text-xs text-gray-300">—</span>}
                     </td>
-                    <td className={`px-3 py-2.5 text-center text-xs font-black ${gradeColor(s.grade)}`}>{s.grade ?? '—'}</td>
+                    <td className={`px-3 py-2.5 text-center text-xs font-semibold ${gradeColor(s.grade)}`}>{s.grade ?? '—'}</td>
                     <td className="px-3 py-2.5 text-center">
                       {s.pass === null
-                        ? <span className="text-[10px] text-gray-300">Pending</span>
-                        : <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${s.pass ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
+                        ? <span className="text-xs text-gray-300">Pending</span>
+                        : <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${s.pass ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-600'}`}>
                             {s.pass ? 'PASS' : 'FAIL'}
                           </span>}
                     </td>

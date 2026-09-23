@@ -10,7 +10,7 @@ import {
 import { EmptyState } from '@/components/ui/empty-state'
 import { useConfirm } from '@/components/ui/use-confirm'
 import { INK, TEAL, CREAM, GREEN, PURPLE, BORDER, SURFACE } from '@/app/components/ulearn/theme'
-import { ProgressBar } from '@/components/loaders'
+import { InlineLoader, ProgressBar } from '@/components/loaders'
 import { BulkImportPanel } from '@/app/components/ulearn/BulkImportPanel'
 import { Toast } from '@/app/components/ulearn/primitives'
 import { useToast } from '@/app/components/ulearn/useToast'
@@ -1659,7 +1659,7 @@ export default function PlatformCurriculum() {
                           <p className="text-[10px] text-gray-400 mt-1">Supports PDF files up to 10MB</p>
                         </div>
                       )}
-                      {uploadError && <p className="text-[10px]" style={{ color: '#791F1F' }}>⚠️ {uploadError}</p>}
+                      {uploadError && <p role="alert" className="text-[10px]" style={{ color: '#791F1F' }}>{uploadError}</p>}
                     </div>
                   </div>
                 </div>
@@ -1762,7 +1762,7 @@ export default function PlatformCurriculum() {
                     ) : (
                       <p className="text-[11px] font-bold" style={{ color: INK }}>Upload file, or <span style={{ color: PURPLE }}>browse</span></p>
                     )}
-                    {uploadError && <p className="text-[9px]" style={{ color: '#791F1F' }}>⚠️ {uploadError}</p>}
+                    {uploadError && <p role="alert" className="text-[9px]" style={{ color: '#791F1F' }}>{uploadError}</p>}
                   </div>
                   <div className="space-y-3 pt-2">
                     <div>
@@ -2024,9 +2024,7 @@ export default function PlatformCurriculum() {
                 </div>
               )}
               {loading ? (
-                <div className="py-6 flex items-center justify-center">
-                  <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: PURPLE, borderTopColor: 'transparent' }} />
-                </div>
+                <InlineLoader portal="platform-admin" label="Loading subjects…" />
               ) : subjects.length === 0 ? (
                 <p className="text-xs text-gray-400 text-center py-6">No subjects for this board & grade.</p>
               ) : (
@@ -2070,7 +2068,7 @@ export default function PlatformCurriculum() {
           <div className="lg:col-span-3 space-y-6">
             {error && (
               <div className="px-4 py-3 rounded-xl flex justify-between items-center text-xs" style={{ background: '#FCEBEB', color: '#791F1F' }}>
-                <span>⚠️ {error}</span>
+                <span>{error}</span>
                 <button onClick={() => setError('')}><X size={13} /></button>
               </div>
             )}
@@ -2239,10 +2237,7 @@ export default function PlatformCurriculum() {
 
                 {/* Chapters */}
                 {loadingDetails ? (
-                  <div className="py-24 text-center">
-                    <div className="w-8 h-8 border-2 rounded-full animate-spin mx-auto mb-3" style={{ borderColor: PURPLE, borderTopColor: 'transparent' }} />
-                    <p className="text-xs text-gray-400 font-medium">Loading syllabus template…</p>
-                  </div>
+                  <InlineLoader portal="platform-admin" label="Loading syllabus template…" size="lg" className="py-24" />
                 ) : chapters.length === 0 ? (
                   <EmptyState
                     icon={BookOpen}
@@ -2352,7 +2347,7 @@ export default function PlatformCurriculum() {
                                           </div>
                                         </div>
                                         {t.content_text && <p className="text-[10px] text-gray-400 mt-1 line-clamp-2">{t.content_text}</p>}
-                                        {t.content_pdf_url && <p className="text-[10px] truncate mt-1" style={{ color: PURPLE }}>📄 {t.content_pdf_url}</p>}
+                                        {t.content_pdf_url && <p className="text-[10px] truncate mt-1" style={{ color: PURPLE }}>PDF attached</p>}
                                         {t.subtopics && t.subtopics.length > 0 && (
                                           <ul className="mt-1.5 space-y-0.5">
                                             {t.subtopics.map((st, si) => (
@@ -2622,9 +2617,7 @@ export default function PlatformCurriculum() {
 
             <div className="flex-1 overflow-y-auto space-y-2 pr-1">
               {loadingMaterials ? (
-                <div className="py-10 text-center">
-                  <div className="w-6 h-6 border-2 rounded-full animate-spin mx-auto" style={{ borderColor: PURPLE, borderTopColor: 'transparent' }} />
-                </div>
+                <InlineLoader portal="platform-admin" label="Loading files…" />
               ) : materials.length === 0 ? (
                 <p className="text-xs text-gray-400 text-center py-10">No files uploaded yet — use &quot;Upload textbook / handbook&quot; to add one.</p>
               ) : (
@@ -2798,7 +2791,7 @@ export default function PlatformCurriculum() {
                                   )}
                                   {mergeError && mergeError.subjectName === group.subjectName && mergeError.bookType === bt && (
                                     <div className="flex items-start gap-1.5 text-[11px] rounded-lg px-2.5 py-2" style={{ background: '#FCEBEB', color: '#791F1F' }}>
-                                      ⚠️ {mergeError.message}
+                                      {mergeError.message}
                                     </div>
                                   )}
                                 </div>
