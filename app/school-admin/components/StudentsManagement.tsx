@@ -43,6 +43,7 @@ type DuplicatesPanelProps = {
   dupGroups: DupGroup[]
   dupLoading: boolean
   dupError: string
+  dupResult: { deleted: number; skipped: number; errors: Array<{ dup_id: number; reason: string }> } | null
   dupTotalCount: number
   selectedDupGroups: Set<number>
   dupDeleting: boolean
@@ -57,7 +58,7 @@ type DuplicatesPanelProps = {
 }
 
 function DuplicatesPanel({
-  dupGroups, dupLoading, dupError, dupTotalCount, selectedDupGroups,
+  dupGroups, dupLoading, dupError, dupResult, dupTotalCount, selectedDupGroups,
   dupDeleting, dupConfirm, onScan, onSelectGroup, onSelectAll,
   onDeleteSelected, onDeleteAll, onConfirmDelete, onCancelConfirm,
 }: DuplicatesPanelProps) {
@@ -117,6 +118,28 @@ function DuplicatesPanel({
 
       {dupError && (
         <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{dupError}</div>
+      )}
+
+      {dupResult && (dupResult.deleted > 0 || dupResult.skipped > 0) && (
+        <div className={`mb-4 border px-4 py-3 rounded-lg text-sm ${dupResult.skipped > 0 ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-green-50 border-green-200 text-green-700'}`}>
+          <p className="font-medium">
+            {dupResult.deleted > 0 && `Merged and removed ${dupResult.deleted} duplicate${dupResult.deleted !== 1 ? 's' : ''}.`}
+            {dupResult.deleted > 0 && dupResult.skipped > 0 && ' '}
+            {dupResult.skipped > 0 && `${dupResult.skipped} left untouched — they still have payment or waiver history that conflicts with the record being kept.`}
+          </p>
+          {dupResult.errors.length > 0 && (
+            <ul className="mt-2 space-y-1 text-xs">
+              {dupResult.errors.map(e => {
+                const name = dupGroups.flatMap(g => g.duplicates).find(d => d.id === e.dup_id)?.name
+                return (
+                  <li key={e.dup_id}>
+                    <span className="font-medium">{name || `Student #${e.dup_id}`}:</span> {e.reason}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
       )}
 
       {dupGroups.length > 0 && (
@@ -263,6 +286,11 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   const [dupTotalCount, setDupTotalCount] = useState(0)
   const [selectedDupGroups, setSelectedDupGroups] = useState<Set<number>>(new Set())
   const [dupError, setDupError] = useState('')
+  // Cleanup can now finish "successfully" (200 OK) while still SKIPPING some
+  // duplicates that have real financial history attached — dupError alone
+  // (a full-request failure banner) never covered that partial-success case,
+  // so an admin had no way to see which duplicates were left alone or why.
+  const [dupResult, setDupResult] = useState<{ deleted: number; skipped: number; errors: Array<{ dup_id: number; reason: string }> } | null>(null)
   const [dupConfirm, setDupConfirm] = useState<'selected' | 'all' | null>(null)
   const [dupDeleting, setDupDeleting] = useState(false)
   const [search, setSearch] = useState('')
@@ -297,7 +325,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   }
 
   const loadDuplicates = useCallback(async () => {
-    setDupLoading(true); setDupError('')
+    setDupLoading(true); setDupError(''); setDupResult(null)
     try {
       const res = await fetch(`/api/students/duplicates?school_id=${schoolId}`)
       const data = await res.json()
@@ -311,7 +339,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   }, [schoolId])
 
   async function handleDeleteDuplicates(mode: 'selected' | 'all') {
-    setDupDeleting(true); setDupConfirm(null); setDupError('')
+    setDupDeleting(true); setDupConfirm(null); setDupError(''); setDupResult(null)
     try {
       const body = mode === 'all'
         ? { school_id: schoolId, cleanup_all: true }
@@ -329,7 +357,13 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
+      // loadDuplicates() below resets dupResult (a fresh scan shouldn't carry
+      // a stale result banner) — set this AFTER it, or it would be wiped out
+      // immediately. A 200 response can still include per-duplicate skips
+      // (real financial history found); surface those explicitly rather than
+      // treating this as a silent, fully-successful cleanup.
       await loadDuplicates()
+      setDupResult({ deleted: data.deleted ?? 0, skipped: data.skipped ?? 0, errors: data.errors ?? [] })
       reloadStudents()
     } catch (err: unknown) {
       setDupError(err instanceof Error ? err.message : 'Cleanup failed')
@@ -519,6 +553,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
             dupGroups={dupGroups}
             dupLoading={dupLoading}
             dupError={dupError}
+            dupResult={dupResult}
             dupTotalCount={dupTotalCount}
             selectedDupGroups={selectedDupGroups}
             dupDeleting={dupDeleting}
