@@ -210,14 +210,17 @@ async function handlePOST(req: NextRequest) {
       if (!isMulti) {
         // ── Single-entry mode (offline admin collection) ──────────────────────────
 
-        // #15 — FOR UPDATE locks the row so concurrent cashiers queue instead of double-paying
+        // #15 — FOR UPDATE locks the row so concurrent cashiers queue instead of double-paying.
+        // student_id is also matched here (not just school_id) — without it, a caller
+        // could name student A in the receipt while ledger_id actually belongs to
+        // student B, crediting the wrong student's bill.
         const { rows: [ledgerRow] } = await client.query(
-          `SELECT amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount FROM student_fee_ledger WHERE id = $1 AND school_id = $2 FOR UPDATE`,
-          [ledger_id, school_id]
+          `SELECT amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount FROM student_fee_ledger WHERE id = $1 AND school_id = $2 AND student_id = $3 FOR UPDATE`,
+          [ledger_id, school_id, student_id]
         )
         if (!ledgerRow) {
           await client.query('ROLLBACK')
-          return NextResponse.json({ error: 'Ledger entry not found' }, { status: 404 })
+          return NextResponse.json({ error: 'Ledger entry not found for this student' }, { status: 404 })
         }
         const balance = parseFloat(ledgerRow.amount_due) - parseFloat(ledgerRow.waiver_amount) - parseFloat(ledgerRow.amount_paid)
         if (parseFloat(String(amount)) > balance + 0.001) {
@@ -257,16 +260,19 @@ async function handlePOST(req: NextRequest) {
       } else {
         // ── Multi-entry FIFO mode ─────────────────────────────────────────────────
         // Fetch ledger entries in FIFO order (oldest due_date first)
-        // #15 — FOR UPDATE locks all selected rows so concurrent cashiers queue
+        // #15 — FOR UPDATE locks all selected rows so concurrent cashiers queue.
+        // student_id is matched too — without it, a ledger_id belonging to another
+        // student in the same school would silently be allocated money under this
+        // receipt's student_id.
         const { rows: entries } = await client.query(
           `SELECT id, amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount, status,
                   GREATEST(amount_due - COALESCE(waiver_amount, 0) - amount_paid, 0) AS balance
            FROM student_fee_ledger
-           WHERE id = ANY($1) AND school_id = $2
+           WHERE id = ANY($1) AND school_id = $2 AND student_id = $3
              AND status NOT IN ('paid', 'waived')
            ORDER BY due_date ASC
            FOR UPDATE`,
-          [ledger_ids, school_id]
+          [ledger_ids, school_id, student_id]
         )
 
         const totalBalance = entries.reduce((sum, e) => sum + parseFloat(String(e.balance)), 0)

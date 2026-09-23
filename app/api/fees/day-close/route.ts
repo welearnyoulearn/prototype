@@ -125,7 +125,11 @@ export async function POST(req: NextRequest) {
           submitted_by, notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        ON CONFLICT (school_id, close_date)
-       DO UPDATE SET actual_cash=$9, difference=$10, submitted_by=$14, notes=$15, submitted_at=NOW()
+       DO UPDATE SET
+         total_cash=$3, total_cheque=$4, total_upi=$5, total_online=$6, total_dd=$7,
+         system_cash=$8, actual_cash=$9, difference=$10,
+         receipt_from=$11, receipt_to=$12, txn_count=$13,
+         submitted_by=$14, notes=$15, submitted_at=NOW()
        RETURNING *`,
       [school_id, date,
        systemCash, modeMap['cheque'] || 0, modeMap['upi'] || 0,

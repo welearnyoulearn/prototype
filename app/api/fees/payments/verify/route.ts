@@ -94,7 +94,10 @@ async function handlePOST(req: NextRequest) {
         // stuck queue); approve credits the ledger, so it needs the same
         // server-side plan gate the self-report endpoint and QR/UPI-ID routes
         // already have — the UI hides this tab, but that's presentation only.
-        if (!await schoolHasFeature(pmtRow.school_id, 'online-payments')) {
+        // Pass `client` — on a max:1 pool, calling this with the default `pool`
+        // while `client` is still held (mid-transaction, since BEGIN above)
+        // deadlocks waiting for a second connection this handler is already using.
+        if (!await schoolHasFeature(pmtRow.school_id, 'online-payments', client)) {
           await client.query('ROLLBACK')
           return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
         }
@@ -114,6 +117,32 @@ async function handlePOST(req: NextRequest) {
           return NextResponse.json({ error: 'This academic year is closed. Reopen it to approve this payment.' }, { status: 409 })
         }
 
+        // Lock the ledger row and check its CURRENT balance before crediting.
+        // Previously this went straight to LEAST(amount_due-waiver, amount_paid+amount)
+        // on the UPDATE below, which silently capped the ledger credit whenever an
+        // offline (cash/cheque) payment had been collected in the meantime — but
+        // still marked this fee_payments row fully 'completed' for the ORIGINAL
+        // amount. That let receipts (sum of completed fee_payments.amount) exceed
+        // what the ledger showed as paid, and a later cancellation of this payment
+        // reversed the full original amount — which could wipe out the unrelated
+        // offline credit too. Rejecting here (same convention as every other
+        // ledger-mutating fee route) forces the admin to reconcile the overlap —
+        // e.g. cancel/correct the offline collection — before approving, so the
+        // amount actually credited always matches what this fee_payments row says.
+        const { rows: [ledgerRow] } = await client.query(
+          `SELECT amount_due, amount_paid, COALESCE(waiver_amount, 0) AS waiver_amount
+           FROM student_fee_ledger WHERE id = $1 FOR UPDATE`,
+          [payment.ledger_id]
+        )
+        const currentBalance = parseFloat(ledgerRow.amount_due) - parseFloat(ledgerRow.waiver_amount) - parseFloat(ledgerRow.amount_paid)
+        const paymentAmount = parseFloat(payment.amount)
+        if (paymentAmount > currentBalance + 0.001) {
+          await client.query('ROLLBACK')
+          return NextResponse.json({
+            error: `Approving this ₹${paymentAmount} payment would exceed the bill's remaining balance (₹${Math.max(0, currentBalance).toFixed(2)}) — another payment or waiver was recorded on this bill since this was submitted. Reconcile the other collection first (cancel/correct it), then approve.`,
+          }, { status: 409 })
+        }
+
         // Mark payment as completed
         await client.query(
           `UPDATE fee_payments
@@ -122,12 +151,15 @@ async function handlePOST(req: NextRequest) {
           [verified_by, payment_id]
         )
 
-        // Update ledger: amount_paid += payment.amount (waiver_amount already applied separately)
+        // Update ledger: amount_paid += payment.amount (waiver_amount already applied
+        // separately). The balance check above guarantees this stays within
+        // amount_due-waiver, so no LEAST(...) cap is needed here anymore — the
+        // amount credited now always equals exactly what this payment row records.
         await client.query(
           `UPDATE student_fee_ledger
-           SET amount_paid = LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1),
+           SET amount_paid = amount_paid + $1,
                status = CASE
-                 WHEN COALESCE(waiver_amount,0) + LEAST(amount_due - COALESCE(waiver_amount,0), amount_paid + $1) >= amount_due THEN 'paid'
+                 WHEN COALESCE(waiver_amount,0) + amount_paid + $1 >= amount_due THEN 'paid'
                  WHEN amount_paid + $1 > 0 THEN 'partial'
                  ELSE status
                END
@@ -139,7 +171,11 @@ async function handlePOST(req: NextRequest) {
 
         // Send confirmation email to parent (non-blocking)
         try {
-          const { rows: [detail] } = await pool.query(
+          // Reuse `client` (still held below, released in `finally`) rather than
+          // `pool.query` — on Vercel's max:1 pool, requesting a second connection
+          // while this handler still holds the only one deadlocks until
+          // connectionTimeoutMillis fails the whole request.
+          const { rows: [detail] } = await client.query(
             `SELECT s.parent_email, s.parent_name, s.name AS student_name,
                     sc.name AS school_name,
                     fc.name AS category_name, l.period_label,
@@ -182,7 +218,9 @@ async function handlePOST(req: NextRequest) {
 
         // Send rejection email to parent (non-blocking)
         try {
-          const { rows: [detail] } = await pool.query(
+          // See the matching comment in the approve branch above — reuse
+          // `client`, don't request a second connection from a max:1 pool.
+          const { rows: [detail] } = await client.query(
             `SELECT s.parent_email, s.parent_name, s.name AS student_name,
                     sc.name AS school_name,
                     fc.name AS category_name, l.period_label,

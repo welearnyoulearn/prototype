@@ -243,7 +243,15 @@ export async function POST(req: NextRequest) {
         let passoutCount = 0, passoutTotal = 0
 
         for (const d of decisions) {
-          // Fetch this student's unpaid bills in from_year (with leaver status)
+          // Fetch this student's unpaid bills in from_year (with leaver status).
+          // FOR UPDATE OF l takes the same row lock the payment/waiver routes take
+          // on these exact rows — without it, a payment committed after this SELECT
+          // but before this transaction's closeOutBill/upsertCarryForwardBill below
+          // leaves year-end carrying/writing off a stale (larger) balance, since
+          // lockYearClose's advisory lock isn't held by the payment routes. Locking
+          // the rows here makes a concurrent payment's own FOR UPDATE (in
+          // payments/route.ts) block until this transaction commits, then correctly
+          // see the bill as already closed (status settled/waived) instead of racing.
           const { rows: studentBills } = await client.query(
             `SELECT l.id, l.fee_category_id, l.period_label, l.amount_due, l.amount_paid,
                     COALESCE(l.waiver_amount,0) AS waiver_amount,
@@ -255,7 +263,8 @@ export async function POST(req: NextRequest) {
              JOIN fee_categories fc ON fc.id = l.fee_category_id
              WHERE l.school_id = $1 AND l.academic_year = $2 AND l.student_id = $3
                AND l.status IN ('pending','overdue','partial')
-               AND GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) > 0`,
+               AND GREATEST(l.amount_due - COALESCE(l.waiver_amount,0) - l.amount_paid, 0) > 0
+             FOR UPDATE OF l`,
             [school_id, from_year, d.student_id]
           )
           if (studentBills.length === 0) continue

@@ -79,14 +79,16 @@ async function handlePOST(req: NextRequest) {
         return NextResponse.json(claim.body as object, { status: claim.status })
       }
 
-      // #15/#16 — FOR UPDATE locks the row so a concurrent payment can't race with this waiver
+      // #15/#16 — FOR UPDATE locks the row so a concurrent payment can't race with this waiver.
+      // student_id is matched too — without it, a ledger_id belonging to another
+      // student in the same school would silently be waived under this student_id.
       const { rows: [ledger] } = await client.query(
-        `SELECT * FROM student_fee_ledger WHERE id = $1 AND school_id = $2 FOR UPDATE`,
-        [ledger_id, school_id]
+        `SELECT * FROM student_fee_ledger WHERE id = $1 AND school_id = $2 AND student_id = $3 FOR UPDATE`,
+        [ledger_id, school_id, student_id]
       )
       if (!ledger) {
         await client.query('ROLLBACK')
-        return NextResponse.json({ error: 'Ledger entry not found' }, { status: 404 })
+        return NextResponse.json({ error: 'Ledger entry not found for this student' }, { status: 404 })
       }
 
       // Block waivers on a closed year (same guard as payments route)
@@ -186,8 +188,14 @@ async function handlePATCH(req: NextRequest) {
     try {
       await client.query('BEGIN')
 
+      // FOR UPDATE — without this, two concurrent corrections of the same waiver
+      // can both pass the is_revoked=FALSE check below before either commits, both
+      // soft-revoke it and insert a replacement, and both apply their delta against
+      // this same stale `w0.waiver_amount` — corrupting the ledger's waiver_amount
+      // and leaving two active replacement waivers. Locking makes the second
+      // request wait for the first to commit, then correctly find is_revoked=TRUE.
       const { rows: [w0] } = await client.query(
-        `SELECT * FROM fee_waivers WHERE id = $1 AND is_revoked = FALSE`, [id]
+        `SELECT * FROM fee_waivers WHERE id = $1 AND is_revoked = FALSE FOR UPDATE`, [id]
       )
       if (!w0) {
         await client.query('ROLLBACK')
@@ -207,14 +215,25 @@ async function handlePATCH(req: NextRequest) {
         }, { status: 409 })
       }
 
-      // Validate: new waiver + existing payments must not exceed amount_due
+      // Validate: new waiver + existing payments + OTHER active waivers on this same
+      // bill must not exceed amount_due. Checking only amount_paid (as before) let a
+      // correction push the combined waived total past the bill whenever more than
+      // one waiver was active on it — e.g. a ₹1,000 bill with ₹200 and ₹400 waivers
+      // both active let the ₹200 one be "corrected" to ₹700, totalling ₹1,100 waived.
       const { rows: [lgCheck] } = await client.query(
         `SELECT amount_due, amount_paid, academic_year FROM student_fee_ledger WHERE id = $1 FOR UPDATE`, [w0.ledger_id]
       )
-      if (parseFloat(lgCheck.amount_paid) + newAmt > parseFloat(lgCheck.amount_due) + 0.01) {
+      const { rows: [otherWaivers] } = await client.query(
+        `SELECT COALESCE(SUM(waiver_amount), 0) AS total
+         FROM fee_waivers
+         WHERE ledger_id = $1 AND is_revoked = FALSE AND id != $2`,
+        [w0.ledger_id, id]
+      )
+      const otherActiveWaived = parseFloat(otherWaivers.total)
+      if (parseFloat(lgCheck.amount_paid) + otherActiveWaived + newAmt > parseFloat(lgCheck.amount_due) + 0.01) {
         await client.query('ROLLBACK')
         return NextResponse.json({
-          error: `Waiver ₹${newAmt} + already paid ₹${lgCheck.amount_paid} exceeds bill ₹${lgCheck.amount_due}`
+          error: `Waiver ₹${newAmt} + already paid ₹${lgCheck.amount_paid} + other active waivers ₹${otherActiveWaived} exceeds bill ₹${lgCheck.amount_due}`
         }, { status: 400 })
       }
 

@@ -83,6 +83,24 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'Cannot delete an entry with a waiver recorded — revoke the waiver first' }, { status: 400 })
       }
+      // The checks above only look at the ledger's CURRENT running totals
+      // (amount_paid, waiver_amount), which a cancelled payment or revoked waiver
+      // already zeroes out — but the fee_payments/fee_waivers ROWS themselves
+      // still exist for audit history, and both reference this ledger_id with
+      // ON DELETE CASCADE. Deleting the bill would silently erase that history:
+      // pending_verification/cancelled payments and revoked waivers alike.
+      const { rows: [linked] } = await client.query(
+        `SELECT
+           EXISTS(SELECT 1 FROM fee_payments WHERE ledger_id = $1) AS has_payments,
+           EXISTS(SELECT 1 FROM fee_waivers  WHERE ledger_id = $1) AS has_waivers`,
+        [id]
+      )
+      if (linked.has_payments || linked.has_waivers) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({
+          error: 'Cannot delete an entry with payment or waiver history (including cancelled/revoked/pending records) — this would erase the audit trail.',
+        }, { status: 400 })
+      }
       await client.query(`DELETE FROM student_fee_ledger WHERE id = $1`, [id])
       await client.query('COMMIT')
       return NextResponse.json({ deleted: true })
@@ -131,9 +149,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
       await client.query('BEGIN')
 
-      // Fetch current entry
+      // Fetch current entry — FOR UPDATE so a concurrent payment/waiver can't land
+      // on this row between this read and the update below, which would let this
+      // edit's own amount_paid/waiver_amount snapshot go stale.
       const { rows: [entry] } = await client.query(
-        `SELECT * FROM student_fee_ledger WHERE id = $1 AND school_id = $2`,
+        `SELECT * FROM student_fee_ledger WHERE id = $1 AND school_id = $2 FOR UPDATE`,
         [id, school_id]
       )
       if (!entry) {
@@ -160,11 +180,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         return NextResponse.json({ error: `Cannot edit a ${entry.status} entry` }, { status: 400 })
       }
 
-      // Cannot set below what is already paid
-      if (Number(new_amount) < Number(entry.amount_paid)) {
+      // Cannot set below what is already covered by payments + waivers combined —
+      // checking amount_paid alone let a bill be cut below amount_paid + waiver_amount
+      // (e.g. ₹1,000 bill, ₹300 paid, ₹500 waived could be edited down to ₹400).
+      const coveredAmount = Number(entry.amount_paid) + Number(entry.waiver_amount || 0)
+      if (Number(new_amount) < coveredAmount) {
         await client.query('ROLLBACK')
         return NextResponse.json({
-          error: `New amount (₹${new_amount}) cannot be less than amount already paid (₹${entry.amount_paid})`
+          error: `New amount (₹${new_amount}) cannot be less than amount already paid + waived (₹${coveredAmount})`
         }, { status: 400 })
       }
 

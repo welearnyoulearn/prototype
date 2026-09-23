@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs'
 import { randomInt, randomUUID } from 'crypto'
 import { cookies, headers } from 'next/headers'
 import { NextRequest } from 'next/server'
+import type { Pool as PgPool, PoolClient } from 'pg'
 import pool from './db'
 import { JWT_SECRET, COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from './auth-constants'
 
@@ -351,21 +352,27 @@ const TIER_INCLUDES: Record<string, string[]> = {
 // falls back to the school's tier (plus everything it inherits) in
 // plan_features. Unconfigured = disabled, matching the convention in
 // GET /api/platform/features.
-export async function schoolHasFeature(schoolId: number, featureKey: string): Promise<boolean> {
-  const overrideRes = await pool.query(
+// `db` optionally reuses a caller's already-held PoolClient instead of asking
+// the shared pool for a second connection. Required whenever a caller invokes
+// this from inside a transaction it opened via pool.connect() — on Vercel's
+// max:1 pool, calling this with the bare `pool` (the default) while a
+// `client` is already held elsewhere in the same request deadlocks until
+// connectionTimeoutMillis fails the whole request.
+export async function schoolHasFeature(schoolId: number, featureKey: string, db: PgPool | PoolClient = pool): Promise<boolean> {
+  const overrideRes = await db.query(
     `SELECT enabled FROM school_feature_overrides WHERE school_id = $1 AND feature_key = $2`,
     [schoolId, featureKey]
   )
   if (overrideRes.rows.length > 0) return overrideRes.rows[0].enabled
 
-  const subRes = await pool.query(
+  const subRes = await db.query(
     `SELECT tier FROM school_subscriptions WHERE school_id = $1`,
     [schoolId]
   )
   if (subRes.rows.length === 0) return false
   const tiers = TIER_INCLUDES[subRes.rows[0].tier] ?? [subRes.rows[0].tier]
 
-  const tierRes = await pool.query(
+  const tierRes = await db.query(
     `SELECT bool_or(enabled) AS enabled FROM plan_features WHERE tier = ANY($1) AND feature_key = $2`,
     [tiers, featureKey]
   )
