@@ -231,11 +231,24 @@ export async function POST(req: NextRequest) {
             await client.query('ROLLBACK')
             return NextResponse.json({ error: `Academic year ${to_year} does not exist. Create it first.` }, { status: 400 })
           }
+          // Lock the DESTINATION year too (from_year is already locked above), not
+          // just checked — otherwise another request could close to_year between
+          // this check and the carry-forward insertion further below, landing a
+          // fresh bill in a year that's now supposed to be immutable. Advisory
+          // locks participate in Postgres's own deadlock detector, so a rare
+          // opposite-direction carry between the same two years at the same
+          // moment safely fails one of the two requests with a retryable error
+          // rather than corrupting anything, even without manually enforcing a
+          // global lock order across every route that calls lockYearClose.
+          await lockYearClose(client, school_id, to_year)
+
           // The destination year must not itself be closed — this only checked that
           // to_year EXISTS, not that it's still open. Without this, reopening an
           // older source year and carrying its (newly reopened) dues forward could
           // write a fresh "Previous Year Dues" bill into a destination year that was
-          // already closed and is supposed to be immutable.
+          // already closed and is supposed to be immutable. Re-checked here, now
+          // that the lock above is held, so this can't read a stale "not closed"
+          // state past a concurrent close that was waiting on it.
           const { rows: [toYearClosed] } = await client.query(
             `SELECT 1 FROM fee_year_close WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
             [school_id, to_year]

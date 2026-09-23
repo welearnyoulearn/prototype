@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { lockYearClose } from '@/lib/feeRollover'
 
 // Verify a ledger entry belongs to the caller's school. Returns the entry's school_id or null.
 async function ledgerSchoolId(id: string): Promise<string | null> {
@@ -41,6 +42,23 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
+
+      // Which academic year this entry is in — needed to take lockYearClose
+      // BEFORE the row lock below (same order year-end itself uses). Unlocked
+      // read is fine here: the FOR UPDATE re-fetch just below is authoritative.
+      const { rows: [yearLookup] } = await client.query(
+        `SELECT academic_year FROM student_fee_ledger WHERE id = $1 AND school_id = $2`,
+        [id, school_id]
+      )
+      if (yearLookup) {
+        // Serialize against year-end apply/close/reopen for this entry's year —
+        // the SAME advisory lock those actions take (lib/feeRollover.ts). The FOR
+        // UPDATE row lock just below alone would serialize this against year-end
+        // APPLY (which locks that same row), but not against a plain CLOSE, which
+        // doesn't touch any ledger row — only this shared lock does.
+        await lockYearClose(client, school_id, yearLookup.academic_year)
+      }
+
       // FOR UPDATE closes the gap between this check and the DELETE below — without
       // it, a payment or waiver could land on this exact row between the read and
       // the delete (a parent's online payment, another admin's cash collection),
@@ -150,6 +168,22 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
 
       await client.query('BEGIN')
+
+      // Which academic year this entry is in — needed to take lockYearClose
+      // BEFORE the row lock below (same order year-end itself uses). Unlocked
+      // read is fine here: the FOR UPDATE re-fetch just below is authoritative.
+      const { rows: [yearLookup] } = await client.query(
+        `SELECT academic_year FROM student_fee_ledger WHERE id = $1 AND school_id = $2`,
+        [id, school_id]
+      )
+      if (yearLookup) {
+        // Serialize against year-end apply/close/reopen for this entry's year —
+        // the SAME advisory lock those actions take (lib/feeRollover.ts). The FOR
+        // UPDATE row lock just below alone would serialize this against year-end
+        // APPLY (which locks that same row), but not against a plain CLOSE, which
+        // doesn't touch any ledger row — only this shared lock does.
+        await lockYearClose(client, school_id, yearLookup.academic_year)
+      }
 
       // Fetch current entry — FOR UPDATE so a concurrent payment/waiver can't land
       // on this row between this read and the update below, which would let this

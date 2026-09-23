@@ -3,6 +3,7 @@ import pool from '@/lib/db'
 import { sendFeePaymentConfirmedEmail, sendFeePaymentRejectedEmail } from '@/lib/email'
 import { requireFeeAccess, schoolHasFeature } from '@/lib/auth'
 import { withWatchline } from '@/lib/logger'
+import { lockYearClose } from '@/lib/feeRollover'
 
 // GET /api/fees/payments/verify?school_id=X — list pending_verification payments
 async function handleGET(req: NextRequest) {
@@ -105,10 +106,28 @@ async function handlePOST(req: NextRequest) {
           return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
         }
 
+        // Which academic year this payment's ledger row is in — needed to take
+        // lockYearClose BEFORE the row lock below (same order year-end itself
+        // uses). Unlocked read is fine here: the FOR UPDATE re-fetch just below
+        // is authoritative.
+        const { rows: [yearLookup] } = await client.query(
+          `SELECT academic_year FROM student_fee_ledger WHERE id = $1`, [payment.ledger_id]
+        )
+        if (yearLookup) {
+          // Serialize against year-end apply/close/reopen for this ledger row's
+          // year — the SAME advisory lock those actions take (lib/feeRollover.ts).
+          // The FOR UPDATE row lock just below alone would serialize this against
+          // year-end APPLY (which locks that same row), but not against a plain
+          // CLOSE, which doesn't touch any ledger row — only this shared lock does.
+          await lockYearClose(client, pmtRow.school_id, yearLookup.academic_year)
+        }
+
         // Block crediting a closed year's ledger — reject doesn't touch the
         // ledger at all (only flips payment_status), so it stays allowed
         // regardless of year-close state; approve does, so it needs the same
-        // guard every other ledger-mutating fee route has.
+        // guard every other ledger-mutating fee route has. Re-checked here, now
+        // that the lock above is held, so this can't read a stale "not closed"
+        // state past a concurrent close that was waiting on it.
         const { rows: [closedYear] } = await client.query(
           `SELECT 1 FROM fee_year_close fyc
            JOIN student_fee_ledger l ON l.academic_year = fyc.academic_year AND l.school_id = fyc.school_id

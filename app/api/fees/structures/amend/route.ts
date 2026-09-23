@@ -19,7 +19,9 @@ export async function POST(req: NextRequest) {
     try {
       const body = await req.json()
       const { school_id, academic_year, fee_category_id, grade, new_amount, reason, changed_by: clientActor, effective_from } = body
-      const access = await requireFeeAccess(school_id)
+      // Pass `client` — already held via pool.connect() above; the default
+      // `pool` here would deadlock requesting a second connection on Vercel's max:1 pool.
+      const access = await requireFeeAccess(school_id, client)
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const changed_by = clientActor || access.actor
 
