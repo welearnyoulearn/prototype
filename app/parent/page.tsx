@@ -567,7 +567,7 @@ function ParentDashboard() {
 
       <div className="portal-body">
         {/* Sidebar */}
-        <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} label={lang === 'te' ? 'నావిగేషన్' : 'Parent navigation'}>
+        <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} label={lang === 'te' ? 'నావిగేషన్' : 'Parent navigation'} portal="parent">
           <div className="portal-identity">
             <p className="text-sm font-semibold tracking-tight">WeLearnYouLearn</p>
             <p className="mt-1 text-xs text-muted-foreground">{parentInfo?.school_name}</p>
