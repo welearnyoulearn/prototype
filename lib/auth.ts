@@ -180,13 +180,18 @@ export async function getSessionIdFromCookie(): Promise<string | null> {
   return verifyToken(token)?.sid ?? null
 }
 
-async function validateStaffSession(touch: boolean): Promise<JWTPayload | null> {
+// `db` optionally reuses a caller's already-held PoolClient — see the matching
+// note on schoolHasFeature above. requireFeeAccess() (below) routes through
+// here for every school-staff fee request, so any fee route that calls
+// pool.connect() before requireFeeAccess() must pass that client through, or
+// this deadlocks itself waiting for a second connection on Vercel's max:1 pool.
+async function validateStaffSession(touch: boolean, db: PgPool | PoolClient = pool): Promise<JWTPayload | null> {
   const token = (await cookies()).get(COOKIE_ADMIN)?.value
   if (!token) return null
   const payload = verifyToken(token)
   if (!payload?.sid) return null
 
-  const { rows: [row] } = await pool.query<{ stale: boolean }>(
+  const { rows: [row] } = await db.query<{ stale: boolean }>(
     `SELECT (s.last_seen_at < NOW() - INTERVAL '30 seconds') AS stale
      FROM user_sessions s
      JOIN users u ON u.id = s.user_id
@@ -200,7 +205,7 @@ async function validateStaffSession(touch: boolean): Promise<JWTPayload | null> 
   if (!row) return null
 
   if (touch && row.stale) {
-    await pool.query(`UPDATE user_sessions SET last_seen_at = NOW() WHERE id = $1`, [payload.sid])
+    await db.query(`UPDATE user_sessions SET last_seen_at = NOW() WHERE id = $1`, [payload.sid])
   }
   return payload
 }
@@ -210,8 +215,9 @@ async function validateStaffSession(touch: boolean): Promise<JWTPayload | null> 
 // A normal call counts as user activity and pushes the idle timer forward. Background
 // pollers (e.g. the notification bell) must pass { passive: true } — otherwise an
 // abandoned tab would keep its session alive forever.
-export async function getSession(opts: { passive?: boolean } = {}): Promise<JWTPayload | null> {
-  return validateStaffSession(!opts.passive)
+// `db` — see requireFeeAccess's matching parameter; threaded through to validateStaffSession.
+export async function getSession(opts: { passive?: boolean; db?: PgPool | PoolClient } = {}): Promise<JWTPayload | null> {
+  return validateStaffSession(!opts.passive, opts.db)
 }
 
 // Explicit activity ping, used by the browser heartbeat (POST /api/auth/session) for
@@ -307,9 +313,16 @@ export function getParentSessionFromRequest(req: NextRequest): ParentJWTPayload 
 //   const access = await requireFeeAccess(requestedSchoolId)
 //   if (!access) return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
 //   // use access.schoolId (trusted) and access.actor for audit fields
-export async function requireFeeAccess(requestedSchoolId: string | number | null | undefined):
+//
+// `db` optionally reuses a caller's already-held PoolClient for the school-staff
+// session check below (getSession -> validateStaffSession -> a real query). Any
+// route that calls this AFTER its own pool.connect() must pass `client` here —
+// otherwise, on Vercel's max:1 pool, this deadlocks requesting a second
+// connection while the caller is still holding the only one.
+export async function requireFeeAccess(requestedSchoolId: string | number | null | undefined, db?: PgPool | PoolClient):
   Promise<{ schoolId: number; role: string; userId: number; actor: string } | null> {
-  // Platform admin: full access to any school (own cookie — see COOKIE_PLATFORM)
+  // Platform admin: full access to any school (own cookie — see COOKIE_PLATFORM).
+  // No pool access at all — just cookie verification — so `db` isn't needed here.
   const platformSession = await getPlatformSession()
   if (platformSession?.role === 'platform_admin') {
     const sid = requestedSchoolId != null ? Number(requestedSchoolId) : (platformSession.schoolId ?? 0)
@@ -318,7 +331,7 @@ export async function requireFeeAccess(requestedSchoolId: string | number | null
   }
 
   // School staff (admin, principal, vice_principal): must match their own school
-  const session = await getSession()
+  const session = await getSession({ db })
   if (!session) return null
 
   const SCHOOL_ROLES = ['school_admin', 'principal', 'vice_principal']

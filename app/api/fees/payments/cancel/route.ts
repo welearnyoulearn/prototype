@@ -32,14 +32,19 @@ async function handlePOST(req: NextRequest) {
         [payment_id]
       )
       if (!pmtPreview) return NextResponse.json({ error: 'Payment not found' }, { status: 404 })
-      // Verify the caller owns this payment's school (school-admin only)
-      const access = await requireFeeAccess(pmtPreview.school_id)
+      // Verify the caller owns this payment's school (school-admin only). Pass
+      // `client` — this handler already holds it via pool.connect() above; on a
+      // max:1 pool, requireFeeAccess's session check with the default `pool`
+      // would deadlock waiting for a second connection.
+      const access = await requireFeeAccess(pmtPreview.school_id, client)
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const done_by = access.actor
 
-      // Block if the academic year is closed — fee_year_close is guaranteed to exist
-      // (see lib/db.ts), so a query error here is a real failure, not a missing table;
-      // let it propagate to the outer catch rather than silently failing this guard open.
+      // Fast preliminary rejection (not authoritative — see the re-check below,
+      // which is the one that actually closes the race). fee_year_close is
+      // guaranteed to exist (see lib/db.ts), so a query error here is a real
+      // failure, not a missing table; let it propagate to the outer catch
+      // rather than silently failing this guard open.
       const { rows: [locked] } = await client.query(
         `SELECT 1 FROM fee_year_close WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
         [pmtPreview.school_id, pmtPreview.academic_year]
@@ -52,13 +57,18 @@ async function handlePOST(req: NextRequest) {
 
       // Re-fetch WITH a row lock now that we're inside the transaction, so two
       // concurrent cancel/correct requests for the same payment can't both pass
-      // the "already cancelled" check and both reverse the ledger.
+      // the "already cancelled" check and both reverse the ledger. Locking `l`
+      // (the student_fee_ledger row) too — not just `fp` — is what actually
+      // closes the year-end race: year-end apply takes the SAME row lock
+      // (FOR UPDATE OF l) on this exact ledger row while closing out the year.
+      // Whichever transaction wins that lock proceeds on accurate data; the
+      // loser blocks until the winner commits, then re-reads fresh state below.
       const { rows: [pmt] } = await client.query(
         `SELECT fp.*, l.academic_year, l.amount_due, l.amount_paid AS ledger_paid
          FROM fee_payments fp
          JOIN student_fee_ledger l ON l.id = fp.ledger_id
          WHERE fp.id = $1
-         FOR UPDATE OF fp`,
+         FOR UPDATE OF fp, l`,
         [payment_id]
       )
       if (!pmt) {
@@ -68,6 +78,21 @@ async function handlePOST(req: NextRequest) {
       if (pmt.payment_status === 'cancelled') {
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'Payment already cancelled' }, { status: 409 })
+      }
+
+      // Authoritative re-check, now that the ledger row lock above is held. If
+      // year-end closed this bill's year while this transaction was blocked
+      // waiting for that lock, this SELECT (a fresh read, now that the lock is
+      // ours) sees it — the earlier pre-BEGIN check above could be stale by
+      // exactly this race, since it ran before either transaction touched the
+      // ledger row and gave no ordering guarantee against a concurrent year-end.
+      const { rows: [lockedNow] } = await client.query(
+        `SELECT 1 FROM fee_year_close WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
+        [pmtPreview.school_id, pmt.academic_year]
+      )
+      if (lockedNow) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'This academic year was closed by a year-end run while this request was in progress. Reopen it to cancel/correct payments.' }, { status: 409 })
       }
 
       const wasCompleted = pmt.payment_status === 'completed'

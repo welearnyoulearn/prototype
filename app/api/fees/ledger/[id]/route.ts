@@ -136,7 +136,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const client = await pool.connect()
     try {
       const { new_amount, reason, changed_by: clientActor, school_id } = await req.json()
-      const access = await requireFeeAccess(school_id)
+      // Pass `client` — already held via pool.connect() above; the default
+      // `pool` here would deadlock requesting a second connection on Vercel's max:1 pool.
+      const access = await requireFeeAccess(school_id, client)
       if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
       const changed_by = clientActor || access.actor
 

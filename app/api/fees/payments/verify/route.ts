@@ -64,7 +64,10 @@ async function handlePOST(req: NextRequest) {
       // Resolve the payment's school and verify ownership
       const { rows: [pmtRow] } = await client.query(`SELECT school_id FROM fee_payments WHERE id = $1`, [payment_id])
       if (!pmtRow) { client.release(); return NextResponse.json({ error: 'Payment not found' }, { status: 404 }) }
-      const access = await requireFeeAccess(pmtRow.school_id)
+      // Pass `client` — requireFeeAccess's school-staff path runs a real query
+      // (session validation); calling it with the default `pool` here, after
+      // this handler's own pool.connect() above, deadlocks on a max:1 pool.
+      const access = await requireFeeAccess(pmtRow.school_id, client)
       if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
       const verified_by = clientActor || access.actor
 

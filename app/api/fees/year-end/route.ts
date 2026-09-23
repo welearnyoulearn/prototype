@@ -231,6 +231,19 @@ export async function POST(req: NextRequest) {
             await client.query('ROLLBACK')
             return NextResponse.json({ error: `Academic year ${to_year} does not exist. Create it first.` }, { status: 400 })
           }
+          // The destination year must not itself be closed — this only checked that
+          // to_year EXISTS, not that it's still open. Without this, reopening an
+          // older source year and carrying its (newly reopened) dues forward could
+          // write a fresh "Previous Year Dues" bill into a destination year that was
+          // already closed and is supposed to be immutable.
+          const { rows: [toYearClosed] } = await client.query(
+            `SELECT 1 FROM fee_year_close WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE LIMIT 1`,
+            [school_id, to_year]
+          )
+          if (toYearClosed) {
+            await client.query('ROLLBACK')
+            return NextResponse.json({ error: `${to_year} is closed. Reopen it before carrying dues into it.` }, { status: 409 })
+          }
           toYearEndDate = ty.end_date
           prevDuesCatId = await getOrCreateSystemFeeCategory(
             client, school_id, 'Previous Year Dues', 'Carried-forward unpaid balance from a previous year'

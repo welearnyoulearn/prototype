@@ -1597,19 +1597,25 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
   // ══════════════════════════════════════════════════════════════════════════
 
   test('VER-101: Approving an online payment is blocked once an offline collection already covers the balance', async () => {
-    const { data: catData } = await api('/api/fees/categories', 'POST', {
+    const catRes = await api('/api/fees/categories', 'POST', {
       school_id: schoolId, name: `Verify Overstate Test ${ts}`, frequency: 'annual', category_type: 'fixed',
     }, adminCookie)
-    const cat = catData as { id: number }
-    await api('/api/fees/structures', 'POST', {
+    expect(catRes.status).toBe(201)
+    const cat = catRes.data as { id: number }
+    // studentA is grade 9 — this structure MUST match, or generate produces no
+    // bill for studentA and `entry` below is silently undefined.
+    const structRes = await api('/api/fees/structures', 'POST', {
       school_id: schoolId, academic_year: AY,
       structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
     }, adminCookie)
-    await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY }, adminCookie)
+    expect(structRes.status).toBe(200)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY }, adminCookie)
+    expect(genRes.status).toBe(200)
     const { data: ledger } = await api(
       `/api/fees/ledger?school_id=${schoolId}&student_id=${studentA}`, 'GET', undefined, adminCookie
     )
     const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
+    expect(entry, 'bill for studentA must exist — category/structure/generate must have succeeded').toBeDefined()
     if (!entry) return
 
     // Simulate a parent's online payment landing as pending_verification (the
@@ -1646,19 +1652,25 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
   })
 
   test('OWNER-101: Payment/waiver creation is rejected when ledger_id belongs to a different student', async () => {
-    const { data: catData } = await api('/api/fees/categories', 'POST', {
+    const catRes = await api('/api/fees/categories', 'POST', {
       school_id: schoolId, name: `Owner Check Test ${ts}`, frequency: 'annual', category_type: 'fixed',
     }, adminCookie)
-    const cat = catData as { id: number }
-    await api('/api/fees/structures', 'POST', {
+    expect(catRes.status).toBe(201)
+    const cat = catRes.data as { id: number }
+    // studentA and studentB are both grade 9 — this structure MUST match, or
+    // generate produces no bill and `entry` below is silently undefined.
+    const structRes = await api('/api/fees/structures', 'POST', {
       school_id: schoolId, academic_year: AY,
       structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
     }, adminCookie)
-    await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY }, adminCookie)
+    expect(structRes.status).toBe(200)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY }, adminCookie)
+    expect(genRes.status).toBe(200)
     const { data: ledger } = await api(
       `/api/fees/ledger?school_id=${schoolId}&student_id=${studentA}`, 'GET', undefined, adminCookie
     )
     const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
+    expect(entry, 'bill for studentA must exist — category/structure/generate must have succeeded').toBeDefined()
     if (!entry) return
 
     // studentA's ledger_id, but the request claims it's for studentB.
@@ -1684,19 +1696,25 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
   })
 
   test('WVCOR-101: Waiver correction is rejected when it would push the combined waived total past the bill', async () => {
-    const { data: catData } = await api('/api/fees/categories', 'POST', {
+    const catRes = await api('/api/fees/categories', 'POST', {
       school_id: schoolId, name: `Waiver Correction Test ${ts}`, frequency: 'annual', category_type: 'fixed',
     }, adminCookie)
-    const cat = catData as { id: number }
-    await api('/api/fees/structures', 'POST', {
+    expect(catRes.status).toBe(201)
+    const cat = catRes.data as { id: number }
+    // studentC is grade 8 (not 9) — this structure MUST match, or generate
+    // produces no bill for studentC and `entry` below is silently undefined.
+    const structRes = await api('/api/fees/structures', 'POST', {
       school_id: schoolId, academic_year: AY,
-      structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
+      structures: [{ fee_category_id: cat.id, grade: '8', amount: 1000, due_day: 10 }],
     }, adminCookie)
-    await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY }, adminCookie)
+    expect(structRes.status).toBe(200)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY }, adminCookie)
+    expect(genRes.status).toBe(200)
     const { data: ledger } = await api(
       `/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}`, 'GET', undefined, adminCookie
     )
     const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
+    expect(entry, 'bill for studentC must exist — category/structure/generate must have succeeded').toBeDefined()
     if (!entry) return
 
     // Two waivers active on the same bill: ₹200 and ₹400 (₹400 remaining balance).
@@ -1728,19 +1746,25 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
   })
 
   test('LEDGERAMT-101: Reducing a bill below payments + waivers combined is rejected', async () => {
-    const { data: catData } = await api('/api/fees/categories', 'POST', {
+    const catRes = await api('/api/fees/categories', 'POST', {
       school_id: schoolId, name: `Ledger Amount Edit Test ${ts}`, frequency: 'annual', category_type: 'fixed',
     }, adminCookie)
-    const cat = catData as { id: number }
-    await api('/api/fees/structures', 'POST', {
+    expect(catRes.status).toBe(201)
+    const cat = catRes.data as { id: number }
+    // studentB is grade 9 — this structure MUST match, or generate produces no
+    // bill for studentB and `entry` below is silently undefined.
+    const structRes = await api('/api/fees/structures', 'POST', {
       school_id: schoolId, academic_year: AY,
       structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
     }, adminCookie)
-    await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY }, adminCookie)
+    expect(structRes.status).toBe(200)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY }, adminCookie)
+    expect(genRes.status).toBe(200)
     const { data: ledger } = await api(
       `/api/fees/ledger?school_id=${schoolId}&student_id=${studentB}`, 'GET', undefined, adminCookie
     )
     const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
+    expect(entry, 'bill for studentB must exist — category/structure/generate must have succeeded').toBeDefined()
     if (!entry) return
 
     // ₹300 paid + ₹500 waived = ₹800 covered, ₹200 remaining.
@@ -1768,19 +1792,25 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
 
   test('DAYCLOSE-101: Resubmitting day-close recalculates system_cash and totals, not just the difference', async () => {
     const dcDate = today()
-    const { data: catData } = await api('/api/fees/categories', 'POST', {
+    const catRes = await api('/api/fees/categories', 'POST', {
       school_id: schoolId, name: `Day Close Resubmit Test ${ts}`, frequency: 'annual', category_type: 'fixed',
     }, adminCookie)
-    const cat = catData as { id: number }
-    await api('/api/fees/structures', 'POST', {
+    expect(catRes.status).toBe(201)
+    const cat = catRes.data as { id: number }
+    // studentC is grade 8 (not 9) — this structure MUST match, or generate
+    // produces no bill for studentC and `entry` below is silently undefined.
+    const structRes = await api('/api/fees/structures', 'POST', {
       school_id: schoolId, academic_year: AY,
-      structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
+      structures: [{ fee_category_id: cat.id, grade: '8', amount: 1000, due_day: 10 }],
     }, adminCookie)
-    await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY }, adminCookie)
+    expect(structRes.status).toBe(200)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY }, adminCookie)
+    expect(genRes.status).toBe(200)
     const { data: ledger } = await api(
       `/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}`, 'GET', undefined, adminCookie
     )
     const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
+    expect(entry, 'bill for studentC must exist — category/structure/generate must have succeeded').toBeDefined()
     if (!entry) return
 
     // First close for today (DC-002 earlier in this suite already closed

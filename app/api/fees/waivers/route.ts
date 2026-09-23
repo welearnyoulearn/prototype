@@ -202,7 +202,9 @@ async function handlePATCH(req: NextRequest) {
         return NextResponse.json({ error: 'Waiver not found or already revoked' }, { status: 404 })
       }
 
-      const access = await requireFeeAccess(w0.school_id)
+      // Pass `client` — already held via pool.connect() above, inside an open
+      // transaction; the default `pool` here would deadlock on a max:1 pool.
+      const access = await requireFeeAccess(w0.school_id, client)
       if (!access) { await client.query('ROLLBACK'); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
 
       // Same reasoning as DELETE: correcting a carry_forward waiver's amount would
@@ -318,7 +320,9 @@ async function handleDELETE(req: NextRequest) {
         [id]
       )
       if (!w0) return NextResponse.json({ error: 'Waiver not found' }, { status: 404 })
-      const access = await requireFeeAccess(w0.school_id)
+      // Pass `client` — already held via pool.connect() above; the default
+      // `pool` here would deadlock on a max:1 pool.
+      const access = await requireFeeAccess(w0.school_id, client)
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const revoked_by = access.actor
 
