@@ -207,104 +207,7 @@ h1.portal-section-heading { margin-bottom: 8px; font-size: 26px; line-height: 1.
 .portal-main :where(h1, h2, h3) { text-wrap: balance; }
 .portal-main :where(p, td, li) { text-wrap: pretty; }
 
-/* Student experience: academic progress presented as momentum, never invented rewards. */
-.portal-root[data-portal="student"] .portal-main {
-  background-color: #faf6ea;
-  background-image: linear-gradient(#e6dcc2 1px, transparent 1px), linear-gradient(90deg, #e6dcc2 1px, transparent 1px);
-  background-size: 28px 28px;
-}
-.portal-root[data-portal="student"] .portal-sidebar {
-  background-color: #f7f1e0;
-  background-image: linear-gradient(#e9dcb8 1px, transparent 1px), linear-gradient(90deg, #e9dcb8 1px, transparent 1px);
-  background-size: 24px 24px;
-}
-.portal-root[data-portal="student"] .portal-identity { position: relative; overflow: hidden; }
-.portal-root[data-portal="student"] .portal-identity::after { content: ''; position: absolute; width: 82px; height: 82px; right: -38px; top: -36px; border: 1px solid rgb(168 95 22 / .2); border-radius: 50%; box-shadow: 0 0 0 18px rgb(168 95 22 / .05); }
-.student-page-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; padding: 4px 0 25px; border-bottom: 1px solid var(--border); }
-.student-page-intro h1 { margin-top: 7px; color: #202a25; font-size: clamp(27px, 4vw, 40px); font-weight: 630; line-height: 1.08; letter-spacing: -.045em; }
-.student-eyebrow { color: var(--portal-accent); font-size: 10px; font-weight: 760; letter-spacing: .14em; text-transform: uppercase; }
-.student-page-description { max-width: 590px; margin-top: 9px; color: #68736b; font-size: 14px; line-height: 1.65; }
-.student-page-aside { flex-shrink: 0; }
-.student-progress { display: grid; gap: 7px; }
-.student-progress-rail { display: block; width: 100%; height: 6px; overflow: hidden; border-radius: 999px; background: #e7e3d9; }
-.student-progress-rail > span { display: block; height: 100%; border-radius: inherit; background: #b76a1f; }
-.student-progress[data-tone="green"] .student-progress-rail > span { background: #317157; }
-.student-progress[data-tone="red"] .student-progress-rail > span { background: #b84d3d; }
-.student-progress-label { color: #747d76; font-size: 11px; line-height: 1.4; }
-.student-empty-state { display: grid; justify-items: center; min-height: 280px; padding: 56px 24px; border-block: 1px solid var(--border); text-align: center; }
-.student-empty-icon { display: grid; place-items: center; width: 48px; height: 48px; margin-bottom: 18px; border-radius: 50%; background: var(--portal-accent-soft); color: var(--portal-accent-deep); }
-.student-empty-state h2 { color: #29352f; font-size: 17px; font-weight: 650; }
-.student-empty-state p { max-width: 430px; margin-top: 7px; color: #748078; font-size: 13px; line-height: 1.6; }
-.student-text-action { display: inline-flex; align-items: center; gap: 7px; min-height: 42px; margin-top: 15px; color: var(--portal-accent-deep); font-size: 13px; font-weight: 700; }
-.student-text-action:hover svg { transform: translateX(3px); }
-.student-momentum { position: relative; overflow: visible; padding: clamp(22px, 4vw, 38px); border-radius: 26px; border: 3px solid #1a120a; background: #2a1608; color: white; box-shadow: 7px 7px 0 #1a120a; }
-.student-momentum > * { position: relative; }
-.student-momentum-sticker { position: absolute; top: -26px; right: 22px; width: 64px; height: 64px; transform: rotate(9deg); filter: drop-shadow(0 6px 6px rgb(0 0 0 / .28)); }
-.student-action-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid #dcd8cd; }
-.student-action { position: relative; min-height: 150px; padding: 23px 22px; text-align: left; }
-.student-action + .student-action { border-left: 1px solid #dcd8cd; }
-.student-action:hover { background: rgb(168 95 22 / .055); }
-.student-action svg { transition: transform var(--motion-micro) var(--ease-standard); }
-.student-action:hover > svg:last-child { transform: translateX(4px); }
-.student-section-kicker { color: #7a837c; font-size: 10px; font-weight: 720; letter-spacing: .1em; text-transform: uppercase; }
-.student-list-surface { overflow: hidden; border-block: 1px solid #dcd8cd; }
-.student-list-row { transition: background-color var(--motion-micro) ease, transform var(--motion-micro) var(--ease-standard); }
-.student-list-row:hover { background: rgb(168 95 22 / .045); }
-.student-success-flash { animation: student-success 520ms var(--ease-standard) both; }
-@keyframes student-success { 0% { box-shadow: inset 4px 0 0 #317157; background: rgb(49 113 87 / .12); } 100% { box-shadow: inset 0 0 0 transparent; background: transparent; } }
 
-/* Student nav: 3D sticker icons in the sidebar and mobile bottom bar, neubrutalist to match the dashboard. */
-.portal-root[data-portal="student"] .portal-nav-label { font-weight: 800; letter-spacing: .08em; color: #8a6a33; }
-.portal-root[data-portal="student"] .portal-nav-item img.portal-nav-sticker,
-.portal-root[data-portal="student"] nav[aria-label="Quick navigation"] img.portal-nav-sticker {
-  width: 24px; height: 24px; object-fit: contain; flex-shrink: 0;
-  transition: transform var(--motion-micro) var(--ease-standard);
-}
-.portal-root[data-portal="student"] .portal-nav-item {
-  border-radius: 14px; border: 2.5px solid transparent; font-weight: 600;
-  transition: background-color var(--motion-micro) ease, color var(--motion-micro) ease, transform var(--motion-micro) var(--ease-standard), border-color var(--motion-micro) ease, box-shadow var(--motion-micro) var(--ease-standard);
-}
-.portal-root[data-portal="student"] .portal-nav-item:hover { transform: none; border-color: #1a1410; background: #fff3cf; }
-.portal-root[data-portal="student"] .portal-nav-item:hover img.portal-nav-sticker { transform: rotate(-8deg) scale(1.08); }
-.portal-root[data-portal="student"] .portal-nav-item[aria-current="page"] {
-  background: #ffcf49; color: #1a1410; border-color: #1a1410; box-shadow: 3px 3px 0 #1a1410; font-weight: 800;
-}
-.portal-root[data-portal="student"] .portal-nav-item[aria-current="page"]::before { display: none; }
-.portal-root[data-portal="student"] .portal-nav-item[aria-current="page"] img.portal-nav-sticker { transform: rotate(-6deg) scale(1.1); }
-.portal-root[data-portal="student"] nav[aria-label="Quick navigation"] button[aria-current="page"] img.portal-nav-sticker { transform: rotate(-6deg) scale(1.1); }
-
-/* Dashboard "quest" tiles: neubrutalist sticker-book cards for the student home screen only —
-   solid flat color, thick dark outline, hard offset shadow, sticker bleeding over the top edge. */
-.student-quest-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 22px 18px; padding-top: 14px; }
-.student-quest-card {
-  position: relative; display: flex; align-items: flex-start; gap: 14px;
-  min-height: 128px; padding: 22px 18px 18px; border-radius: 22px; text-align: left;
-  background: var(--quest-bg); color: #1a1410; border: 3px solid #1a1410;
-  box-shadow: 5px 5px 0 #1a1410;
-  transition: transform var(--motion-micro) var(--ease-standard), box-shadow var(--motion-micro) var(--ease-standard);
-}
-.student-quest-card:hover { transform: translate(-2px, -3px); box-shadow: 8px 8px 0 #1a1410; }
-.student-quest-card:active { transform: translate(1px, 1px); box-shadow: 3px 3px 0 #1a1410; }
-.student-quest-card[data-tone="gold"] { --quest-bg: #ffcf49; }
-.student-quest-card[data-tone="sky"] { --quest-bg: #7fb4ff; }
-.student-quest-card[data-tone="violet"] { --quest-bg: #c9a3f7; }
-.student-quest-card[data-tone="mint"] { --quest-bg: #7fe0ab; }
-.student-quest-icon {
-  flex-shrink: 0; width: 52px; height: 52px; object-fit: contain; margin-top: -30px;
-  filter: drop-shadow(0 4px 4px rgb(0 0 0 / .22));
-}
-.student-quest-card:nth-of-type(1) .student-quest-icon { transform: rotate(-8deg); }
-.student-quest-card:nth-of-type(2) .student-quest-icon { transform: rotate(6deg); }
-.student-quest-card:nth-of-type(3) .student-quest-icon { transform: rotate(-5deg); }
-.student-quest-card:nth-of-type(4) .student-quest-icon { transform: rotate(7deg); }
-.student-quest-label { font-size: 15px; font-weight: 800; color: #1a1410; }
-.student-quest-description { margin-top: 4px; font-size: 12.5px; line-height: 1.5; color: #362c1c; }
-.student-quest-arrow { position: absolute; top: 16px; right: 16px; color: #1a1410; transition: transform var(--motion-micro) var(--ease-standard); }
-.student-quest-card:hover .student-quest-arrow { transform: translateX(3px); }
-@media (prefers-reduced-motion: reduce) {
-  .student-quest-card:hover .student-quest-arrow { transform: none; }
-  .student-quest-card:hover, .student-quest-card:active { transform: none; }
-}
 .portal-drawer-overlay { position: fixed; inset: 0; z-index: var(--z-drawer); background: rgb(18 29 23 / .52); }
 .portal-drawer {
   --portal-accent: #245b46;
@@ -383,11 +286,6 @@ h1.portal-section-heading { margin-bottom: 8px; font-size: 26px; line-height: 1.
   .auth-mobile-identity .parent-timeline { display: none; }
   .auth-mobile-identity .parent-pulse { top: -30px; left: 50%; transform: translateX(-50%) scale(.58); }
   .auth-help-line { flex-direction: column; gap: 6px; }
-  .student-page-intro { align-items: flex-start; flex-direction: column; gap: 16px; padding-bottom: 20px; }
-  .student-page-aside { width: 100%; }
-  .student-action-row { grid-template-columns: 1fr; }
-  .student-action { min-height: 104px; }
-  .student-action + .student-action { border-top: 1px solid #dcd8cd; border-left: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .portal-drawer[data-state], .portal-drawer-overlay[data-state],
@@ -395,6 +293,5 @@ h1.portal-section-heading { margin-bottom: 8px; font-size: 26px; line-height: 1.
   .portal-nav-item[aria-current="page"]::before, .portal-topbar,
   .auth-surface header, .auth-surface main > aside, .auth-surface main > section { animation: none; }
   .portal-nav-item:hover { transform: none; }
-  .student-success-flash { animation: none; }
 }
 }

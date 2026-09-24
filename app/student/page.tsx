@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
-import { FullPageLoader } from '@/components/loaders'
 import NotificationBell from '../components/NotificationBell'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { useFeatureTracking } from '@/lib/useFeatureTracking'
@@ -11,13 +10,9 @@ import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 import PortalSidebar from '@/components/portal/PortalSidebar'
-import { CalendarDays, LogOut, Menu } from 'lucide-react'
+import { LogOut, Menu } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
-
-// 3D sticker icons (Fluent Emoji, MIT-licensed) — see public/student-icons/NOTICE.
-function NavSticker({ src, alt = '' }: { src: string; alt?: string }) {
-  return <img src={src} alt={alt} className="portal-nav-sticker" />
-}
+import { Sticker, type StickerName } from './components/stickers'
 
 // Always-loaded (landing tab, and small enough not to be worth its own chunk)
 import StudentDashboard from './components/StudentDashboard'
@@ -28,13 +23,25 @@ import StudentProfile from './components/StudentProfile'
 // Lazy-loaded — only downloaded when first opened
 function ModuleSkeleton() {
   return (
-    <div className="space-y-4" role="status" aria-live="polite" aria-busy="true">
-      <div><p className="student-eyebrow">Getting things ready</p><p className="mt-2 text-sm text-[#68736b]">Preparing this part of your workspace…</p></div>
-      <Skeleton className="h-8 w-48 rounded-md" />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {[1,2,3].map(i => <Skeleton key={i} className="h-28" />)}
+    <div className="space-y-5" role="status" aria-live="polite" aria-busy="true">
+      <div className="flex items-center gap-3"><Sticker name="pencil" size="lg" tilt={-12} className="motion-safe:animate-bounce" /><p className="sb-hand text-xl">Getting this page ready…</p></div>
+      <Skeleton className="h-12 w-64 rounded-full" />
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+        {[1,2,3].map(i => <Skeleton key={i} className="h-32 rounded-[22px]" />)}
       </div>
-      <Skeleton className="h-64" />
+      <Skeleton className="h-64 rounded-[22px]" />
+    </div>
+  )
+}
+
+function StudentBootLoader() {
+  return (
+    <div data-student-ui="" role="status" aria-live="polite" aria-busy="true" className="grid min-h-dvh place-items-center px-6" style={{ background: 'var(--sb-canvas)' }}>
+      <div className="sb-card flex flex-col items-center gap-3 px-10 py-9 text-center">
+        <Sticker name="rocket" size="hero" tilt={12} className="motion-safe:animate-bounce" />
+        <p className="sb-display text-3xl">Opening your workspace</p>
+        <p className="sb-hand">fetching your lessons, marks &amp; more…</p>
+      </div>
     </div>
   )
 }
@@ -48,39 +55,39 @@ const StudentClassCircle = dynamic(() => import('./components/StudentClassCircle
 type Student = {
   id: number; name: string; grade: string; section: string; roll_number: string
   email: string | null; phone: string | null; parent_name: string | null; parent_phone: string | null
-  school_id: number; school_name: string; date_of_birth?: string | null
+  school_id: number; school_name: string; school_city?: string | null; school_logo_url?: string | null; date_of_birth?: string | null
 }
 
-type NavItem    = { key: string; label: string; icon: React.ReactNode; comingSoon?: boolean }
+type NavItem    = { key: string; label: string; sticker: StickerName; comingSoon?: boolean }
 type NavSection = { label: string; items: NavItem[] }
 
 const NAV_SECTIONS: NavSection[] = [
   {
     label: 'HOME',
     items: [
-      { key: 'dashboard', label: 'Overview', icon: <NavSticker src="/student-icons/house.png" /> },
-      { key: 'syllabus', label: 'Syllabus', icon: <NavSticker src="/student-icons/graduation-cap.png" /> },
-      { key: 'library', label: 'Digital library', icon: <NavSticker src="/student-icons/open-book.png" /> },
+      { key: 'dashboard', label: 'Overview', sticker: 'house' },
+      { key: 'syllabus', label: 'Syllabus', sticker: 'graduation-cap' },
+      { key: 'library', label: 'Digital library', sticker: 'open-book' },
     ],
   },
   {
     label: 'LEARNING',
     items: [
-      { key: 'class-circle', label: 'Class circle', icon: <NavSticker src="/student-icons/party-popper.png" /> },
+      { key: 'class-circle', label: 'Class circle', sticker: 'party-popper' },
     ],
   },
   {
     label: 'ACADEMIC',
     items: [
-      { key: 'my-marks', label: 'My marks', icon: <NavSticker src="/student-icons/trophy.png" /> },
-      { key: 'attendance', label: 'My attendance', icon: <NavSticker src="/student-icons/clipboard.png" /> },
-      { key: 'calendar', label: 'School calendar', icon: <NavSticker src="/student-icons/calendar.png" /> },
+      { key: 'my-marks', label: 'My marks', sticker: 'trophy' },
+      { key: 'attendance', label: 'My attendance', sticker: 'clipboard' },
+      { key: 'calendar', label: 'School calendar', sticker: 'calendar' },
     ],
   },
   {
     label: 'ACCOUNT',
     items: [
-      { key: 'profile', label: 'My profile', icon: <NavSticker src="/student-icons/bust-in-silhouette.png" /> },
+      { key: 'profile', label: 'My profile', sticker: 'bust-in-silhouette' },
     ],
   },
   {
@@ -88,7 +95,7 @@ const NAV_SECTIONS: NavSection[] = [
     // see isNavItemVisible('ai-hub') and the empty-section filter below.
     label: 'AI HUB',
     items: [
-      { key: 'ai-hub', label: 'AI Hub', icon: <NavSticker src="/student-icons/robot.png" /> },
+      { key: 'ai-hub', label: 'AI Hub', sticker: 'robot' },
     ],
   },
 ]
@@ -105,10 +112,10 @@ const NAV_ITEMS: NavItem[] = NAV_SECTIONS.flatMap(s => s.items)
 // by StudentDashboard, not used for a sidebar entry.
 const RESTRICTABLE_NAV_KEYS = new Set(['syllabus', 'library', 'my-marks', 'attendance', 'calendar'])
 
-const BOTTOM_NAV = [
-  { key: 'dashboard', label: 'Home', icon: <NavSticker src="/student-icons/house.png" /> },
-  { key: 'my-marks', label: 'Marks', icon: <NavSticker src="/student-icons/trophy.png" /> },
-  { key: 'profile', label: 'Profile', icon: <NavSticker src="/student-icons/bust-in-silhouette.png" /> },
+const BOTTOM_NAV: { key: string; label: string; sticker: StickerName }[] = [
+  { key: 'dashboard', label: 'Home', sticker: 'house' },
+  { key: 'my-marks', label: 'Marks', sticker: 'trophy' },
+  { key: 'profile', label: 'Profile', sticker: 'bust-in-silhouette' },
 ]
 
 function StudentPortal() {
@@ -218,7 +225,7 @@ function StudentPortal() {
     router.replace('/student/login')
   }
 
-  if (loading) return <FullPageLoader portal="student" sub="Fetching your courses and progress…" />
+  if (loading) return <StudentBootLoader />
 
   if (!student) return null
 
@@ -226,25 +233,26 @@ function StudentPortal() {
   const currentItem = NAV_ITEMS.find(i => i.key === activeNav)
 
   return (
-    <div className="portal-root" data-portal="student">
+    <div className="portal-root" data-portal="student" data-student-ui="" data-section={activeNav}>
       <a href="#student-content" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-white focus:p-3">Skip to content</a>
       <header className="portal-topbar">
         <div className="flex min-w-0 items-center gap-3">
-          <button onClick={() => setSidebarOpen(o => !o)} className="portal-icon-button lg:hidden" aria-label="Open navigation" aria-controls="portal-navigation" aria-expanded={sidebarOpen}>
+          <button onClick={() => setSidebarOpen(o => !o)} className="sb-icon-btn lg:hidden" aria-label="Open navigation" aria-controls="portal-navigation" aria-expanded={sidebarOpen} data-testid="student-menu-btn">
             <Menu size={20} aria-hidden="true" />
           </button>
-          <span className="hidden sm:block text-sm font-semibold text-[#8b4a10]">Student workspace</span>
-          <span className="hidden sm:block text-[#a5afa8]" aria-hidden="true">/</span>
-          <span className="truncate text-sm font-medium text-[#202a25]">{currentItem?.label || 'Overview'}</span>
+          <p className="sb-crumb" data-testid="student-page-title">
+            <Sticker name={currentItem?.sticker ?? 'house'} size="sm" tilt={-8} />
+            <span className="truncate">{currentItem?.label || 'Overview'}</span>
+          </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2 sm:gap-4">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           {academicYear && (
-            <span data-testid="academic-year-badge" title="Active academic year — all data on this screen is scoped to this year" className="hidden items-center gap-1.5 text-xs text-[#647068] sm:inline-flex">
-              <CalendarDays size={14} aria-hidden="true" /> {academicYear}
+            <span data-testid="academic-year-badge" title="Active academic year — all data on this screen is scoped to this year" className="sb-chip hidden sm:inline-flex" data-tone="mint">
+              <Sticker name="spiral-calendar" size="xs" />{academicYear}
             </span>
           )}
           <NotificationBell studentId={student.id} onNavigate={navigateTo} />
-          <button onClick={handleLogout} className="portal-icon-button text-[#647068] hover:text-red-700" aria-label="Sign out">
+          <button onClick={handleLogout} className="sb-icon-btn" aria-label="Sign out" data-testid="student-logout-btn">
             <LogOut size={18} aria-hidden="true" />
           </button>
         </div>
@@ -253,19 +261,29 @@ function StudentPortal() {
       <div className="portal-body">
         <PortalSidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} label="Student navigation" portal="student">
           <div className="portal-identity">
-            <p className="text-lg font-extrabold tracking-tight text-[#5c2f08]">WeLearnYouLearn</p>
-            <p className="mt-1 text-xs leading-relaxed text-[#647068]">{student.school_name}</p>
+            <div className="flex items-center gap-3">
+              {student.school_logo_url ? (
+                // eslint-disable-next-line @next/next/no-img-element -- school-uploaded logo from any host
+                <img src={student.school_logo_url} alt={student.school_name} className="sb-school-logo" data-testid="student-school-logo" />
+              ) : (
+                <span className="sb-school-logo sb-school-logo-fallback" aria-hidden="true" data-testid="student-school-logo">{student.school_name.charAt(0).toUpperCase()}</span>
+              )}
+              <div className="min-w-0">
+                <p className="sb-display line-clamp-2 text-[17px] leading-tight [overflow-wrap:anywhere]">{student.school_name}</p>
+                <span className="sb-chip mt-1.5" data-tone="yellow">Student portal</span>
+              </div>
+            </div>
           </div>
-          <nav className="flex-1 overflow-y-auto px-3 py-3" aria-label="Student sections">
+          <nav className="flex-1 overflow-y-auto px-3 py-2" aria-label="Student sections">
             {NAV_SECTIONS.map(section => {
               const visibleItems = section.items.filter(item => isNavItemVisible(item.key))
               if (visibleItems.length === 0) return null
               return (
-                <div key={section.label} className="mb-4">
+                <div key={section.label} className="mb-1">
                   <p className="portal-nav-label">{section.label}</p>
                   {visibleItems.map(item => (
-                    <button key={item.key} onClick={() => { if (!item.comingSoon) navigateTo(item.key) }} className="portal-nav-item" aria-current={activeNav === item.key ? 'page' : undefined} disabled={item.comingSoon}>
-                      <span className="shrink-0" aria-hidden="true">{item.icon}</span>
+                    <button key={item.key} onClick={() => { if (!item.comingSoon) navigateTo(item.key) }} className="portal-nav-item" aria-current={activeNav === item.key ? 'page' : undefined} disabled={item.comingSoon} data-testid={`student-nav-${item.key}`}>
+                      <Sticker name={item.sticker} size="sm" />
                       <span className="flex-1">{item.label}</span>
                       {item.comingSoon && <span className="text-xs">Soon</span>}
                     </button>
@@ -275,19 +293,19 @@ function StudentPortal() {
             })}
           </nav>
           <div className="portal-account">
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-2 border-[#1a1410] bg-[#ffcf49] text-sm font-extrabold text-[#1a1410]" aria-hidden="true">{firstName.charAt(0)}</span>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-[#202a25]">{student.name}</p>
-                <p className="mt-0.5 text-xs text-[#647068]">Grade {student.grade} · Section {student.section}</p>
-              </div>
-            </div>
+            <button type="button" onClick={() => navigateTo('profile')} className="sb-account" data-testid="student-account-btn" aria-label={`${student.name} — open my profile`}>
+              <span className="sb-avatar" data-tone="pink" aria-hidden="true">{firstName.charAt(0).toUpperCase()}</span>
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-extrabold">{student.name}</span>
+                <span className="mt-0.5 block text-xs font-semibold text-[#6b604f]">Grade {student.grade} · Section {student.section}</span>
+              </span>
+            </button>
           </div>
         </PortalSidebar>
 
         {/* ── Main Content ──────────────────────────────────────────── */}
         <main id="student-content" tabIndex={-1} className="portal-main">
-          <div className="mx-auto w-full max-w-5xl">
+          <div className="mx-auto w-full max-w-5xl pb-6">
             {visitedNav.has('dashboard')   && <div hidden={activeNav !== 'dashboard'}><StudentDashboard student={student} classId={classId} schoolId={student.school_id} onNavigate={navigateTo} isNavItemVisible={isNavItemVisible} /></div>}
             {visitedNav.has('class-circle') && <div hidden={activeNav !== 'class-circle'}><StudentClassCircle /></div>}
             {visitedNav.has('attendance') && isNavItemVisible('attendance') && (
@@ -309,19 +327,13 @@ function StudentPortal() {
         </main>
       </div>
 
-      <nav className="shrink-0 border-t border-[#dde3dd] bg-white pb-[env(safe-area-inset-bottom)] lg:hidden" aria-label="Quick navigation">
-        <div className="flex">
-          {BOTTOM_NAV.filter(item => isNavItemVisible(item.key)).map(item => {
-            const isActive = activeNav === item.key
-            return (
-              <button key={item.key} onClick={() => navigateTo(item.key)} aria-current={isActive ? 'page' : undefined}
-                className={`relative flex min-h-16 flex-1 flex-col items-center justify-center gap-1 border-t-2 text-xs font-medium transition-colors motion-reduce:transition-none ${isActive ? 'border-[#a85f16] bg-[#f7efe3] text-[#713f0f]' : 'border-transparent text-[#647068] hover:bg-[#f8f5ef]'}`}>
-                <span aria-hidden="true">{item.icon}</span>
-                <span>{item.label}</span>
-              </button>
-            )
-          })}
-        </div>
+      <nav className="sb-bottom-nav shrink-0 lg:hidden" aria-label="Quick navigation">
+        {BOTTOM_NAV.filter(item => isNavItemVisible(item.key)).map(item => (
+          <button key={item.key} onClick={() => navigateTo(item.key)} aria-current={activeNav === item.key ? 'page' : undefined} data-testid={`student-bottom-nav-${item.key}`}>
+            <Sticker name={item.sticker} size="sm" />
+            <span>{item.label}</span>
+          </button>
+        ))}
       </nav>
 
     </div>

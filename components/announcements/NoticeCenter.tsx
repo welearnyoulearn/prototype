@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { getTemplate } from '@/lib/announcementTemplates'
 import NoticeModal from './NoticeModal'
 import { localised, type Lang, type NoticeItem } from './types'
-import { AlertTriangle, CalendarDays, FileText, Megaphone, Pin, Search } from 'lucide-react'
+import { AlertTriangle, ArrowUpRight, CalendarDays, FileText, Megaphone, Pin, Search } from 'lucide-react'
+import { Sticker, type Tone } from '@/app/student/components/stickers'
 
 const TX = {
   en: { title: 'School notices', newCount: (n: number) => `${n} new`, viewAll: 'View all notices', search: 'Search notices…', all: 'All', unread: 'Unread', pinned: 'Pinned', action: 'Action needed', past: 'Past', none: 'No notices found', new: 'NEW', actionTag: 'Action needed', urgent: 'Urgent', back: 'Close', of: (a: number, b: number) => `Showing ${a} of ${b}` },
@@ -23,13 +24,15 @@ function fmt(s: string) {
 // a full searchable list, and the notice card popup (animated greeting cards for festive notices).
 // Unseen greeting / urgent / action-needed notices pop up once so nobody misses them.
 export default function NoticeCenter({
-  schoolId, lang = 'en', schoolName, preview = 4,
+  schoolId, lang = 'en', schoolName, preview = 4, experience = 'shared',
 }: {
   schoolId: number
   lang?: Lang
   schoolName?: string
   preview?: number
+  experience?: 'student' | 'shared'
 }) {
+  const isStudent = experience === 'student'
   const tx = TX[lang]
   const [items, setItems] = useState<NoticeItem[]>([])
   const [past, setPast] = useState<NoticeItem[] | null>(null)
@@ -111,6 +114,33 @@ export default function NoticeCenter({
   if (!loaded) return null
   if (items.length === 0 && !active) return null
 
+  const noteTone = (n: NoticeItem): Tone => {
+    if (n.priority === 'urgent') return 'coral'
+    if (n.requires_ack && !n.acked) return 'yellow'
+    if (getTemplate(n.template_key)?.greeting) return 'pink'
+    if (n.announcement_type === 'event') return 'blue'
+    return 'paper'
+  }
+
+  const pinNote = (n: NoticeItem, index: number) => {
+    const tpl = getTemplate(n.template_key)
+    const l = localised(n, lang)
+    return (
+      <button key={n.id} data-testid={`notice-row-${n.id}`} onClick={() => setOpenId(n.id)}
+        className="sb-pin-note" data-tone={noteTone(n)} style={{ '--tilt': `${[-1.5, 1.2, -.8, 1.6][index % 4]}deg` } as React.CSSProperties}>
+        <Sticker name="pushpin" size="sm" tilt={index % 2 ? 18 : -14} />
+        <span className="flex flex-wrap items-center gap-1.5">
+          {!n.seen && <span data-testid={`notice-new-dot-${n.id}`} className="sb-chip" data-tone="blue">{tx.new}</span>}
+          {n.priority === 'urgent' && <span className="sb-chip" data-tone="coral">{tx.urgent}</span>}
+          {n.requires_ack && !n.acked && <span className="sb-chip" data-tone="yellow">{tx.actionTag}</span>}
+          {n.pinned && <span className="sb-chip" data-tone="paper"><Pin size={11} aria-hidden="true" />Pinned</span>}
+        </span>
+        <span className={`text-[15px] leading-snug ${n.seen ? 'font-semibold' : 'font-extrabold'}`}>{tpl?.greeting ? `${tpl.emoji} ` : ''}{l.title}</span>
+        <span className="mt-auto text-xs font-semibold text-[#6b604f]">{n.created_by_name ? `${n.created_by_name} · ` : ''}{fmt(n.published_at ?? n.created_at)}</span>
+      </button>
+    )
+  }
+
   const row = (n: NoticeItem) => {
     const tpl = getTemplate(n.template_key)
     const l = localised(n, lang)
@@ -135,7 +165,24 @@ export default function NoticeCenter({
 
   return (
     <>
-      {items.length > 0 && (
+      {items.length > 0 && isStudent && (
+        <section data-testid="notice-center" className="sb-board" aria-labelledby="notice-center-title">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Sticker name="megaphone" size="lg" tilt={-12} />
+              <h2 id="notice-center-title" className="sb-display text-3xl">{tx.title}</h2>
+              {unread > 0 && <span data-testid="notice-unread-badge" className="sb-chip" data-size="lg" data-tone="blue">{tx.newCount(unread)}</span>}
+              {urgent > 0 && <span className="sb-chip" data-size="lg" data-tone="coral">{urgent} {tx.urgent}</span>}
+            </div>
+            <button data-testid="notice-viewall" onClick={() => setShowAll(true)} className="sb-btn" data-size="sm" data-variant="dark">
+              {tx.viewAll}{items.length > preview ? ` (${items.length})` : ''}<ArrowUpRight size={15} aria-hidden="true" />
+            </button>
+          </div>
+          <div className="sb-board-notes">{items.slice(0, preview).map(pinNote)}</div>
+        </section>
+      )}
+
+      {items.length > 0 && !isStudent && (
         <section data-testid="notice-center" className="bg-white border-y border-gray-200 overflow-hidden" aria-labelledby="notice-center-title">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -155,7 +202,7 @@ export default function NoticeCenter({
 
       {showAll && (
         <div className="fixed inset-0 z-[250] bg-black/45 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setShowAll(false)}>
-          <div role="dialog" aria-modal="true" aria-labelledby="notice-panel-title" data-testid="notice-panel" className="bg-white w-full sm:max-w-xl max-h-[88vh] rounded-t-lg sm:rounded-lg shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-labelledby="notice-panel-title" data-testid="notice-panel" data-student-ui={isStudent ? '' : undefined} className="bg-white w-full sm:max-w-xl max-h-[88vh] rounded-t-lg sm:rounded-lg shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="px-5 pt-5 pb-3 space-y-3 border-b border-gray-100">
               <div className="flex items-center justify-between">
                 <p id="notice-panel-title" className="flex items-center gap-2 text-base font-semibold text-gray-900"><Megaphone size={17} className="text-[#245b46]" />{tx.title}</p>

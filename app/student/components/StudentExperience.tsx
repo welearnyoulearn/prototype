@@ -3,14 +3,17 @@
 import type { ReactNode } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { ArrowRight } from 'lucide-react'
+import { Sticker, type StickerName, type Tone } from './stickers'
 
 const ease = [0.16, 1, 0.3, 1] as const
 
-export function StudentPageIntro({ eyebrow, title, description, aside }: {
+export function StudentPageIntro({ eyebrow, title, description, aside, sticker, tone = 'yellow' }: {
   eyebrow: string
   title: string
   description: string
   aside?: ReactNode
+  sticker?: StickerName
+  tone?: Tone
 }) {
   const reduceMotion = useReducedMotion()
   return (
@@ -18,64 +21,84 @@ export function StudentPageIntro({ eyebrow, title, description, aside }: {
       initial={reduceMotion ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: .36, ease }}
-      className="student-page-intro"
+      className="sb-page-head"
     >
       <div className="min-w-0">
-        <p className="student-eyebrow">{eyebrow}</p>
-        <h1>{title}</h1>
-        <p className="student-page-description">{description}</p>
+        <span className="sb-kicker" data-tone={tone}>{eyebrow}</span>
+        <div className="sb-page-head-title">
+          <h1>{title}</h1>
+          {sticker && <Sticker name={sticker} size="xl" tilt={8} className="mt-2 hidden sm:inline-block" />}
+        </div>
+        <p className="sb-page-desc">{description}</p>
       </div>
-      {aside && <div className="student-page-aside">{aside}</div>}
+      {aside && <div className="shrink-0">{aside}</div>}
     </motion.header>
   )
 }
 
-export function StudentProgressTrack({ value, label, tone = 'amber' }: {
+export function StudentProgressTrack({ value, label, tone = 'yellow', size }: {
   value: number
   label?: string
-  tone?: 'amber' | 'green' | 'red'
+  tone?: Tone
+  size?: 'sm'
 }) {
   const reduceMotion = useReducedMotion()
   const safe = Math.max(0, Math.min(100, value))
   return (
-    <div className="student-progress" data-tone={tone} aria-label={label ? `${label}: ${safe}%` : `${safe}%`}>
-      <span className="student-progress-rail" aria-hidden="true">
+    <span className="sb-meter" data-tone={tone} data-size={size} role="img" aria-label={label ? `${label}: ${safe}%` : `${safe}%`}>
+      <span className="sb-meter-rail" aria-hidden="true">
         <motion.span
+          data-empty={safe === 0}
           initial={reduceMotion ? { width: `${safe}%` } : { width: 0 }}
           animate={{ width: `${safe}%` }}
-          transition={{ duration: reduceMotion ? 0 : .72, ease }}
+          transition={{ duration: reduceMotion ? 0 : .8, ease }}
         />
       </span>
-      {label && <span className="student-progress-label">{label}</span>}
-    </div>
+      {label && <span className="sb-meter-label">{label}</span>}
+    </span>
   )
 }
 
-export function StudentEmptyState({ icon, title, description, action }: {
-  icon: ReactNode
+export function StudentEmptyState({ sticker, title, description, action, tone = 'paper' }: {
+  sticker: StickerName
   title: string
   description: string
   action?: { label: string; onClick: () => void }
+  tone?: Tone
 }) {
   return (
-    <div className="student-empty-state">
-      <span className="student-empty-icon" aria-hidden="true">{icon}</span>
+    <div className="sb-card sb-empty" data-tone={tone}>
+      <Sticker name={sticker} size="hero" tilt={-6} />
       <h2>{title}</h2>
       <p>{description}</p>
       {action && (
-        <button type="button" onClick={action.onClick} className="student-text-action">
-          {action.label}<ArrowRight size={15} aria-hidden="true" />
+        <button type="button" onClick={action.onClick} className="sb-btn mt-3" data-tone="yellow">
+          {action.label}<ArrowRight size={16} aria-hidden="true" />
         </button>
       )}
     </div>
   )
 }
 
+export function StudentAlert({ children, onRetry, retryLabel = 'Try again', testId }: {
+  children: ReactNode
+  onRetry?: () => void
+  retryLabel?: string
+  testId?: string
+}) {
+  return (
+    <div role="alert" className="sb-alert" data-tone="coral" data-testid={testId}>
+      <span className="flex items-center gap-3"><Sticker name="warning" size="sm" />{children}</span>
+      {onRetry && <button type="button" onClick={onRetry} className="sb-btn" data-size="sm" data-variant="ghost">{retryLabel}</button>}
+    </div>
+  )
+}
+
 export const studentReveal = {
-  hidden: { opacity: 0, y: 9 },
+  hidden: { opacity: 0, y: 12 },
   visible: (i = 0) => ({
     opacity: 1,
     y: 0,
-    transition: { delay: Math.min(i * .045, .24), duration: .32, ease },
+    transition: { delay: Math.min(i * .05, .3), duration: .34, ease },
   }),
 }

@@ -38,6 +38,7 @@ export default function PortalSidebar({ open, onClose, label, portal, children, 
         <Dialog.Content
           id="portal-navigation"
           data-portal={portal}
+          data-student-ui={portal === 'student' ? '' : undefined}
           className={cn('portal-sidebar portal-drawer', className)}
           aria-describedby={undefined}
           onCloseAutoFocus={event => {

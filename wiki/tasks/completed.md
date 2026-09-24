@@ -18,6 +18,12 @@ All finished features and bug fixes. Most recent first.
 
 ---
 
+### 2026-09-24 — Student portal: sticker-book redesign of every screen (#229)
+**Type:** Enhancement (UI/UX)
+**Portal:** Student
+**Summary:** Neubrutalist + Y2K + scrapbook design system for the whole student portal (dashboard, syllabus, library, class circle, marks, attendance, calendar, profile, AI Hub, sign-in pages) with 3D stickers, per-screen colours and the school logo top-left. Student-scoped CSS; other portals unchanged.
+**PR:** feature/229-student-dashboard-stickers
+
 ### 2026-09-22 — Export Data: one tab for every download (#206)
 **Type:** Feature (rebuild)
 **Portal:** School Admin
