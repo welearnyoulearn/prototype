@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { lockYearClose } from '@/lib/feeRollover'
 
 // student_fee_category_assignments / student_fee_assignment_history table
 // creation lives in lib/db.ts's ensureDB() now (single source of truth); this
@@ -104,7 +105,9 @@ export async function POST(req: NextRequest) {
     const client = await pool.connect()
     try {
       const { school_id, academic_year, assignments, changed_by: clientActor } = await req.json()
-      const access = await requireFeeAccess(school_id)
+      // Pass `client` — already held via pool.connect() above; the default
+      // `pool` here would deadlock requesting a second connection on Vercel's max:1 pool.
+      const access = await requireFeeAccess(school_id, client)
       if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
       const changed_by = clientActor || access.actor
       if (!school_id || !academic_year || !Array.isArray(assignments)) {
@@ -145,9 +148,19 @@ export async function POST(req: NextRequest) {
 
       await client.query('BEGIN')
 
+      // Serialize against year-end apply/close/reopen for this year — the SAME
+      // advisory lock those actions take (lib/feeRollover.ts), taken BEFORE any
+      // row lock below (consistent ordering with every other mutating fee
+      // route). Without this, a concurrent close could land between the check
+      // just below and this route's amount_due writes further down, leaving a
+      // closed year's balances inconsistent with the closure snapshot it just took.
+      await lockYearClose(client, school_id, academic_year)
+
       // Block assignment changes on a closed year — every other mutating fee
       // route already has this guard; this one writes amount_due directly
       // onto the ledger (below) just like structures/amend, so it needs it too.
+      // Re-checked here, now that the lock above is held, so this can't read a
+      // stale "not closed" state past a concurrent close that was waiting on it.
       const { rows: [closedYear] } = await client.query(
         `SELECT 1 FROM fee_year_close
          WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,
@@ -219,9 +232,21 @@ export async function POST(req: NextRequest) {
            AND student_id = ANY($3) AND fee_category_id = ANY($4)`,
         [school_id, academic_year, studentIds, categoryIds]
       )
-      const overpaidMap = new Map(wouldOverpay.map((r: { student_id: number; fee_category_id: number; amount_paid: string; waiver_amount: string }) =>
-        [`${r.student_id}:${r.fee_category_id}`, parseFloat(r.amount_paid) + parseFloat(r.waiver_amount)]
-      ))
+      // A variable category can bill multiple PERIOD rows per student (monthly/
+      // quarterly), each with its own amount_paid/waiver_amount, but only one
+      // student_id:fee_category_id KEY — new Map(wouldOverpay.map(...)) kept
+      // only the last period the (unordered) query happened to return, silently
+      // dropping every other period's committed amount from this check. Since
+      // the UPDATE below applies the SAME new amount to every period for this
+      // student+category, the check must use each key's WORST-CASE (highest
+      // committed) period, not an arbitrary single one.
+      const overpaidMap = new Map<string, number>()
+      for (const r of wouldOverpay as Array<{ student_id: number; fee_category_id: number; amount_paid: string; waiver_amount: string }>) {
+        const key = `${r.student_id}:${r.fee_category_id}`
+        const committed = parseFloat(r.amount_paid) + parseFloat(r.waiver_amount)
+        const existing = overpaidMap.get(key)
+        if (existing === undefined || committed > existing) overpaidMap.set(key, committed)
+      }
       const overpaidCount = toSave.filter(({ student_id, fee_category_id, amount }: { student_id: number; fee_category_id: number; amount: string }) => {
         const committed = overpaidMap.get(`${student_id}:${fee_category_id}`)
         return committed !== undefined && committed > parseFloat(amount) + 0.01
@@ -267,19 +292,44 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // For removed entries (zero = not applicable): delete unpaid pending/overdue ledger rows
+      // For removed entries (zero = not applicable): delete unpaid pending/overdue
+      // ledger rows. Same reasoning as the ledger/[id] DELETE route's guard: the
+      // amount_paid=0 check above only looks at the CURRENT running total, which
+      // a cancelled payment or revoked waiver already zeroes out — but the
+      // fee_payments/fee_waivers ROWS themselves still exist for audit history,
+      // and both reference this ledger_id with ON DELETE CASCADE. Deleting the
+      // bill would silently erase that history: pending_verification/cancelled
+      // payments and revoked waivers alike. Unlike the single-entry ledger route
+      // (which rejects the whole request), this is a bulk operation covering many
+      // students at once — skipping just the rows with real history (and
+      // reporting how many) keeps one student's old cancelled receipt from
+      // blocking everyone else's zero-out.
+      let historyPreserved = 0
       for (const { student_id, fee_category_id } of toRemove) {
-        await client.query(
-          `DELETE FROM student_fee_ledger
-           WHERE school_id = $1 AND student_id = $2 AND fee_category_id = $3
-             AND academic_year = $4 AND amount_paid = 0
-             AND status IN ('pending', 'overdue')`,
+        const { rowCount } = await client.query(
+          `DELETE FROM student_fee_ledger l
+           WHERE l.school_id = $1 AND l.student_id = $2 AND l.fee_category_id = $3
+             AND l.academic_year = $4 AND l.amount_paid = 0
+             AND l.status IN ('pending', 'overdue')
+             AND NOT EXISTS (SELECT 1 FROM fee_payments WHERE ledger_id = l.id)
+             AND NOT EXISTS (SELECT 1 FROM fee_waivers  WHERE ledger_id = l.id)`,
           [school_id, student_id, fee_category_id, academic_year]
         )
+        if (!rowCount) {
+          const { rows: [hasHistory] } = await client.query(
+            `SELECT 1 FROM student_fee_ledger l
+             WHERE l.school_id = $1 AND l.student_id = $2 AND l.fee_category_id = $3
+               AND l.academic_year = $4 AND l.amount_paid = 0 AND l.status IN ('pending', 'overdue')
+               AND (EXISTS (SELECT 1 FROM fee_payments WHERE ledger_id = l.id)
+                 OR EXISTS (SELECT 1 FROM fee_waivers  WHERE ledger_id = l.id))`,
+            [school_id, student_id, fee_category_id, academic_year]
+          )
+          if (hasHistory) historyPreserved++
+        }
       }
 
       await client.query('COMMIT')
-      return NextResponse.json({ upserted, ledgerUpdated })
+      return NextResponse.json({ upserted, ledgerUpdated, historyPreserved })
     } catch (e) {
       await client.query('ROLLBACK')
       console.error(e)

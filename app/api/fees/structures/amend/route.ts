@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
 import { todayIST } from '@/lib/istDate'
+import { lockYearClose } from '@/lib/feeRollover'
 
 // POST /api/fees/structures/amend — amend a locked fee structure amount
 // Updates fee_structures + creates amendment record + updates unpaid ledger entries
@@ -19,7 +20,9 @@ export async function POST(req: NextRequest) {
     try {
       const body = await req.json()
       const { school_id, academic_year, fee_category_id, grade, new_amount, reason, changed_by: clientActor, effective_from } = body
-      const access = await requireFeeAccess(school_id)
+      // Pass `client` — already held via pool.connect() above; the default
+      // `pool` here would deadlock requesting a second connection on Vercel's max:1 pool.
+      const access = await requireFeeAccess(school_id, client)
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const changed_by = clientActor || access.actor
 
@@ -32,11 +35,22 @@ export async function POST(req: NextRequest) {
 
       await client.query('BEGIN')
 
+      // Serialize against year-end apply/close/reopen for this year — the SAME
+      // advisory lock those actions take (lib/feeRollover.ts), taken BEFORE any
+      // row lock below (consistent ordering with every other mutating fee
+      // route, so this can't deadlock against them). Without this, a concurrent
+      // close could land between the check just below and this route's
+      // amount_due writes further down, leaving a closed year's balances
+      // inconsistent with the closure snapshot it just took.
+      await lockYearClose(client, school_id, academic_year)
+
       // Block amendments on a closed year — same guard as payments/waivers routes.
       // Missing here previously let an admin amend amounts on a closed year without
       // reopening it first, bypassing the "changes need an amendment" rule for the
       // wrong reason: not because it wasn't tracked, but because the year shouldn't
-      // have been editable at all.
+      // have been editable at all. Re-checked here, now that the lock above is
+      // held, so this can't read a stale "not closed" state past a concurrent
+      // close that was waiting on it.
       const { rows: [closedYear] } = await client.query(
         `SELECT 1 FROM fee_year_close
          WHERE school_id = $1 AND academic_year = $2 AND is_reopened = FALSE`,

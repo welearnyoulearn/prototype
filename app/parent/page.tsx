@@ -21,6 +21,16 @@ import PortalSidebar from '@/components/portal/PortalSidebar'
 import { CalendarDays } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 
+// Used by printParentReceipt below — fee category names (admin-set),
+// transaction references (parent-typed, directly attacker-controlled) and
+// payment modes are stored text going into a raw HTML document via
+// document.write, not React JSX (which escapes automatically). Unescaped,
+// stored HTML/script metacharacters there could alter the printed receipt's
+// contents or, depending on the browser, execute.
+function escHtml(s: unknown): string {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Child = { id: number; name: string; grade: string; section: string; roll_number: string; school_id: number }
 type Student = {
@@ -363,9 +373,14 @@ function ParentDashboard() {
       const isMulti = selectedLedgerIds.size > 0
       const ref = upiRef !== undefined ? upiRef : payUPI
       if (!payIdemKeyRef.current) payIdemKeyRef.current = crypto.randomUUID()
+      // Single-entry mode was missing `transaction_ref` — only multi sent it,
+      // so a single-bill submission left the backend's structured reference
+      // column null (the text survives in `notes` via upi_id, but reference
+      // lookup, exports and the printed receipt's "Transaction Ref" field all
+      // read transaction_ref specifically, not notes).
       const body = isMulti
         ? { school_id: student.school_id, student_id: student.id, ledger_ids: Array.from(selectedLedgerIds), total_amount: parseFloat(payAmount), transaction_ref: ref || null, upi_id: ref || null, idempotency_key: payIdemKeyRef.current }
-        : { school_id: student.school_id, student_id: student.id, ledger_id: payingLedger?.id, amount: parseFloat(payAmount), upi_id: ref || null, idempotency_key: payIdemKeyRef.current }
+        : { school_id: student.school_id, student_id: student.id, ledger_id: payingLedger?.id, amount: parseFloat(payAmount), transaction_ref: ref || null, upi_id: ref || null, idempotency_key: payIdemKeyRef.current }
       const r = await fetch('/api/parent/fees', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -418,6 +433,17 @@ function ParentDashboard() {
 
   function printParentReceipt(pmt: FeePayment) {
     const modeLabel: Record<string, string> = { cash: 'Cash', cheque: 'Cheque', dd: 'Demand Draft', upi: 'UPI', online: 'Online Transfer' }
+    // A multi-bill payment allocates across several bills but shares ONE
+    // receipt_number across all of them (see POST /api/parent/fees) — printing
+    // just the clicked row's own amount as "Total Paid" produced two different
+    // printouts for the SAME receipt number with two different totals (e.g. a
+    // ₹1,000 payment split ₹600/₹400 across two bills). Group every completed
+    // allocation sharing this receipt number and print them as line items with
+    // one combined total, so what's on paper actually matches the receipt number on it.
+    const allocations = feePayments.filter(p => p.receipt_number === pmt.receipt_number && p.payment_status === 'completed')
+    const rows = allocations.length > 0 ? allocations : [pmt]
+    const combinedTotal = rows.reduce((sum, p) => sum + Number(p.amount), 0)
+    const isPartial = rows.length > 1
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ${pmt.receipt_number}</title>
 <style>
   body{font-family:Arial,sans-serif;padding:32px;color:#222;max-width:680px;margin:0 auto}
@@ -425,6 +451,7 @@ function ParentDashboard() {
   .school{font-size:20px;font-weight:bold}
   .rtitle{font-size:14px;font-weight:bold;margin-top:6px;letter-spacing:1px}
   .rno{font-size:12px;color:#555;margin-top:4px}
+  .note{font-size:11px;color:#888;margin-top:2px}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
   .lbl{font-size:11px;color:#888;margin-bottom:2px}
   .val{font-size:13px;font-weight:500}
@@ -438,19 +465,20 @@ function ParentDashboard() {
 <div class="hdr">
   <div class="school">Fee Receipt</div>
   <div class="rtitle">PAYMENT CONFIRMATION</div>
-  <div class="rno">Receipt No: <strong>${pmt.receipt_number}</strong></div>
+  <div class="rno">Receipt No: <strong>${escHtml(pmt.receipt_number)}</strong></div>
+  ${isPartial ? `<div class="note">Covers ${rows.length} bills paid together under this one receipt</div>` : ''}
 </div>
 <table>
   <thead><tr><th>Fee Category</th><th>Period</th><th>Amount Paid</th></tr></thead>
   <tbody>
-    <tr><td>${pmt.category_name}</td><td>${pmt.period_label}</td><td>₹${Number(pmt.amount).toLocaleString('en-IN')}</td></tr>
+    ${rows.map(r => `<tr><td>${escHtml(r.category_name)}</td><td>${escHtml(r.period_label)}</td><td>₹${Number(r.amount).toLocaleString('en-IN')}</td></tr>`).join('')}
   </tbody>
-  <tfoot><tr class="tot"><td colspan="2" style="text-align:right">Total Paid:</td><td>₹${Number(pmt.amount).toLocaleString('en-IN')}</td></tr></tfoot>
+  <tfoot><tr class="tot"><td colspan="2" style="text-align:right">Total Paid:</td><td>₹${combinedTotal.toLocaleString('en-IN')}</td></tr></tfoot>
 </table>
 <div class="grid2">
-  <div><div class="lbl">Payment Mode</div><div class="val">${modeLabel[pmt.payment_mode] || pmt.payment_mode}</div></div>
-  <div><div class="lbl">Payment Date</div><div class="val">${pmt.paid_date}</div></div>
-  ${pmt.transaction_ref ? `<div><div class="lbl">Transaction Ref</div><div class="val">${pmt.transaction_ref}</div></div>` : ''}
+  <div><div class="lbl">Payment Mode</div><div class="val">${escHtml(modeLabel[pmt.payment_mode] || pmt.payment_mode)}</div></div>
+  <div><div class="lbl">Payment Date</div><div class="val">${escHtml(pmt.paid_date)}</div></div>
+  ${pmt.transaction_ref ? `<div><div class="lbl">Transaction Ref</div><div class="val">${escHtml(pmt.transaction_ref)}</div></div>` : ''}
 </div>
 <div class="ftr">Generated on ${new Date().toLocaleString('en-IN')} · Computer-generated receipt · No signature required.</div>
 </body></html>`

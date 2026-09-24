@@ -13,22 +13,27 @@ export async function GET(req: NextRequest) {
     const school_id   = p.get('school_id')
     const student_id  = p.get('student_id')
     if (!school_id || !student_id) return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
-    // getAnySession() only confirms SOME valid login exists — without these
-    // checks, any logged-in parent/teacher/student could pass another
-    // family's student_id/school_id and read their fee ledger, payment
-    // history, and transaction references.
+    // getAnySession() only confirms SOME valid login exists, for whichever role —
+    // this endpoint is parent-only (only app/parent/page.tsx calls it; there is
+    // no student/teacher/admin fees screen that does). Without this check, a
+    // logged-in student or teacher session — neither of which has any
+    // parent-link relationship to verify — could pass ANY same-school
+    // student_id and read that student's fee ledger, payment history, and
+    // transaction references; POST had the same gap for submitting a payment
+    // against another student's bill.
+    if (session.role !== 'parent') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
     if (session.schoolId !== parseInt(school_id)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
-    if (session.role === 'parent') {
-      const parent = await getParentSession()
-      const linkRes = await pool.query(
-        'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
-        [student_id, parent?.parentId]
-      )
-      if (linkRes.rowCount === 0) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-      }
+    const parent = await getParentSession()
+    const linkRes = await pool.query(
+      'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
+      [student_id, parent?.parentId]
+    )
+    if (linkRes.rowCount === 0) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
     const academic_year = p.get('academic_year') || await resolveAcademicYear(school_id)
 
@@ -87,16 +92,21 @@ export async function GET(req: NextRequest) {
       // Fetch waivers so parent sees the full picture of what was reduced/waived —
       // excludes revoked waivers so a revoked waiver doesn't keep showing as active
       // and inflating total_waived below, same filter as reports/stats/passbook.
+      // Scoped to the SAME academic_year as `ledger` above — without this, a
+      // waiver from a different year (most commonly a carry_forward bookkeeping
+      // waiver on last year's now-closed bill) still showed here and inflated
+      // total_waived, even though every other summary figure (total_due,
+      // total_paid, total_outstanding) is scoped to the selected year only.
       const { rows: waivers } = await pool.query(
         `SELECT w.id, w.waiver_type, w.waiver_amount, w.reason, w.granted_by_name, w.created_at,
                 fc.name AS category_name, l.period_label, l.amount_due
          FROM fee_waivers w
          JOIN student_fee_ledger l ON l.id = w.ledger_id
          JOIN fee_categories fc ON fc.id = l.fee_category_id
-         WHERE w.school_id = $1 AND w.student_id = $2
+         WHERE w.school_id = $1 AND w.student_id = $2 AND l.academic_year = $3
            AND COALESCE(w.is_revoked, FALSE) = FALSE
          ORDER BY w.created_at DESC`,
-        [school_id, student_id]
+        [school_id, student_id, academic_year]
       ).catch(() => ({ rows: [] }))
 
       const total_due         = ledger.reduce((s, r) => s + Number(r.amount_due), 0)
@@ -146,39 +156,46 @@ export async function POST(req: NextRequest) {
     const session = await getAnySession()
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
+    const { school_id, student_id, ledger_id, ledger_ids, amount, total_amount, transaction_ref, upi_id, idempotency_key } = await req.json()
+    if (!school_id || !student_id) {
+      return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
+    }
+    // getAnySession() only confirms SOME valid login exists, for whichever role —
+    // this endpoint is parent-only (see the matching comment on GET above).
+    // Without this check, a logged-in student or teacher session could submit a
+    // fabricated payment against ANOTHER same-school student's ledger by
+    // supplying its IDs directly, since every query below trusts
+    // school_id/student_id/ledger_id straight from the request body.
+    if (session.role !== 'parent') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    if (session.schoolId !== Number(school_id)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    const parent = await getParentSession()
+    const linkRes = await pool.query(
+      'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
+      [student_id, parent?.parentId]
+    )
+    if (linkRes.rowCount === 0) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+    // Server-side plan gate — this is the actual write path that creates a
+    // fee_payments row; the QR/upi-id endpoints are gated too, but a caller
+    // could skip straight here. Without this, a school whose plan doesn't
+    // include online-payments could still have parents self-report payments
+    // that land in the admin's verification queue.
+    if (!await schoolHasFeature(Number(school_id), 'online-payments')) {
+      return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
+    }
+
+    // Both pool.query gates above must run BEFORE pool.connect() below — on
+    // Vercel's max:1 pool, a client held via pool.connect() plus a nested
+    // pool.query() call (as these were, inline in the try block) request two
+    // connections from a pool of one and deadlock until connectionTimeoutMillis
+    // fails the whole request. See the matching fix in payments/verify/route.ts.
     const client = await pool.connect()
     try {
-      const { school_id, student_id, ledger_id, ledger_ids, amount, total_amount, transaction_ref, upi_id, idempotency_key } = await req.json()
-      if (!school_id || !student_id) {
-        return NextResponse.json({ error: 'school_id, student_id required' }, { status: 400 })
-      }
-      // getAnySession() only confirms SOME valid login exists — without these
-      // checks (already applied on GET above, but missing here), any logged-in
-      // parent/teacher/student could submit a fabricated payment against ANOTHER
-      // school's student/ledger by supplying its IDs directly, since every query
-      // below trusts school_id/student_id/ledger_id straight from the request body.
-      if (session.schoolId !== Number(school_id)) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-      }
-      if (session.role === 'parent') {
-        const parent = await getParentSession()
-        const linkRes = await pool.query(
-          'SELECT 1 FROM student_parents WHERE student_id = $1 AND parent_id = $2',
-          [student_id, parent?.parentId]
-        )
-        if (linkRes.rowCount === 0) {
-          return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-        }
-      }
-      // Server-side plan gate — this is the actual write path that creates a
-      // fee_payments row; the QR/upi-id endpoints are gated too, but a caller
-      // could skip straight here. Without this, a school whose plan doesn't
-      // include online-payments could still have parents self-report payments
-      // that land in the admin's verification queue.
-      if (!await schoolHasFeature(Number(school_id), 'online-payments')) {
-        return NextResponse.json({ error: 'Online payments is not enabled for this school' }, { status: 403 })
-      }
-
       const isMulti = Array.isArray(ledger_ids) && ledger_ids.length > 0
       const payAmount = isMulti ? parseFloat(String(total_amount)) : parseFloat(String(amount))
 
@@ -270,16 +287,28 @@ export async function POST(req: NextRequest) {
           [ledger_ids, school_id, student_id]
         )
 
-        // Subtract amounts already submitted and awaiting verification on these same
-        // bills — see the matching comment in the single-entry branch above.
-        const { rows: [pendingRow] } = await client.query(
-          `SELECT COALESCE(SUM(amount), 0) AS pending_total
+        // Subtract amounts already submitted and awaiting verification — PER BILL,
+        // not just as one combined total. Subtracting only the combined aggregate
+        // let allocation still put a fresh amount against a bill that already had
+        // a pending payment on it: e.g. two ₹500 bills with ₹500 pending on bill 1
+        // left totalBalance at ₹500, but the FIFO loop below allocated straight to
+        // bill 1's full (unadjusted) balance again instead of skipping to bill 2.
+        const { rows: pendingByLedger } = await client.query(
+          `SELECT ledger_id, COALESCE(SUM(amount), 0) AS pending_total
            FROM fee_payments
-           WHERE ledger_id = ANY($1) AND payment_status = 'pending_verification'`,
+           WHERE ledger_id = ANY($1) AND payment_status = 'pending_verification'
+           GROUP BY ledger_id`,
           [ledger_ids]
         )
-        const alreadyPending = parseFloat(pendingRow.pending_total)
-        const totalBalance = entries.reduce((sum, e) => sum + parseFloat(String(e.balance)), 0) - alreadyPending
+        const pendingMap = new Map<number, number>(
+          pendingByLedger.map((r: { ledger_id: number; pending_total: string }) => [r.ledger_id, parseFloat(r.pending_total)])
+        )
+        const adjustedEntries = entries.map(e => ({
+          ...e,
+          effectiveBalance: Math.max(0, parseFloat(String(e.balance)) - (pendingMap.get(e.id) || 0)),
+        }))
+        const totalBalance = adjustedEntries.reduce((sum, e) => sum + e.effectiveBalance, 0)
+        const alreadyPending = Array.from(pendingMap.values()).reduce((s, v) => s + v, 0)
         if (payAmount > totalBalance + 0.001) {
           await client.query('ROLLBACK')
           const msg = totalBalance <= 0
@@ -291,9 +320,9 @@ export async function POST(req: NextRequest) {
         }
 
         let remaining = payAmount
-        for (const entry of entries) {
+        for (const entry of adjustedEntries) {
           if (remaining <= 0) break
-          const balance = parseFloat(String(entry.balance))
+          const balance = entry.effectiveBalance
           if (balance <= 0) continue
           const remainingPaise = Math.round(remaining * 100)
           const balancePaise   = Math.round(balance * 100)

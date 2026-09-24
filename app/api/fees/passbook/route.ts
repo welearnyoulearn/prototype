@@ -191,12 +191,27 @@ export async function GET(req: NextRequest) {
 
     const timeline: TimelineEntry[] = []
 
+    // Net amendment delta per ledger row, used to reconstruct the bill event's
+    // ORIGINAL amount below — l.amount_due is the CURRENT (already-amended)
+    // value, and the amendment loop further down separately adds each
+    // historical delta as its own timeline entry. Using l.amount_due as-is for
+    // the bill event double-counted every amendment: a ₹1,000 bill amended to
+    // ₹1,200 showed as a ₹1,200 bill event PLUS a ₹200 amendment event = ₹1,400,
+    // while the ledger's actual amount_due was ₹1,200.
+    const amendmentDeltaByLedger = new Map<number, number>()
+    for (const a of amendments as Array<Record<string, unknown>>) {
+      const ledgerId = a.ledger_id as number
+      const delta = parseFloat(String(a.new_amount)) - parseFloat(String(a.old_amount))
+      amendmentDeltaByLedger.set(ledgerId, (amendmentDeltaByLedger.get(ledgerId) || 0) + delta)
+    }
+
     for (const l of ledger) {
+      const netAmendmentDelta = amendmentDeltaByLedger.get(l.id) || 0
       timeline.push({
         date: l.created_at,
         type: 'bill',
         description: `${l.fee_head_name} · ${l.period_label}`,
-        debit: parseFloat(l.amount_due),
+        debit: parseFloat(l.amount_due) - netAmendmentDelta,
         credit: 0,
         by: 'System',
         reference: null,

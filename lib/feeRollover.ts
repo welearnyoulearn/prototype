@@ -87,14 +87,28 @@ export async function upsertCarryForwardBill(
     sourceYear: string
   }
 ): Promise<void> {
+  // ON CONFLICT accumulates onto the existing destination bill (amount_due +=
+  // EXCLUDED.amount_due) rather than replacing it. A second carry-forward for
+  // the same (student, category, target year, period) is a genuinely NEW debt on
+  // top of whatever's already there — e.g. a source year gets reopened, a payment
+  // is cancelled (creating new due), and the year is carried forward again. The
+  // old `SET amount_due = EXCLUDED.amount_due` silently discarded whatever the
+  // first carry had already put on this bill (and any payment/waiver already
+  // recorded against it in the destination year stays untouched either way,
+  // since amount_paid/waiver_amount aren't in this SET clause).
   await client.query(
     `INSERT INTO student_fee_ledger
        (school_id, student_id, fee_category_id, fee_structure_id, academic_year,
         period_label, amount_due, due_date, status, notes, source_academic_year)
      VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, 'pending', $8, $9)
      ON CONFLICT (student_id, fee_category_id, academic_year, period_label) DO UPDATE
-       SET amount_due = EXCLUDED.amount_due, notes = EXCLUDED.notes,
-           source_academic_year = EXCLUDED.source_academic_year`,
+       SET amount_due = student_fee_ledger.amount_due + EXCLUDED.amount_due,
+           notes = student_fee_ledger.notes || ' | ' || EXCLUDED.notes,
+           source_academic_year = EXCLUDED.source_academic_year,
+           status = CASE
+             WHEN student_fee_ledger.status IN ('paid', 'waived') THEN 'partial'
+             ELSE student_fee_ledger.status
+           END`,
     [params.schoolId, params.studentId, params.categoryId, params.targetYear, params.periodLabel,
      params.amount, params.dueDate, params.notes, params.sourceYear]
   )

@@ -1984,21 +1984,34 @@ async function runIncrementalMigrations() {
   // ── DB-level safety constraints on fee ledger amounts ────────────────────────
   // NOT VALID skips scanning existing rows — only new/updated rows are checked.
   // This prevents ensureDB from failing if legacy data has edge-case values.
-  await pool.query(`
-    DO $$ BEGIN
-      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_amount_due_positive    CHECK (amount_due    >= 0) NOT VALID;
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$
-  `).catch(() => {})
-  await pool.query(`
-    DO $$ BEGIN
-      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_amount_paid_positive   CHECK (amount_paid   >= 0) NOT VALID;
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$
-  `).catch(() => {})
-  await pool.query(`
-    DO $$ BEGIN
-      ALTER TABLE student_fee_ledger ADD CONSTRAINT chk_waiver_amount_positive CHECK (waiver_amount >= 0) NOT VALID;
-    EXCEPTION WHEN duplicate_object THEN NULL; END $$
-  `).catch(() => {})
+  //
+  // `>= 0` alone does NOT exclude the numeric special value NaN — PostgreSQL's
+  // `numeric` type defines NaN as sorting ABOVE every finite value (so
+  // application code can still ORDER BY it predictably), which means
+  // `'NaN'::numeric >= 0` evaluates to TRUE. A NaN that reaches the database
+  // (e.g. from `Number("NaN")` in application code, which every `<= 0` /
+  // `< x` JS comparison silently treats as "not less than anything") would
+  // pass this constraint unless explicitly excluded — hence the added
+  // `!= 'NaN'` clause on each. (Application-level Number.isFinite() checks
+  // are the primary defense — see the ledger PATCH route — this is
+  // defense-in-depth for any other write path that isn't as careful.)
+  //
+  // DROP + re-ADD (same name), not ADD-with-duplicate_object-caught: these
+  // constraint names already exist on any database that ran an earlier
+  // version of this migration (`>= 0` only, no NaN exclusion) — silently
+  // swallowing "already exists" would leave that weaker check in place
+  // forever instead of upgrading it. Both are NOT VALID and DROP/ADD on a
+  // NOT VALID check is a metadata-only change, no table scan either way.
+  for (const [name, col] of [
+    ['chk_amount_due_positive', 'amount_due'],
+    ['chk_amount_paid_positive', 'amount_paid'],
+    ['chk_waiver_amount_positive', 'waiver_amount'],
+  ]) {
+    await pool.query(`ALTER TABLE student_fee_ledger DROP CONSTRAINT IF EXISTS ${name}`).catch(() => {})
+    await pool.query(
+      `ALTER TABLE student_fee_ledger ADD CONSTRAINT ${name} CHECK (${col} >= 0 AND ${col} != 'NaN') NOT VALID`
+    ).catch(() => {})
+  }
 
   // ── Plan pricing table (may not exist on older DBs that skipped migrations array) ──
   await pool.query(`
