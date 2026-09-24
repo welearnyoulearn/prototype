@@ -149,6 +149,15 @@ async function handleGET(req: NextRequest) {
       // Discretionary waivers per category — kept as a separate aggregate (not joined
       // into the query above) since a ledger entry can have more than one fee_waivers
       // row over time; joining would multiply total_due/total_collected/outstanding.
+      // `discQueryFailed` distinguishes "the query itself errored" (fall back to
+      // showing total_waived as a rough approximation, better than nothing)
+      // from "the query succeeded and this category legitimately has zero
+      // discretionary waivers" (e.g. a category with only carry-forward/
+      // writeoff bookkeeping waivers). The old `discMap.get(c.id) ?? c.total_waived`
+      // couldn't tell these apart — an empty Map from EITHER cause fell back to
+      // total_waived, so a carry-only category reported its full carried-forward
+      // amount as a "discretionary waiver" that was never actually granted.
+      let discQueryFailed = false
       const { rows: discByCategory } = await pool.query(
         `SELECT fc.id AS fee_category_id, COALESCE(SUM(w.waiver_amount), 0) AS total
          FROM fee_waivers w
@@ -159,9 +168,11 @@ async function handleGET(req: NextRequest) {
            AND w.waiver_type NOT IN ('carry_forward', 'writeoff')
          GROUP BY fc.id`,
         [school_id, academic_year]
-      ).catch(() => ({ rows: [] }))
+      ).catch(() => { discQueryFailed = true; return { rows: [] } })
       const discMap = new Map(discByCategory.map((r: { fee_category_id: number; total: string }) => [r.fee_category_id, r.total]))
-      for (const c of byCategory) c.discretionary_waived = discMap.get(c.id) ?? c.total_waived
+      for (const c of byCategory) {
+        c.discretionary_waived = discMap.has(c.id) ? discMap.get(c.id) : (discQueryFailed ? c.total_waived : 0)
+      }
 
       // Payment mode breakdown
       const { rows: byMode } = await pool.query(

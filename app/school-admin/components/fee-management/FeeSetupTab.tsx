@@ -520,7 +520,17 @@ export default function FeeSetupTab({
     })
     const d = await r.json()
     if (r.ok) {
-      setApplMsg(`✓ Saved — ${d.upserted} assignments${d.ledgerUpdated > 0 ? `, ${d.ledgerUpdated} ledger entries updated` : ''}`)
+      // historyPreserved: zeroing out a student's assignment normally removes
+      // their unpaid bill for that category, but a bill with real payment/
+      // waiver history attached (even cancelled/revoked) is deliberately left
+      // alone instead — silently, from the API's point of view. Surfacing the
+      // count here is the only way the admin finds out some removals didn't
+      // fully take effect and still need a manual look.
+      setApplMsg(
+        `✓ Saved — ${d.upserted} assignments` +
+        (d.ledgerUpdated > 0 ? `, ${d.ledgerUpdated} ledger entries updated` : '') +
+        (d.historyPreserved > 0 ? `, ${d.historyPreserved} removal${d.historyPreserved !== 1 ? 's' : ''} skipped (existing payment/waiver history)` : '')
+      )
       // Variable-fee assignments can change amount_due on existing bills (ledgerUpdated),
       // so the Overview tab's totals would otherwise stay stale until a tab switch.
       onStatsChanged()

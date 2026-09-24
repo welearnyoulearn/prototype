@@ -72,7 +72,9 @@ export async function PUT(req: NextRequest) {
         `SELECT school_id, name, frequency, is_active, category_type FROM fee_categories WHERE id = $1`, [id]
       )
       if (!current) return NextResponse.json({ error: 'Category not found' }, { status: 404 })
-      const access = await requireFeeAccess(current.school_id)
+      // Pass `client` — already held via pool.connect() above; the default
+      // `pool` here would deadlock requesting a second connection on Vercel's max:1 pool.
+      const access = await requireFeeAccess(current.school_id, client)
       if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       const changed_by = clientActor || access.actor
 
@@ -149,7 +151,9 @@ export async function DELETE(req: NextRequest) {
     try {
       const { rows: [cat] } = await client.query(`SELECT school_id FROM fee_categories WHERE id = $1`, [id])
       if (!cat) return NextResponse.json({ error: 'Category not found' }, { status: 404 })
-      if (!await requireFeeAccess(cat.school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      // Pass `client` — already held via pool.connect() above; the default
+      // `pool` here would deadlock requesting a second connection on Vercel's max:1 pool.
+      if (!await requireFeeAccess(cat.school_id, client)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       await client.query('BEGIN')
       const { rows: [{ cnt }] } = await client.query(
         `SELECT COUNT(*) AS cnt FROM student_fee_ledger WHERE fee_category_id = $1`, [id]

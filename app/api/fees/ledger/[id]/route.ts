@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { lockYearClose } from '@/lib/feeRollover'
 
 // Verify a ledger entry belongs to the caller's school. Returns the entry's school_id or null.
 async function ledgerSchoolId(id: string): Promise<string | null> {
@@ -41,6 +42,23 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
+
+      // Which academic year this entry is in — needed to take lockYearClose
+      // BEFORE the row lock below (same order year-end itself uses). Unlocked
+      // read is fine here: the FOR UPDATE re-fetch just below is authoritative.
+      const { rows: [yearLookup] } = await client.query(
+        `SELECT academic_year FROM student_fee_ledger WHERE id = $1 AND school_id = $2`,
+        [id, school_id]
+      )
+      if (yearLookup) {
+        // Serialize against year-end apply/close/reopen for this entry's year —
+        // the SAME advisory lock those actions take (lib/feeRollover.ts). The FOR
+        // UPDATE row lock just below alone would serialize this against year-end
+        // APPLY (which locks that same row), but not against a plain CLOSE, which
+        // doesn't touch any ledger row — only this shared lock does.
+        await lockYearClose(client, school_id, yearLookup.academic_year)
+      }
+
       // FOR UPDATE closes the gap between this check and the DELETE below — without
       // it, a payment or waiver could land on this exact row between the read and
       // the delete (a parent's online payment, another admin's cash collection),
@@ -83,6 +101,24 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         await client.query('ROLLBACK')
         return NextResponse.json({ error: 'Cannot delete an entry with a waiver recorded — revoke the waiver first' }, { status: 400 })
       }
+      // The checks above only look at the ledger's CURRENT running totals
+      // (amount_paid, waiver_amount), which a cancelled payment or revoked waiver
+      // already zeroes out — but the fee_payments/fee_waivers ROWS themselves
+      // still exist for audit history, and both reference this ledger_id with
+      // ON DELETE CASCADE. Deleting the bill would silently erase that history:
+      // pending_verification/cancelled payments and revoked waivers alike.
+      const { rows: [linked] } = await client.query(
+        `SELECT
+           EXISTS(SELECT 1 FROM fee_payments WHERE ledger_id = $1) AS has_payments,
+           EXISTS(SELECT 1 FROM fee_waivers  WHERE ledger_id = $1) AS has_waivers`,
+        [id]
+      )
+      if (linked.has_payments || linked.has_waivers) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({
+          error: 'Cannot delete an entry with payment or waiver history (including cancelled/revoked/pending records) — this would erase the audit trail.',
+        }, { status: 400 })
+      }
       await client.query(`DELETE FROM student_fee_ledger WHERE id = $1`, [id])
       await client.query('COMMIT')
       return NextResponse.json({ deleted: true })
@@ -118,22 +154,58 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const client = await pool.connect()
     try {
       const { new_amount, reason, changed_by: clientActor, school_id } = await req.json()
-      const access = await requireFeeAccess(school_id)
+      // Pass `client` — already held via pool.connect() above; the default
+      // `pool` here would deadlock requesting a second connection on Vercel's max:1 pool.
+      const access = await requireFeeAccess(school_id, client)
       if (!access) { client.release(); return NextResponse.json({ error: 'Forbidden' }, { status: 403 }) }
       const changed_by = clientActor || access.actor
 
       if (!new_amount || !reason || !school_id) {
         return NextResponse.json({ error: 'new_amount, reason, school_id required' }, { status: 400 })
       }
-      if (Number(new_amount) <= 0) {
-        return NextResponse.json({ error: 'Amount must be greater than 0' }, { status: 400 })
+      // `Number("NaN")` is `NaN`, and every comparison against NaN (`<= 0`,
+      // `< entry.amount_paid`, etc.) evaluates to false — so a literal "NaN"
+      // string sailed through both this and the coveredAmount check below,
+      // reaching the UPDATE and the audit INSERT as-is. Postgres's `numeric`
+      // type accepts the special value NaN and sorts it above every finite
+      // number, so a plain `CHECK (amount_due >= 0)` constraint can't exclude
+      // it either. Number.isFinite rejects NaN, ±Infinity, and non-numeric
+      // strings up front, before any of that.
+      const parsedAmount = Number(new_amount)
+      if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+        return NextResponse.json({ error: 'Amount must be a valid number greater than 0' }, { status: 400 })
+      }
+      // Reject sub-paisa precision here too — NUMERIC(10,2) would otherwise
+      // silently round it, so a value that LOOKS accepted doesn't match what
+      // actually lands in the audit trail. Epsilon tolerance sidesteps
+      // ordinary float noise (e.g. 500.1*100 landing at 50009.999999999996).
+      if (Math.abs(parsedAmount * 100 - Math.round(parsedAmount * 100)) > 1e-6) {
+        return NextResponse.json({ error: 'Amount cannot have more than 2 decimal places' }, { status: 400 })
       }
 
       await client.query('BEGIN')
 
-      // Fetch current entry
+      // Which academic year this entry is in — needed to take lockYearClose
+      // BEFORE the row lock below (same order year-end itself uses). Unlocked
+      // read is fine here: the FOR UPDATE re-fetch just below is authoritative.
+      const { rows: [yearLookup] } = await client.query(
+        `SELECT academic_year FROM student_fee_ledger WHERE id = $1 AND school_id = $2`,
+        [id, school_id]
+      )
+      if (yearLookup) {
+        // Serialize against year-end apply/close/reopen for this entry's year —
+        // the SAME advisory lock those actions take (lib/feeRollover.ts). The FOR
+        // UPDATE row lock just below alone would serialize this against year-end
+        // APPLY (which locks that same row), but not against a plain CLOSE, which
+        // doesn't touch any ledger row — only this shared lock does.
+        await lockYearClose(client, school_id, yearLookup.academic_year)
+      }
+
+      // Fetch current entry — FOR UPDATE so a concurrent payment/waiver can't land
+      // on this row between this read and the update below, which would let this
+      // edit's own amount_paid/waiver_amount snapshot go stale.
       const { rows: [entry] } = await client.query(
-        `SELECT * FROM student_fee_ledger WHERE id = $1 AND school_id = $2`,
+        `SELECT * FROM student_fee_ledger WHERE id = $1 AND school_id = $2 FOR UPDATE`,
         [id, school_id]
       )
       if (!entry) {
@@ -160,21 +232,25 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         return NextResponse.json({ error: `Cannot edit a ${entry.status} entry` }, { status: 400 })
       }
 
-      // Cannot set below what is already paid
-      if (Number(new_amount) < Number(entry.amount_paid)) {
+      // Cannot set below what is already covered by payments + waivers combined —
+      // checking amount_paid alone let a bill be cut below amount_paid + waiver_amount
+      // (e.g. ₹1,000 bill, ₹300 paid, ₹500 waived could be edited down to ₹400).
+      const coveredAmount = Number(entry.amount_paid) + Number(entry.waiver_amount || 0)
+      if (parsedAmount < coveredAmount) {
         await client.query('ROLLBACK')
         return NextResponse.json({
-          error: `New amount (₹${new_amount}) cannot be less than amount already paid (₹${entry.amount_paid})`
+          error: `New amount (₹${parsedAmount}) cannot be less than amount already paid + waived (₹${coveredAmount})`
         }, { status: 400 })
       }
 
-      // Record the edit in audit log
+      // Record the edit in audit log — `parsedAmount`, not the raw request
+      // body value, now that it's been validated finite.
       await client.query(
         `INSERT INTO student_fee_ledger_edits
            (ledger_id, school_id, student_id, old_amount, new_amount, reason, changed_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [id, school_id, entry.student_id,
-         entry.amount_due, new_amount, reason, changed_by]
+         entry.amount_due, parsedAmount, reason, changed_by]
       )
 
       // Update the ledger entry
@@ -189,7 +265,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
              END
          WHERE id = $2
          RETURNING *`,
-        [new_amount, id]
+        [parsedAmount, id]
       )
 
       await client.query('COMMIT')
