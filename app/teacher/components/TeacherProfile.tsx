@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import BirthdayField from '@/app/components/BirthdayField'
 
 type Teacher = {
   id: number
@@ -18,18 +19,26 @@ type Teacher = {
   class_teacher_grade: string | null
   class_teacher_section: string | null
   status: string
+  date_of_birth?: string | null
 }
+
+type AcademicYearOption = { id: number; label: string; is_current: boolean }
 
 type Props = {
   teacher: Teacher
   onUpdate: (updated: Teacher) => void
+  availableYears: AcademicYearOption[]
+  selectedAcademicYear: string
+  schoolCurrentYear: string
+  onSelectYear: (label: string) => void
 }
 
 type PwForm = { current: string; next: string; confirm: string }
 
-export default function TeacherProfile({ teacher, onUpdate }: Props) {
+export default function TeacherProfile({ teacher, onUpdate, availableYears, selectedAcademicYear, schoolCurrentYear, onSelectYear }: Props) {
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<Partial<Teacher>>({})
+  const [dob, setDob] = useState(teacher.date_of_birth ?? null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -125,7 +134,7 @@ export default function TeacherProfile({ teacher, onUpdate }: Props) {
         ) : (
           <div className="flex gap-2">
             <button onClick={handleSave} disabled={saving}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+              className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
               {saving ? 'Saving...' : 'Save'}
             </button>
             <button onClick={() => { setEditing(false); setForm({}) }}
@@ -144,9 +153,9 @@ export default function TeacherProfile({ teacher, onUpdate }: Props) {
       )}
 
       {/* Avatar + badge */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-4">
+      <div className="bg-white rounded-md border border-gray-200 p-6 mb-4">
         <div className="flex items-center gap-4 mb-6">
-          <div className="w-16 h-16 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-2xl flex-shrink-0">
+          <div className="w-12 h-12 rounded-md bg-secondary flex items-center justify-center text-primary font-semibold text-xl flex-shrink-0" aria-hidden="true">
             {teacher.name.charAt(0).toUpperCase()}
           </div>
           <div>
@@ -180,7 +189,7 @@ export default function TeacherProfile({ teacher, onUpdate }: Props) {
               { label: 'Teaches Grades', value: teacher.teaches_grades },
             ].map(({ label, value }) => (
               <div key={label}>
-                <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+                <p className="text-xs text-muted-foreground mb-0.5">{label}</p>
                 <p className="text-sm text-gray-900 font-medium">{value || <span className="text-gray-300">Not set</span>}</p>
               </div>
             ))}
@@ -200,12 +209,28 @@ export default function TeacherProfile({ teacher, onUpdate }: Props) {
         )}
       </div>
 
+      {/* Birthday — self-service, separate from the admin-gated fields above
+          (PUT /api/teachers/{id}) since a teacher may only ever set this one
+          field for themselves */}
+      <div className="bg-white rounded-md border border-gray-200 p-6 mb-4">
+        <h3 className="text-base font-semibold text-gray-900 mb-0.5">Birthday</h3>
+        <p className="text-xs text-muted-foreground mb-4">Shared with your school so they can wish you on the day</p>
+        <BirthdayField
+          value={dob}
+          endpoint="/api/teacher/auth/date-of-birth"
+          kind="adult"
+          ring="focus:ring-blue-300"
+          accentGradient="from-blue-600 to-blue-700"
+          onSaved={setDob}
+        />
+      </div>
+
       {/* Password change section */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="bg-white rounded-md border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-base font-semibold text-gray-900">Password</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Change your login password</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Change your login password</p>
           </div>
           {!pwSection && (
             <button onClick={() => { setPwSection(true); setPwError(''); setPwSuccess('') }}
@@ -244,7 +269,7 @@ export default function TeacherProfile({ teacher, onUpdate }: Props) {
             </div>
             <div className="flex gap-2 pt-1">
               <button onClick={handlePasswordChange} disabled={pwSaving}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+                className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
                 {pwSaving ? 'Saving...' : 'Update Password'}
               </button>
               <button onClick={() => { setPwSection(false); setPwForm({ current: '', next: '', confirm: '' }); setPwError('') }}
@@ -255,6 +280,38 @@ export default function TeacherProfile({ teacher, onUpdate }: Props) {
           </div>
         )}
       </div>
+
+      {/* Academic year — independent of school admin's active year. Every
+          fresh login resets this to whatever school admin has set as
+          current; a teacher can look back at a past (closed) year, but that
+          list is view-only here — no add/create, that stays a school-admin
+          capability. Selecting a non-current year makes the rest of the
+          portal (currently: Syllabus tracking) read-only. */}
+      {availableYears.length > 0 && (
+        <div className="bg-white rounded-md border border-gray-200 p-6 mt-4">
+          <div className="mb-4">
+            <h3 className="text-base font-semibold text-gray-900">Academic Year</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Choose which year to view across your portal. Only the current year is editable.</p>
+          </div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <select
+              value={selectedAcademicYear}
+              onChange={e => onSelectYear(e.target.value)}
+              data-testid="teacher-academic-year-select"
+              className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+            >
+              {availableYears.map(y => (
+                <option key={y.id} value={y.label}>{y.label}{y.is_current ? ' (current)' : ''}</option>
+              ))}
+            </select>
+            {selectedAcademicYear && selectedAcademicYear !== schoolCurrentYear && (
+              <span className="text-xs px-3 py-1.5 rounded-full font-medium bg-amber-100 text-amber-700" data-testid="teacher-year-readonly-badge">
+                👁 View only — {selectedAcademicYear} is closed
+              </span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

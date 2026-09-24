@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
+import { SearchIcon } from 'lucide-react'
 
 type Result = {
   type: 'student' | 'teacher' | 'nav' | 'action'
@@ -16,8 +17,6 @@ const QUICK_ACTIONS: Result[] = [
   { type: 'action', label: 'Create Announcement',     sub: 'Post to students & teachers', nav: 'announcements' },
   { type: 'action', label: 'Mark Attendance',         sub: 'Today\'s register',           nav: 'attendance' },
   { type: 'action', label: 'Collect Fee Payment',     sub: 'Record a payment',            nav: 'fee-management' },
-  { type: 'action', label: 'Review Leave Requests',   sub: 'Pending approvals',           nav: 'leave-requests' },
-  { type: 'action', label: 'View Timetable',          sub: 'Manage class schedules',      nav: 'timetable' },
   { type: 'action', label: 'Exam Schedule',           sub: 'Upcoming exams',              nav: 'exam-schedule' },
   { type: 'action', label: 'Fee Defaulters',          sub: 'Students with overdue fees',  nav: 'fee-management' },
   { type: 'action', label: 'School Settings',         sub: 'Configure school details',    nav: 'settings' },
@@ -29,17 +28,14 @@ const NAV_SEARCH: Result[] = [
   { type: 'nav', label: 'Teachers',         sub: 'Staff management',    nav: 'staff' },
   { type: 'nav', label: 'Students',         sub: 'Student management',  nav: 'students' },
   { type: 'nav', label: 'Class Management', sub: 'Manage classes',      nav: 'class-management' },
-  { type: 'nav', label: 'Timetable',        sub: 'Class schedules',     nav: 'timetable' },
   { type: 'nav', label: 'Exam Schedule',    sub: 'Exams & marks',       nav: 'exam-schedule' },
   { type: 'nav', label: 'Fee Management',   sub: 'Ledger, payments',    nav: 'fee-management' },
   { type: 'nav', label: 'Fee Ledger',       sub: 'View all entries',    nav: 'fee-management' },
   { type: 'nav', label: 'Fee Structure',    sub: 'Configure amounts',   nav: 'fee-management' },
   { type: 'nav', label: 'Defaulters',       sub: 'Overdue fees',        nav: 'fee-management' },
-  { type: 'nav', label: 'Leave Requests',   sub: 'Staff leaves',        nav: 'leave-requests' },
   { type: 'nav', label: 'Announcements',    sub: 'Notice board',        nav: 'announcements' },
-  { type: 'nav', label: 'Export & Reports', sub: 'Download data',       nav: 'export' },
+  { type: 'nav', label: 'Export Data', sub: 'Download data',       nav: 'export' },
   { type: 'nav', label: 'School Settings',  sub: 'Configuration',       nav: 'settings' },
-  { type: 'nav', label: 'Emergency Cover',  sub: 'Substitute teachers', nav: 'emergency-cover' },
 ]
 
 const TYPE_ICON: Record<string, string> = {
@@ -177,13 +173,11 @@ export default function CommandBar({ schoolId, onNavigate }: Props) {
       <div className="relative w-full max-w-xl mx-4 bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden" onClick={e => e.stopPropagation()}>
         {/* Input */}
         <div className="flex items-center gap-3 px-4 py-3.5 border-b border-gray-100">
-          <svg className="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+          <SearchIcon className="w-5 h-5 text-gray-400 shrink-0" />
           <input
             ref={inputRef}
             type="text"
-            placeholder="Search anything — students, teachers, fees, timetable…"
+            placeholder="Search anything — students, teachers, fees…"
             value={query}
             onChange={e => setQuery(e.target.value)}
             onKeyDown={onKeyDown}

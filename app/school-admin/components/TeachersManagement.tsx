@@ -1,7 +1,10 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
-import { GRADE_SEQUENCE } from '@/lib/grades'
+import { Users } from 'lucide-react'
+import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { EmptyState } from '@/components/ui/empty-state'
+import { GradesMultiSelect } from '@/components/ui/grades-multiselect'
 
 type Props = { schoolId: number; refreshKey?: number }
 
@@ -25,30 +28,6 @@ type Teacher = {
 
 type EditForm = Partial<Teacher>
 
-type TimetableSlot = {
-  id: number
-  day_of_week: string
-  period_number: number
-  time_from: string
-  time_to: string
-  subject: string
-  grade: string
-  section: string
-  room: string
-}
-
-type SubDuty = {
-  id: number
-  period_number: number
-  subject_name: string | null
-  original_teacher_name: string | null
-  original_teacher_department: string | null
-  grade: string
-  section: string
-}
-
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-
 function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg' }) {
   const sz = size === 'sm' ? 'w-8 h-8 text-xs' : size === 'lg' ? 'w-14 h-14 text-lg' : 'w-10 h-10 text-sm'
   return (
@@ -58,159 +37,11 @@ function Avatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' | 'lg'
   )
 }
 
-const ALL_GRADES = GRADE_SEQUENCE.filter(g => /^\d+$/.test(g))
-
-// Multi-select grades dropdown
-function GradesDropdown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [open, setOpen] = useState(false)
-  const selected = value ? value.split(',').map(s => s.trim()).filter(Boolean) : []
-
-  function toggle(g: string) {
-    const next = selected.includes(g) ? selected.filter(x => x !== g) : [...selected, g]
-    onChange(next.sort((a, b) => parseInt(a) - parseInt(b)).join(','))
-  }
-
-  return (
-    <div className="relative">
-      <button type="button" onClick={() => setOpen(v => !v)}
-        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-left bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 flex justify-between items-center">
-        <span className={selected.length ? 'text-gray-900' : 'text-gray-400'}>
-          {selected.length ? `Grades: ${selected.join(', ')}` : 'Select grades...'}
-        </span>
-        <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      {open && (
-        <div className="absolute z-50 top-full left-0 mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg p-2">
-          <div className="grid grid-cols-4 gap-1">
-            {ALL_GRADES.map(g => (
-              <button key={g} type="button" onClick={() => toggle(g)}
-                className={`py-1 rounded-lg text-xs font-medium transition-colors ${
-                  selected.includes(g) ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}>
-                {g}
-              </button>
-            ))}
-          </div>
-          <button type="button" onClick={() => { onChange(''); setOpen(false) }}
-            className="mt-2 w-full text-xs text-red-500 hover:text-red-700 text-center py-1">
-            Clear all
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Passwords are hashed and never recoverable after creation — the temp
-// password shown at onboarding (or a previous reset) is gone from the UI the
-// moment that screen closes. This panel is the only ongoing way to get a
-// usable, visible password for a staff member: click Reset, a fresh one is
-// generated, emailed to them, and shown here once.
-function CredentialsPanel({ teachers }: { teachers: Teacher[] }) {
-  const [search, setSearch] = useState('')
-  const [resettingId, setResettingId] = useState<number | null>(null)
-  const [results, setResults] = useState<Record<number, { password: string; error?: string }>>({})
-
-  async function handleReset(teacher: Teacher) {
-    if (!confirm(`Reset ${teacher.name}'s password? Their current password will stop working immediately, and the new one will be emailed to them.`)) return
-    setResettingId(teacher.id)
-    setResults(prev => {
-      const next = { ...prev }
-      delete next[teacher.id]
-      return next
-    })
-    try {
-      const res = await fetch(`/api/teachers/${teacher.id}/reset-credentials`, { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Reset failed')
-      setResults(prev => ({ ...prev, [teacher.id]: { password: data.temp_password } }))
-    } catch (err: unknown) {
-      setResults(prev => ({ ...prev, [teacher.id]: { password: '', error: err instanceof Error ? err.message : 'Reset failed' } }))
-    } finally {
-      setResettingId(null)
-    }
-  }
-
-  const filtered = teachers.filter(t =>
-    !search.trim() ||
-    t.name.toLowerCase().includes(search.toLowerCase()) ||
-    (t.email || '').toLowerCase().includes(search.toLowerCase())
-  )
-
-  return (
-    <div>
-      <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-xs text-gray-500 max-w-xl">
-          Passwords are never stored in plain text and can&apos;t be shown again after creation.
-          Click <strong>Reset</strong> to generate a new one — it&apos;s emailed to the staff member automatically and shown here once.
-        </p>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or email..."
-          className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 min-w-[220px]" />
-      </div>
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="text-left px-4 py-2.5 font-medium text-gray-500">Staff</th>
-              <th className="text-left px-4 py-2.5 font-medium text-gray-500">Username (Email)</th>
-              <th className="text-left px-4 py-2.5 font-medium text-gray-500">Password</th>
-              <th className="text-left px-4 py-2.5 font-medium text-gray-500 w-28">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {filtered.length === 0 ? (
-              <tr><td colSpan={4} className="text-center py-8 text-gray-400 text-sm">No staff found</td></tr>
-            ) : filtered.map(t => {
-              const result = results[t.id]
-              return (
-                <tr key={t.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center gap-2.5">
-                      <Avatar name={t.name} size="sm" />
-                      <span className="font-medium text-gray-900">{t.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {t.email
-                      ? <span className="font-mono text-gray-700 text-xs">{t.email}</span>
-                      : <span className="text-gray-400 italic text-xs">No email on file</span>}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {result?.error ? (
-                      <span className="text-red-500 text-xs">{result.error}</span>
-                    ) : result?.password ? (
-                      <span className="font-mono bg-green-50 text-green-700 px-2 py-0.5 rounded border border-green-200 text-xs">{result.password}</span>
-                    ) : (
-                      <span className="text-gray-400 text-xs">•••••••• (hidden)</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <button
-                      data-testid={`reset-staff-credentials-${t.id}`}
-                      onClick={() => handleReset(t)}
-                      disabled={resettingId === t.id || !t.email}
-                      title={!t.email ? 'Add an email first' : 'Reset password'}
-                      className="text-xs text-blue-600 hover:text-blue-800 hover:underline disabled:opacity-40 disabled:no-underline font-medium">
-                      {resettingId === t.id ? 'Resetting…' : 'Reset'}
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
 
 export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   const [teachers, setTeachers] = useState<Teacher[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [mainTab, setMainTab] = useState<'staff' | 'credentials'>('staff')
   const [tab, setTab] = useState<'teaching' | 'non_teaching'>('teaching')
   const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'removed' | 'all'>('active')
   const [deptFilter, setDeptFilter] = useState('all')
@@ -219,25 +50,53 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState<EditForm>({})
   const [saving, setSaving] = useState(false)
-  const [showTimetable, setShowTimetable] = useState(false)
-  const [teacherTimetable, setTeacherTimetable] = useState<TimetableSlot[]>([])
-  const [teacherSubDuties, setTeacherSubDuties] = useState<SubDuty[]>([])
-  const [timetableLoading, setTimetableLoading] = useState(false)
   const [detailTab, setDetailTab] = useState<'info' | 'analytics'>('info')
-  const [teacherAnalytics, setTeacherAnalytics] = useState<{
-    taskCount: number; pendingLeaves: number; totalLeaves: number; subDutyCount: number; periodsPerWeek: number
-  } | null>(null)
-  const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [showRemoveDialog, setShowRemoveDialog] = useState(false)
   const [removeConsequences, setRemoveConsequences] = useState<{
     subjects_teaching: { subject_name: string; grade: string; section: string }[]
     class_teacher_of: { grade: string; section: string }[]
-    timetable_slots: { subject_name: string; grade: string; section: string; day_of_week: string; period_number: number }[]
   } | null>(null)
   const [loadingConsequences, setLoadingConsequences] = useState(false)
+  const [removing, setRemoving] = useState(false)
   const [removeToast, setRemoveToast] = useState<{ name: string; summary: string[] } | null>(null)
 
+  // Primary/core subject dropdown — same source and fallback as
+  // StaffOnboarding's Subject field, so editing a teacher's core subject
+  // stays in sync with the same catalog they were onboarded against, instead
+  // of drifting into free-typed spelling variants over time. This is
+  // teachers.subject only — the per-class assignments made in Class
+  // Management (class_subjects) are a separate, free-text "other subjects
+  // taught" record and are never affected by this dropdown.
+  const [subscribedSubjectNames, setSubscribedSubjectNames] = useState<string[]>([])
+  const [subjectInputMode, setSubjectInputMode] = useState<'dropdown' | 'manual'>('dropdown')
+
   useEffect(() => { loadTeachers() }, [schoolId, refreshKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/school/subjects?school_id=${schoolId}`)
+        if (res.ok) {
+          const d = await res.json()
+          const rows: { subject_name: string }[] = Array.isArray(d.subjects) ? d.subjects : []
+          const names = Array.from(new Set(rows.map(r => r.subject_name))).sort()
+          if (names.length > 0) {
+            setSubscribedSubjectNames(names)
+            return
+          }
+        }
+        // No subscribed subjects — same fallback as onboarding: use the full
+        // platform master catalog rather than forcing free text.
+        const masterRes = await fetch('/api/platform/subjects')
+        if (masterRes.ok) {
+          const d = await masterRes.json()
+          const rows: { subject_name: string }[] = Array.isArray(d.subjects) ? d.subjects : []
+          const names = Array.from(new Set(rows.map(r => r.subject_name))).sort()
+          setSubscribedSubjectNames(names)
+        }
+      } catch { /* non-critical — falls back to free text */ }
+    })()
+  }, [schoolId])
 
   async function loadTeachers() {
     setLoading(true)
@@ -257,6 +116,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     const phone = (editForm.phone ?? selected?.phone ?? '').trim()
     const email = (editForm.email ?? selected?.email ?? '').trim()
     if (!name) return 'Name is required'
+    if (!isValidName(name)) return `Name: ${NAME_INVALID_MESSAGE}`
     if (phone && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(phone)) return 'Phone must be 7–15 digits'
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Enter a valid email address'
     return null
@@ -302,44 +162,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     }
   }
 
-  async function loadTeacherTimetable(teacherId: number) {
-    setTimetableLoading(true)
-    const todayStr = new Date().toISOString().split('T')[0]
-    try {
-      const [ttRes, subRes] = await Promise.all([
-        fetch(`/api/timetable?teacher_id=${teacherId}&school_id=${schoolId}`),
-        fetch(`/api/substitutes?school_id=${schoolId}&substitute_teacher_id=${teacherId}&date=${todayStr}`),
-      ])
-      const ttData = await ttRes.json()
-      const subData = await subRes.json()
-      setTeacherTimetable(Array.isArray(ttData) ? ttData : [])
-      setTeacherSubDuties(Array.isArray(subData) ? subData : [])
-    } catch { setError('Failed to load timetable') }
-    finally { setTimetableLoading(false) }
-  }
-
-  async function loadTeacherAnalytics(teacherId: number) {
-    setAnalyticsLoading(true); setTeacherAnalytics(null)
-    try {
-      const [tasks, leaves, tt] = await Promise.all([
-        fetch(`/api/tasks?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
-        fetch(`/api/leave-requests?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
-        fetch(`/api/timetable?teacher_id=${teacherId}&school_id=${schoolId}`).then(r => r.json()).catch(() => []),
-      ])
-      const taskArr = Array.isArray(tasks) ? tasks : []
-      const leaveArr = Array.isArray(leaves) ? leaves : []
-      const ttArr = Array.isArray(tt) ? tt : []
-      const pendingLeaves = leaveArr.filter((l: { status: string }) => l.status === 'pending').length
-      setTeacherAnalytics({
-        taskCount: taskArr.length,
-        pendingLeaves,
-        totalLeaves: leaveArr.length,
-        subDutyCount: teacherSubDuties.length,
-        periodsPerWeek: ttArr.length,
-      })
-    } finally { setAnalyticsLoading(false) }
-  }
-
   async function handleDelete(teacher: Teacher) {
     setLoadingConsequences(true)
     setShowRemoveDialog(true)
@@ -350,7 +172,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       setRemoveConsequences({
         subjects_teaching: data.subjects_teaching ?? [],
         class_teacher_of:  data.class_teacher_of  ?? [],
-        timetable_slots:   data.timetable_slots   ?? [],
       })
     } catch {
       setError('Failed to fetch removal consequences')
@@ -361,9 +182,10 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   }
 
   async function confirmDelete() {
-    if (!selected) return
+    if (!selected || removing) return
     const teacherName = selected.name
     const impact = removeConsequences
+    setRemoving(true)
     try {
       const res = await fetch(`/api/teachers/${selected.id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
@@ -377,14 +199,14 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
           summary.push(`Class teacher unlinked from ${impact.class_teacher_of.map(c => `Gr.${c.grade}-${c.section}`).join(', ')}`)
         if (impact.subjects_teaching.length > 0)
           summary.push(`Unassigned from ${impact.subjects_teaching.length} subject${impact.subjects_teaching.length !== 1 ? 's' : ''}`)
-        if (impact.timetable_slots.length > 0)
-          summary.push(`${impact.timetable_slots.length} timetable slot${impact.timetable_slots.length !== 1 ? 's' : ''} cleared`)
       }
       setRemoveToast({ name: teacherName, summary })
       setTimeout(() => setRemoveToast(null), 6000)
     } catch {
       setError('Failed to remove teacher')
       setShowRemoveDialog(false)
+    } finally {
+      setRemoving(false)
     }
   }
 
@@ -393,8 +215,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
     setEditing(false)
     setEditForm({})
     setDetailTab('info')
-    setShowTimetable(false)
-    setTeacherAnalytics(null)
   }
 
   const byType = useMemo(() => teachers.filter(t => (t.staff_type || 'teaching') === tab), [teachers, tab])
@@ -427,16 +247,17 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300'
 
 
-  if (loading) return <div className="py-12 text-center text-gray-400">Loading staff...</div>
+  if (loading) return <div className="py-12 text-center text-muted-foreground">Loading staff...</div>
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-bold text-gray-900">Staff Directory</h2>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-400">{teachers.length} total staff</span>
+          <span className="text-sm text-muted-foreground">{teachers.length} total staff</span>
           <button onClick={loadTeachers} disabled={loading}
             title="Refresh staff list"
+            data-testid="staff-refresh"
             className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-500 rounded-lg text-xs hover:bg-gray-50 transition-colors disabled:opacity-40">
             <svg className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -446,19 +267,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
         </div>
       </div>
 
-      {/* Main tabs: Staff Directory vs Credentials */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit mb-4">
-        <button onClick={() => setMainTab('staff')}
-          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${mainTab === 'staff' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-          Staff Directory
-        </button>
-        <button onClick={() => setMainTab('credentials')}
-          data-testid="staff-credentials-tab"
-          className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${mainTab === 'credentials' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-          Credentials
-        </button>
-      </div>
-
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
           <span>{error}</span>
@@ -466,17 +274,14 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
         </div>
       )}
 
-      {mainTab === 'credentials' ? (
-        <CredentialsPanel teachers={teachers.filter(t => t.status === 'active')} />
-      ) : (
-      <>
       {/* Staff type tabs */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit mb-4">
         {(['teaching', 'non_teaching'] as const).map(t => (
           <button key={t} onClick={() => { setTab(t); setDeptFilter('all'); setStatusFilter('active') }}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+            data-testid={`staff-type-tab-${t}`}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === t ? 'bg-white text-gray-900 ' : 'text-gray-500 hover:text-gray-700'}`}>
             {t === 'teaching' ? 'Teaching Staff' : 'Non-Teaching Staff'}
-            <span className="ml-1.5 text-xs text-gray-400">({teachers.filter(x => (x.staff_type || 'teaching') === t).length})</span>
+            <span className="ml-1.5 text-xs text-muted-foreground">({teachers.filter(x => (x.staff_type || 'teaching') === t).length})</span>
           </button>
         ))}
       </div>
@@ -484,6 +289,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       {/* Filters row */}
       <div className="flex gap-3 mb-4 flex-wrap">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or ID..."
+          data-testid="staff-search-input"
           className="flex-1 min-w-[200px] border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300" />
         {/* Status filter */}
         <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
@@ -492,10 +298,11 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
               : s === 'removed' ? byType.filter(t => t.status === 'removed').length : 0
             return (
               <button key={s} onClick={() => setStatusFilter(s as typeof statusFilter)}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${statusFilter === s ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                data-testid={`staff-status-filter-${s}`}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${statusFilter === s ? 'bg-white text-gray-900 ' : 'text-gray-500 hover:text-gray-700'}`}>
                 {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
                 {count > 0 && (
-                  <span className={`ml-1 rounded-full px-1.5 py-0.5 text-[10px] ${s === 'removed' ? 'bg-red-100 text-red-600' : 'bg-gray-200 text-gray-600'}`}>{count}</span>
+                  <span className={`ml-1 rounded-full px-1.5 py-0.5 text-xs ${s === 'removed' ? 'bg-red-100 text-red-600' : 'bg-gray-200 text-gray-600'}`}>{count}</span>
                 )}
               </button>
             )
@@ -503,6 +310,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
         </div>
         {tab === 'teaching' && departments.length > 1 && (
           <select value={deptFilter} onChange={e => setDeptFilter(e.target.value)}
+            data-testid="staff-department-filter"
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
             {departments.map(d => <option key={d} value={d}>{d === 'all' ? 'All Departments' : d}</option>)}
           </select>
@@ -510,18 +318,22 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       </div>
 
       {filtered.length === 0 ? (
-        <div className="bg-white rounded-xl border border-gray-200 py-12 text-center">
-          <p className="text-gray-400">No {statusFilter !== 'all' ? statusFilter + ' ' : ''}{tab === 'teaching' ? 'teaching' : 'non-teaching'} staff found</p>
-          {(statusFilter === 'inactive' || statusFilter === 'removed') && (
-            <button onClick={() => setStatusFilter('active')} className="text-blue-500 text-sm mt-2 hover:underline">
-              Switch to active staff
-            </button>
-          )}
-        </div>
+        <EmptyState
+          icon={Users}
+          title={`No ${statusFilter !== 'all' ? statusFilter + ' ' : ''}${tab === 'teaching' ? 'teaching' : 'non-teaching'} staff found`}
+          className="bg-white"
+          action={
+            (statusFilter === 'inactive' || statusFilter === 'removed') && (
+              <button onClick={() => setStatusFilter('active')} className="text-blue-500 text-sm hover:underline">
+                Switch to active staff
+              </button>
+            )
+          }
+        />
       ) : tab === 'teaching' ? (
         <div className="space-y-5">
           {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([dept, members]) => (
-            <div key={dept} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div key={dept} className="bg-white rounded-md border border-gray-200 overflow-hidden">
               <div className="px-5 py-3 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
                 <span className="font-semibold text-blue-800 text-sm">{dept}</span>
                 <span className="text-xs text-blue-500">{members.length} teacher{members.length !== 1 ? 's' : ''}</span>
@@ -538,7 +350,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
           ))}
         </div>
       ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
           <div className="divide-y divide-gray-100">
             {filtered.map(t => (
               <TeacherCard key={t.id} teacher={t}
@@ -549,13 +361,11 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
           </div>
         </div>
       )}
-      </>
-      )}
 
       {/* ── Full-screen Detail Modal ── */}
       {selected && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl w-full max-w-3xl my-6 shadow-2xl">
+          <div className="bg-white rounded-lg w-full max-w-3xl my-6 shadow-2xl">
 
             {/* Modal header */}
             <div className="flex items-center gap-4 px-6 py-4 border-b border-gray-100">
@@ -572,10 +382,10 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                     </span>
                   )}
                 </div>
-                <p className="text-sm text-gray-400 mt-0.5">{selected.employee_id}</p>
+                <p className="text-sm text-muted-foreground mt-0.5">{selected.employee_id}</p>
               </div>
               <button onClick={() => { setSelected(null); setEditing(false) }}
-                className="text-gray-400 hover:text-gray-600 text-2xl leading-none flex-shrink-0 ml-2">×</button>
+                className="text-muted-foreground hover:text-gray-600 text-2xl leading-none flex-shrink-0 ml-2">×</button>
             </div>
 
             {/* Sub-tabs */}
@@ -583,10 +393,9 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
               {(['info', 'analytics'] as const).map(t => (
                 <button key={t} onClick={() => {
                   setDetailTab(t)
-                  if (t === 'analytics' && !teacherAnalytics) loadTeacherAnalytics(selected.id)
                 }}
                   className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${detailTab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                  {t === 'info' ? 'Profile' : '360° View'}
+                  {t === 'info' ? 'Profile' : 'Details'}
                 </button>
               ))}
             </div>
@@ -607,7 +416,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                         { label: 'Teaches Grades', value: selected.teaches_grades },
                       ].map(({ label, value }) => value ? (
                         <div key={label}>
-                          <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+                          <p className="text-xs text-muted-foreground mb-0.5">{label}</p>
                           <p className="text-gray-800 font-medium">{value}</p>
                         </div>
                       ) : null)}
@@ -617,7 +426,6 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                       {[
                         { field: 'name', label: 'Name *', type: 'text', placeholder: 'Full name' },
                         { field: 'email', label: 'Email', type: 'email', placeholder: 'teacher@school.com' },
-                        { field: 'subject', label: 'Subject', type: 'text', placeholder: 'e.g. Mathematics' },
                         { field: 'phone', label: 'Phone', type: 'tel', placeholder: '10-digit number' },
                         { field: 'department', label: 'Department', type: 'text', placeholder: 'e.g. Science' },
                         { field: 'qualification', label: 'Qualification', type: 'text', placeholder: 'e.g. B.Ed, M.Sc' },
@@ -631,6 +439,41 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                         </div>
                       ))}
                       <div>
+                        <label className="block text-xs text-gray-500 mb-1">Subject</label>
+                        {subscribedSubjectNames.length > 0 && subjectInputMode !== 'manual' ? (
+                          <select
+                            data-testid="staff-edit-subject-select"
+                            value={subscribedSubjectNames.includes((editForm.subject ?? selected.subject) as string) ? (editForm.subject ?? selected.subject) : ''}
+                            onChange={e => {
+                              if (e.target.value === '__other__') {
+                                setSubjectInputMode('manual')
+                                setEditForm(f => ({ ...f, subject: '' }))
+                              } else {
+                                setEditForm(f => ({ ...f, subject: e.target.value }))
+                              }
+                            }}
+                            className={inputCls}>
+                            <option value="">Select subject</option>
+                            {subscribedSubjectNames.map(name => (
+                              <option key={name} value={name}>{name}</option>
+                            ))}
+                            <option value="__other__">Other (type manually)…</option>
+                          </select>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <input type="text" placeholder="e.g. Mathematics" data-testid="staff-edit-subject-input"
+                              value={editForm.subject ?? selected.subject ?? ''}
+                              onChange={e => setEditForm(f => ({ ...f, subject: e.target.value }))}
+                              className={inputCls} />
+                            {subscribedSubjectNames.length > 0 && (
+                              <button type="button" title="Pick from the subject list"
+                                onClick={() => setSubjectInputMode('dropdown')}
+                                className="text-xs text-blue-500 hover:text-blue-700 flex-shrink-0">↺</button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div>
                         <label className="block text-xs text-gray-500 mb-1">Staff Type</label>
                         <select value={editForm.staff_type ?? selected.staff_type ?? 'teaching'}
                           onChange={e => setEditForm(f => ({ ...f, staff_type: e.target.value }))}
@@ -641,60 +484,24 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                       </div>
                       <div>
                         <label className="block text-xs text-gray-500 mb-1">Teaches Grades</label>
-                        <GradesDropdown
+                        <GradesMultiSelect
                           value={editForm.teaches_grades ?? selected.teaches_grades ?? ''}
                           onChange={v => setEditForm(f => ({ ...f, teaches_grades: v }))}
+                          testIdBase="teacher-grade"
+                          emptyLabel="All grades (no restriction)"
+                          labelSeparator=": "
+                          panelWidth={260}
                         />
                       </div>
                     </div>
                   )}
 
-                  {/* Timetable toggle */}
-                  <div className="mt-6 border-t border-gray-100 pt-4">
-                    <button
-                      onClick={() => {
-                        const next = !showTimetable
-                        setShowTimetable(next)
-                        if (next) loadTeacherTimetable(selected.id)
-                      }}
-                      className="text-sm font-medium text-purple-600 hover:text-purple-800 flex items-center gap-2">
-                      {showTimetable ? '▲ Hide Timetable' : '▼ View Weekly Timetable'}
-                    </button>
-                    {showTimetable && (
-                      <div className="mt-3">
-                        <TeacherTimetableView
-                          timetable={teacherTimetable}
-                          loading={timetableLoading}
-                          teacherName={selected.name}
-                          subDuties={teacherSubDuties}
-                        />
-                      </div>
-                    )}
-                  </div>
                 </>
               )}
 
               {detailTab === 'analytics' && (
-                analyticsLoading ? (
-                  <div className="py-12 text-center">
-                    <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto" />
-                  </div>
-                ) : !teacherAnalytics ? null : (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-4 gap-3">
-                      {[
-                        { label: 'Periods/Week', value: teacherAnalytics.periodsPerWeek, color: 'text-blue-600', bg: 'bg-blue-50' },
-                        { label: 'Tasks Assigned', value: teacherAnalytics.taskCount, color: 'text-violet-600', bg: 'bg-violet-50' },
-                        { label: 'Total Leaves', value: teacherAnalytics.totalLeaves, color: 'text-orange-600', bg: 'bg-orange-50' },
-                        { label: 'Pending Leaves', value: teacherAnalytics.pendingLeaves, color: 'text-red-600', bg: 'bg-red-50' },
-                      ].map(({ label, value, color, bg }) => (
-                        <div key={label} className={`${bg} rounded-xl p-4 text-center`}>
-                          <p className={`text-3xl font-black ${color}`}>{value}</p>
-                          <p className="text-xs text-gray-500 mt-1">{label}</p>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="bg-gray-50 rounded-xl p-4 grid grid-cols-2 gap-3 text-sm">
+                    <div className="bg-gray-50 rounded-md p-4 grid grid-cols-2 gap-3 text-sm">
                       {[
                         { label: 'Subject', value: selected.subject },
                         { label: 'Department', value: selected.department },
@@ -702,13 +509,12 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                         { label: 'Class Teacher', value: selected.class_grade ? `Gr.${selected.class_grade}-${selected.class_section}` : null },
                       ].map(({ label, value }) => value ? (
                         <div key={label}>
-                          <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+                          <p className="text-xs text-muted-foreground mb-0.5">{label}</p>
                           <p className="font-medium text-gray-700">{value}</p>
                         </div>
                       ) : null)}
                     </div>
                   </div>
-                )
               )}
             </div>
 
@@ -735,25 +541,30 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                   {editing ? (
                     <>
                       <button onClick={handleSave} disabled={saving}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
+                        data-testid="staff-save-edit"
+                        className="bg-primary hover:bg-primary/90 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
                         {saving ? 'Saving...' : 'Save Changes'}
                       </button>
                       <button onClick={() => { setEditing(false); setEditForm({}) }}
+                        data-testid="staff-cancel-edit"
                         className="border border-gray-200 text-gray-600 px-5 py-2 rounded-lg text-sm hover:bg-gray-50 transition-colors">
                         Cancel
                       </button>
                     </>
                   ) : (
                     <button onClick={() => setEditing(true)}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors">
+                      data-testid="staff-edit-details"
+                      className="bg-primary hover:bg-primary/90 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors">
                       Edit Details
                     </button>
                   )}
                   <button onClick={() => handleToggleStatus(selected)}
+                    data-testid="staff-toggle-status"
                     className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors border ${selected.status === 'active' ? 'border-orange-200 text-orange-600 hover:bg-orange-50' : 'border-green-200 text-green-600 hover:bg-green-50 font-semibold'}`}>
                     {selected.status === 'active' ? 'Deactivate' : 'Reactivate'}
                   </button>
                   <button onClick={() => handleDelete(selected)}
+                    data-testid="staff-remove"
                     className="ml-auto border border-red-200 text-red-600 px-5 py-2 rounded-lg text-sm font-medium hover:bg-red-50 transition-colors">
                     Remove from School
                   </button>
@@ -766,21 +577,21 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
 
       {/* ── Remove impact toast ── */}
       {removeToast && (
-        <div className="fixed bottom-5 right-5 z-[70] bg-gray-900 text-white rounded-xl shadow-2xl px-5 py-4 max-w-sm w-full animate-in slide-in-from-bottom-4">
+        <div className="fixed bottom-5 right-5 z-[70] bg-gray-900 text-white rounded-md shadow-2xl px-5 py-4 max-w-sm w-full animate-in slide-in-from-bottom-4">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold">{removeToast.name} removed</p>
               {removeToast.summary.length > 0 ? (
                 <ul className="mt-1.5 space-y-0.5">
                   {removeToast.summary.map((s, i) => (
-                    <li key={i} className="text-xs text-gray-400 flex items-center gap-1.5">
+                    <li key={i} className="text-xs text-muted-foreground flex items-center gap-1.5">
                       <span className="w-1 h-1 rounded-full bg-orange-400 flex-shrink-0" />
                       {s}
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="text-xs text-gray-400 mt-1">No active assignments were affected.</p>
+                <p className="text-xs text-muted-foreground mt-1">No active assignments were affected.</p>
               )}
             </div>
             <button onClick={() => setRemoveToast(null)} className="text-gray-500 hover:text-gray-300 flex-shrink-0 mt-0.5">✕</button>
@@ -791,14 +602,14 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
       {/* ── Remove Consequences Dialog ── */}
       {showRemoveDialog && (
         <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+          <div className="bg-white rounded-lg w-full max-w-md shadow-2xl">
             <div className="px-6 py-4 border-b border-gray-100">
               <h3 className="font-bold text-gray-900">Remove {selected?.name}?</h3>
               <p className="text-xs text-gray-500 mt-0.5">Their record is kept for history. All assignments will be unlinked.</p>
             </div>
             <div className="px-6 py-4 space-y-3 max-h-80 overflow-y-auto">
               {loadingConsequences ? (
-                <div className="py-6 text-center text-gray-400 text-sm">Checking impact...</div>
+                <div className="py-6 text-center text-muted-foreground text-sm">Checking impact...</div>
               ) : removeConsequences ? (
                 <>
                   {removeConsequences.class_teacher_of.length > 0 && (
@@ -817,13 +628,7 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                       ))}
                     </div>
                   )}
-                  {removeConsequences.timetable_slots.length > 0 && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                      <p className="text-xs font-semibold text-amber-700 mb-1">{removeConsequences.timetable_slots.length} timetable slot(s) will lose teacher</p>
-                      <p className="text-xs text-amber-600">Timetable slots will remain but teacher will be blank</p>
-                    </div>
-                  )}
-                  {removeConsequences.class_teacher_of.length === 0 && removeConsequences.subjects_teaching.length === 0 && removeConsequences.timetable_slots.length === 0 && (
+                  {removeConsequences.class_teacher_of.length === 0 && removeConsequences.subjects_teaching.length === 0 && (
                     <p className="text-sm text-gray-500 text-center py-2">No active assignments found. Safe to remove.</p>
                   )}
                 </>
@@ -834,133 +639,15 @@ export default function TeachersManagement({ schoolId, refreshKey }: Props) {
                 className="flex-1 border border-gray-200 text-gray-600 px-4 py-2 rounded-lg text-sm hover:bg-gray-50">
                 Cancel
               </button>
-              <button onClick={confirmDelete} disabled={loadingConsequences}
+              <button onClick={confirmDelete} disabled={loadingConsequences || removing}
+                data-testid="confirm-remove-staff"
                 className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
-                Yes, Remove
+                {removing ? 'Removing…' : 'Yes, Remove'}
               </button>
             </div>
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-const ALL_PERIODS = [1, 2, 3, 4, 5, 6]
-const PERIOD_TIMES: Record<number, { from: string; to: string }> = {
-  1: { from: '08:00', to: '08:45' },
-  2: { from: '08:50', to: '09:35' },
-  3: { from: '09:40', to: '10:25' },
-  4: { from: '10:45', to: '11:30' },
-  5: { from: '11:35', to: '12:20' },
-  6: { from: '12:25', to: '13:10' },
-}
-const BREAK_ROWS = [{ afterPeriod: 3, label: 'Break', time: '10:25–10:45' }]
-
-function TeacherTimetableView({ timetable, loading, teacherName, subDuties }: { timetable: TimetableSlot[]; loading: boolean; teacherName: string; subDuties: SubDuty[] }) {
-  if (loading) return <div className="py-6 text-center text-gray-400 text-sm">Loading timetable...</div>
-  if (timetable.length === 0) {
-    return (
-      <div className="py-6 text-center">
-        <p className="text-gray-400 text-sm">No timetable generated yet</p>
-      </div>
-    )
-  }
-
-  const byDay: Record<string, TimetableSlot[]> = {}
-  DAYS.forEach(d => { byDay[d] = [] })
-  timetable.forEach(p => { if (byDay[p.day_of_week]) byDay[p.day_of_week].push(p) })
-
-  const today = (() => {
-    const d = new Date().getDay()
-    if (d === 0 || d === 6) return null
-    return DAYS[d - 1]
-  })()
-  const nowMins = new Date().getHours() * 60 + new Date().getMinutes()
-
-  const rows: ({ type: 'period'; num: number } | { type: 'break'; label: string; time: string })[] = []
-  for (const p of ALL_PERIODS) {
-    rows.push({ type: 'period', num: p })
-    const brk = BREAK_ROWS.find(b => b.afterPeriod === p)
-    if (brk) rows.push({ type: 'break', label: brk.label, time: brk.time })
-  }
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <p className="text-sm font-semibold text-gray-700">Weekly Timetable — {teacherName}</p>
-        {subDuties.length > 0 && (
-          <span className="text-xs bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full font-semibold">
-            {subDuties.length} substitute period{subDuties.length > 1 ? 's' : ''} today
-          </span>
-        )}
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs border-collapse">
-          <thead>
-            <tr>
-              <th className="bg-slate-700 text-slate-200 px-2 py-1.5 text-left font-semibold rounded-tl-lg">P</th>
-              {DAYS.map(d => (
-                <th key={d} className={`px-2 py-1.5 text-center font-semibold ${d === today ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300'}`}>
-                  {d.slice(0, 3)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => {
-              if (row.type === 'break') {
-                return (
-                  <tr key={`brk-${i}`} className="bg-amber-50 border-y border-amber-100">
-                    <td className="px-2 py-1 text-amber-600 font-semibold text-center">{row.label}</td>
-                    <td colSpan={6} className="px-2 py-1 text-center text-amber-400 italic">{row.time}</td>
-                  </tr>
-                )
-              }
-              const pNum = row.num
-              const { from, to } = PERIOD_TIMES[pNum]
-              const pFromMins = parseInt(from.split(':')[0]) * 60 + parseInt(from.split(':')[1])
-              const pToMins = parseInt(to.split(':')[0]) * 60 + parseInt(to.split(':')[1])
-              const isCurrentPeriod = nowMins >= pFromMins && nowMins < pToMins
-              return (
-                <tr key={pNum} className={`border-b border-gray-100 ${isCurrentPeriod ? 'bg-orange-50/30' : ''}`}>
-                  <td className="px-2 py-1.5 bg-gray-50 font-semibold text-gray-500 border-r border-gray-100 text-center whitespace-nowrap">
-                    <span>{pNum}</span>
-                    <span className="block text-gray-300 font-normal" style={{ fontSize: '8px' }}>{from}</span>
-                  </td>
-                  {DAYS.map(day => {
-                    const slot = byDay[day].find(s => s.period_number === pNum)
-                    const isNow = day === today && isCurrentPeriod
-                    const subDuty = day === today ? subDuties.find(s => s.period_number === pNum) : undefined
-                    return (
-                      <td key={day} className="px-1 py-1 border-r border-gray-100 last:border-r-0">
-                        {slot ? (
-                          <div className={`rounded px-1 py-1 text-center ${isNow ? 'border border-orange-300 bg-orange-50' : 'bg-emerald-50 border border-emerald-100'}`}>
-                            <p className="font-semibold text-gray-800 leading-tight">{slot.subject}</p>
-                            <p className="text-gray-400 leading-tight">Gr.{slot.grade}-{slot.section}</p>
-                          </div>
-                        ) : subDuty ? (
-                          <div className="rounded px-1 py-1 text-center bg-amber-50 border-2 border-amber-300">
-                            <p className="font-semibold text-amber-800 leading-tight text-[10px]">
-                              {subDuty.subject_name || subDuty.original_teacher_department || '—'}
-                            </p>
-                            <p className="text-amber-600 leading-tight text-[10px]">Gr.{subDuty.grade}-{subDuty.section}</p>
-                          </div>
-                        ) : (
-                          <div className="rounded px-1 py-1 text-center bg-gray-50 border border-gray-100">
-                            <p className="text-gray-300 italic">Free</p>
-                          </div>
-                        )}
-                      </td>
-                    )
-                  })}
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-xs text-gray-400 mt-2">{timetable.length} assigned period{timetable.length !== 1 ? 's' : ''}</p>
     </div>
   )
 }
@@ -971,6 +658,7 @@ function TeacherCard({ teacher, onClick, onToggle, onDelete }:
   const isRemoved = teacher.status === 'removed'
   return (
     <div onClick={onClick}
+      data-testid={`staff-card-${teacher.id}`}
       className={`flex items-center gap-4 px-5 py-3.5 cursor-pointer transition-colors hover:bg-gray-50 ${isInactive || isRemoved ? 'opacity-60' : ''}`}>
       <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0 ${
         isRemoved ? 'bg-red-300' : isInactive ? 'bg-gray-300' : 'bg-blue-600'
@@ -979,7 +667,7 @@ function TeacherCard({ teacher, onClick, onToggle, onDelete }:
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className={`font-medium text-sm ${isRemoved ? 'line-through text-gray-400' : 'text-gray-900'}`}>{teacher.name}</span>
+          <span className={`font-medium text-sm ${isRemoved ? 'line-through text-muted-foreground' : 'text-gray-900'}`}>{teacher.name}</span>
           {teacher.class_grade && !isRemoved && (
             <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">
               CT: Gr.{teacher.class_grade}-{teacher.class_section}
@@ -994,7 +682,7 @@ function TeacherCard({ teacher, onClick, onToggle, onDelete }:
           {isRemoved && <span className="text-xs bg-red-100 text-red-500 px-1.5 py-0.5 rounded font-medium">Removed</span>}
         </div>
         <div className="flex items-center gap-2 mt-0.5">
-          {teacher.employee_id && <span className="text-xs text-gray-400 font-mono">{teacher.employee_id}</span>}
+          {teacher.employee_id && <span className="text-xs text-muted-foreground font-mono">{teacher.employee_id}</span>}
           {teacher.subject && <span className="text-xs text-gray-500">· {teacher.subject}</span>}
           {/* Show staff type label */}
           <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
@@ -1007,6 +695,7 @@ function TeacherCard({ teacher, onClick, onToggle, onDelete }:
       <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
         {isInactive && (
           <button onClick={onToggle}
+            data-testid={`staff-reactivate-${teacher.id}`}
             className="text-xs px-2.5 py-1 rounded border border-green-200 hover:bg-green-50 text-green-600 font-medium transition-colors">
             Reactivate
           </button>

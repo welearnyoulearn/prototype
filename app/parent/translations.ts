@@ -29,16 +29,17 @@ const en = {
   // Nav
   nav: {
     overview:     'Overview',
-    today:        "Today's Schedule",
     syllabus:     'Syllabus',
+    library:      'Digital Library',
     attendance:   'Attendance',
+    calendar:     'School Calendar',
     fees:         'Fees',
     exams:        'Exam Calendar',
     results:      'Results',
     'weekly-tests': 'Weekly Tests',
     activity:     'Activity Log',
     'ai-chats':   'AI Chat History',
-    marketplace:  'Marketplace',
+    profile:      'Profile',
   },
 
   // Language
@@ -47,7 +48,6 @@ const en = {
   // Overview
   yourChild: 'Your Child',
   thisMonth: 'This month',
-  todaysPeriods: "Today's Periods",
   upcomingExams: 'Upcoming Exams',
   pendingSignoff: 'Pending Sign-off',
   outstandingFees: 'Outstanding Fees',
@@ -59,10 +59,7 @@ const en = {
   viewFullCalendar: 'View full calendar →',
   signOffNeeded: 'sign-off needed',
   signNow: 'Sign now',
-  recentTasks: 'Recent Homework',
-  due: 'Due',
   done: 'Done',
-  pending: 'Pending',
   schoolNotices: 'School Notices',
   urgent: 'Urgent',
   today: 'Today',
@@ -74,8 +71,6 @@ const en = {
 
   // Today's schedule
   refresh: 'Refresh',
-  noTimetableToday: 'No timetable for today',
-  noTimetableHint: 'It may be a holiday or timetable is not set up yet',
   freePeriod: 'Free Period',
   now: 'NOW',
 
@@ -183,16 +178,17 @@ const te: typeof en = {
   // Nav
   nav: {
     overview:     'అవలోకనం',
-    today:        'నేటి వేళాపట్టిక',
     syllabus:     'పాఠ్యక్రమం',
+    library:      'డిజిటల్ లైబ్రరీ',
     attendance:   'హాజరు',
+    calendar:     'పాఠశాల క్యాలెండర్',
     fees:         'రుసుములు',
     exams:        'పరీక్షల పంచాంగం',
     results:      'ఫలితాలు',
     'weekly-tests': 'వారపు పరీక్షలు',
     activity:     'కార్యకలాప నమోదు',
     'ai-chats':   'AI చాట్ చరిత్ర',
-    marketplace:  'మార్కెట్‌ప్లేస్',
+    profile:      'ప్రొఫైల్',
   },
 
   // Language
@@ -201,7 +197,6 @@ const te: typeof en = {
   // Overview
   yourChild: 'మీ పిల్లవాడు',
   thisMonth: 'ఈ నెల',
-  todaysPeriods: 'నేటి తరగతులు',
   upcomingExams: 'రాబోయే పరీక్షలు',
   pendingSignoff: 'సంతకం పెండింగ్',
   outstandingFees: 'బాకీ రుసుములు',
@@ -213,10 +208,7 @@ const te: typeof en = {
   viewFullCalendar: 'పూర్తి పంచాంగం చూడండి →',
   signOffNeeded: 'సంతకం అవసరం',
   signNow: 'ఇప్పుడే సంతకం',
-  recentTasks: 'ఇటీవలి హోంవర్క్',
-  due: 'గడువు',
   done: 'పూర్తయింది',
-  pending: 'పెండింగ్',
   schoolNotices: 'పాఠశాల నోటీసులు',
   urgent: 'అత్యవసర',
   today: 'నేడు',
@@ -228,8 +220,6 @@ const te: typeof en = {
 
   // Today's schedule
   refresh: 'తాజాచేయి',
-  noTimetableToday: 'నేటికి వేళాపట్టిక లేదు',
-  noTimetableHint: 'సెలవు రోజు కావచ్చు లేదా వేళాపట్టిక ఏర్పాటు కాలేదు',
   freePeriod: 'విరామ వ్యవధి',
   now: 'ఇప్పుడు',
 

@@ -141,13 +141,17 @@ export async function proxy(req: NextRequest) {
     const token = req.cookies.get(COOKIE_ADMIN)?.value
     const payload = token ? await getTokenPayload(token) : null
     const schoolRoles = ['school_admin', 'principal', 'vice_principal']
-    if (!payload || !schoolRoles.includes(payload.role as string)) {
+    // `sid` = server-side session id; cookies from before server sessions existed lack it.
+    if (!payload || !payload.sid || !schoolRoles.includes(payload.role as string)) {
       return NextResponse.redirect(new URL('/login?role=school', req.url))
     }
     if (payload.firstLogin && pathname !== '/change-password') {
       return NextResponse.redirect(new URL('/change-password?first=1', req.url))
     }
-    return watchlineAndNext(req, origin, pathname)
+    // Never cache authenticated pages — after logout the Back button must not replay them.
+    const res = await watchlineAndNext(req, origin, pathname)
+    res.headers.set('Cache-Control', 'no-store')
+    return res
   }
 
   // ── Teacher ───────────────────────────────────────────────────────────────

@@ -105,7 +105,7 @@ function Sparkline({ trend, valueKey }: { trend: Trend[]; valueKey: keyof Trend 
               style={{ height: `${pct}%` }}
             />
             {(i === 0 || i === trend.length - 1 || i % Math.ceil(trend.length / 6) === 0) && (
-              <span className="text-[10px] text-gray-400 mt-1 whitespace-nowrap">{fmtDay(t.day)}</span>
+              <span className="text-xs text-muted-foreground mt-1 whitespace-nowrap">{fmtDay(t.day)}</span>
             )}
           </div>
         )
@@ -207,7 +207,7 @@ export default function UsageAnalyticsPage() {
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
             <h1 className="text-xl font-bold text-gray-900">Usage Analytics</h1>
-            <p className="text-gray-400 text-sm mt-0.5">Logins and time spent across every school, all portals</p>
+            <p className="text-muted-foreground text-sm mt-0.5">Logins and time spent across every school, all portals</p>
           </div>
           <div className="flex items-center gap-2">
             <div className="flex gap-1 bg-white border border-gray-200 rounded-lg p-1">
@@ -244,7 +244,7 @@ export default function UsageAnalyticsPage() {
             { key: 'growth', label: 'Growth & Retention' },
           ] as const).map(t => (
             <button key={t.key} onClick={() => setView(t.key)}
-              className={`px-4 py-2 text-sm font-medium transition-colors ${view === t.key ? 'border-b-2 border-gray-900 text-gray-900' : 'text-gray-400 hover:text-gray-600'}`}>
+              className={`px-4 py-2 text-sm font-medium transition-colors ${view === t.key ? 'border-b-2 border-gray-900 text-gray-900' : 'text-muted-foreground hover:text-gray-600'}`}>
               {t.label}
             </button>
           ))}
@@ -252,20 +252,20 @@ export default function UsageAnalyticsPage() {
 
         {view === 'growth' ? (
           growthLoading ? (
-            <div className="py-20 text-center text-gray-400 text-sm">Loading…</div>
+            <div className="py-20 text-center text-muted-foreground text-sm">Loading…</div>
           ) : !growth ? (
-            <div className="py-20 text-center text-gray-400 text-sm">Failed to load growth analytics.</div>
+            <div className="py-20 text-center text-muted-foreground text-sm">Failed to load growth analytics.</div>
           ) : !growth.tracking_started ? (
-            <div className="py-20 text-center text-gray-400 text-sm max-w-md mx-auto">
+            <div className="py-20 text-center text-muted-foreground text-sm max-w-md mx-auto">
               Not enough usage history yet — monthly active schools and cohort retention build up once the nightly rollup has run for at least one full day.
             </div>
           ) : (
             <>
               {/* Monthly active schools */}
-              <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="bg-white rounded-md border border-gray-200 p-5">
                 <div className="flex items-center justify-between mb-4">
                   <p className="text-sm font-semibold text-gray-700">Monthly active schools</p>
-                  <p className="text-xs text-gray-400">{fmt(growth.total_active_schools)} schools total</p>
+                  <p className="text-xs text-muted-foreground">{fmt(growth.total_active_schools)} schools total</p>
                 </div>
                 {growth.monthly_active.length === 0 ? (
                   <div className="h-32 flex items-center justify-center text-gray-300 text-sm">No data yet</div>
@@ -280,7 +280,7 @@ export default function UsageAnalyticsPage() {
                             {fmtMonth(m.month)}: {fmt(m.active_schools)} schools
                           </div>
                           <div className="w-full bg-purple-400 group-hover:bg-purple-500 rounded-t transition-colors" style={{ height: `${pct}%` }} />
-                          <span className="text-[10px] text-gray-400 mt-1 whitespace-nowrap">{fmtMonth(m.month)}</span>
+                          <span className="text-xs text-muted-foreground mt-1 whitespace-nowrap">{fmtMonth(m.month)}</span>
                         </div>
                       )
                     })}
@@ -289,13 +289,13 @@ export default function UsageAnalyticsPage() {
               </div>
 
               {/* Cohort retention */}
-              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
                 <div className="px-5 py-3 border-b border-gray-100">
                   <p className="text-sm font-semibold text-gray-700">Cohort retention</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Schools grouped by onboarding month — % still active in each month after</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Schools grouped by onboarding month — % still active in each month after</p>
                 </div>
                 {growth.cohorts.length === 0 ? (
-                  <div className="py-8 text-center text-gray-400 text-sm">No cohorts in this window.</div>
+                  <div className="py-8 text-center text-muted-foreground text-sm">No cohorts in this window.</div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm min-w-[600px]">
@@ -333,9 +333,9 @@ export default function UsageAnalyticsPage() {
           )
         ) : view === 'health' ? (
           healthLoading ? (
-            <div className="py-20 text-center text-gray-400 text-sm">Loading…</div>
+            <div className="py-20 text-center text-muted-foreground text-sm">Loading…</div>
           ) : !health ? (
-            <div className="py-20 text-center text-gray-400 text-sm">Failed to load school health.</div>
+            <div className="py-20 text-center text-muted-foreground text-sm">Failed to load school health.</div>
           ) : (
             <>
               <p className="text-sm text-gray-500">
@@ -346,23 +346,23 @@ export default function UsageAnalyticsPage() {
                 {(['at_risk', 'watch', 'healthy'] as RiskLevel[]).map(level => (
                   <button key={level}
                     onClick={() => setRiskFilter(f => f === level ? null : level)}
-                    className={`bg-white rounded-xl border px-4 py-3 text-left transition-all ${riskFilter === level ? 'border-gray-900 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-300'}`}>
+                    className={`bg-white rounded-md border px-4 py-3 text-left transition-all ${riskFilter === level ? 'border-gray-900 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-300'}`}>
                     <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full mb-2 ${RISK_CHIP[level]}`}>{RISK_LABEL[level]}</span>
                     <p className="text-xl font-bold text-gray-900">{fmt(health.risk_counts[level] || 0)}</p>
-                    <p className="text-xs text-gray-400">
+                    <p className="text-xs text-muted-foreground">
                       {level === 'healthy' ? 'score ≥ 60' : level === 'watch' ? 'score 30-59' : 'score < 30'}
                     </p>
                   </button>
                 ))}
               </div>
 
-              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
                 <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
                   <p className="text-sm font-semibold text-gray-700">
                     Schools {riskFilter ? `— ${RISK_LABEL[riskFilter]}` : ''}
                   </p>
                   {riskFilter && (
-                    <button onClick={() => setRiskFilter(null)} className="text-xs text-gray-400 hover:text-gray-600">Clear filter</button>
+                    <button onClick={() => setRiskFilter(null)} className="text-xs text-muted-foreground hover:text-gray-600">Clear filter</button>
                   )}
                 </div>
                 <div className="overflow-x-auto">
@@ -381,7 +381,7 @@ export default function UsageAnalyticsPage() {
                       {health.schools.filter(s => !riskFilter || s.risk_level === riskFilter).map(s => (
                         <tr key={s.school_id} className="hover:bg-gray-50">
                           <td className="px-5 py-3 font-medium text-gray-800">{s.school_name}</td>
-                          <td className="px-5 py-3 text-xs text-gray-400 capitalize">{s.tier}</td>
+                          <td className="px-5 py-3 text-xs text-muted-foreground capitalize">{s.tier}</td>
                           <td className="px-5 py-3 text-right text-xs text-gray-500">
                             {s.days_since_login == null ? 'Never' : s.days_since_login === 0 ? 'Today' : `${s.days_since_login}d ago`}
                           </td>
@@ -400,9 +400,9 @@ export default function UsageAnalyticsPage() {
           )
         ) : view === 'adoption' ? (
           adoptionLoading ? (
-            <div className="py-20 text-center text-gray-400 text-sm">Loading…</div>
+            <div className="py-20 text-center text-muted-foreground text-sm">Loading…</div>
           ) : !adoption ? (
-            <div className="py-20 text-center text-gray-400 text-sm">Failed to load feature adoption.</div>
+            <div className="py-20 text-center text-muted-foreground text-sm">Failed to load feature adoption.</div>
           ) : (
             <>
               <div className="flex items-center justify-between flex-wrap gap-2">
@@ -423,7 +423,7 @@ export default function UsageAnalyticsPage() {
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+              <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[640px]">
                     <thead className="bg-gray-50 border-b border-gray-200">
@@ -440,7 +440,7 @@ export default function UsageAnalyticsPage() {
                       {adoption.filter(f => !categoryFilter || f.category === categoryFilter).map(f => (
                         <tr key={f.key} className="hover:bg-gray-50">
                           <td className="px-5 py-3 font-medium text-gray-800">{f.label}</td>
-                          <td className="px-5 py-3 text-xs text-gray-400">{f.category}</td>
+                          <td className="px-5 py-3 text-xs text-muted-foreground">{f.category}</td>
                           <td className="px-5 py-3 text-right font-mono text-xs text-gray-600">{fmt(f.entitled_schools)}</td>
                           <td className="px-5 py-3 text-right font-mono text-xs text-gray-600">{fmt(f.active_schools)}</td>
                           <td className="px-5 py-3">
@@ -464,9 +464,9 @@ export default function UsageAnalyticsPage() {
             </>
           )
         ) : loading ? (
-          <div className="py-20 text-center text-gray-400 text-sm">Loading…</div>
+          <div className="py-20 text-center text-muted-foreground text-sm">Loading…</div>
         ) : !overview ? (
-          <div className="py-20 text-center text-gray-400 text-sm">Failed to load usage analytics.</div>
+          <div className="py-20 text-center text-muted-foreground text-sm">Failed to load usage analytics.</div>
         ) : (
           <>
             {/* Summary cards */}
@@ -477,16 +477,16 @@ export default function UsageAnalyticsPage() {
                 { label: 'Unique users', value: fmt(overview.totals.unique_actors), sub: `last ${days}d`, color: 'text-gray-900' },
                 { label: 'Time in product', value: fmtDuration(overview.totals.total_duration_seconds), sub: `last ${days}d`, color: 'text-gray-900' },
               ].map(c => (
-                <div key={c.label} className="bg-white rounded-xl border border-gray-200 px-4 py-4">
-                  <p className="text-xs text-gray-400 font-medium uppercase tracking-wide mb-1">{c.label}</p>
+                <div key={c.label} className="bg-white rounded-md border border-gray-200 px-4 py-4">
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">{c.label}</p>
                   <p className={`text-2xl font-bold font-mono ${c.color}`}>{c.value}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">{c.sub}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{c.sub}</p>
                 </div>
               ))}
             </div>
 
             {/* Trend chart */}
-            <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <div className="bg-white rounded-md border border-gray-200 p-5">
               <div className="flex items-center justify-between mb-4">
                 <p className="text-sm font-semibold text-gray-700">Engagement trend</p>
                 <div className="flex gap-1 bg-gray-50 border border-gray-200 rounded-lg p-1">
@@ -506,17 +506,17 @@ export default function UsageAnalyticsPage() {
             </div>
 
             {/* Role breakdown */}
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100">
                 <p className="text-sm font-semibold text-gray-700">By role</p>
               </div>
               <div className="divide-y divide-gray-100">
                 {overview.by_role.length === 0 ? (
-                  <div className="py-8 text-center text-gray-400 text-sm">No login activity yet in this window.</div>
+                  <div className="py-8 text-center text-muted-foreground text-sm">No login activity yet in this window.</div>
                 ) : overview.by_role.map(r => (
                   <div key={r.actor_role} className="px-5 py-3 flex items-center justify-between text-sm">
                     <span className="font-medium text-gray-700">{ROLE_LABEL[r.actor_role] || r.actor_role}</span>
-                    <div className="flex items-center gap-6 text-xs text-gray-400">
+                    <div className="flex items-center gap-6 text-xs text-muted-foreground">
                       <span>{fmt(r.login_count)} logins</span>
                       <span>{fmt(r.unique_actors)} users</span>
                       <span className="text-gray-600 font-medium">{fmtDuration(r.total_duration_seconds)}</span>
@@ -527,12 +527,12 @@ export default function UsageAnalyticsPage() {
             </div>
 
             {/* Per-school leaderboard */}
-            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+            <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100">
                 <p className="text-sm font-semibold text-gray-700">By school</p>
               </div>
               {overview.by_school.length === 0 ? (
-                <div className="py-8 text-center text-gray-400 text-sm">No school activity yet in this window.</div>
+                <div className="py-8 text-center text-muted-foreground text-sm">No school activity yet in this window.</div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[600px]">
@@ -552,7 +552,7 @@ export default function UsageAnalyticsPage() {
                           <td className="px-5 py-3 text-right font-mono text-xs text-gray-600">{fmt(s.login_count)}</td>
                           <td className="px-5 py-3 text-right font-mono text-xs text-gray-600">{fmt(s.unique_actors)}</td>
                           <td className="px-5 py-3 text-right font-mono text-xs text-gray-600">{fmtDuration(s.total_duration_seconds)}</td>
-                          <td className="px-5 py-3 text-xs text-gray-400">{fmtDay(s.last_active_day)}</td>
+                          <td className="px-5 py-3 text-xs text-muted-foreground">{fmtDay(s.last_active_day)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -570,17 +570,17 @@ export default function UsageAnalyticsPage() {
           <div className="bg-gray-50 w-full max-w-2xl h-full overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10">
               <div>
-                <p className="text-xs text-gray-400">School drill-down</p>
+                <p className="text-xs text-muted-foreground">School drill-down</p>
                 <h2 className="text-lg font-bold text-gray-900">{selectedSchool.name}</h2>
               </div>
-              <button onClick={() => setSelectedSchool(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+              <button onClick={() => setSelectedSchool(null)} className="text-muted-foreground hover:text-gray-600 text-xl leading-none">✕</button>
             </div>
 
             <div className="p-6 space-y-6">
               {detailLoading ? (
-                <div className="py-16 text-center text-gray-400 text-sm">Loading…</div>
+                <div className="py-16 text-center text-muted-foreground text-sm">Loading…</div>
               ) : !detail ? (
-                <div className="py-16 text-center text-gray-400 text-sm">Failed to load school detail.</div>
+                <div className="py-16 text-center text-muted-foreground text-sm">Failed to load school detail.</div>
               ) : (
                 <>
                   {/* Segment summary */}
@@ -588,10 +588,10 @@ export default function UsageAnalyticsPage() {
                     {(['active', 'cooling', 'at_risk'] as Segment[]).map(seg => (
                       <button key={seg}
                         onClick={() => setSegmentFilter(f => f === seg ? null : seg)}
-                        className={`bg-white rounded-xl border px-4 py-3 text-left transition-all ${segmentFilter === seg ? 'border-gray-900 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-300'}`}>
+                        className={`bg-white rounded-md border px-4 py-3 text-left transition-all ${segmentFilter === seg ? 'border-gray-900 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-300'}`}>
                         <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded-full mb-2 ${SEGMENT_CHIP[seg]}`}>{SEGMENT_LABEL[seg]}</span>
                         <p className="text-xl font-bold text-gray-900">{fmt(detail.segment_counts[seg] || 0)}</p>
-                        <p className="text-xs text-gray-400">
+                        <p className="text-xs text-muted-foreground">
                           {seg === 'active' ? 'within 7 days' : seg === 'cooling' ? '8-21 days ago' : '22+ days ago'}
                         </p>
                       </button>
@@ -599,17 +599,17 @@ export default function UsageAnalyticsPage() {
                   </div>
 
                   {/* By role for this school */}
-                  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
                     <div className="px-5 py-3 border-b border-gray-100">
                       <p className="text-sm font-semibold text-gray-700">By role</p>
                     </div>
                     <div className="divide-y divide-gray-100">
                       {detail.by_role.length === 0 ? (
-                        <div className="py-6 text-center text-gray-400 text-sm">No activity in this window.</div>
+                        <div className="py-6 text-center text-muted-foreground text-sm">No activity in this window.</div>
                       ) : detail.by_role.map(r => (
                         <div key={r.actor_role} className="px-5 py-2.5 flex items-center justify-between text-sm">
                           <span className="font-medium text-gray-700">{ROLE_LABEL[r.actor_role] || r.actor_role}</span>
-                          <div className="flex items-center gap-4 text-xs text-gray-400">
+                          <div className="flex items-center gap-4 text-xs text-muted-foreground">
                             <span>{fmt(r.login_count)} logins</span>
                             <span className="text-gray-600 font-medium">{fmtDuration(r.total_duration_seconds)}</span>
                           </div>
@@ -619,27 +619,27 @@ export default function UsageAnalyticsPage() {
                   </div>
 
                   {/* Actor list */}
-                  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
                     <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
                       <p className="text-sm font-semibold text-gray-700">
                         Users {segmentFilter ? `— ${SEGMENT_LABEL[segmentFilter]}` : ''}
                       </p>
                       {segmentFilter && (
-                        <button onClick={() => setSegmentFilter(null)} className="text-xs text-gray-400 hover:text-gray-600">Clear filter</button>
+                        <button onClick={() => setSegmentFilter(null)} className="text-xs text-muted-foreground hover:text-gray-600">Clear filter</button>
                       )}
                     </div>
                     <div className="divide-y divide-gray-100 max-h-[420px] overflow-y-auto">
                       {filteredActors.length === 0 ? (
-                        <div className="py-8 text-center text-gray-400 text-sm">No users match this filter.</div>
+                        <div className="py-8 text-center text-muted-foreground text-sm">No users match this filter.</div>
                       ) : filteredActors.map(a => (
                         <div key={`${a.actor_role}-${a.actor_id}`} className="px-5 py-2.5 flex items-center justify-between text-sm">
                           <div>
                             <p className="font-medium text-gray-800">{a.actor_name || `#${a.actor_id}`}</p>
-                            <p className="text-xs text-gray-400">{ROLE_LABEL[a.actor_role] || a.actor_role} · {fmt(a.login_count)} logins · {fmtDuration(a.total_duration_seconds)}</p>
+                            <p className="text-xs text-muted-foreground">{ROLE_LABEL[a.actor_role] || a.actor_role} · {fmt(a.login_count)} logins · {fmtDuration(a.total_duration_seconds)}</p>
                           </div>
                           <div className="text-right">
                             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${SEGMENT_CHIP[a.segment]}`}>{SEGMENT_LABEL[a.segment]}</span>
-                            <p className="text-xs text-gray-400 mt-1">{fmtDateTime(a.last_login_at)}</p>
+                            <p className="text-xs text-muted-foreground mt-1">{fmtDateTime(a.last_login_at)}</p>
                           </div>
                         </div>
                       ))}

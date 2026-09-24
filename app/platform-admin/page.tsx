@@ -3,6 +3,9 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
+import { Skeleton } from '@/components/ui/skeleton'
+import { useConfirm } from '@/components/ui/use-confirm'
+import { RefreshCw, Users } from 'lucide-react'
 
 type School = {
   id: number
@@ -67,6 +70,7 @@ function isNewThisWeek(dateStr: string) {
 }
 
 export default function PlatformAdmin() {
+  const { confirm, ConfirmDialog } = useConfirm()
   const [tab, setTab]                     = useState<Tab>('active')
   const [schools, setSchools]             = useState<School[]>([])
   const [stats, setStats]                 = useState<PlatformStats | null>(null)
@@ -77,7 +81,7 @@ export default function PlatformAdmin() {
   const [search, setSearch]               = useState('')
   const [filterTier, setFilterTier]       = useState<string>('all')
   const [highlightId, setHighlightId]     = useState<number | null>(null)
-  const [createdSchool, setCreatedSchool] = useState<{ id: number; name: string; code: string; pass: string } | null>(null)
+  const [createdSchool, setCreatedSchool] = useState<{ id: number; name: string; email: string; pass: string } | null>(null)
   const [copiedCode, setCopiedCode]       = useState<number | null>(null)
   const [changingPlanFor, setChangingPlanFor] = useState<number | null>(null)
   const [sort, setSort] = useState<{ col: SortCol; dir: 'asc' | 'desc' }>({ col: 'joined', dir: 'desc' })
@@ -184,7 +188,8 @@ export default function PlatformAdmin() {
   }
 
   async function handleResetAdmin(adminId: number) {
-    if (!confirm('Reset credentials for this admin? A new password will be generated and emailed to them.')) return
+    const ok = await confirm('Reset credentials for this admin? A new password will be generated and emailed to them.', { title: 'Reset credentials?', confirmText: 'Reset', destructive: true })
+    if (!ok) return
     setResettingId(adminId); setResetResult(null)
     try {
       const res  = await fetch(`/api/platform/admins/${adminId}/reset`, { method: 'POST' })
@@ -208,7 +213,7 @@ export default function PlatformAdmin() {
       if (!res.ok) throw new Error(data.error)
       setShowModal(false)
       setForm({ name: '', type: 'Private', city: '', country: '', phone: '', email: '', address: '' })
-      setCreatedSchool({ id: data.id, name: data.name, code: data.school_code, pass: data.temp_password })
+      setCreatedSchool({ id: data.id, name: data.name, email: data.email, pass: data.temp_password })
       setTab('active')
       fetchSchools('active')
       fetchStats()
@@ -237,7 +242,8 @@ export default function PlatformAdmin() {
   }
 
   async function handleDelete(id: number, name: string) {
-    if (!confirm(`Delete "${name}"?\n\nThe school will be soft-deleted — all data is preserved and can be restored later.`)) return
+    const ok = await confirm(`Delete "${name}"?\n\nThe school will be soft-deleted — all data is preserved and can be restored later.`, { title: 'Delete school?', confirmText: 'Delete', destructive: true })
+    if (!ok) return
     try {
       const res = await fetch(`/api/schools/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
@@ -247,7 +253,8 @@ export default function PlatformAdmin() {
   }
 
   async function handleRestore(id: number, name: string) {
-    if (!confirm(`Restore "${name}"? It will become active again.`)) return
+    const ok = await confirm(`Restore "${name}"? It will become active again.`, { title: 'Restore school?', confirmText: 'Restore' })
+    if (!ok) return
     try {
       const res = await fetch(`/api/schools/${id}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -301,8 +308,8 @@ export default function PlatformAdmin() {
 
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-purple-300'
   const tabCls = (t: Tab) =>
-    `px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-      tab === t ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'
+    `min-h-11 whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+      tab === t ? 'border-[#235b46] text-[#235b46]' : 'border-transparent text-gray-600 hover:text-gray-900'
     }`
 
   function thSort(col: SortCol, label: string) {
@@ -310,39 +317,41 @@ export default function PlatformAdmin() {
     return (
       <th
         key={col}
-        onClick={() => toggleSort(col)}
-        className="text-left px-5 py-3 font-medium text-gray-500 cursor-pointer select-none hover:text-gray-800 transition-colors whitespace-nowrap"
+        scope="col"
+        aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+        className="text-left px-5 py-1 font-medium text-gray-600 whitespace-nowrap"
       >
-        <span className="inline-flex items-center gap-1">
+        <button type="button" onClick={() => toggleSort(col)} className="inline-flex min-h-10 items-center gap-1 text-left hover:text-[#235b46]">
           {label}
-          <span className={`text-[10px] ${active ? 'text-purple-500' : 'text-gray-300'}`}>
+          <span className={`text-xs ${active ? 'text-purple-500' : 'text-gray-300'}`}>
             {active ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'}
           </span>
-        </span>
+        </button>
       </th>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-full bg-[#f8f9f6]">
+      {ConfirmDialog}
 
       {/* ── Page header ── */}
-      <div className="bg-white border-b border-gray-200 px-6 py-3.5 flex items-center justify-between sticky top-0 z-20 shadow-sm">
-        <h1 className="text-lg font-bold text-gray-900">Schools</h1>
+      <div className="mx-auto flex max-w-7xl flex-wrap items-start justify-between gap-4 px-4 pt-6 sm:px-7 sm:pt-8">
+        <div><p className="mb-1 text-xs font-medium text-[#67736b]">Platform workspace</p><h1 className="portal-section-heading">Schools</h1><p className="mt-1.5 text-sm text-[#67736b]">Manage school access, plans and account activity.</p></div>
         <div className="flex items-center gap-2">
           <button onClick={openAdminModal}
-            className="text-xs text-purple-600 hover:text-purple-800 border border-purple-200 bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg transition-colors font-medium">
-            👥 Admin Team
+            className="flex min-h-10 items-center gap-2 rounded-md px-3 text-sm font-medium text-[#465449] transition-colors hover:bg-[#eef2eb]">
+            <Users size={16} aria-hidden="true" /> Admin team
           </button>
           <button
             onClick={() => { fetchSchools(tab); fetchStats() }}
-            className="text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors"
+            className="flex min-h-10 items-center gap-2 rounded-md border border-[#dce2db] bg-white px-3 text-sm text-[#465449] transition-colors hover:bg-[#eef2eb]"
             title="Refresh data"
-          >↻ Refresh</button>
+          ><RefreshCw size={15} aria-hidden="true" />Refresh</button>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <div className="max-w-7xl mx-auto px-4 py-6 sm:px-7">
 
         {error && (
           <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between items-center text-sm">
@@ -354,10 +363,10 @@ export default function PlatformAdmin() {
         {/* ── Stats cards ── */}
         {stats && (
           <>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+            <div className="grid grid-cols-1 border-y border-[#dce2db] mb-6 divide-y divide-[#dce2db] sm:grid-cols-2 sm:divide-y-0 xl:grid-cols-4">
 
               {/* Active Schools */}
-              <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="bg-white p-5 sm:border-r border-border">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Active Schools</p>
                   <div className="w-8 h-8 bg-purple-50 rounded-lg flex items-center justify-center">
@@ -367,7 +376,7 @@ export default function PlatformAdmin() {
                     </svg>
                   </div>
                 </div>
-                <p className="text-3xl font-black text-gray-900">{stats.schools.active}</p>
+                <p className="text-3xl font-semibold text-gray-900">{stats.schools.active}</p>
                 <div className="mt-1.5 space-y-1">
                   {stats.growth.this_month > 0 ? (
                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -375,11 +384,11 @@ export default function PlatformAdmin() {
                         +{stats.growth.this_month} this month
                       </span>
                       {stats.growth.last_month > 0 && (
-                        <span className="text-xs text-gray-400">vs {stats.growth.last_month} last mo</span>
+                        <span className="text-xs text-muted-foreground">vs {stats.growth.last_month} last mo</span>
                       )}
                     </div>
                   ) : (
-                    <p className="text-xs text-gray-400">
+                    <p className="text-xs text-muted-foreground">
                       {stats.growth.last_month > 0
                         ? `${stats.growth.last_month} joined last month`
                         : 'no new schools this month'}
@@ -389,13 +398,13 @@ export default function PlatformAdmin() {
                     {stats.schools.inactive > 0 &&
                       <span className="text-xs text-orange-500 font-medium">{stats.schools.inactive} inactive</span>}
                     {stats.schools.deleted > 0 &&
-                      <span className="text-xs text-gray-400">{stats.schools.deleted} deleted</span>}
+                      <span className="text-xs text-muted-foreground">{stats.schools.deleted} deleted</span>}
                   </div>
                 </div>
               </div>
 
               {/* On Paid Plan */}
-              <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="bg-white p-5 xl:border-r border-border">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">On Paid Plan</p>
                   <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center">
@@ -405,8 +414,8 @@ export default function PlatformAdmin() {
                     </svg>
                   </div>
                 </div>
-                <p className="text-3xl font-black text-gray-900">{paidCount}</p>
-                <p className="text-xs text-gray-400 mt-0.5">
+                <p className="text-3xl font-semibold text-gray-900">{paidCount}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
                   {paidCount} of {stats.schools.active} active
                   <span className="ml-1 font-semibold text-gray-600">({conversionPct}%)</span>
                 </p>
@@ -432,7 +441,7 @@ export default function PlatformAdmin() {
               </div>
 
               {/* Platform Reach */}
-              <div className="bg-white rounded-xl border border-gray-200 p-5">
+              <div className="bg-white p-5 sm:border-r border-border">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-xs text-gray-500 font-medium uppercase tracking-wide">Platform Reach</p>
                   <div className="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center">
@@ -442,10 +451,10 @@ export default function PlatformAdmin() {
                     </svg>
                   </div>
                 </div>
-                <p className="text-3xl font-black text-gray-900">
+                <p className="text-3xl font-semibold text-gray-900">
                   {(stats.teachers.total + stats.students.total).toLocaleString()}
                 </p>
-                <p className="text-xs text-gray-400 mt-1.5">
+                <p className="text-xs text-muted-foreground mt-1.5">
                   <span className="text-gray-700 font-medium">{stats.teachers.total.toLocaleString()}</span> teachers
                   {' · '}
                   <span className="text-gray-700 font-medium">{stats.students.total.toLocaleString()}</span> students
@@ -453,19 +462,19 @@ export default function PlatformAdmin() {
               </div>
 
               {/* No Plan Yet */}
-              <div className={`rounded-xl border p-5 ${noPlanCount > 0 ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200'}`}>
+              <div className={`p-5 ${noPlanCount > 0 ? 'bg-amber-50' : 'bg-white'}`}>
                 <div className="flex items-center justify-between mb-3">
                   <p className={`text-xs font-medium uppercase tracking-wide ${noPlanCount > 0 ? 'text-amber-600' : 'text-gray-500'}`}>
                     No Plan Yet
                   </p>
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${noPlanCount > 0 ? 'bg-amber-100' : 'bg-gray-100'}`}>
-                    <svg className={`w-4 h-4 ${noPlanCount > 0 ? 'text-amber-600' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className={`w-4 h-4 ${noPlanCount > 0 ? 'text-amber-600' : 'text-muted-foreground'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                   </div>
                 </div>
-                <p className={`text-3xl font-black ${noPlanCount > 0 ? 'text-amber-700' : 'text-gray-400'}`}>{noPlanCount}</p>
-                <p className={`text-xs mt-1.5 ${noPlanCount > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+                <p className={`text-3xl font-semibold ${noPlanCount > 0 ? 'text-amber-700' : 'text-muted-foreground'}`}>{noPlanCount}</p>
+                <p className={`text-xs mt-1.5 ${noPlanCount > 0 ? 'text-amber-600' : 'text-muted-foreground'}`}>
                   {noPlanCount > 0 ? 'active schools awaiting plan assignment' : 'all active schools have a plan'}
                 </p>
                 {noPlanCount > 0 && (
@@ -481,7 +490,7 @@ export default function PlatformAdmin() {
 
             {/* Inactive schools banner */}
             {stats.schools.inactive > 0 && (
-              <div className="mb-6 bg-orange-50 border border-orange-200 rounded-xl px-5 py-3 flex items-center justify-between">
+              <div className="mb-6 bg-orange-50 border border-orange-200 rounded-md px-5 py-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <svg className="w-4 h-4 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -501,10 +510,10 @@ export default function PlatformAdmin() {
         )}
 
         {/* ── Header + Add button ── */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Schools</h2>
-            <p className="text-gray-400 text-sm">
+            <h2 className="text-lg font-semibold text-[#202a25]">School directory</h2>
+            <p className="text-muted-foreground text-sm">
               {filtered.length !== schools.length
                 ? `${filtered.length} of ${schools.length} shown`
                 : `${schools.length} school${schools.length !== 1 ? 's' : ''}`}
@@ -512,7 +521,7 @@ export default function PlatformAdmin() {
           </div>
           <button
             onClick={() => setShowModal(true)}
-            className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            className="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -522,34 +531,35 @@ export default function PlatformAdmin() {
         </div>
 
         {/* ── Tabs ── */}
-        <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl mb-4 w-fit">
-          <button onClick={() => switchTab('active')} className={tabCls('active')}>
+        <div className="flex max-w-full items-center overflow-x-auto border-b border-[#dce2db] mb-4" aria-label="School status filters">
+          <button onClick={() => switchTab('active')} aria-pressed={tab === 'active'} className={tabCls('active')}>
             Active
-            {stats && <span className="ml-1.5 text-gray-400 font-normal">({stats.schools.active})</span>}
+            {stats && <span className="ml-1.5 text-muted-foreground font-normal">({stats.schools.active})</span>}
           </button>
-          <button onClick={() => switchTab('inactive')} className={tabCls('inactive')}>
+          <button onClick={() => switchTab('inactive')} aria-pressed={tab === 'inactive'} className={tabCls('inactive')}>
             Inactive
-            <span className={`ml-1.5 font-normal ${stats && stats.schools.inactive > 0 ? 'text-orange-400' : 'text-gray-400'}`}>
+            <span className={`ml-1.5 font-normal ${stats && stats.schools.inactive > 0 ? 'text-orange-400' : 'text-muted-foreground'}`}>
               ({stats?.schools.inactive ?? 0})
             </span>
           </button>
-          <button onClick={() => switchTab('deleted')} className={tabCls('deleted')}>
+          <button onClick={() => switchTab('deleted')} aria-pressed={tab === 'deleted'} className={tabCls('deleted')}>
             Deleted
             {stats && stats.schools.deleted > 0 && (
-              <span className="ml-1.5 text-gray-400 font-normal">({stats.schools.deleted})</span>
+              <span className="ml-1.5 text-muted-foreground font-normal">({stats.schools.deleted})</span>
             )}
           </button>
         </div>
 
         {/* ── Filters ── */}
-        <div className="flex gap-3 mb-4">
-          <div className="relative flex-1">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
+        <div className="flex flex-wrap gap-3 mb-4">
+          <div className="relative min-w-0 basis-full sm:flex-1 sm:basis-auto">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none"
               fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <input
               type="text"
+              aria-label="Search schools by name, city or school code"
               placeholder={tab === 'deleted' ? 'Search deleted schools…' : 'Search by name, city, school code…'}
               value={search} onChange={e => setSearch(e.target.value)}
               className="w-full border border-gray-200 rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 bg-white"
@@ -557,6 +567,7 @@ export default function PlatformAdmin() {
           </div>
           {tab !== 'deleted' && (
             <select
+              aria-label="Filter schools by plan"
               value={filterTier} onChange={e => setFilterTier(e.target.value)}
               className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-300 text-gray-700"
             >
@@ -570,7 +581,7 @@ export default function PlatformAdmin() {
           {(search || filterTier !== 'all') && (
             <button
               onClick={() => { setSearch(''); setFilterTier('all') }}
-              className="text-sm text-gray-400 hover:text-gray-700 border border-gray-200 px-3 py-2 rounded-lg bg-white transition-colors"
+              className="text-sm text-muted-foreground hover:text-gray-700 border border-gray-200 px-3 py-2 rounded-lg bg-white transition-colors"
             >
               Clear
             </button>
@@ -584,16 +595,24 @@ export default function PlatformAdmin() {
         )}
 
         {/* ── Table ── */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-md border border-[#dce2db] overflow-x-auto" role="region" aria-label="School directory table" tabIndex={0}>
           {loading ? (
-            <div className="py-16 text-center">
-              <div className="w-6 h-6 border-2 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-              <p className="text-gray-400 text-sm">Loading schools…</p>
+            <div className="px-5 py-4" role="status" aria-busy="true" aria-label="Loading schools">
+              <div className="flex gap-4 pb-3 border-b border-gray-100">
+                {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-2.5 flex-1" />)}
+              </div>
+              {Array.from({ length: 6 }).map((_, r) => (
+                <div key={r} className="flex gap-4 py-3 border-b border-gray-50">
+                  {Array.from({ length: 5 }).map((_, c) => (
+                    <Skeleton key={c} className={`h-3 flex-1 ${c === 0 ? 'max-w-32' : ''}`} />
+                  ))}
+                </div>
+              ))}
             </div>
           ) : sorted.length === 0 ? (
             <div className="py-16 text-center">
               <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-6 h-6 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                     d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                 </svg>
@@ -606,7 +625,7 @@ export default function PlatformAdmin() {
                   : 'No active schools yet'}
               </p>
               {!search && filterTier === 'all' && tab === 'active' && (
-                <p className="text-gray-400 text-sm mt-1">Click &quot;Add School&quot; to register the first school</p>
+                <p className="text-muted-foreground text-sm mt-1">Click &quot;Add School&quot; to register the first school</p>
               )}
               {(search || filterTier !== 'all') && (
                 <button onClick={() => { setSearch(''); setFilterTier('all') }}
@@ -633,7 +652,7 @@ export default function PlatformAdmin() {
                   <tr key={school.id} className="hover:bg-red-50/30 transition-colors opacity-75">
                     <td className="px-5 py-3.5">
                       <span className="font-medium text-gray-600 line-through">{school.name}</span>
-                      <div className="text-gray-400 text-xs mt-0.5">{school.type}</div>
+                      <div className="text-muted-foreground text-xs mt-0.5">{school.type}</div>
                     </td>
                     <td className="px-5 py-3.5">
                       {school.school_code
@@ -644,7 +663,7 @@ export default function PlatformAdmin() {
                       <div><span className="font-medium">{school.teacher_count ?? '—'}</span> teachers</div>
                       <div><span className="font-medium">{school.student_count ?? '—'}</span> students</div>
                     </td>
-                    <td className="px-5 py-3.5 text-gray-400 text-xs">
+                    <td className="px-5 py-3.5 text-muted-foreground text-xs">
                       {school.deleted_at ? new Date(school.deleted_at).toLocaleDateString() : '—'}
                     </td>
                     <td className="px-5 py-3.5">
@@ -706,7 +725,7 @@ export default function PlatformAdmin() {
                               {school.name}
                             </Link>
                             {isNew && (
-                              <span className="text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold leading-tight">NEW</span>
+                              <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold leading-tight">NEW</span>
                             )}
                             {needsSetup && (
                               <span
@@ -715,7 +734,7 @@ export default function PlatformAdmin() {
                               >⚠</span>
                             )}
                           </div>
-                          <div className="text-gray-400 text-xs mt-0.5">{school.type}</div>
+                          <div className="text-muted-foreground text-xs mt-0.5">{school.type}</div>
                         </td>
 
                         {/* School ID + copy button */}
@@ -727,11 +746,12 @@ export default function PlatformAdmin() {
                               </code>
                               <button
                                 onClick={() => copyCode(school.id, school.school_code!)}
+                                aria-label={`Copy school code for ${school.name}`}
                                 title="Copy school code"
                                 className="text-gray-300 hover:text-purple-500 transition-colors flex-shrink-0"
                               >
                                 {copiedCode === school.id
-                                  ? <span className="text-[10px] text-green-600 font-bold">✓</span>
+                                  ? <span className="text-xs text-green-600 font-bold">✓</span>
                                   : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                                         d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -746,6 +766,7 @@ export default function PlatformAdmin() {
                         <td className="px-5 py-3.5">
                           <div className="relative inline-flex items-center">
                             <select
+                              aria-label={`Plan for ${school.name}`}
                               value={school.tier || 'none'}
                               onChange={e => handlePlanChange(school.id, e.target.value)}
                               disabled={isChanging}
@@ -783,11 +804,11 @@ export default function PlatformAdmin() {
                         {/* Portal status */}
                         <td className="px-5 py-3.5">
                           <div className="flex items-center gap-1">
-                            <span title="Student Portal" className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${school.student_portal_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>S</span>
-                            <span title="Parent Portal" className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${school.parent_portal_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>P</span>
+                            <span title="Student Portal" className={`text-xs font-bold px-1.5 py-0.5 rounded ${school.student_portal_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-muted-foreground'}`}>S</span>
+                            <span title="Parent Portal" className={`text-xs font-bold px-1.5 py-0.5 rounded ${school.parent_portal_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-muted-foreground'}`}>P</span>
                             {Number(school.portal_pending_count || 0) > 0 && (school.student_portal_enabled || school.parent_portal_enabled) && (
                               <span title={`${school.portal_pending_count} students missing a login`}
-                                className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
+                                className="text-xs font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
                                 {school.portal_pending_count} pending
                               </span>
                             )}
@@ -808,7 +829,7 @@ export default function PlatformAdmin() {
                         </td>
 
                         {/* Joined */}
-                        <td className="px-5 py-3.5 text-gray-400 text-xs whitespace-nowrap">
+                        <td className="px-5 py-3.5 text-muted-foreground text-xs whitespace-nowrap">
                           {school.created_at ? timeAgo(school.created_at) : '—'}
                         </td>
 
@@ -843,7 +864,7 @@ export default function PlatformAdmin() {
         </div>
 
         {!loading && sorted.length > 0 && (
-          <p className="mt-3 text-center text-xs text-gray-400">
+          <p className="mt-3 text-center text-xs text-muted-foreground">
             {sorted.length} school{sorted.length !== 1 ? 's' : ''}
             {(search || filterTier !== 'all') && ` — filtered from ${schools.length} total`}
             {' · '}sorted by {sort.col.replace('_', ' ')} {sort.dir === 'asc' ? '↑' : '↓'}
@@ -854,13 +875,13 @@ export default function PlatformAdmin() {
       {/* ── Add School Modal ── */}
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white rounded-t-2xl">
               <div>
                 <h3 className="font-semibold text-gray-900">Add New School</h3>
-                <p className="text-xs text-gray-400 mt-0.5">Admin credentials will be generated and emailed automatically</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Admin credentials will be generated and emailed automatically</p>
               </div>
-              <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+              <button onClick={() => setShowModal(false)} className="text-muted-foreground hover:text-gray-600 text-xl leading-none">✕</button>
             </div>
             <form onSubmit={handleCreate} className="px-6 py-5 space-y-4">
               {error && <p className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
@@ -902,7 +923,7 @@ export default function PlatformAdmin() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   School Email <span className="text-red-500">*</span>
-                  <span className="text-gray-400 font-normal text-xs ml-1">(login credentials sent here)</span>
+                  <span className="text-muted-foreground font-normal text-xs ml-1">(login credentials sent here)</span>
                 </label>
                 <input type="email" required value={form.email}
                   onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
@@ -930,7 +951,7 @@ export default function PlatformAdmin() {
                   Cancel
                 </button>
                 <button type="submit" disabled={submitting}
-                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
+                  className="flex-1 bg-primary hover:bg-primary/90 text-white py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50">
                   {submitting ? 'Creating…' : 'Create School'}
                 </button>
               </div>
@@ -942,10 +963,10 @@ export default function PlatformAdmin() {
       {/* ── School Created — Credentials Modal ── */}
       {createdSchool && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+          <div className="bg-white rounded-lg w-full max-w-md shadow-2xl">
             <div className="bg-green-600 px-6 py-5 rounded-t-2xl">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                <div className="w-10 h-10 bg-white/20 rounded-md flex items-center justify-center">
                   <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
@@ -960,14 +981,14 @@ export default function PlatformAdmin() {
               <p className="text-sm text-gray-600 mb-4">
                 Copy these credentials and share with the school admin. They&apos;ll be prompted to set a new password on first login.
               </p>
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
+              <div className="bg-amber-50 border border-amber-200 rounded-md p-4 space-y-3">
                 <div>
-                  <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">School ID (Login)</p>
+                  <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">Admin Email (Login)</p>
                   <div className="flex items-center gap-2">
                     <code className="text-sm font-mono text-amber-900 bg-white border border-amber-200 rounded px-3 py-2 flex-1">
-                      {createdSchool.code}
+                      {createdSchool.email}
                     </code>
-                    <button onClick={() => copyCode(-1, createdSchool.code)}
+                    <button onClick={() => copyCode(-1, createdSchool.email)}
                       className="text-amber-600 hover:text-amber-800 border border-amber-200 rounded px-2 py-2 hover:bg-amber-100 transition-colors">
                       {copiedCode === -1
                         ? <span className="text-xs font-bold">✓</span>
@@ -988,7 +1009,7 @@ export default function PlatformAdmin() {
               </div>
               <button
                 onClick={handleCredentialsDismiss}
-                className="w-full mt-4 bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-xl text-sm font-medium transition-colors"
+                className="w-full mt-4 bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-md text-sm font-medium transition-colors"
               >
                 Done — Go to school in list
               </button>
@@ -1000,18 +1021,18 @@ export default function PlatformAdmin() {
       {/* ── Admin Team Modal ── */}
       {showAdminModal && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+          <div className="bg-white rounded-lg shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
               <div>
                 <h2 className="font-bold text-gray-900 text-lg">Platform Admin Team</h2>
-                <p className="text-xs text-gray-400 mt-0.5">Credentials are sent to their email automatically</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Credentials are sent to their email automatically</p>
               </div>
-              <button onClick={() => setShowAdminModal(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+              <button onClick={() => setShowAdminModal(false)} className="text-muted-foreground hover:text-gray-600 text-xl leading-none">✕</button>
             </div>
             <div className="flex-1 overflow-y-auto px-6 py-4">
               {/* Reset result banner */}
               {resetResult && (
-                <div className={`mb-4 rounded-xl border p-4 ${resetResult.emailSent ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
+                <div className={`mb-4 rounded-md border p-4 ${resetResult.emailSent ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
                   <p className={`text-xs font-bold uppercase tracking-wide mb-2 ${resetResult.emailSent ? 'text-green-700' : 'text-amber-700'}`}>
                     {resetResult.emailSent ? '✓ Credentials reset & emailed' : '⚠ Credentials reset — email failed, copy manually'}
                   </p>
@@ -1025,30 +1046,30 @@ export default function PlatformAdmin() {
                       className="text-xs text-amber-700 underline hover:no-underline"
                     >copy</button>
                   </div>
-                  <button onClick={() => setResetResult(null)} className="mt-2 text-xs text-gray-400 hover:text-gray-600">dismiss ✕</button>
+                  <button onClick={() => setResetResult(null)} className="mt-2 text-xs text-muted-foreground hover:text-gray-600">dismiss ✕</button>
                 </div>
               )}
 
               {adminList.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-4">No admins yet</p>
+                <p className="text-sm text-muted-foreground text-center py-4">No admins yet</p>
               ) : (
                 <div className="space-y-2 mb-4">
                   {adminList.map(a => (
-                    <div key={a.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                    <div key={a.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-md">
                       <div className="w-8 h-8 bg-purple-100 rounded-full flex items-center justify-center flex-shrink-0">
                         <span className="text-purple-600 text-sm font-bold">{(a.full_name || a.email).charAt(0).toUpperCase()}</span>
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold text-gray-900 truncate">{a.full_name || '—'}</p>
-                        <p className="text-xs text-gray-400 truncate">{a.email}</p>
+                        <p className="text-xs text-muted-foreground truncate">{a.email}</p>
                       </div>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${a.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
+                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${a.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-muted-foreground'}`}>
                         {a.status}
                       </span>
                       <button
                         onClick={() => handleResetAdmin(a.id)}
                         disabled={resettingId === a.id}
-                        className="text-xs text-gray-400 hover:text-purple-600 hover:bg-purple-50 border border-gray-200 hover:border-purple-200 px-2 py-1 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+                        className="text-xs text-muted-foreground hover:text-purple-600 hover:bg-purple-50 border border-gray-200 hover:border-purple-200 px-2 py-1 rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
                         title="Reset & resend credentials"
                       >
                         {resettingId === a.id ? '…' : '↺ Reset'}
@@ -1065,14 +1086,14 @@ export default function PlatformAdmin() {
                 <form onSubmit={handleAddAdmin} className="space-y-3">
                   <input type="text" placeholder="Full name" value={adminForm.full_name}
                     onChange={e => setAdminForm(f => ({ ...f, full_name: e.target.value }))}
-                    className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    className="w-full border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
                     required />
                   <input type="email" placeholder="Email address" value={adminForm.email}
                     onChange={e => setAdminForm(f => ({ ...f, email: e.target.value }))}
-                    className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    className="w-full border border-gray-200 rounded-md px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300"
                     required />
                   <button type="submit" disabled={adminSubmitting}
-                    className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">
+                    className="w-full bg-purple-600 hover:bg-purple-700 disabled:opacity-60 text-white font-semibold py-2.5 rounded-md text-sm transition-colors">
                     {adminSubmitting ? 'Sending invite…' : 'Send Invite Email'}
                   </button>
                 </form>

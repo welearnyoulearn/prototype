@@ -36,7 +36,7 @@ Maintain these files in `docs/`:
 The `wiki/` folder is the living documentation of this project. Read it to understand what exists and what's in progress.
 
 - **[wiki/README.md](wiki/README.md)** — Index of all wiki docs
-- **[wiki/features/](wiki/features/)** — Feature docs per portal (school-admin, teacher, student, parent, platform-admin, display, auth)
+- **[wiki/features/](wiki/features/)** — Feature docs per portal (school-admin, teacher, student, parent, platform-admin, auth)
 - **[wiki/tasks/completed.md](wiki/tasks/completed.md)** — All finished work
 - **[wiki/tasks/in-progress.md](wiki/tasks/in-progress.md)** — Currently active work
 - **[wiki/tasks/planned.md](wiki/tasks/planned.md)** — Upcoming features
@@ -46,6 +46,9 @@ The `wiki/` folder is the living documentation of this project. Read it to under
 2. **When starting new work:** add an entry to `wiki/tasks/in-progress.md`
 3. **When a feature status changes** (Planned → Partial → Built): update both the feature doc and `wiki/tasks/planned.md`
 4. **Use the template** at `wiki/features/_template.md` when documenting new features
+
+### Product docs (definition of done)
+A feature PR is not done until its doc is current: update `wiki/features/<feature>.md` and `wiki/features/feature-map.json`, run `node scripts/product-docs.mjs`, commit the regenerated `wiki/features/CATALOG.md` and `docs/product/PRODUCT-FACTBOOK.md`. See `.claude/skills/update-product-docs/SKILL.md`. `e2e/docs-coverage.spec.ts` fails if a feature in `lib/features.ts` has no doc or the generated files are stale.
 
 ## Project Rules
 
@@ -97,7 +100,7 @@ Platform Admin is served on `admin.welearnyoulearn.com` subdomain only — block
 - `plan_features` table — feature enabled/disabled per tier (basic/standard/premium)
 - `school_feature_overrides` table — per-school override takes precedence
 - `schoolHasFeature(schoolId, featureKey)` in `lib/auth.ts` — checks override first, then tier, returns `false` by default
-- Feature keys in `lib/features.ts` — `OVERRIDABLE_FEATURE_KEYS = ['online-payments', 'whatsapp']`
+- Feature keys in `lib/features.ts` — `OVERRIDABLE_FEATURE_KEYS = ['student-portal', 'parent-portal', 'api-monitoring', 'online-payments']` (`'whatsapp'` is not a feature key — `sendWhatsappMessage()` in `lib/whatsapp.ts` is a logging-only scaffold called from onboarding, ungated, not wired to any real send)
 
 ### Fee Management
 - `app/school-admin/components/FeeManagement.tsx` — large single component (~4000 lines), tabs: overview/setup/ledger/collect/students/reports/yearend + optional online-payments/whatsapp
@@ -110,8 +113,8 @@ Platform Admin is served on `admin.welearnyoulearn.com` subdomain only — block
 - Excel template served from `/api/students/template` via ExcelJS
 
 ### Encryption
-- `lib/encryption.ts` — AES-256-GCM, key from `ENCRYPTION_KEY` env var (64-char hex = 32 bytes)
-- Used for Cashfree secret key and WhatsApp access token at rest
+- Not yet built — `lib/encryption.ts` does not exist in the repo. `ENCRYPTION_KEY` (64-char hex = 32 bytes) is reserved for it.
+- Planned use: AES-256-GCM at rest for the Cashfree secret key and WhatsApp access token once those integrations are built — `school_payment_config`/`payment_transactions`/`payment_webhook_log` (`lib/db.ts`) are schema-only scaffolding today; no route creates a Cashfree order or handles its webhook. The only working "online payment" path is a manual UPI-QR + parent self-report + admin-approve flow (`app/api/fees/upi-*`, `app/api/parent/fees` POST, `app/api/fees/payments/verify`), which stores no secret needing encryption.
 
 ### Branch Strategy
 - `wlylV1` — dev/testing branch (Vercel preview)
@@ -134,3 +137,13 @@ APP_URL               # Base URL for email links
 WHATSAPP_VERIFY_TOKEN # Meta webhook verification
 WHATSAPP_APP_SECRET   # Meta webhook HMAC secret
 ```
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

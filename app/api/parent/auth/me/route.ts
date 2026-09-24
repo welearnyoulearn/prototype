@@ -1,15 +1,27 @@
 import { NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getParentSession } from '@/lib/auth'
+import { getParentSession, schoolHasFeature, clearParentAuthCookie } from '@/lib/auth'
 
 export async function GET() {
   try {
     const session = await getParentSession()
     if (!session) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
 
+    // Checked on every load (and periodically while the tab stays open, see
+    // the access-revocation poll in app/parent/page.tsx) so a school admin
+    // turning off Parent Portal Access logs out parents who are already
+    // signed in, not just new login attempts.
+    if (!(await schoolHasFeature(session.schoolId, 'parent-portal'))) {
+      await clearParentAuthCookie()
+      return NextResponse.json(
+        { error: 'access_revoked', message: "Your school has disabled parent portal access. Please contact your school admin." },
+        { status: 401 }
+      )
+    }
+
     // Get parent info + all linked children
     const parentResult = await pool.query(
-      `SELECT p.id, p.name, p.email, p.phone, p.school_id, p.password_changed,
+      `SELECT p.id, p.name, p.email, p.phone, p.school_id, p.password_changed, p.date_of_birth,
               s.name AS school_name
        FROM parents p
        LEFT JOIN schools s ON s.id = p.school_id
