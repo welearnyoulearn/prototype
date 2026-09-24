@@ -1,60 +1,27 @@
 # In Progress
 
-Tasks currently being worked on. Move to [completed.md](completed.md) when done.
+Move an entry to [completed.md](completed.md) when it ships. Add new entries at the top.
 
 ---
 
-<!-- Add new entries at the top -->
-
-### Performance & security audit — login latency, tenant isolation, pagination (#TBD)
-**Type:** Bug Fix / Enhancement
-**Portal:** All (School Admin, Teacher, Student, Parent, Platform Admin)
-**Assigned to:** Vamsi
-**Branch:** feature/perf-security-audit — ⚠️ needs renaming once an issue number exists
-**Started:** 2026-08-09
-**Summary:** Fixed a cross-tenant data leak that exposed password hashes, hardened committed secret fallbacks, cut cold-start DB round-trips ~115 → 2 (the real cause of slow login), and collapsed a 4-level N+1 from ~1,500 queries to 6. Full detail and the open-items list: [DOCS/PERF-SECURITY-AUDIT-2026-08.md](../../DOCS/PERF-SECURITY-AUDIT-2026-08.md).
+### Product documentation dossiers (this branch)
+**Type:** Docs
+**Summary:** One deep, code-verified dossier per feature (product brief, end-to-end flow, business rules, developer reference, pitch kit) plus platform architecture, roles/plans and a deck storyline, in `docs/product/features/`. Old, stale docs were removed; the factbook and wiki summaries were corrected against the code.
 **Progress:**
-- [x] P0 cross-tenant leak + password-hash exposure (students, teachers)
-- [x] JWT / ingest secret fallbacks fail closed in production
-- [x] Cold-start migration version gate (~115 → 2 round-trips)
-- [x] 4-level N+1 in `/api/school/subjects` (~1,500 → 6 queries)
-- [x] Missing indexes; dashboard waterfall; teacher + student bundle splitting
-- [x] Opt-in pagination API on 6 endpoints + shared `Pagination` component
-- [ ] **P0: tenant guards on doubts, announcements, leave-requests, notifications**
-- [ ] `/api/fees/payments` unfiltered — ~36k rows to render 6 (2-line fix, biggest win)
-- [ ] Facets/search API so the roster screens can actually paginate
-- [ ] Open GitHub issues, rename branch, add Playwright tenant-isolation regression test
+- [x] 19 feature dossiers + Teacher and Platform Admin portal dossiers
+- [x] Architecture, roles/access/plans, deck storyline
+- [x] Stale docs removed; factbook, wiki, tasks refreshed
+- [ ] Founder fills the `[TBD – founder]` items (traction, pricing, funding, team)
 
----
+### UI overhaul — shared portal design layer
+**Type:** Feature (UI)
+**Portals:** all five
+**Status:** Uncommitted on `dev` (`app/portal.css`, `components/portal/`, restyled Overview/dashboards, `components/ui/*`).
+**Tracker:** [`UI_PROGRESS.md`](../../UI_PROGRESS.md)
 
-## Format
-
-```
-### Title (#issue-number)
-**Type:** Feature / Bug Fix / Enhancement
-**Portal:** School Admin / Teacher / Student / Parent / Platform Admin
-**Assigned to:** Name
-**Branch:** feature/42-short-description or fix/87-short-description
-**Started:** YYYY-MM-DD
-**Summary:** What is being done in 1-2 sentences.
+### API authentication guards (security)
+**Type:** Bug fix
+**Summary:** State-changing routes found with no session check: plan/subscription update, announcements create/edit/delete, textbooks upload/delete, several `/api/platform/*` routes. Listed in `docs/KNOWN_ISSUES.md` (#131) and `docs/product/features/00-platform-architecture.md` §12.1.
 **Progress:**
-- [x] Step completed
-- [ ] Step remaining
-```
-
----
-
-<!-- 
-### Example task (#42)
-**Type:** Feature
-**Portal:** Student
-**Assigned to:** Vamsi
-**Branch:** feature/42-student-login
-**Started:** 2026-06-18
-**Summary:** Building proper login form for student portal to replace demo dropdown.
-**Progress:**
-- [x] Design login form UI
-- [x] Create API endpoint
-- [ ] Add JWT session
-- [ ] Write Playwright tests
--->
+- [ ] Log a GitHub issue, branch `fix/<n>-api-auth-guards`
+- [ ] Add guards + e2e tests proving anonymous and cross-school calls are refused

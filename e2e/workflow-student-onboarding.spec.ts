@@ -4,7 +4,7 @@ import { BASE, platformAdminCookie, createSchool, setSubscription } from './fixt
 // ─── UI helpers ─────────────────────────────────────────────────────────────
 async function uiLogin(page: Page, identifier: string, password: string): Promise<string> {
   await page.goto('/login?role=school')
-  await page.getByPlaceholder(/School ID or email/i).fill(identifier)
+  await page.getByPlaceholder('you@school.com').fill(identifier)
   await page.getByPlaceholder(/password/i).fill(password)
   await page.getByTestId('auth-submit-btn').click()
   await page.waitForURL(/\/change-password|\/school-admin/, { timeout: 30000 })
@@ -53,7 +53,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   const phone = (n: number) => `9${tsSuffix}${String(n).padStart(2, '0')}` // 10 digits
 
   let schoolId: number
-  let schoolCode: string
+  let adminEmail: string
   let schoolPass: string
   let uiPass = ''
   let adminCookie: string
@@ -82,13 +82,13 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
       address: '1 Test Lane',
     })
     schoolId   = school.id
-    schoolCode = school.school_code
+    adminEmail = school.email
     schoolPass = school.temp_password
 
     await setSubscription(platformCookie, schoolId, 'premium')
 
     const loginRes = await ctx.post('/api/auth/login', {
-      data: { identifier: schoolCode, password: schoolPass },
+      data: { email: adminEmail, password: schoolPass },
     })
     if (!loginRes.ok()) throw new Error(`Setup login failed — status ${loginRes.status()}`)
     const state = await ctx.storageState()
@@ -115,7 +115,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 1. Single student — required fields only (no email) ─────────────────────
   test('1. Enroll single student — required fields only (no email)', async ({ page }) => {
     test.setTimeout(60000)
-    uiPass = await uiLogin(page, schoolCode, schoolPass)
+    uiPass = await uiLogin(page, adminEmail, schoolPass)
     await goToOnboarding(page)
 
     await fillRow(page, {
@@ -139,7 +139,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 2. Single student — with student + parent email ─────────────────────────
   test('2. Enroll student with student email + parent email', async ({ page }) => {
     test.setTimeout(60000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToOnboarding(page)
 
     await fillRow(page, {
@@ -166,7 +166,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 3. Siblings — same parent phone (one parent account) ────────────────────
   test('3. Siblings: same parent phone — one parent account for both', async ({ page }) => {
     test.setTimeout(60000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToOnboarding(page)
 
     const sharedPhone = phone(3)
@@ -197,7 +197,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 4. Siblings — same parent email (one parent account) ────────────────────
   test('4. Siblings: same parent email — one parent account for both', async ({ page }) => {
     test.setTimeout(60000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToOnboarding(page)
 
     const sharedEmail = `parent${ts}@shared.com`
@@ -232,7 +232,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 5. Duplicate roll number — same grade+section rejected ──────────────────
   test('5. Duplicate roll number in same grade+section is rejected', async ({ page }) => {
     test.setTimeout(60000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToOnboarding(page)
 
     // Roll 1 in 10-A already exists from test 1 (against existing DB record)
@@ -255,7 +255,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 6. Same roll number — different section allowed ─────────────────────────
   test('6. Same roll number in a different section is allowed', async ({ page }) => {
     test.setTimeout(60000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToOnboarding(page)
 
     await fillRow(page, {
@@ -276,7 +276,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 7. Same roll number — different grade allowed ────────────────────────────
   test('7. Same roll number in a different grade is allowed', async ({ page }) => {
     test.setTimeout(60000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToOnboarding(page)
 
     await fillRow(page, {
@@ -297,7 +297,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 8. Bulk: valid + invalid roll number → validation error ─────────────────
   test('8. Bulk batch: invalid (negative) roll number is blocked by validation', async ({ page }) => {
     test.setTimeout(60000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToOnboarding(page)
 
     await fillRow(page, {
@@ -323,7 +323,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 9. Missing name → enroll blocked; missing other required field → error ───
   test('9. Missing name keeps enroll disabled; missing required field is flagged', async ({ page }) => {
     test.setTimeout(60000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToOnboarding(page)
 
     // Part A: with no names entered, the Enroll button is disabled (cannot submit).
@@ -352,7 +352,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 10. Credentials — student + parent temp passwords displayed ─────────────
   test('10. Credentials modal shows student and parent temp passwords', async ({ page }) => {
     test.setTimeout(60000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToOnboarding(page)
 
     await fillRow(page, {
@@ -379,7 +379,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 11. Reset credentials → new password shown ──────────────────────────────
   test('11. Reset credentials shows a new password in the modal', async ({ page }) => {
     test.setTimeout(60000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToOnboarding(page)
 
     await fillRow(page, {
@@ -413,7 +413,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 12. Student list sorted by roll number ───────────────────────────────────
   test('12. Student list is sorted by roll number within grade+section', async ({ page }) => {
     test.setTimeout(60000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
 
     await page.getByRole('button', { name: /Student Management/i }).click()
     await expect(page.getByText('Student List')).toBeVisible({ timeout: 10000 })
@@ -432,7 +432,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 13. UI: Onboarding page loads with controls ─────────────────────────────
   test('13. UI: Onboarding page loads with table, buttons, and headers', async ({ page }) => {
     test.setTimeout(60000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToOnboarding(page)
 
     await expect(page.getByTestId('onboarding-table')).toBeVisible()
@@ -450,7 +450,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 14. UI: Manual entry + credentials modal + Copy All ─────────────────────
   test('14. UI: Manual entry enrolls and Copy All works in credentials modal', async ({ page }) => {
     test.setTimeout(90000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToOnboarding(page)
 
     await fillRow(page, {
@@ -476,7 +476,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── 15. Delete student → marked inactive ─────────────────────────────────────
   test('15. Delete student marks it inactive', async ({ page }) => {
     test.setTimeout(60000)
-    await uiLogin(page, schoolCode, uiPass)
+    await uiLogin(page, adminEmail, uiPass)
     await goToOnboarding(page)
 
     // Enroll a student to delete
@@ -525,6 +525,6 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
     expect(res.status()).toBe(401)
     await anon.dispose()
 
-    await expect(page.getByPlaceholder(/School ID or email/i)).toBeVisible()
+    await expect(page.getByPlaceholder('you@school.com')).toBeVisible()
   })
 })

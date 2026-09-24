@@ -10,7 +10,7 @@ export function StatusPill({ status }: { status: TopicStatus }) {
   const m = STATUS_STYLE[status]
   return (
     <span
-      className="text-xs font-medium px-2 py-0.5 rounded-full"
+      className="text-xs font-medium px-2 py-1 rounded"
       style={{ background: m.bg, color: m.fg }}
     >
       {m.label}
@@ -55,7 +55,8 @@ export function Pills<T extends string | number>({
           <button
             key={String(it)}
             onClick={() => onChange(it)}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium border transition-all"
+            aria-pressed={active}
+            className="min-h-10 max-sm:min-h-11 px-3 py-2 rounded-md text-sm font-medium border transition-colors"
             style={{
               background: active ? color : 'white',
               color: active ? 'white' : INK,
@@ -88,7 +89,7 @@ export function ProgressBar({
 
 export function BackBtn({ onClick, label }: { onClick: () => void; label: string }) {
   return (
-    <button onClick={onClick} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-1">
+    <button onClick={onClick} className="flex min-h-11 items-center gap-1 text-sm text-muted-foreground hover:text-primary mb-1">
       <ChevronLeft size={15} /> {label}
     </button>
   )
@@ -105,7 +106,7 @@ export function UlearnCard({
 }) {
   return (
     <div
-      className={`bg-white rounded-2xl border shadow-sm ${className}`}
+      className={`bg-white rounded-lg border border-border ${className}`}
       style={borderColor ? { borderColor } : undefined}
     >
       {children}
