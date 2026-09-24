@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { getSession, verifyPassword, hashPassword, signToken } from '@/lib/auth'
-import { cookies } from 'next/headers'
+import { getSession, verifyPassword, hashPassword, setAuthCookie, revokeUserSessions } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
   try {
@@ -35,17 +34,11 @@ export async function POST(req: NextRequest) {
         [newHash, session.userId]
       )
 
-      // Re-issue token with firstLogin = false
-      const newPayload = { ...session, firstLogin: false }
-      const token = signToken(newPayload)
-      const cookieStore = await cookies()
-      cookieStore.set('wlyl-auth', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 60 * 60 * 24 * 7,
-        path: '/',
-      })
+      // A password change signs the user out everywhere else; this session stays.
+      if (session.sid) await revokeUserSessions(session.userId, session.sid)
+
+      // Re-issue token with firstLogin = false (same server session, same sid)
+      await setAuthCookie({ ...session, firstLogin: false })
 
       const profileRes = await pool.query('SELECT profile_completed FROM users WHERE id = $1', [session.userId])
       const profileCompleted = profileRes.rows[0]?.profile_completed ?? false

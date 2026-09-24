@@ -4,11 +4,12 @@
 // headline feature, ported as a shared component. The textarea keeps focus
 // across renders because state lives here, not in a parent that remounts it.
 
-import { useState } from 'react'
-import { Upload, X, Sparkles, Copy, ExternalLink, AlertTriangle } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { Upload, X, Sparkles, Copy, ExternalLink, AlertTriangle, FileUp } from 'lucide-react'
 import { INK, PURPLE, CREAM, BORDER } from './theme'
 
 export type BulkAction = {
+  id: string
   label: string
   color: string
   onClick: (text: string) => void
@@ -34,6 +35,16 @@ export function BulkImportPanel({
   onCopyPrompt?: (text: string) => void
 }) {
   const [text, setText] = useState('')
+  const [fileName, setFileName] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-selecting the same file name later
+    if (!file) return
+    setText(await file.text())
+    setFileName(file.name)
+  }
 
   return (
     <div className="bg-white rounded-2xl border shadow-sm p-4 space-y-3" style={{ borderColor: PURPLE }}>
@@ -74,7 +85,7 @@ export function BulkImportPanel({
 
       <textarea
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => { setText(e.target.value); setFileName('') }}
         spellCheck={false}
         rows={9}
         placeholder={example}
@@ -90,7 +101,21 @@ export function BulkImportPanel({
 
       <div className="flex items-center gap-2 flex-wrap">
         <button
-          onClick={() => setText(example)}
+          onClick={() => fileInputRef.current?.click()}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border font-medium hover:bg-gray-50"
+        >
+          <FileUp size={13} /> Select file…
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,application/json"
+          onChange={handleFileSelected}
+          className="hidden"
+        />
+        {fileName && <span className="text-xs text-gray-400 truncate max-w-[10rem]">{fileName}</span>}
+        <button
+          onClick={() => { setText(example); setFileName('') }}
           className="text-xs px-3 py-1.5 rounded-lg border font-medium hover:bg-gray-50"
         >
           Load example
@@ -98,7 +123,7 @@ export function BulkImportPanel({
         <div className="flex-1" />
         {actions.map((a) => (
           <button
-            key={a.label}
+            key={a.id}
             onClick={() => a.onClick(text)}
             className="text-sm px-3 py-1.5 rounded-lg text-white font-medium shadow-sm"
             style={{ background: a.color }}

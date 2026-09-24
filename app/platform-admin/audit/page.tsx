@@ -71,15 +71,15 @@ export default function AuditLogPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-xl font-bold text-gray-900">Audit Log</h1>
-            <p className="text-gray-400 text-sm mt-0.5">{total} total actions recorded</p>
+            <p className="text-muted-foreground text-sm mt-0.5">{total} total actions recorded</p>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
           {loading ? (
-            <div className="py-16 text-center text-gray-400">Loading…</div>
+            <div className="py-16 text-center text-muted-foreground">Loading…</div>
           ) : logs.length === 0 ? (
-            <div className="py-16 text-center text-gray-400">No actions recorded yet.</div>
+            <div className="py-16 text-center text-muted-foreground">No actions recorded yet.</div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
@@ -105,10 +105,10 @@ export default function AuditLogPage() {
                         {log.entity_name ? (
                           <span className="text-gray-800 font-medium">{log.entity_name}</span>
                         ) : (
-                          <span className="text-gray-400">—</span>
+                          <span className="text-muted-foreground">—</span>
                         )}
                         {log.entity_id && (
-                          <span className="text-gray-400 text-xs ml-1">#{log.entity_id}</span>
+                          <span className="text-muted-foreground text-xs ml-1">#{log.entity_id}</span>
                         )}
                       </td>
                       <td className="px-5 py-3.5 text-gray-500 text-xs">

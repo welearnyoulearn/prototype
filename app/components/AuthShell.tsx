@@ -1,8 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useId, useState, type CSSProperties } from 'react'
 import Link from 'next/link'
+import { ArrowLeft, Eye, EyeOff, CircleAlert, Check, LoaderCircle, LockKeyhole } from 'lucide-react'
+import PortalIdentityVisual, { type PortalIdentity } from './PortalIdentityVisual'
 
+// Legacy theme keys remain available to existing auth and onboarding screens.
 export type AuthTheme = {
   accent: string
   accentHover: string
@@ -15,64 +18,45 @@ export type AuthTheme = {
   blob2: string
   border: string
   btnGradient: string
+  photo: string
+  photoAlt: string
+  caption: string
+  pin: string
+  identity: PortalIdentity
+  color: string
+  colorHover: string
+  soft: string
+  deep: string
+}
+
+const sharedTheme = {
+  accent: 'bg-[#235b46]',
+  accentHover: 'hover:bg-[#194734]',
+  ring: 'focus:ring-[#235b46]/20',
+  gradientFrom: 'from-[#235b46]',
+  gradientVia: 'via-[#235b46]',
+  emoji: '',
+  blob1: '',
+  blob2: '',
+  border: 'border-[#dce2da]',
+  btnGradient: 'from-[#235b46] to-[#235b46]',
+  photo: '',
+  photoAlt: '',
+  caption: '',
+  pin: 'bg-[#235b46]',
+  identity: 'admin' as PortalIdentity,
+  color: '#245b46',
+  colorHover: '#194734',
+  soft: '#dfeade',
+  deep: '#183b2e',
 }
 
 export const THEMES: Record<string, AuthTheme> = {
-  admin: {
-    accent: 'bg-blue-600', accentHover: 'hover:bg-blue-700',
-    ring: 'focus:ring-blue-500/50',
-    gradientFrom: 'from-[#0a0f1e]', gradientVia: 'via-[#0d1635]',
-    label: 'School Admin Portal',
-    emoji: '🏫',
-    blob1: 'bg-blue-600/25',
-    blob2: 'bg-indigo-600/20',
-    border: 'border-blue-500/20',
-    btnGradient: 'from-blue-600 to-indigo-600',
-  },
-  platform: {
-    accent: 'bg-purple-600', accentHover: 'hover:bg-purple-700',
-    ring: 'focus:ring-purple-500/50',
-    gradientFrom: 'from-[#0f0a1e]', gradientVia: 'via-[#160d35]',
-    label: 'Platform Admin',
-    emoji: '⚙️',
-    blob1: 'bg-purple-600/25',
-    blob2: 'bg-pink-600/20',
-    border: 'border-purple-500/20',
-    btnGradient: 'from-purple-600 to-pink-600',
-  },
-  teacher: {
-    accent: 'bg-emerald-600', accentHover: 'hover:bg-emerald-700',
-    ring: 'focus:ring-emerald-500/50',
-    gradientFrom: 'from-[#0a1e12]', gradientVia: 'via-[#0d2a1a]',
-    label: 'Teacher Portal',
-    emoji: '👨‍🏫',
-    blob1: 'bg-emerald-600/25',
-    blob2: 'bg-teal-600/20',
-    border: 'border-emerald-500/20',
-    btnGradient: 'from-emerald-600 to-teal-600',
-  },
-  student: {
-    accent: 'bg-orange-500', accentHover: 'hover:bg-orange-600',
-    ring: 'focus:ring-orange-500/50',
-    gradientFrom: 'from-[#1e120a]', gradientVia: 'via-[#2a1a0d]',
-    label: 'Student Portal',
-    emoji: '🎓',
-    blob1: 'bg-orange-500/25',
-    blob2: 'bg-amber-500/20',
-    border: 'border-orange-500/20',
-    btnGradient: 'from-orange-500 to-amber-500',
-  },
-  parent: {
-    accent: 'bg-purple-500', accentHover: 'hover:bg-purple-600',
-    ring: 'focus:ring-purple-500/50',
-    gradientFrom: 'from-[#120a1e]', gradientVia: 'via-[#1a0d2a]',
-    label: 'Parent Portal',
-    emoji: '👨‍👩‍👧',
-    blob1: 'bg-purple-500/25',
-    blob2: 'bg-pink-500/20',
-    border: 'border-purple-500/20',
-    btnGradient: 'from-purple-500 to-pink-500',
-  },
+  admin: { ...sharedTheme, label: 'School admin portal' },
+  platform: { ...sharedTheme, label: 'Platform admin', identity: 'platform', color: '#773e48', colorHover: '#5f3038', soft: '#ead7da', deep: '#4f2830' },
+  teacher: { ...sharedTheme, label: 'Teacher portal', identity: 'teacher', color: '#21686a', colorHover: '#185456', soft: '#dcebea', deep: '#164749' },
+  student: { ...sharedTheme, label: 'Student portal', identity: 'student', color: '#a85f16', colorHover: '#884a0d', soft: '#f4e5cf', deep: '#6f3b0b' },
+  parent: { ...sharedTheme, label: 'Parent portal', identity: 'parent', color: '#a44f3c', colorHover: '#843b2d', soft: '#f2dfd9', deep: '#713126' },
 }
 
 export default function AuthShell({
@@ -80,50 +64,42 @@ export default function AuthShell({
 }: {
   theme: AuthTheme; title: string; subtitle: string; children: React.ReactNode
 }) {
+  const authStyle = {
+    '--auth-accent': theme.color,
+    '--auth-accent-hover': theme.colorHover,
+    '--auth-soft': theme.soft,
+    '--auth-deep': theme.deep,
+  } as CSSProperties
+
   return (
-    <div className={`min-h-screen bg-[#0a0f1e] flex items-center justify-center p-4 relative overflow-hidden`}>
+    <div className="auth-surface" data-auth-portal={theme.identity} style={authStyle}>
+      <header className="auth-header">
+        <Link href="/" className="auth-brand focus-visible:outline-2 focus-visible:outline-offset-4">
+          <span aria-hidden="true">W</span>
+          <b>WeLearnYouLearn</b>
+        </Link>
+        <div className="auth-secure"><LockKeyhole aria-hidden="true" /> Secure school access</div>
+      </header>
 
-      {/* Background blobs */}
-      <div className={`absolute -top-32 -right-32 w-80 h-80 ${theme.blob1} rounded-full blur-3xl pointer-events-none`} />
-      <div className={`absolute -bottom-32 -left-32 w-80 h-80 ${theme.blob2} rounded-full blur-3xl pointer-events-none`} />
-      <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.015)_1px,transparent_1px)] bg-[size:48px_48px] pointer-events-none" />
-
-      <div className="relative w-full max-w-md">
-
-        {/* Logo + role badge */}
-        <div className="text-center mb-8">
-          <Link href="/" className="inline-flex flex-col items-center gap-2 group">
-            <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${theme.btnGradient} flex items-center justify-center text-2xl shadow-xl group-hover:scale-105 transition-transform`}>
-              {theme.emoji}
-            </div>
-            <span className="text-white font-black text-xl tracking-tight">WeLearnYouLearn</span>
+      <main className="auth-layout">
+        <aside className="auth-visual" aria-label={`${theme.label} introduction`}>
+          <PortalIdentityVisual portal={theme.identity} />
+          <Link href="/" className="auth-back-link">
+            <ArrowLeft aria-hidden="true" className="size-4" /> Choose another portal
           </Link>
-          <span className={`inline-block mt-2 text-[11px] font-semibold uppercase tracking-widest px-3 py-1 rounded-full border ${theme.border} text-white/50`}>
-            {theme.label}
-          </span>
-        </div>
+        </aside>
 
-        {/* Card */}
-        <div className={`bg-white/5 backdrop-blur-xl border ${theme.border} rounded-2xl shadow-2xl overflow-hidden`}>
-
-          {/* Card header */}
-          <div className={`px-8 py-5 bg-gradient-to-r ${theme.btnGradient} relative overflow-hidden`}>
-            <div className="absolute inset-0 bg-black/10" />
-            <div className="relative">
-              <h2 className="text-lg font-bold text-white">{title}</h2>
-              <p className="text-white/70 text-sm mt-0.5">{subtitle}</p>
-            </div>
+        <section aria-labelledby="auth-title" className="auth-form-column">
+          <div className="auth-mobile-identity"><PortalIdentityVisual portal={theme.identity} compact /></div>
+          <div className="auth-form-frame">
+            <p className="auth-portal-label"><span /> {theme.label}</p>
+            <h1 id="auth-title">{title}</h1>
+            <p className="auth-subtitle">{subtitle}</p>
+            {children}
+            <div className="auth-help-line"><span>Account access is managed by your school.</span><span>Need help? Contact the school office.</span></div>
           </div>
-
-          {/* Card body */}
-          <div className="px-8 py-7">{children}</div>
-        </div>
-
-        {/* Footer */}
-        <p className="text-center text-white/20 text-xs mt-6">
-          © {new Date().getFullYear()} WeLearnYouLearn · Built for Indian Schools
-        </p>
-      </div>
+        </section>
+      </main>
     </div>
   )
 }
@@ -131,11 +107,9 @@ export default function AuthShell({
 export function AuthError({ message }: { message: string }) {
   if (!message) return null
   return (
-    <div data-testid="auth-error-text" className="mb-5 flex items-start gap-2.5 bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl backdrop-blur-sm">
-      <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-      </svg>
-      {message}
+    <div role="alert" data-testid="auth-error-text" className="mb-5 flex items-start gap-2.5 rounded-md border-l-2 border-[#b74038] bg-[#fbefed] px-4 py-3 text-sm leading-6 text-[#91372f]">
+      <CircleAlert aria-hidden="true" className="mt-1 size-4 shrink-0" />
+      <span>{message}</span>
     </div>
   )
 }
@@ -143,43 +117,45 @@ export function AuthError({ message }: { message: string }) {
 export function AuthSuccess({ message }: { message: string }) {
   if (!message) return null
   return (
-    <div className="mb-5 flex items-start gap-2.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm px-4 py-3 rounded-xl backdrop-blur-sm">
-      <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-      </svg>
-      {message}
+    <div role="status" className="mb-5 flex items-start gap-2.5 rounded-md border-l-2 border-[#235b46] bg-[#edf4ed] px-4 py-3 text-sm leading-6 text-[#235b46]">
+      <Check aria-hidden="true" className="mt-1 size-4 shrink-0" />
+      <span>{message}</span>
     </div>
   )
 }
 
 export function AuthInput({
   label, type = 'text', value, onChange, placeholder, required = true,
-  hint, autoComplete, ring,
+  hint, autoComplete, testId,
 }: {
   label: string; type?: string; value: string
   onChange: (v: string) => void; placeholder?: string
-  required?: boolean; hint?: string; autoComplete?: string; ring: string
+  required?: boolean; hint?: string; autoComplete?: string; ring: string; testId?: string
 }) {
+  const inputId = useId()
+  const hintId = `${inputId}-hint`
   return (
     <div>
-      <label className="block text-sm font-medium text-white/70 mb-1.5">{label}</label>
+      <label htmlFor={inputId} className="mb-2 block text-sm font-medium text-[#34483b]">{label}</label>
       <input
+        id={inputId}
         type={type}
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
         autoComplete={autoComplete}
         required={required}
-        data-testid={`auth-${label.toLowerCase().replace(/\s+/g, '-')}-input`}
-        className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 ${ring} focus:border-transparent transition backdrop-blur-sm`}
+        aria-describedby={hint ? hintId : undefined}
+        data-testid={testId ?? `auth-${label.toLowerCase().replace(/\s+/g, '-')}-input`}
+        className="auth-input min-h-12 w-full rounded-md border bg-white px-3.5 py-3 text-base text-[#202a25] transition-colors placeholder:text-[#7b877e] focus:outline-none focus:ring-2 motion-reduce:transition-none sm:text-sm"
       />
-      {hint && <p className="text-xs text-white/30 mt-1.5">{hint}</p>}
+      {hint && <p id={hintId} className="mt-2 text-xs leading-5 text-[#626e66]">{hint}</p>}
     </div>
   )
 }
 
 export function PasswordField({
-  value, onChange, placeholder = 'Enter password', ring, label,
+  value, onChange, placeholder = 'Enter password', label,
   autoComplete, required = true,
 }: {
   value: string; onChange: (v: string) => void
@@ -187,11 +163,13 @@ export function PasswordField({
   autoComplete?: string; required?: boolean
 }) {
   const [show, setShow] = useState(false)
+  const inputId = useId()
   return (
     <div>
-      <label className="block text-sm font-medium text-white/70 mb-1.5">{label}</label>
+      <label htmlFor={inputId} className="mb-2 block text-sm font-medium text-[#34483b]">{label}</label>
       <div className="relative">
         <input
+          id={inputId}
           type={show ? 'text' : 'password'}
           value={value}
           onChange={e => onChange(e.target.value)}
@@ -199,14 +177,16 @@ export function PasswordField({
           autoComplete={autoComplete}
           required={required}
           data-testid="auth-password-input"
-          className={`w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder:text-white/25 focus:outline-none focus:ring-2 ${ring} focus:border-transparent transition backdrop-blur-sm pr-12`}
+          className="auth-input min-h-12 w-full rounded-md border bg-white py-3 pl-3.5 pr-14 text-base text-[#202a25] transition-colors placeholder:text-[#7b877e] focus:outline-none focus:ring-2 motion-reduce:transition-none sm:text-sm"
         />
-        <button type="button" onClick={() => setShow(v => !v)}
-          className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100/60 transition-all">
-          {show
-            ? <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
-            : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-          }
+        <button
+          type="button"
+          onClick={() => setShow(v => !v)}
+          aria-label={show ? 'Hide password' : 'Show password'}
+          aria-controls={inputId}
+          className="auth-password-toggle absolute right-0.5 top-1/2 flex size-11 -translate-y-1/2 items-center justify-center rounded-md text-[#626e66] transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-3px] motion-reduce:transition-none"
+        >
+          {show ? <EyeOff aria-hidden="true" className="size-[18px]" /> : <Eye aria-hidden="true" className="size-[18px]" />}
         </button>
       </div>
     </div>
@@ -214,26 +194,20 @@ export function PasswordField({
 }
 
 export function AuthButton({
-  loading, label, loadingLabel = 'Please wait...', gradient,
+  loading, label, loadingLabel = 'Please wait...', testId = 'auth-submit-btn',
 }: {
-  loading: boolean; label: string; loadingLabel?: string; gradient: string
+  loading: boolean; label: string; loadingLabel?: string; gradient: string; testId?: string
 }) {
   return (
     <button
       type="submit"
       disabled={loading}
-      data-testid="auth-submit-btn"
-      className={`w-full bg-gradient-to-r ${gradient} text-white font-semibold py-3 rounded-xl text-sm transition-all disabled:opacity-50 shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2`}
+      aria-busy={loading}
+      data-testid={testId}
+      className="auth-submit flex min-h-12 w-full items-center justify-center gap-2 rounded-md px-4 py-3 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60 motion-reduce:transition-none"
     >
-      {loading ? (
-        <>
-          <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-          </svg>
-          {loadingLabel}
-        </>
-      ) : label}
+      {loading && <LoaderCircle aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" />}
+      <span aria-live="polite">{loading ? loadingLabel : label}</span>
     </button>
   )
 }

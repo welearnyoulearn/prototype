@@ -11,6 +11,80 @@ Non-obvious technical decisions and their reasoning for the WLYL School prototyp
 **Consequences:** What trade-offs come with this decision?
 -->
 
+
+## 2026-09-21 — One central Year Rollover, gated by fee year-end (#199)
+
+**Context:** Fee Year-End could create the next academic year and switch the current year on its own ("Start Year Rollover"), while the Year Rollover tab promoted students. The two did not know about each other, so a school could end up on the new year with students not promoted, and the year could be created or switched from three places.
+
+**Decision:** Year Rollover is the only place the next year is created and made current. It requires the fee year-end to be closed (server 409 + popup). Fee Year-End keeps money decisions only (carry / write off / passout / leave open, then close). The target year is always the label after the current one, so carried dues and promoted students land in the same year. A rolled-over fee year cannot be reopened.
+
+**Consequences:** the one-shot fee rollover route is removed. Schools that already ran the old fee rollover have the new year current with students not yet promoted — they must finish that year's fee year-end and then run Year Rollover. Roll numbers are freed and re-applied during promotion (old value kept in `student_class_history`).
+
+## 2026-09-21 — Timetable lives only on its own feature branch (#175, #176)
+
+**Context:** The timetable's generation, conflict, publish and availability backend had been stripped from `dev` while the screens stayed, so the feature could not work; and the routes in git history had no sign-in checks.
+
+**Decision:** Build the full end-to-end workflow on `feature/175-timetable-full-workflow` (restored backend, new `lib/timetableAuth.ts` guard, 11 end-to-end tests) and remove every timetable screen, route and the `timetable` feature key from `dev`. Tables stay. Letting a teacher schedule their own periods in the class view is a known follow-up on the branch.
+
+**Consequences:** `dev` no longer offers timetables; substitute-duty panels went with them (Emergency Cover was already removed). Merge the branch back when the workflow is signed off.
+
+## 2026-09-21 — Clean dev down to features that work end to end (#163–#168)
+
+**Context:** After an earlier "stripped for production" commit removed many API routes, `dev` still carried screens for features whose backend no longer existed (Display kiosk, Learning Hub, Daily Knowledge, Marketplace, Lesson Planner, Class Performance, Weekly Test). None was reachable from a menu, and calling them returned 404. They confused the docs, the API spec and the product story.
+
+**Decision:** Delete the Display kiosk for good. Move each of the other five to its own preserved feature branch (same pattern as #136–#140: `EXTRACTION-N.md` plan + draft PR) and remove it from `dev`. Learning Hub/Daily Knowledge and the Marketplace are student-independent, so they are **not** Platform-Admin features; Lesson Planner, Class Performance and Weekly Test each become their **own** Platform-Admin feature key when they return. Database tables are never dropped.
+
+**Consequences:** `dev` has fewer half-features; the rewards points/badges/streak data and `GET /api/students/{id}/rewards` stay for the admin's student panel. Screens for other features that still call missing routes (timetable generation, leaderboard, year review, parent engagement, class-analytics panels) are tracked in KNOWN_ISSUES.
+
+## 2026-09-21 — Analytics leftovers leave dev (#180–#183)
+
+**Context:** Four school-admin analytics screens (Student Leaderboard, Year-in-Review, Parent Engagement, Class Analytics) and the Student Management performance tab had no working backend on `dev`; three of the screens were not linked from any menu. The Leaderboard's points mostly came from features already removed.
+
+**Decision:** Delete the Leaderboard. Preserve Year-in-Review, Parent Engagement and Class Analytics + the performance tab on their own branches (#184–#186) and remove them from `dev`; rebuild each later as its own PR. Parent Engagement is the smallest to restore; Class Analytics should be redesigned around exam data and the shared attendance rules, reusing the Student 360 profile.
+
+**Consequences:** the four feature keys leave the Platform Admin config. The unauthenticated rewards route was deleted with the only screen that used it.
+
+## 2026-09-21 — Platform Admin config lists only reachable features (#188–#190)
+
+**Context:** three features (Daily Briefing, Student-Teacher Analysis, Notification Center) were switchable in Platform Admin but had no menu entry, so enabling them showed nothing.
+
+**Decision:** remove them from `dev` (each preserved on its own branch) and keep the feature config in step with what a school admin can actually open. A feature is added to `lib/features.ts` when it is implemented and reachable.
+
+**Consequences:** 20 features remain in the config. The attendance end-to-end checks that read the briefing route now use the overview route, which carries the same holiday and attendance facts.
+
+## 2026-09-20 — Attendance: any teacher marks, first submit locks; holidays live in the Academic Calendar (#153)
+
+**Context:** Attendance let any logged-in user (students and parents too) read and write any class, silently overwrote earlier records, and each portal computed its own percentage. The school calendar existed but nothing used it, so a holiday looked like a day nobody marked, and its routes had no authentication.
+
+**Decision:** Every teacher can mark every class (schools rotate cover). The **first submit locks** a class + date + session through a unique key on `attendance_sessions`, so a second teacher — even one submitting at the same instant — is told who marked it and changes nothing. The marker may correct it the same day; the admin any time; others use "Report a mistake". **Holidays are the Academic Calendar's `holiday` entries** (plus a per-school weekly-off list): one source of truth that the calendar screens, the mark sheet, the server, the analytics and the parent/student calendars all read. All percentages come from one module: (present + late) ÷ marked sessions, holidays out, unmarked days are gaps. Identity comes only from the signed session; parents and students get their own narrow endpoints.
+
+**Alternatives considered:** class-teacher-only marking (rejected: real schools rotate/cover); letting the last write win (rejected: silent data loss); a `holiday` flag on the attendance table (rejected: a holiday is a school fact, not a per-record one); per-class holidays and half-days (deferred); per-session vs per-day percentage (per-session chosen: simple to explain, works for one or two sessions a day).
+
+**Consequences:** One extra table and a backfill (existing days count as already marked). A teacher's mistake on a locked session needs the admin — deliberate. A holiday added over marked days ignores those records while it exists and counts them again if it is deleted (the admin is warned both times). `attendance` plan feature still gates the parent/student tabs. Whole-school, whole-day holidays only. No LEAP integration (no public API).
+
+
+## 2026-09-20 — Per-person school staff login with revocable server-side sessions (#145)
+
+**Context:** School staff logged in with a shared School ID, so actions could not be tied to a person. Logout only cleared a cookie (a stateless 7-day JWT), a deactivated user kept access until the JWT expired, and the login page offered "Continue to Dashboard" for whoever last left a session open, letting the next person on a shared computer walk into that account without a password.
+
+**Decision:** Email + password only, one account per person (all school staff roles keep identical access). A `user_sessions` row per login; the JWT carries its id (`sid`) and `getSession()` rejects revoked, idle (20 min) or expired (12 h) sessions and inactive users. The cookie is a browser-session cookie. Only real user activity extends the idle timer: API calls and a browser heartbeat do, background pollers (`getSession({ passive: true })`, e.g. the notification bell) do not. Invites use the existing `password_reset_tokens` table with a 48 h expiry rather than emailing a password. The login page remembers only name + email of the last account (localStorage) and always asks for the password.
+
+**Alternatives considered:** Keep School ID login for the owner (rejected: shared credential, no attribution); per-role permissions (deferred: all roles have the same access today); NextAuth/DB sessions library (rejected: project rule is custom JWT, and one small table covers the need); opt-in "Remember me" (rejected by the product owner in favour of always showing the last-used account).
+
+**Consequences:** One extra indexed query per authenticated school-admin API call. `proxy.ts` (Edge) can only check the JWT signature and presence of `sid`, so an idle-expired session is caught on the first API call and by the client-side `IdleSessionGuard`, not at page load. Existing school-admin cookies (no `sid`) are invalidated once. Two people on one computer take turns (logging in ends the previous session); simultaneous use needs separate browsers or devices. The last-used card shows the previous person's name and email to anyone opening the login page on that browser, which is a deliberate product choice. Follow-ups: school audit log, login lockout/rate limiting.
+
+
+## 2026-09-12 — Syllabus "Translate" uses transliteration via a server-side proxy (#116)
+
+**Context:** Telugu and Hindi teachers could not enter chapter names in their language without installing Google Input Tools or changing keyboards. We want an in-app option.
+
+**Decision:** Sound-based transliteration, not meaning translation: the teacher types "amma prema" and gets అమ్మ ప్రేమ, with alternative spellings to pick. Textbook titles must match exactly, which meaning translation would reword. The browser calls our own staff-only `GET /api/transliterate`, which proxies Google's public Input Tools endpoint (no API key).
+
+**Alternatives considered:** Google Cloud Translation (meaning-based, $20/1M chars, no Latin→Telugu transliteration); Google's free `translate.googleapis.com` (blocked our requests); Groq AI via `lib/gemini.ts` (needs `GROQ_API_KEY`, not configured for this release, weaker on Telugu); client-side libraries like Sanscript (need strict ITRANS spelling teachers won't know); Chrome's built-in Translator API (desktop Chrome only, meaning-based).
+
+**Consequences:** Zero cost and good quality today, but the upstream is undocumented with no SLA (tracked in KNOWN_ISSUES). The proxy route is the seam: swapping to Azure Translator Transliterate later changes only the route, not the UI.
+
+
 ## 2026-07-01 — Data-only backup to R2 + gap-fill-only restore
 
 **Context:** We need protection against accidental data loss (deleted rows) without introducing a way to clobber good data. Vercel serverless cannot run `pg_dump`/`pg_restore` binaries.

@@ -1,389 +1,434 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { todayIST, weekdayOf, monthBounds } from '@/lib/attendanceRules'
+import {
+  CALENDAR_TYPE_UI, MONTH_NAMES, WEEKDAY_SHORT, eventCoversDate, fmtLong, fmtRange, useCalendarRange,
+  type CalendarEvent,
+} from '@/app/components/SchoolCalendarView'
 
-type CalendarEvent = {
-  id: number
+// Academic Calendar — the school admin's tool. Whatever is entered here is what teachers,
+// students and parents see (read-only) in their own portals. A HOLIDAY additionally stops
+// attendance from being marked on those dates and removes them from every percentage.
+
+type AdminEvent = CalendarEvent
+type EventType = CalendarEvent['event_type']
+
+type FormState = {
+  id: number | null
+  event_type: EventType
   title: string
   event_date: string
-  end_date: string | null
-  event_type: string
-  color: string
-  description: string | null
-  all_day: boolean
+  multi: boolean
+  end_date: string
+  audience: 'everyone' | 'staff'
+  description: string
 }
 
-const EVENT_TYPES = [
-  { value: 'holiday', label: 'Holiday',  color: 'red' },
-  { value: 'exam',    label: 'Exam',     color: 'orange' },
-  { value: 'event',   label: 'Event',    color: 'blue' },
-  { value: 'meeting', label: 'Meeting',  color: 'purple' },
-  { value: 'other',   label: 'Other',    color: 'gray' },
-]
-
-const COLOR_MAP: Record<string, { bg: string; text: string; dot: string }> = {
-  red:    { bg: 'bg-red-100',    text: 'text-red-700',    dot: 'bg-red-500' },
-  orange: { bg: 'bg-orange-100', text: 'text-orange-700', dot: 'bg-orange-500' },
-  blue:   { bg: 'bg-blue-100',   text: 'text-blue-700',   dot: 'bg-blue-500' },
-  purple: { bg: 'bg-purple-100', text: 'text-purple-700', dot: 'bg-purple-500' },
-  green:  { bg: 'bg-green-100',  text: 'text-green-700',  dot: 'bg-green-500' },
-  gray:   { bg: 'bg-gray-100',   text: 'text-gray-600',   dot: 'bg-gray-400' },
-}
-
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
-const DAYS   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+const TYPES: EventType[] = ['holiday', 'exam', 'event', 'meeting', 'other']
+const PREFILL_KEY = 'wlyl_calendar_prefill'
+const emptyForm = (date: string, type: EventType = 'event'): FormState => ({
+  id: null, event_type: type, title: '', event_date: date, multi: false, end_date: '', audience: 'everyone', description: '',
+})
 
 export default function AcademicCalendar({ schoolId }: { schoolId: number }) {
-  const today = new Date()
-  const [year, setYear]         = useState(today.getFullYear())
-  const [month, setMonth]       = useState(today.getMonth())
-  const [events, setEvents]     = useState<CalendarEvent[]>([])
-  const [loading, setLoading]   = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [deleting, setDeleting] = useState<number | null>(null)
-  const [saving, setSaving]     = useState(false)
-  const [error, setError]       = useState('')
-  const [filterType, setFilterType] = useState('all')
+  void schoolId // the school comes from the login; the prop only keeps this screen's signature stable
+  const today = todayIST()
+  const [month, setMonth] = useState(today.slice(0, 7))
+  const [selected, setSelected] = useState<string | null>(today)
+  const [filter, setFilter] = useState<'all' | EventType>('all')
+  const [reload, setReload] = useState(0)
 
-  const [form, setForm] = useState({
-    title: '', event_date: '', end_date: '',
-    event_type: 'event', color: 'blue', description: '',
-  })
+  const year = month.slice(0, 4)
+  const cal = useCalendarRange(`${year}-01-01`, `${year}-12-31`, reload)
+  const events = cal.events as AdminEvent[]
 
-  useEffect(() => { loadEvents() }, [schoolId, year])
+  const [form, setForm] = useState<FormState | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState('')
+  const [needsConfirm, setNeedsConfirm] = useState<string | null>(null)   // server warning about existing attendance
+  const [notice, setNotice] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
-  async function loadEvents() {
-    setLoading(true)
+  // The admin's unsaved edit of the weekly-off days. `null` = not editing, so the screen simply shows what the
+  // server has. (It used to start from a placeholder, so a quick click before the load finished saved a wrong list.)
+  const [weeklyDraft, setWeeklyDraft] = useState<number[] | null>(null)
+  const [weeklySaving, setWeeklySaving] = useState(false)
+  const [weeklyError, setWeeklyError] = useState('')
+
+  // The "Mark today as holiday" button on the Attendance page hands over a prefilled form.
+  useEffect(() => {
     try {
-      const r = await fetch(`/api/school-calendar?school_id=${schoolId}&year=${year}`)
-      if (r.ok) setEvents(await r.json())
-    } finally {
-      setLoading(false)
-    }
+      const raw = sessionStorage.getItem(PREFILL_KEY)
+      if (!raw) return
+      sessionStorage.removeItem(PREFILL_KEY)
+      const p = JSON.parse(raw) as { event_type?: EventType; event_date?: string }
+      // Deferred a tick so this is not a synchronous state update inside the effect body.
+      queueMicrotask(() => setForm(emptyForm(p.event_date ?? today, p.event_type ?? 'holiday')))
+    } catch { /* storage unavailable */ }
+  }, [today])
+
+  const weeklyOff = weeklyDraft ?? cal.weeklyOff
+  const weeklyDirty = weeklyDraft !== null
+
+  const [yy, mm] = month.split('-').map(Number)
+  const { from, to } = monthBounds(month)
+  const lead = weekdayOf(from)
+  const days = Array.from({ length: Number(to.slice(8)) }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`)
+  const visible = events.filter(e => filter === 'all' || e.event_type === filter)
+  const eventsOn = (d: string) => visible.filter(e => eventCoversDate(e, d))
+  const selectedEvents = selected ? eventsOn(selected) : []
+  const upcoming = events.filter(e => (e.end_date ?? e.event_date) >= today && (filter === 'all' || e.event_type === filter)).slice(0, 10)
+  const holidaysThisYear = events.filter(e => e.event_type === 'holiday').length
+
+  function go(delta: number) {
+    setMonth(new Date(Date.UTC(yy, mm - 1 + delta, 1)).toISOString().slice(0, 7))
+    setSelected(null)
   }
 
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault()
-    setSaving(true); setError('')
+  function openAdd(date: string | null) {
+    setFormError(''); setNeedsConfirm(null); setNotice('')
+    setForm(emptyForm(date ?? today))
+  }
+
+  function openEdit(e: AdminEvent) {
+    setFormError(''); setNeedsConfirm(null); setNotice('')
+    setForm({
+      id: e.id, event_type: e.event_type, title: e.title, event_date: e.event_date,
+      multi: !!e.end_date, end_date: e.end_date ?? '', audience: e.audience, description: e.description ?? '',
+    })
+  }
+
+  async function save(acknowledge = false) {
+    if (!form) return
+    if (!form.title.trim()) { setFormError('Please enter a title.'); return }
+    if (!form.event_date) { setFormError('Please choose a date.'); return }
+    if (form.multi && !form.end_date) { setFormError('Please choose the last date, or turn off "Several days".'); return }
+    setSaving(true); setFormError('')
     try {
-      const r = await fetch('/api/school-calendar', {
-        method: 'POST',
+      const res = await fetch(form.id ? `/api/school-calendar/${form.id}` : '/api/school-calendar', {
+        method: form.id ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, school_id: schoolId }),
+        body: JSON.stringify({
+          title: form.title.trim(), event_type: form.event_type, event_date: form.event_date,
+          end_date: form.multi ? form.end_date : null,
+          audience: form.event_type === 'holiday' ? 'everyone' : form.audience,
+          description: form.description.trim() || null,
+          acknowledge_existing_attendance: acknowledge || undefined,
+        }),
       })
-      if (!r.ok) { const d = await r.json(); throw new Error(d.error) }
-      setShowForm(false)
-      setForm({ title: '', event_date: '', end_date: '', event_type: 'event', color: 'blue', description: '' })
-      await loadEvents()
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to save')
+      const data = await res.json().catch(() => ({}))
+      if (res.status === 409 && data.code === 'ATTENDANCE_EXISTS') { setNeedsConfirm(data.error); return }
+      if (!res.ok) { setFormError(data.error || 'Could not save. Please try again.'); return }
+      setNotice(form.id ? 'Entry updated.' : form.event_type === 'holiday' ? 'Holiday added. Attendance is now closed on those dates.' : 'Entry added.')
+      setForm(null); setNeedsConfirm(null)
+      setSelected(form.event_date.slice(0, 7) === month ? form.event_date : selected)
+      setReload(r => r + 1)
+    } catch {
+      setFormError('Connection problem. Please try again.')
     } finally {
       setSaving(false)
     }
   }
 
-  async function handleDelete(id: number) {
-    setDeleting(id)
-    await fetch(`/api/school-calendar/${id}`, { method: 'DELETE' })
-    setEvents(prev => prev.filter(ev => ev.id !== id))
-    setDeleting(null)
+  async function remove(id: number) {
+    setDeleting(true); setNotice('')
+    try {
+      const res = await fetch(`/api/school-calendar/${id}`, { method: 'DELETE' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { setNotice(data.error || 'Could not delete.'); return }
+      setNotice(data.restoredSessions > 0
+        ? `Holiday removed. ${data.restoredSessions} already-marked attendance session${data.restoredSessions > 1 ? 's' : ''} now count in reports again.`
+        : 'Entry deleted.')
+      setConfirmDelete(null)
+      setReload(r => r + 1)
+    } catch { setNotice('Connection problem. Please try again.') }
+    finally { setDeleting(false) }
   }
 
-  // Auto-set color when event_type changes
-  function handleTypeChange(type: string) {
-    const t = EVENT_TYPES.find(et => et.value === type)
-    setForm(f => ({ ...f, event_type: type, color: t?.color ?? 'blue' }))
+  async function saveWeeklyOff() {
+    setWeeklySaving(true); setWeeklyError('')
+    try {
+      const res = await fetch('/api/school-calendar/settings', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ weekly_off_days: weeklyOff }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) { setWeeklyError(data.error || 'Could not save.'); return }
+      setWeeklyDraft(null); setNotice('Weekly off days saved.'); setReload(r => r + 1)
+    } catch { setWeeklyError('Connection problem. Please try again.') }
+    finally { setWeeklySaving(false) }
   }
 
-  // Build calendar grid for current month
-  const firstDay = new Date(year, month, 1).getDay()
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
-  const cells: (number | null)[] = [
-    ...Array(firstDay).fill(null),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-  ]
-  // Pad to full weeks
-  while (cells.length % 7 !== 0) cells.push(null)
-
-  function dateStr(day: number) {
-    return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-  }
-
-  function eventsOnDay(day: number): CalendarEvent[] {
-    const ds = dateStr(day)
-    return events.filter(ev => {
-      if (filterType !== 'all' && ev.event_type !== filterType) return false
-      // Show if event_date <= ds <= end_date (or no end_date)
-      if (ev.event_date > ds) return false
-      if (ev.end_date && ev.end_date < ds) return false
-      if (!ev.end_date && ev.event_date !== ds) return false
-      return true
-    })
-  }
-
-  const todayStr = today.toISOString().slice(0, 10)
-
-  // Upcoming events list (next 60 days)
-  const upcomingCutoff = new Date(today)
-  upcomingCutoff.setDate(upcomingCutoff.getDate() + 60)
-  const upcoming = events
-    .filter(ev => {
-      if (filterType !== 'all' && ev.event_type !== filterType) return false
-      return ev.event_date >= todayStr && ev.event_date <= upcomingCutoff.toISOString().slice(0, 10)
-    })
-    .slice(0, 15)
-
-  function fmtDate(s: string) {
-    const [y, m, d] = s.split('-').map(Number)
-    return new Date(y, m - 1, d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
-  }
+  const input = 'w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500'
 
   return (
-    <div className="space-y-5">
+    <div data-testid="academic-calendar" className="space-y-5">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-lg font-bold text-gray-800">Academic Calendar</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Holidays, exams, events and school meetings</p>
+          <h2 className="text-xl font-bold text-gray-900">Academic Calendar</h2>
+          <p className="text-sm text-gray-500 mt-0.5">Holidays, exams, events and meetings. Teachers, students and parents see this calendar.</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors"
-        >
-          + Add Event
+        <button type="button" onClick={() => openAdd(selected)} data-testid="cal-add-btn"
+          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-2.5 rounded-xl shadow-sm">
+          + Add to calendar
         </button>
       </div>
 
-      {/* Add Event Modal */}
-      {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-              <h3 className="font-semibold text-gray-800">Add Calendar Event</h3>
-              <button onClick={() => setShowForm(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
-            </div>
-            <form onSubmit={handleCreate} className="p-6 space-y-4">
-              {error && <div className="bg-red-50 border border-red-100 text-red-600 text-sm px-4 py-2 rounded-lg">{error}</div>}
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-500 mb-1.5">Event Title *</label>
-                <input
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="e.g. Diwali Holiday"
-                  value={form.title}
-                  onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                  required autoFocus
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1.5">Start Date *</label>
-                  <input type="date" required
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={form.event_date}
-                    onChange={e => setForm(f => ({ ...f, event_date: e.target.value }))}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1.5">End Date</label>
-                  <input type="date"
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    value={form.end_date}
-                    onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}
-                    min={form.event_date}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-500 mb-1.5">Event Type</label>
-                <select
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  value={form.event_type}
-                  onChange={e => handleTypeChange(e.target.value)}
-                >
-                  {EVENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-500 mb-1.5">Description</label>
-                <textarea
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                  rows={2} placeholder="Optional details…"
-                  value={form.description}
-                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                />
-              </div>
-
-              <div className="flex gap-3 pt-1">
-                <button type="submit" disabled={saving}
-                  className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60">
-                  {saving ? 'Saving…' : 'Add Event'}
-                </button>
-                <button type="button" onClick={() => setShowForm(false)}
-                  className="px-4 py-2.5 border border-gray-200 text-gray-600 text-sm rounded-lg hover:bg-gray-50 transition-colors">
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </div>
+      {notice && (
+        <div role="status" data-testid="cal-notice" className="bg-green-50 border border-green-200 text-green-800 text-sm rounded-xl px-4 py-2.5 flex items-center justify-between gap-3">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice('')} aria-label="Dismiss" className="text-green-700 hover:text-green-900">✕</button>
+        </div>
+      )}
+      {cal.error && (
+        <div role="alert" data-testid="cal-error" className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-700 flex items-center justify-between gap-3">
+          <span>{cal.error}</span>
+          <button type="button" onClick={() => setReload(r => r + 1)} className="text-xs font-semibold border border-red-300 rounded-lg px-3 py-1.5 hover:bg-red-100">Try again</button>
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-5">
-        {/* Calendar Grid — spans 2 cols */}
-        <div className="col-span-2 bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-          {/* Month nav */}
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-50">
-            <div className="flex items-center gap-2">
-              <button onClick={() => setYear(y => y - 1)}
-                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors text-xs font-bold">‹‹</button>
-              <button onClick={() => { setMonth(m => { if (m === 0) { setYear(y => y - 1); return 11 } return m - 1 }) }}
-                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">‹</button>
-              <span className="text-sm font-bold text-gray-800 w-36 text-center">{MONTHS[month]} {year}</span>
-              <button onClick={() => { setMonth(m => { if (m === 11) { setYear(y => y + 1); return 0 } return m + 1 }) }}
-                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors">›</button>
-              <button onClick={() => setYear(y => y + 1)}
-                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors text-xs font-bold">››</button>
-            </div>
-
-            {/* Type filter pills */}
-            <div className="flex gap-1 flex-wrap">
-              <button
-                onClick={() => setFilterType('all')}
-                className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${filterType === 'all' ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
-                All
-              </button>
-              {EVENT_TYPES.map(t => {
-                const c = COLOR_MAP[t.color] ?? COLOR_MAP.gray
-                return (
-                  <button key={t.value}
-                    onClick={() => setFilterType(filterType === t.value ? 'all' : t.value)}
-                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${filterType === t.value ? `${c.bg} ${c.text}` : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
-                    {t.label}
-                  </button>
-                )
-              })}
-            </div>
+      {/* Add / edit form */}
+      {form && (
+        <form
+          data-testid="cal-form"
+          onSubmit={e => { e.preventDefault(); void save(false) }}
+          className="bg-white border border-blue-200 rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm"
+        >
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-bold text-gray-900">{form.id ? 'Edit entry' : 'Add to calendar'}</h3>
+            <button type="button" onClick={() => setForm(null)} aria-label="Close" className="text-gray-400 hover:text-gray-600">✕</button>
           </div>
 
-          {/* Day headers */}
-          <div className="grid grid-cols-7 border-b border-gray-50">
-            {DAYS.map(d => (
-              <div key={d} className="py-2 text-center text-xs font-semibold text-gray-400">{d}</div>
+          <div>
+            <p className="text-xs font-semibold text-gray-500 mb-1.5">What is it?</p>
+            <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Type">
+              {TYPES.map(t => (
+                <button key={t} type="button" role="radio" aria-checked={form.event_type === t}
+                  data-testid={`cal-form-type-${t}`} onClick={() => setForm(f => f && ({ ...f, event_type: t }))}
+                  className={`text-sm font-medium px-3 py-1.5 rounded-full border transition ${
+                    form.event_type === t ? `${CALENDAR_TYPE_UI[t].chip} border-transparent ring-2 ring-offset-1 ring-gray-300` : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                  {CALENDAR_TYPE_UI[t].label}
+                </button>
+              ))}
+            </div>
+            {form.event_type === 'holiday' && (
+              <p data-testid="cal-form-holiday-note" className="mt-2 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                A holiday is shown to everyone. Teachers cannot mark attendance on these dates, and they are left out of attendance percentages.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="cal-title" className="block text-xs font-semibold text-gray-500 mb-1.5">Title</label>
+            <input id="cal-title" data-testid="cal-form-title" className={input} value={form.title} maxLength={120}
+              placeholder={form.event_type === 'holiday' ? 'e.g. Diwali' : form.event_type === 'exam' ? 'e.g. Unit Test 1' : 'e.g. Annual Day'}
+              onChange={e => setForm(f => f && ({ ...f, title: e.target.value }))} autoFocus />
+          </div>
+
+          <div className="grid sm:grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="cal-date" className="block text-xs font-semibold text-gray-500 mb-1.5">{form.multi ? 'From' : 'Date'}</label>
+              <input id="cal-date" type="date" data-testid="cal-form-date" className={input} value={form.event_date}
+                onChange={e => setForm(f => f && ({ ...f, event_date: e.target.value, end_date: f.end_date && f.end_date < e.target.value ? e.target.value : f.end_date }))} />
+            </div>
+            {form.multi && (
+              <div>
+                <label htmlFor="cal-end" className="block text-xs font-semibold text-gray-500 mb-1.5">To (last day)</label>
+                <input id="cal-end" type="date" data-testid="cal-form-end-date" className={input} value={form.end_date} min={form.event_date}
+                  onChange={e => setForm(f => f && ({ ...f, end_date: e.target.value }))} />
+              </div>
+            )}
+          </div>
+          <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input type="checkbox" data-testid="cal-form-multi" checked={form.multi}
+              onChange={e => setForm(f => f && ({ ...f, multi: e.target.checked, end_date: e.target.checked ? (f.end_date || f.event_date) : '' }))} />
+            Several days (e.g. Dasara break)
+          </label>
+
+          {form.event_type !== 'holiday' && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1.5">Who can see it?</p>
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Audience">
+                {([['everyone', 'Everyone (staff, students, parents)'], ['staff', 'Staff only (admin and teachers)']] as const).map(([v, label]) => (
+                  <button key={v} type="button" role="radio" aria-checked={form.audience === v} data-testid={`cal-form-audience-${v}`}
+                    onClick={() => setForm(f => f && ({ ...f, audience: v }))}
+                    className={`text-sm px-3 py-1.5 rounded-full border ${form.audience === v ? 'bg-blue-50 border-blue-300 text-blue-700 font-medium' : 'bg-white border-gray-200 text-gray-600'}`}>{label}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label htmlFor="cal-desc" className="block text-xs font-semibold text-gray-500 mb-1.5">Note (optional)</label>
+            <textarea id="cal-desc" data-testid="cal-form-description" className={input} rows={2} maxLength={500} value={form.description}
+              onChange={e => setForm(f => f && ({ ...f, description: e.target.value }))} />
+          </div>
+
+          {formError && <p role="alert" data-testid="cal-form-error" className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{formError}</p>}
+
+          {needsConfirm && (
+            <div role="alertdialog" data-testid="cal-attendance-warning" className="bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 space-y-2">
+              <p className="text-sm text-amber-900">{needsConfirm}</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => void save(true)} disabled={saving} data-testid="cal-confirm-anyway"
+                  className="text-sm font-semibold bg-amber-600 hover:bg-amber-700 text-white rounded-lg px-3 py-1.5 disabled:opacity-50">Save anyway</button>
+                <button type="button" onClick={() => setNeedsConfirm(null)} className="text-sm border border-amber-300 text-amber-800 rounded-lg px-3 py-1.5">Go back</button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <button type="submit" disabled={saving || !!needsConfirm} data-testid="cal-form-save"
+              className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-5 py-2.5 rounded-xl disabled:opacity-50">
+              {saving ? 'Saving…' : form.id ? 'Save changes' : 'Add'}
+            </button>
+            <button type="button" onClick={() => setForm(null)} data-testid="cal-form-cancel"
+              className="text-sm text-gray-600 border border-gray-200 px-4 py-2.5 rounded-xl hover:bg-gray-50">Cancel</button>
+          </div>
+        </form>
+      )}
+
+      <div className="grid lg:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start">
+        {/* Month grid */}
+        <div className="bg-white border border-gray-200 rounded-2xl p-3 sm:p-4 space-y-3" aria-busy={cal.loading}>
+          <div className="flex items-center justify-between">
+            <button type="button" onClick={() => go(-1)} aria-label="Previous month" data-testid="cal-prev" className="w-10 h-10 rounded-xl text-gray-500 hover:bg-gray-100 text-lg">‹</button>
+            <div className="text-center">
+              <p data-testid="cal-month-label" className="text-base font-bold text-gray-900">{MONTH_NAMES[mm - 1]} {yy}</p>
+              {month !== today.slice(0, 7) && (
+                <button type="button" onClick={() => { setMonth(today.slice(0, 7)); setSelected(today) }} className="text-xs text-blue-600 hover:underline">Back to this month</button>
+              )}
+            </div>
+            <button type="button" onClick={() => go(1)} aria-label="Next month" data-testid="cal-next" className="w-10 h-10 rounded-xl text-gray-500 hover:bg-gray-100 text-lg">›</button>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter">
+            {(['all', ...TYPES] as const).map(t => (
+              <button key={t} type="button" onClick={() => setFilter(t)} data-testid={`cal-filter-${t}`} aria-pressed={filter === t}
+                className={`text-xs font-medium px-2.5 py-1 rounded-full border ${filter === t ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>
+                {t === 'all' ? 'All' : CALENDAR_TYPE_UI[t].label}
+              </button>
             ))}
           </div>
 
-          {/* Calendar cells */}
-          {loading ? (
-            <div className="text-center py-12 text-gray-400 text-sm">Loading…</div>
-          ) : (
-            <div className="grid grid-cols-7 divide-x divide-y divide-gray-50">
-              {cells.map((day, idx) => {
-                if (!day) return <div key={`e-${idx}`} className="h-20 bg-gray-50/30" />
-                const ds = dateStr(day)
-                const dayEvents = eventsOnDay(day)
-                const isToday = ds === todayStr
+          <div>
+            <div className="grid grid-cols-7 gap-1 sm:gap-1.5 mb-1.5" aria-hidden>
+              {WEEKDAY_SHORT.map(d => <div key={d} className="text-center text-[11px] font-semibold text-gray-400">{d}</div>)}
+            </div>
+            <div className={`grid grid-cols-7 gap-1 sm:gap-1.5 ${cal.loading ? 'opacity-50' : ''}`}>
+              {Array.from({ length: lead }).map((_, i) => <div key={`b${i}`} />)}
+              {days.map(d => {
+                const evs = eventsOn(d)
+                const holiday = evs.find(e => e.event_type === 'holiday')
+                const off = !holiday && weeklyOff.includes(weekdayOf(d))
                 return (
-                  <div key={day} className={`h-20 p-1.5 flex flex-col gap-0.5 overflow-hidden ${isToday ? 'bg-indigo-50/60' : 'hover:bg-gray-50/50'} transition-colors`}>
-                    <span className={`text-xs font-semibold leading-none mb-0.5 ${isToday ? 'text-indigo-600' : 'text-gray-700'}`}>
-                      {day}
+                  <button key={d} type="button" onClick={() => setSelected(selected === d ? null : d)}
+                    data-testid={`cal-day-${d}`} data-holiday={holiday ? 'true' : 'false'}
+                    aria-label={`${fmtLong(d)}${evs.length ? ': ' + evs.map(e => e.title).join(', ') : ''}`}
+                    className={`min-h-12 sm:min-h-20 rounded-lg sm:rounded-xl border p-1 sm:p-1.5 text-left flex flex-col transition ${
+                      holiday ? CALENDAR_TYPE_UI.holiday.cell : off ? 'bg-slate-50 border-slate-100 text-slate-400' : 'bg-white border-gray-100 hover:border-gray-300'
+                    } ${d === today ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${selected === d ? 'outline outline-2 outline-gray-900' : ''}`}>
+                    <span className={`text-xs sm:text-sm font-semibold ${holiday ? 'text-red-700' : ''}`}>{Number(d.slice(8))}</span>
+                    <span className="flex gap-0.5 mt-auto sm:hidden">
+                      {evs.slice(0, 3).map(e => <span key={e.id} className={`w-1.5 h-1.5 rounded-full ${CALENDAR_TYPE_UI[e.event_type].dot}`} />)}
                     </span>
-                    {dayEvents.slice(0, 3).map(ev => {
-                      const c = COLOR_MAP[ev.color] ?? COLOR_MAP.blue
-                      return (
-                        <div key={ev.id} className={`truncate text-[10px] font-medium px-1 py-0.5 rounded ${c.bg} ${c.text}`}>
-                          {ev.title}
-                        </div>
-                      )
-                    })}
-                    {dayEvents.length > 3 && (
-                      <span className="text-[10px] text-gray-400">+{dayEvents.length - 3} more</span>
-                    )}
-                  </div>
+                    <span className="hidden sm:flex flex-col gap-0.5 mt-0.5 w-full">
+                      {evs.slice(0, 2).map(e => <span key={e.id} className={`truncate text-[10px] leading-tight rounded px-1 py-0.5 ${CALENDAR_TYPE_UI[e.event_type].chip}`}>{e.title}</span>)}
+                      {evs.length > 2 && <span className="text-[10px] text-gray-400">+{evs.length - 2} more</span>}
+                    </span>
+                  </button>
                 )
               })}
             </div>
-          )}
+          </div>
+
+          {/* Selected day */}
+          <div data-testid="cal-detail" className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-3 text-sm space-y-2">
+            {selected ? (
+              <>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-semibold text-gray-700">{fmtLong(selected)}</p>
+                  <button type="button" onClick={() => openAdd(selected)} data-testid="cal-add-on-day" className="text-xs font-semibold text-blue-600 hover:underline">+ Add on this day</button>
+                </div>
+                {selectedEvents.length === 0
+                  ? <p className="text-gray-500">{weeklyOff.includes(weekdayOf(selected)) ? 'Weekly off.' : 'Nothing scheduled.'}</p>
+                  : selectedEvents.map(e => (
+                    <div key={e.id} className="flex items-start justify-between gap-3 bg-white border border-gray-100 rounded-lg px-3 py-2" data-testid={`cal-entry-${e.id}`}>
+                      <div className="min-w-0">
+                        <span className={`text-[11px] font-semibold rounded-full px-2 py-0.5 mr-2 ${CALENDAR_TYPE_UI[e.event_type].chip}`}>{CALENDAR_TYPE_UI[e.event_type].label}</span>
+                        <span className="font-medium text-gray-800">{e.title}</span>
+                        <span className="text-xs text-gray-400 ml-2">{fmtRange(e)}</span>
+                        {e.audience === 'staff' && <span className="text-[11px] text-gray-500 ml-2">· staff only</span>}
+                        {e.description && <p className="text-gray-500 text-xs mt-0.5">{e.description}</p>}
+                      </div>
+                      <div className="flex gap-1.5 shrink-0">
+                        {confirmDelete === e.id ? (
+                          <>
+                            <button type="button" onClick={() => void remove(e.id)} disabled={deleting} data-testid={`cal-delete-confirm-${e.id}`}
+                              className="text-xs font-semibold bg-red-600 text-white rounded-lg px-2.5 py-1 disabled:opacity-50">{deleting ? '…' : 'Delete'}</button>
+                            <button type="button" onClick={() => setConfirmDelete(null)} className="text-xs border border-gray-200 rounded-lg px-2.5 py-1">Keep</button>
+                          </>
+                        ) : (
+                          <>
+                            <button type="button" onClick={() => openEdit(e)} data-testid={`cal-entry-edit-${e.id}`} className="text-xs border border-gray-200 rounded-lg px-2.5 py-1 hover:bg-gray-50">Edit</button>
+                            <button type="button" onClick={() => setConfirmDelete(e.id)} data-testid={`cal-entry-delete-${e.id}`} className="text-xs border border-red-200 text-red-600 rounded-lg px-2.5 py-1 hover:bg-red-50">Delete</button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+              </>
+            ) : <span className="text-gray-400">Tap a day to see or add entries.</span>}
+          </div>
         </div>
 
-        {/* Upcoming events panel */}
-        <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden flex flex-col">
-          <div className="px-5 py-3.5 border-b border-gray-50">
-            <h3 className="text-sm font-semibold text-gray-700">Upcoming (60 days)</h3>
+        {/* Side: upcoming + weekly off */}
+        <div className="space-y-5">
+          <div className="bg-white border border-gray-200 rounded-2xl p-4" data-testid="cal-upcoming">
+            <div className="flex items-baseline justify-between mb-2">
+              <p className="text-sm font-semibold text-gray-800">Coming up</p>
+              <p className="text-[11px] text-gray-400">{holidaysThisYear} holiday{holidaysThisYear === 1 ? '' : 's'} in {year}</p>
+            </div>
+            {cal.loading ? <p className="text-sm text-gray-400">Loading…</p>
+              : upcoming.length === 0 ? <p className="text-sm text-gray-400">Nothing scheduled yet. Add the year&apos;s holidays so teachers and parents can plan.</p>
+              : (
+                <ul className="divide-y divide-gray-100">
+                  {upcoming.map(e => (
+                    <li key={e.id} className="py-2">
+                      <button type="button" onClick={() => { setMonth(e.event_date.slice(0, 7)); setSelected(e.event_date) }} className="w-full text-left flex items-start justify-between gap-2">
+                        <span><span className={`text-[10px] font-semibold rounded-full px-1.5 py-0.5 mr-1.5 ${CALENDAR_TYPE_UI[e.event_type].chip}`}>{CALENDAR_TYPE_UI[e.event_type].label}</span><span className="text-sm text-gray-800">{e.title}</span></span>
+                        <span className="text-xs text-gray-400 whitespace-nowrap">{fmtRange(e)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
           </div>
-          <div className="flex-1 overflow-y-auto divide-y divide-gray-50">
-            {upcoming.length === 0 ? (
-              <div className="text-center py-8 text-gray-400 text-sm px-4">No upcoming events</div>
-            ) : (
-              upcoming.map(ev => {
-                const c = COLOR_MAP[ev.color] ?? COLOR_MAP.blue
-                const isToday = ev.event_date === todayStr
-                return (
-                  <div key={ev.id} className="flex items-start gap-3 px-4 py-3 hover:bg-gray-50/50 group transition-colors">
-                    <div className={`w-2 h-2 rounded-full flex-shrink-0 mt-1.5 ${c.dot}`} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-gray-700 truncate">{ev.title}</p>
-                      <p className="text-[10px] text-gray-400 mt-0.5">
-                        {isToday ? <span className="text-indigo-600 font-bold">TODAY</span> : fmtDate(ev.event_date)}
-                        {ev.end_date && ev.end_date !== ev.event_date ? ` – ${fmtDate(ev.end_date)}` : ''}
-                      </p>
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${c.bg} ${c.text} capitalize`}>
-                        {ev.event_type}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => handleDelete(ev.id)}
-                      disabled={deleting === ev.id}
-                      className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 text-xs transition-opacity disabled:opacity-50 flex-shrink-0"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                )
-              })
+
+          <div className="bg-white border border-gray-200 rounded-2xl p-4" data-testid="weekly-off-card">
+            <p className="text-sm font-semibold text-gray-800">Weekly off</p>
+            <p className="text-xs text-gray-500 mt-0.5 mb-3">These weekdays are never school days: no attendance, and not counted in percentages.</p>
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="Weekly off days">
+              {WEEKDAY_SHORT.map((label, i) => (
+                <button key={label} type="button" aria-pressed={cal.ready && weeklyOff.includes(i)} data-testid={`weekly-off-${i}`}
+                  disabled={!cal.ready}
+                  onClick={() => setWeeklyDraft(w => { const cur = w ?? cal.weeklyOff; return cur.includes(i) ? cur.filter(x => x !== i) : [...cur, i] })}
+                  className={`disabled:opacity-40 text-xs font-semibold w-11 h-9 rounded-lg border ${weeklyOff.includes(i) ? 'bg-slate-700 text-white border-slate-700' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'}`}>{label}</button>
+              ))}
+            </div>
+            {weeklyError && <p role="alert" data-testid="weekly-off-error" className="text-xs text-red-600 mt-2">{weeklyError}</p>}
+            {weeklyDirty && (
+              <div className="flex gap-2 mt-3">
+                <button type="button" onClick={() => void saveWeeklyOff()} disabled={weeklySaving} data-testid="weekly-off-save"
+                  className="text-sm font-semibold bg-blue-600 text-white rounded-lg px-3 py-1.5 disabled:opacity-50">{weeklySaving ? 'Saving…' : 'Save'}</button>
+                <button type="button" onClick={() => { setWeeklyDraft(null); setWeeklyError('') }} className="text-sm border border-gray-200 rounded-lg px-3 py-1.5">Reset</button>
+              </div>
             )}
           </div>
         </div>
-      </div>
-
-      {/* Full event list (all events this year) */}
-      <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-gray-50 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-700">All Events — {year}</h3>
-          <span className="text-xs text-gray-400">{events.length} total</span>
-        </div>
-        {events.length === 0 ? (
-          <div className="text-center py-8 text-gray-400 text-sm">No events for {year}</div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            {events.map(ev => {
-              const c = COLOR_MAP[ev.color] ?? COLOR_MAP.blue
-              return (
-                <div key={ev.id} className="flex items-center gap-4 px-5 py-3 hover:bg-gray-50/50 group transition-colors">
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${c.dot}`} />
-                  <div className="w-28 text-xs text-gray-500 flex-shrink-0">
-                    {fmtDate(ev.event_date)}{ev.end_date && ev.end_date !== ev.event_date ? ` – ${fmtDate(ev.end_date)}` : ''}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm text-gray-700 font-medium">{ev.title}</span>
-                    {ev.description && <span className="text-xs text-gray-400 ml-2 hidden sm:inline">{ev.description}</span>}
-                  </div>
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize ${c.bg} ${c.text}`}>{ev.event_type}</span>
-                  <button
-                    onClick={() => handleDelete(ev.id)}
-                    disabled={deleting === ev.id}
-                    className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 text-xs transition-opacity disabled:opacity-50"
-                  >
-                    ✕
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-        )}
       </div>
     </div>
   )

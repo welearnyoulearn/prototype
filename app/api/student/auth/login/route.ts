@@ -28,8 +28,12 @@ export async function POST(req: NextRequest) {
 
     const student = result.rows[0]
 
-    if (!student.password_hash || !(await schoolHasFeature(student.school_id, 'student-portal'))) {
+    if (!student.password_hash) {
       return NextResponse.json({ error: 'Account not activated. Please contact your school admin.' }, { status: 401 })
+    }
+
+    if (!(await schoolHasFeature(student.school_id, 'student-portal'))) {
+      return NextResponse.json({ error: "You don't have access. Please contact your school admin." }, { status: 403 })
     }
 
     if (student.status !== 'active') {
