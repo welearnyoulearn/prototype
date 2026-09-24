@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { addDays, monthBounds, todayIST, weekdayOf } from '@/lib/attendanceRules'
-import { CalendarDays } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { StudentAlert, StudentPageIntro } from '@/app/student/components/StudentExperience'
+import { Sticker, type Tone } from '@/app/student/components/stickers'
 
 // The school's Academic Calendar, READ-ONLY, for teachers, students and parents.
 // (The school admin manages it in the admin portal.) Holidays are shown in red because they
@@ -26,6 +28,8 @@ export const CALENDAR_TYPE_UI: Record<CalendarEvent['event_type'], { label: stri
   meeting: { label: 'Meeting', chip: 'bg-purple-100 text-purple-700', dot: 'bg-purple-500', cell: 'bg-purple-50 border-purple-200' },
   other:   { label: 'Other',   chip: 'bg-gray-100 text-gray-600',     dot: 'bg-gray-400',   cell: 'bg-gray-50 border-gray-200' },
 }
+
+const TYPE_TONE: Record<CalendarEvent['event_type'], Tone> = { holiday: 'coral', exam: 'orange', event: 'blue', meeting: 'violet', other: 'paper' }
 
 export const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 export const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -94,14 +98,113 @@ export default function SchoolCalendarView({ experience = 'shared' }: { experien
   const selectedEvents = selected ? eventsOn(selected) : []
   const upcomingList = upcoming.events.filter(e => (e.end_date ?? e.event_date) >= today).slice(0, 8)
 
+  if (experience === 'student') {
+    return (
+      <div data-testid="school-calendar" className="max-w-4xl space-y-8">
+        <StudentPageIntro eyebrow="Plan what’s ahead" title="School calendar" sticker="spiral-calendar" tone="blue"
+          description="Exams, events, holidays and other dates shared by your school."
+          aside={<span className="sb-chip" data-size="lg" data-tone="paper"><Sticker name="pushpin" size="xs" />School schedule</span>} />
+
+        <div className="sb-month-bar">
+          <button type="button" onClick={() => go(-1)} aria-label="Previous month" data-testid="cal-prev" className="sb-icon-btn"><ChevronLeft size={20} aria-hidden="true" /></button>
+          <div className="text-center">
+            <p data-testid="cal-month-label" className="sb-month">{MONTH_NAMES[mm - 1]} {yy}</p>
+            {month !== currentMonth && (
+              <button type="button" onClick={() => { setMonth(currentMonth); setSelected(null) }} data-testid="cal-today" className="sb-link min-h-0 text-xs">Back to this month</button>
+            )}
+          </div>
+          <button type="button" onClick={() => go(1)} aria-label="Next month" data-testid="cal-next" className="sb-icon-btn"><ChevronRight size={20} aria-hidden="true" /></button>
+        </div>
+
+        {cal.error && <StudentAlert testId="cal-error" onRetry={() => setReload(r => r + 1)}>{cal.error}</StudentAlert>}
+
+        <section className="sb-planner" aria-busy={cal.loading} aria-label="Month planner">
+          <div className="sb-weekdays" aria-hidden>{WEEKDAY_SHORT.map(d => <div key={d}>{d}</div>)}</div>
+          <div className={`sb-days ${cal.loading ? 'opacity-50' : ''}`}>
+            {Array.from({ length: lead }).map((_, i) => <div key={`b${i}`} />)}
+            {days.map(d => {
+              const evs = eventsOn(d)
+              const holiday = evs.find(e => e.event_type === 'holiday')
+              const off = !holiday && cal.weeklyOff.includes(weekdayOf(d))
+              return (
+                <button
+                  key={d} type="button" onClick={() => setSelected(selected === d ? null : d)}
+                  data-testid={`cal-day-${d}`} data-holiday={holiday ? 'true' : 'false'} data-off={off} data-today={d === today} data-selected={selected === d}
+                  aria-pressed={selected === d}
+                  aria-label={`${fmtLong(d)}${evs.length ? ': ' + evs.map(e => e.title).join(', ') : ''}${off ? ': weekly off' : ''}`}
+                  className="sb-day sb-cal-day"
+                >
+                  <span>{Number(d.slice(8))}</span>
+                  <span className="mt-auto flex gap-1 sm:hidden">
+                    {evs.slice(0, 3).map(e => <span key={e.id} className="sb-dot" data-tone={TYPE_TONE[e.event_type]} />)}
+                  </span>
+                  <span className="hidden w-full flex-col gap-1 sm:flex">
+                    {evs.slice(0, 2).map(e => <span key={e.id} className="sb-washi" data-tone={TYPE_TONE[e.event_type]}>{e.title}</span>)}
+                    {evs.length > 2 && <span className="text-[11px] font-extrabold">+{evs.length - 2} more</span>}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+
+          <div data-testid="cal-detail" className="sb-say mt-6">
+            {selected ? (
+              selectedEvents.length > 0 ? (
+                <ul className="space-y-2">
+                  <li className="font-extrabold">{fmtLong(selected)}</li>
+                  {selectedEvents.map(e => (
+                    <li key={e.id} className="flex flex-wrap items-center gap-2">
+                      <span className="sb-chip" data-tone={TYPE_TONE[e.event_type]}>{CALENDAR_TYPE_UI[e.event_type].label}</span>
+                      <span className="font-bold">{e.title}</span>
+                      <span className="text-xs font-semibold text-[#6b604f]">{fmtRange(e)}</span>
+                      {e.description && <p className="w-full text-[#4a4034]">{e.description}</p>}
+                      {e.event_type === 'holiday' && <p className="w-full text-xs font-bold">No school and no attendance on this day.</p>}
+                    </li>
+                  ))}
+                </ul>
+              ) : <span>{fmtLong(selected)} — {cal.weeklyOff.includes(weekdayOf(selected)) ? 'weekly off.' : 'nothing scheduled.'}</span>
+            ) : <span className="sb-hand text-lg">tap a day to see what’s planned</span>}
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2" aria-label="Legend">
+            {(Object.keys(CALENDAR_TYPE_UI) as CalendarEvent['event_type'][]).map(t => (
+              <span key={t} className="sb-chip" data-tone="paper"><span className="sb-dot" data-tone={TYPE_TONE[t]} />{CALENDAR_TYPE_UI[t].label}</span>
+            ))}
+            <span className="sb-chip" data-tone="paper"><span className="sb-swatch" data-status="weekly_off" />Weekly off</span>
+          </div>
+        </section>
+
+        <section className="sb-card p-5" data-tone="paper" data-testid="cal-upcoming">
+          <div className="flex flex-wrap items-baseline gap-x-3">
+            <h2 className="sb-display text-2xl">Coming up</h2>
+            <span className="sb-hand">the next 60 days</span>
+          </div>
+          {upcoming.loading ? <p className="mt-3 text-sm font-semibold" role="status">Checking the next 60 days…</p>
+            : upcomingList.length === 0 ? (
+              <div className="mt-3 flex items-center gap-3"><Sticker name="sleeping-face" size="md" /><p className="text-sm font-semibold">Nothing scheduled in the next 60 days.</p></div>
+            ) : (
+              <ul className="mt-4 space-y-3">
+                {upcomingList.map(e => (
+                  <li key={e.id} className="flex items-center gap-4">
+                    <span className="sb-leaf" data-tone={TYPE_TONE[e.event_type]}><span>{MONTH_NAMES[Number(e.event_date.slice(5, 7)) - 1].slice(0, 3)}</span><strong>{Number(e.event_date.slice(8))}</strong></span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[15px] font-extrabold">{e.title}</span>
+                      <span className="mt-1 flex flex-wrap gap-2">
+                        <span className="sb-chip" data-tone={TYPE_TONE[e.event_type]}>{CALENDAR_TYPE_UI[e.event_type].label}</span>
+                        <span className="text-xs font-semibold text-[#6b604f]">{fmtRange(e)}</span>
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+        </section>
+      </div>
+    )
+  }
+
   return (
     <div data-testid="school-calendar" className="space-y-5 max-w-4xl">
-      {experience === 'student' && (
-        <header className="student-page-intro">
-          <div><p className="student-eyebrow">Plan what’s ahead</p><h1>School calendar</h1><p className="student-page-description">See exams, events, holidays, and other dates shared by your school.</p></div>
-          <div className="student-page-aside flex items-center gap-2 text-xs font-medium text-[#68736b]"><CalendarDays size={17} className="text-[#a85f16]" aria-hidden="true" />School schedule</div>
-        </header>
-      )}
       <div className="flex items-center justify-between border-y border-gray-200 bg-white/65 px-3 py-2">
         <button type="button" onClick={() => go(-1)} aria-label="Previous month" data-testid="cal-prev"
           className="w-10 h-10 rounded-md text-gray-500 hover:bg-gray-100 text-lg">‹</button>

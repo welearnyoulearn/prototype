@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { motion, useMotionValue, useTransform, animate, useReducedMotion } from 'framer-motion'
-import { Award, BarChart3, Printer } from 'lucide-react'
-import { GRADE_COLORS, type ExamGrade } from '@/lib/examGrading'
-import { InlineLoader } from '@/components/loaders'
+import { ChevronDown, Printer } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { StudentEmptyState, StudentPageIntro, StudentProgressTrack } from './StudentExperience'
+import { StudentAlert, StudentEmptyState, StudentPageIntro, StudentProgressTrack, studentReveal } from './StudentExperience'
+import { Sticker, subjectSticker, type StickerName, type Tone } from './stickers'
 
 type SubjectResult = {
   subject_name: string
@@ -55,6 +55,33 @@ function CountUpPercent({ value }: { value: number }) {
   return <>{display}</>
 }
 
+function fmtDate(date: string): string {
+  const d = new Date(date.length === 10 ? `${date}T00:00:00` : date)
+  return Number.isNaN(d.getTime()) ? date : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function passTone(pass: boolean | null): Tone {
+  return pass === true ? 'mint' : pass === false ? 'coral' : 'paper'
+}
+
+function resultSticker(pct: number | null, pass: boolean | null): StickerName {
+  if (pct === null) return 'memo'
+  if (pct >= 100) return 'hundred-points'
+  if (pct >= 90) return 'star-struck'
+  if (pass) return 'sports-medal'
+  return 'seedling'
+}
+
+function cheerFor(pct: number | null, pass: boolean | null): string {
+  if (pct === null) return 'Result recorded.'
+  if (pct >= 100) return 'A perfect score!'
+  if (pct >= 90) return 'Outstanding work!'
+  if (pass) return 'Well done — keep it up!'
+  return 'You can bounce back — ask your teacher what to practise next.'
+}
+
+const PAGE_INTRO = { eyebrow: 'Academic progress', title: 'My marks', sticker: 'trophy' as const, tone: 'yellow' as const, description: 'Review released exams, see how each subject went, and open a score card to share or print.' }
+
 const EXAM_TYPE_LABELS: Record<string, string> = {
   unit_test: 'Unit Test',
   mid_term: 'Mid Term',
@@ -91,18 +118,20 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
 
   if (loading) {
     return (
-      <InlineLoader portal="student" label="Preparing your released results…" size="lg" className="py-20" />
+      <div className="space-y-6" role="status" aria-live="polite" aria-busy="true">
+        <span className="sr-only">Preparing your released results…</span>
+        <Skeleton className="h-28 rounded-[22px]" />
+        <Skeleton className="h-56 rounded-[22px]" />
+        {[1, 2].map(i => <Skeleton key={i} className="h-20 rounded-[14px]" />)}
+      </div>
     )
   }
 
   if (error) {
     return (
       <div className="space-y-6">
-        <StudentPageIntro eyebrow="Academic progress" title="My marks" description="Review released exams, understand each subject result, and open a score card when you need the full record." />
-        <div role="alert" className="border-l-2 border-red-600 bg-red-50 p-5">
-          <p className="text-red-800 text-sm">We couldn’t load your released results. {error}</p>
-          <button onClick={fetchExams} className="mt-3 min-h-10 text-sm font-semibold text-red-800 underline underline-offset-4">Try again</button>
-        </div>
+        <StudentPageIntro {...PAGE_INTRO} />
+        <StudentAlert onRetry={fetchExams}>We couldn’t load your released results. {error}</StudentAlert>
       </div>
     )
   }
@@ -110,148 +139,133 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
   if (exams.length === 0) {
     return (
       <div className="space-y-6">
-        <StudentPageIntro eyebrow="Academic progress" title="My marks" description="Review released exams, understand each subject result, and open a score card when you need the full record." />
-        <StudentEmptyState icon={<BarChart3 size={22} />} title="No released results yet" description="Your exam results will appear here after your school releases them." />
+        <StudentPageIntro {...PAGE_INTRO} />
+        <StudentEmptyState sticker="hourglass" tone="yellow" title="No released results yet" description="Your exam results will appear here after your school releases them." />
       </div>
     )
   }
 
   const latestExam = exams[0]
+  const latestTone: Tone = latestExam.pass === true ? 'mint' : latestExam.pass === false ? 'orange' : 'paper'
 
   return (
-    <div className="space-y-6">
-      <StudentPageIntro eyebrow="Academic progress" title="My marks" description="Review released exams, understand each subject result, and open a score card when you need the full record." />
+    <div className="space-y-10">
+      <StudentPageIntro {...PAGE_INTRO} />
+
       {latestExam.percentage !== null && (
-        <motion.div
+        <motion.section
           initial={reduceMotion ? false : { opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-          className="grid gap-6 border-y border-[#dcd8cd] bg-white/60 px-4 py-6 text-foreground sm:grid-cols-[1fr_auto] sm:items-center"
+          className="sb-card p-6 sm:p-8" data-tone={latestTone} data-testid="marks-latest" aria-labelledby="marks-latest-title"
         >
-          <div className="relative">
-            <p className="student-section-kicker">Latest released result</p>
-            <p className="text-foreground font-semibold text-xl mt-1">{latestExam.exam_name}</p>
-            <p className="text-muted-foreground text-sm">{EXAM_TYPE_LABELS[latestExam.exam_type] || latestExam.exam_type} · {latestExam.exam_date}</p>
-            <div className="mt-4 max-w-sm"><StudentProgressTrack value={latestExam.percentage} label={`${latestExam.total_obtained ?? '—'} of ${latestExam.total_max} total marks`} tone={latestExam.pass ? 'green' : 'red'} /></div>
-          </div>
-          <div className="relative flex items-center gap-3">
-            <div className="text-center">
-              <div className="text-3xl font-semibold"><CountUpPercent value={latestExam.percentage} />%</div>
-              <div className={`mt-1 text-xs font-bold ${latestExam.pass ? 'text-green-700' : 'text-red-700'}`}>{latestExam.grade} · {latestExam.pass ? 'PASS' : 'FAIL'}</div>
+          <Sticker name={resultSticker(latestExam.percentage, latestExam.pass)} size="hero" tilt={12} className="sb-peek -top-10 right-6" />
+          <div className="grid items-center gap-8 sm:grid-cols-[1fr_auto]">
+            <div className="min-w-0">
+              <span className="sb-kicker" data-tone="paper">Latest released result</span>
+              <h2 id="marks-latest-title" className="sb-display mt-3 text-3xl sm:text-4xl">{latestExam.exam_name}</h2>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="sb-chip" data-tone="paper">{EXAM_TYPE_LABELS[latestExam.exam_type] || latestExam.exam_type}</span>
+                <span className="sb-chip" data-tone="paper">{fmtDate(latestExam.exam_date)}</span>
+              </div>
+              <div className="mt-5 max-w-sm"><StudentProgressTrack value={latestExam.percentage} tone="yellow" label={`${latestExam.total_obtained ?? '—'} of ${latestExam.total_max} total marks`} /></div>
+              <p className="sb-hand mt-4">{cheerFor(latestExam.percentage, latestExam.pass)}</p>
             </div>
-            <button onClick={() => setScoreCardExam(latestExam)} data-testid="view-score-card"
-              className="min-h-11 bg-[#8b4a10] hover:bg-[#713b0b] text-white text-sm font-medium px-4 py-2 rounded-md transition-colors">
-              Open score card
-            </button>
+            <div className="flex flex-col items-center gap-5">
+              <div className="sb-score-badge">
+                <span>
+                  <strong><CountUpPercent value={latestExam.percentage} />%</strong>
+                  <span className="mt-1 block text-xs font-extrabold">{latestExam.grade} · {latestExam.pass ? 'PASS' : 'FAIL'}</span>
+                </span>
+              </div>
+              <button onClick={() => setScoreCardExam(latestExam)} data-testid="view-score-card" className="sb-btn" data-variant="dark">
+                <Sticker name="identification-card" size="xs" />Open score card
+              </button>
+            </div>
           </div>
-        </motion.div>
+        </motion.section>
       )}
 
-      {exams.map((exam, i) => (
-        <motion.div
-          key={exam.exam_id}
-          initial={reduceMotion ? false : { opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.08 + i * 0.05, duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          className="bg-white rounded-md border border-gray-200 overflow-hidden">
-          <button aria-expanded={expanded === exam.exam_id} className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-gray-50 transition-colors"
-            onClick={() => setExpanded(expanded === exam.exam_id ? null : exam.exam_id)}>
-            <div className="flex items-center gap-3 text-left">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold ${exam.pass === true ? 'bg-green-100 text-green-700' : exam.pass === false ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-500'}`}>
-                {exam.grade || '—'}
-              </div>
-              <div>
-                <p className="font-semibold text-gray-800 text-sm">{exam.exam_name}</p>
-                <p className="text-xs text-muted-foreground">{EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type} · {exam.exam_date}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              {exam.percentage !== null && (
-                <div className="text-right">
-                  <div className="text-base font-bold text-gray-800">{exam.percentage}%</div>
-                  <div className={`text-xs font-semibold ${exam.pass ? 'text-green-600' : 'text-red-500'}`}>{exam.pass ? 'PASS' : 'FAIL'}</div>
-                </div>
-              )}
-              <svg className={`w-4 h-4 text-muted-foreground transition-transform ${expanded === exam.exam_id ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </div>
-          </button>
+      <section className="space-y-4" aria-labelledby="marks-all-title">
+        <div className="flex items-center gap-3">
+          <Sticker name="notebook" size="md" tilt={-8} />
+          <h2 id="marks-all-title" className="sb-display text-2xl">All released results</h2>
+        </div>
+        {exams.map((exam, i) => (
+          <motion.div
+            key={exam.exam_id}
+            custom={i}
+            variants={studentReveal}
+            initial={reduceMotion ? false : 'hidden'}
+            animate="visible"
+            className="sb-index-card" data-testid={`exam-card-${exam.exam_id}`}>
+            <button aria-expanded={expanded === exam.exam_id} onClick={() => setExpanded(expanded === exam.exam_id ? null : exam.exam_id)}>
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="sb-grade-dot" data-tone={passTone(exam.pass)}>{exam.grade || '—'}</span>
+                <span className="min-w-0">
+                  <span className="block truncate text-[15px] font-extrabold">{exam.exam_name}</span>
+                  <span className="block text-xs font-semibold text-[#6b604f]">{EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type} · {fmtDate(exam.exam_date)}</span>
+                </span>
+              </span>
+              <span className="flex shrink-0 items-center gap-3">
+                {exam.percentage !== null && (
+                  <span className="text-right">
+                    <span className="sb-display block text-2xl">{exam.percentage}%</span>
+                    <span className="sb-chip mt-1" data-tone={passTone(exam.pass)}>{exam.pass ? 'Pass' : 'Fail'}</span>
+                  </span>
+                )}
+                <ChevronDown size={20} className={`transition-transform ${expanded === exam.exam_id ? 'rotate-180' : ''}`} aria-hidden="true" />
+              </span>
+            </button>
 
-          {expanded === exam.exam_id && (
-            <div className="border-t border-gray-100 px-4 py-3">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm mb-3">
-                  <thead>
-                    <tr className="text-xs text-muted-foreground uppercase tracking-wide">
-                      <th className="text-left pb-2 font-medium">Subject</th>
-                      <th className="text-right pb-2 font-medium">Marks</th>
-                      <th className="text-right pb-2 font-medium">%</th>
-                      <th className="text-right pb-2 font-medium">Grade</th>
-                      <th className="text-right pb-2 font-medium">Result</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {exam.subjects.map((sub) => (
-                      <tr key={sub.subject_name} className="hover:bg-gray-50">
-                        <td className="py-2 text-gray-700 font-medium">{sub.subject_name}</td>
-                        <td className="py-2 text-right text-gray-600">
-                          {sub.is_absent ? <span className="text-amber-500 text-xs font-semibold">ABSENT</span> : sub.marks_obtained !== null ? `${sub.marks_obtained}/${sub.max_marks}` : '—'}
-                        </td>
-                        <td className="py-2 text-right text-gray-600">{sub.percentage !== null ? `${sub.percentage}%` : '—'}</td>
-                        <td className="py-2 text-right">
-                          {sub.grade ? (
-                            <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-bold ${GRADE_COLORS[sub.grade as ExamGrade] ?? 'bg-gray-100 text-gray-600'}`}>{sub.grade}</span>
-                          ) : '—'}
-                        </td>
-                        <td className="py-2 text-right">
-                          {sub.pass === true && <span className="text-green-600 text-xs font-semibold">Pass</span>}
-                          {sub.pass === false && <span className="text-red-500 text-xs font-semibold">Fail</span>}
-                          {sub.pass === null && <span className="text-muted-foreground text-xs">—</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  {exam.total_obtained !== null && (
-                    <tfoot>
-                      <tr className="border-t-2 border-gray-200 font-semibold">
-                        <td className="pt-2 text-gray-800">Total</td>
-                        <td className="pt-2 text-right text-gray-800">{exam.total_obtained}/{exam.total_max}</td>
-                        <td className="pt-2 text-right text-gray-800">{exam.percentage}%</td>
-                        <td className="pt-2 text-right">
-                          {exam.grade && <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-bold ${GRADE_COLORS[exam.grade as ExamGrade] ?? 'bg-gray-100 text-gray-600'}`}>{exam.grade}</span>}
-                        </td>
-                        <td className="pt-2 text-right">
-                          <span className={`text-xs font-bold ${exam.pass ? 'text-green-600' : 'text-red-500'}`}>{exam.pass ? 'PASS' : 'FAIL'}</span>
-                        </td>
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
-              </div>
-
-              <div className="border-t border-gray-100 pt-3 flex items-center justify-between gap-3">
-                {exam.parent_acknowledged ? (
-                  <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2 flex-1">
-                    <svg className="w-4 h-4 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span>Acknowledged by <strong>{exam.parent_ack_name}</strong>{exam.parent_ack_at && ` on ${new Date(exam.parent_ack_at).toLocaleDateString()}`}</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 text-xs text-amber-600 bg-amber-50 rounded-lg px-3 py-2 flex-1">
-                    <svg className="w-4 h-4 text-amber-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
-                    <span>Waiting for your parent to acknowledge this result in their own portal.</span>
+            {expanded === exam.exam_id && (
+              <div className="space-y-4 border-t-[2.5px] border-[#1b1611] bg-[#faf5e8] p-4">
+                <ul className="grid gap-2" aria-label={`${exam.exam_name} subjects`}>
+                  {exam.subjects.map(sub => (
+                    <li key={sub.subject_name} className="sb-subject-row">
+                      <Sticker name={subjectSticker(sub.subject_name)} size="sm" tilt={-6} />
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-extrabold">{sub.subject_name}</span>
+                        {sub.is_absent
+                          ? <span className="sb-chip mt-1" data-tone="yellow">Absent</span>
+                          : sub.percentage !== null && <span className="mt-1.5 block max-w-[220px]"><StudentProgressTrack value={sub.percentage} tone={sub.pass === false ? 'coral' : 'mint'} size="sm" /></span>}
+                      </span>
+                      <span className="flex items-center gap-2 text-right">
+                        <span className="text-sm font-extrabold tabular-nums">{sub.is_absent ? '—' : sub.marks_obtained !== null ? `${sub.marks_obtained}/${sub.max_marks}` : '—'}</span>
+                        {sub.grade && <span className="sb-chip" data-tone={passTone(sub.pass)}>{sub.grade}</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {exam.total_obtained !== null && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-[14px] border-[2.5px] border-[#1b1611] bg-[#1b1611] px-4 py-3 text-white">
+                    <span className="text-sm font-extrabold uppercase tracking-[.08em]">Total</span>
+                    <span className="flex items-center gap-3 font-extrabold tabular-nums">
+                      {exam.total_obtained}/{exam.total_max} · {exam.percentage}%
+                      {exam.grade && <span className="sb-chip" data-tone={passTone(exam.pass)}>{exam.grade}</span>}
+                    </span>
                   </div>
                 )}
-                <button onClick={() => setScoreCardExam(exam)} className="min-h-10 text-xs font-semibold text-[#8b4a10] hover:text-[#6f3b0b] flex-shrink-0">Open score card →</button>
+
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  {exam.parent_acknowledged ? (
+                    <p className="flex flex-1 items-center gap-2 text-sm font-semibold">
+                      <Sticker name="check-mark-button" size="xs" />
+                      <span>Seen by <strong>{exam.parent_ack_name}</strong>{exam.parent_ack_at && ` on ${new Date(exam.parent_ack_at).toLocaleDateString()}`}</span>
+                    </p>
+                  ) : (
+                    <p className="flex flex-1 items-center gap-2 text-sm font-semibold">
+                      <Sticker name="hourglass" size="xs" />
+                      <span>Waiting for your parent to acknowledge this result in their portal.</span>
+                    </p>
+                  )}
+                  <button onClick={() => setScoreCardExam(exam)} className="sb-btn" data-size="sm" data-variant="ghost">Open score card</button>
+                </div>
               </div>
-            </div>
-          )}
-        </motion.div>
-      ))}
+            )}
+          </motion.div>
+        ))}
+      </section>
 
       {scoreCardExam && <ScoreCardModal exam={scoreCardExam} onClose={() => setScoreCardExam(null)} />}
     </div>
@@ -265,58 +279,34 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
 function ScoreCardModal({ exam, onClose }: { exam: ExamResult; onClose: () => void }) {
   return (
     <Dialog open onOpenChange={open => { if (!open) onClose() }}>
-      <DialogContent className="max-h-[90dvh] gap-0 overflow-y-auto border-0 p-0 sm:max-w-lg" showCloseButton>
-        <DialogHeader className="bg-[#713f0f] px-6 py-6 pr-14 text-white">
-          <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[.14em] text-[#f0bc72]"><Award size={15} aria-hidden="true" />Released score card</div>
-          <DialogTitle className="text-xl font-semibold text-white">{exam.exam_name}</DialogTitle>
-          <DialogDescription className="text-sm text-white/65">{EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type} · {exam.exam_date}</DialogDescription>
-          <div className="mt-5 flex items-center gap-5 sm:gap-6">
-            <div>
-              <p className="text-4xl font-semibold">{exam.percentage}%</p>
-              <p className="text-white/55 text-xs uppercase tracking-wide mt-1">Overall</p>
-            </div>
-            <div className="w-px h-12 bg-white/20" />
-            <div>
-              <p className="text-4xl font-semibold">{exam.grade}</p>
-              <p className="text-white/55 text-xs uppercase tracking-wide mt-1">Grade</p>
-            </div>
-            <div className="w-px h-12 bg-white/20" />
-            <div>
-              <p className={`text-2xl font-semibold ${exam.pass ? 'text-emerald-300' : 'text-red-300'}`}>{exam.pass ? 'PASS' : 'FAIL'}</p>
-              <p className="text-white/55 text-xs uppercase tracking-wide mt-1">Result</p>
-            </div>
+      <DialogContent data-student-ui="" className="max-h-[90dvh] gap-0 overflow-y-auto bg-[#fffdf7] p-0 sm:max-w-lg" showCloseButton>
+        <DialogHeader className="sb-certificate-head pr-14 text-left">
+          <Sticker name={resultSticker(exam.percentage, exam.pass)} size="xl" tilt={10} className="absolute right-12 top-4 hidden sm:inline-block" />
+          <span className="sb-kicker w-fit" data-tone="yellow">Released score card</span>
+          <DialogTitle className="sb-display mt-3 text-3xl text-white">{exam.exam_name}</DialogTitle>
+          <DialogDescription className="text-sm text-white/70">{EXAM_TYPE_LABELS[exam.exam_type] || exam.exam_type} · {fmtDate(exam.exam_date)}</DialogDescription>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <span className="sb-note px-4 py-2" data-tone="yellow" style={{ '--tilt': '-3deg' } as React.CSSProperties}><span className="sb-display block text-3xl">{exam.percentage}%</span><span className="text-[11px] font-extrabold uppercase">Overall</span></span>
+            <span className="sb-note px-4 py-2" data-tone="blue" style={{ '--tilt': '2deg' } as React.CSSProperties}><span className="sb-display block text-3xl">{exam.grade}</span><span className="text-[11px] font-extrabold uppercase">Grade</span></span>
+            <span className="sb-note px-4 py-2" data-tone={passTone(exam.pass)} style={{ '--tilt': '-1.5deg' } as React.CSSProperties}><span className="sb-display block text-3xl">{exam.pass ? 'PASS' : 'FAIL'}</span><span className="text-[11px] font-extrabold uppercase">Result</span></span>
           </div>
         </DialogHeader>
-        <div className="p-6">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-xs text-muted-foreground uppercase tracking-wide border-b border-gray-100">
-                <th className="text-left pb-2 font-semibold">Subject</th>
-                <th className="text-right pb-2 font-semibold">Marks</th>
-                <th className="text-right pb-2 font-semibold">Grade</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {exam.subjects.map(sub => (
-                <tr key={sub.subject_name}>
-                  <td className="py-2 text-gray-700">{sub.subject_name}</td>
-                  <td className="py-2 text-right text-gray-600">{sub.is_absent ? 'Absent' : sub.marks_obtained !== null ? `${sub.marks_obtained}/${sub.max_marks}` : '—'}</td>
-                  <td className="py-2 text-right">
-                    {sub.grade ? <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-bold ${GRADE_COLORS[sub.grade as ExamGrade] ?? 'bg-gray-100 text-gray-600'}`}>{sub.grade}</span> : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="border-t-2 border-gray-200 font-bold">
-                <td className="pt-2 text-gray-800">Total</td>
-                <td className="pt-2 text-right text-gray-800">{exam.total_obtained}/{exam.total_max}</td>
-                <td className="pt-2 text-right text-gray-800">{exam.percentage}%</td>
-              </tr>
-            </tfoot>
-          </table>
-          <p className="text-xs text-gray-500 text-center mt-5">Passing criteria: {exam.passing_pct}% · Released {new Date(exam.released_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-          <button onClick={() => window.print()} className="flex min-h-11 w-full items-center justify-center gap-2 mt-4 border border-gray-200 text-gray-700 text-sm font-semibold py-2.5 rounded-md hover:bg-gray-50 transition-colors">
+        <div className="space-y-2 p-6">
+          {exam.subjects.map(sub => (
+            <div key={sub.subject_name} className="sb-subject-row">
+              <Sticker name={subjectSticker(sub.subject_name)} size="sm" />
+              <span className="truncate text-sm font-extrabold">{sub.subject_name}</span>
+              <span className="flex items-center gap-2 text-sm font-extrabold tabular-nums">
+                {sub.is_absent ? 'Absent' : sub.marks_obtained !== null ? `${sub.marks_obtained}/${sub.max_marks}` : '—'}
+                {sub.grade && <span className="sb-chip" data-tone={passTone(sub.pass)}>{sub.grade}</span>}
+              </span>
+            </div>
+          ))}
+          <div className="flex items-center justify-between rounded-[14px] border-[2.5px] border-[#1b1611] bg-[#1b1611] px-4 py-3 font-extrabold text-white">
+            <span>Total</span><span className="tabular-nums">{exam.total_obtained}/{exam.total_max} · {exam.percentage}%</span>
+          </div>
+          <p className="pt-3 text-center text-xs font-semibold text-[#6b604f]">Passing criteria: {exam.passing_pct}% · Released {new Date(exam.released_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+          <button onClick={() => window.print()} className="sb-btn mt-2 w-full" data-tone="yellow">
             <Printer size={16} aria-hidden="true" />Print or save as PDF
           </button>
         </div>
