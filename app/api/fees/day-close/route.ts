@@ -1,42 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
-
-const ENSURE = `
-  CREATE TABLE IF NOT EXISTS fee_day_close (
-    id            SERIAL PRIMARY KEY,
-    school_id     INTEGER NOT NULL,
-    close_date    DATE    NOT NULL,
-    total_cash    NUMERIC(10,2) NOT NULL DEFAULT 0,
-    total_cheque  NUMERIC(10,2) NOT NULL DEFAULT 0,
-    total_upi     NUMERIC(10,2) NOT NULL DEFAULT 0,
-    total_online  NUMERIC(10,2) NOT NULL DEFAULT 0,
-    total_dd      NUMERIC(10,2) NOT NULL DEFAULT 0,
-    system_cash   NUMERIC(10,2) NOT NULL DEFAULT 0,
-    actual_cash   NUMERIC(10,2),
-    difference    NUMERIC(10,2),
-    receipt_from  TEXT,
-    receipt_to    TEXT,
-    txn_count     INTEGER NOT NULL DEFAULT 0,
-    submitted_by  TEXT NOT NULL,
-    submitted_at  TIMESTAMPTZ DEFAULT NOW(),
-    notes         TEXT,
-    UNIQUE(school_id, close_date)
-  )
-`
+import { todayIST } from '@/lib/istDate'
 
 // GET /api/fees/day-close?school_id=X&date=YYYY-MM-DD
 // Returns collection summary for a date (or today if no date)
 export async function GET(req: NextRequest) {
   const p         = req.nextUrl.searchParams
   const school_id = p.get('school_id')
-  const date      = p.get('date') || new Date().toISOString().slice(0, 10)
+  const date      = p.get('date') || todayIST()
 
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
   if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   try {
-    await pool.query(ENSURE)
+    await ensureDB()
 
     // Today's payment breakdown by mode
     const { rows: byMode } = await pool.query(
@@ -106,7 +84,7 @@ export async function GET(req: NextRequest) {
 // Body: { school_id, date, actual_cash, submitted_by, notes? }
 export async function POST(req: NextRequest) {
   try {
-    await pool.query(ENSURE)
+    await ensureDB()
     const { school_id, date, actual_cash, submitted_by: clientActor, notes } = await req.json()
     const access = await requireFeeAccess(school_id)
     if (!access) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -114,12 +92,28 @@ export async function POST(req: NextRequest) {
     if (!school_id || !date) {
       return NextResponse.json({ error: 'school_id, date required' }, { status: 400 })
     }
+    if (actual_cash != null && !Number.isFinite(parseFloat(actual_cash))) {
+      return NextResponse.json({ error: 'actual_cash must be a number' }, { status: 400 })
+    }
 
-    // Get system totals for the day
+    // Get system totals for the day AND the receipt range/count in ONE query,
+    // not two separate autocommit pool.query() calls — each of those took its
+    // own independent read snapshot, so a payment collected/cancelled between
+    // them could leave the saved receipt count/range inconsistent with the
+    // saved cash/mode totals (e.g. txn_count reflecting one more payment than
+    // total_cash does). A single SQL statement's sub-selects all execute
+    // against the SAME snapshot, even outside an explicit transaction.
     const { rows: byMode } = await pool.query(
-      `SELECT payment_mode, SUM(amount) AS total
-       FROM fee_payments
-       WHERE school_id = $1 AND paid_date = $2 AND payment_status = 'completed'
+      `WITH day_payments AS (
+         SELECT payment_mode, amount, receipt_number
+         FROM fee_payments
+         WHERE school_id = $1 AND paid_date = $2 AND payment_status = 'completed'
+       )
+       SELECT payment_mode, SUM(amount) AS total,
+              (SELECT MIN(receipt_number) FROM day_payments) AS first_receipt,
+              (SELECT MAX(receipt_number) FROM day_payments) AS last_receipt,
+              (SELECT COUNT(*) FROM day_payments) AS cnt
+       FROM day_payments
        GROUP BY payment_mode`,
       [school_id, date]
     )
@@ -127,12 +121,13 @@ export async function POST(req: NextRequest) {
     byMode.forEach((r: { payment_mode: string; total: string }) => {
       modeMap[r.payment_mode] = parseFloat(r.total)
     })
-
-    const { rows: [receipts] } = await pool.query(
-      `SELECT MIN(receipt_number) AS first_receipt, MAX(receipt_number) AS last_receipt, COUNT(*) AS cnt
-       FROM fee_payments WHERE school_id = $1 AND paid_date = $2 AND payment_status = 'completed'`,
-      [school_id, date]
-    )
+    // first_receipt/last_receipt/cnt are the same on every grouped row (they're
+    // computed over the whole day_payments CTE, not per-mode) — or absent
+    // entirely if there were no payments at all for the day, in which case
+    // there's nothing that could have been inconsistent anyway.
+    const receipts = byMode[0]
+      ? { first_receipt: byMode[0].first_receipt, last_receipt: byMode[0].last_receipt, cnt: byMode[0].cnt }
+      : { first_receipt: null, last_receipt: null, cnt: 0 }
 
     const systemCash = modeMap['cash'] || 0
     const diff = actual_cash != null ? parseFloat(actual_cash) - systemCash : null
@@ -144,7 +139,11 @@ export async function POST(req: NextRequest) {
           submitted_by, notes)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        ON CONFLICT (school_id, close_date)
-       DO UPDATE SET actual_cash=$9, difference=$10, submitted_by=$14, notes=$15, submitted_at=NOW()
+       DO UPDATE SET
+         total_cash=$3, total_cheque=$4, total_upi=$5, total_online=$6, total_dd=$7,
+         system_cash=$8, actual_cash=$9, difference=$10,
+         receipt_from=$11, receipt_to=$12, txn_count=$13,
+         submitted_by=$14, notes=$15, submitted_at=NOW()
        RETURNING *`,
       [school_id, date,
        systemCash, modeMap['cheque'] || 0, modeMap['upi'] || 0,

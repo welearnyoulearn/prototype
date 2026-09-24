@@ -6,7 +6,7 @@
 // one. Add a portal to a feature's list to make it gate that portal too — no
 // other plumbing needed, the enabled-features endpoint and each portal's nav
 // filter both read this array directly.
-export type Portal = 'school-admin' | 'student' | 'parent'
+export type Portal = 'school-admin' | 'student' | 'parent' | 'teacher'
 
 export const ALL_FEATURES: { key: string; label: string; category: string; portals: Portal[] }[] = [
   // ── Core ─────────────────────────────────────────────────────────────────────
@@ -16,45 +16,46 @@ export const ALL_FEATURES: { key: string; label: string; category: string; porta
   { key: 'class-management',   label: 'Class Management',                category: 'Core', portals: ['school-admin'] },
   { key: 'student-portal',     label: 'Student Portal Access',           category: 'Core', portals: ['school-admin'] },
   { key: 'parent-portal',      label: 'Parent Portal Access',            category: 'Core', portals: ['school-admin'] },
-  { key: 'library',            label: 'WLYL Digital Library',            category: 'Core', portals: ['school-admin', 'student', 'parent'] },
+  { key: 'library',            label: 'WLYL Digital Library',            category: 'Core', portals: ['school-admin', 'student', 'parent', 'teacher'] },
 
   // ── Scheduling ───────────────────────────────────────────────────────────────
-  { key: 'attendance',         label: 'Attendance Tracking',             category: 'Scheduling', portals: ['school-admin'] },
-  { key: 'leave-requests',     label: 'Leave Requests',                  category: 'Scheduling', portals: ['school-admin'] },
-  { key: 'emergency-cover',    label: 'Emergency Cover',                 category: 'Scheduling', portals: ['school-admin'] },
-  { key: 'timetable',          label: 'Timetable Management',            category: 'Scheduling', portals: ['school-admin'] },
-  { key: 'curriculum',         label: 'Syllabus Customizer',             category: 'Scheduling', portals: ['school-admin', 'student', 'parent'] },
-  { key: 'exam-schedule',      label: 'Exam Schedule',                   category: 'Scheduling', portals: ['school-admin'] },
+  { key: 'attendance',         label: 'Attendance Tracking',             category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },
+  { key: 'curriculum',         label: 'Syllabus Customizer',             category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },
+  // Combined switch for the entire exam/marks feature — school admin's
+  // create-and-release screen, teacher's marks entry/review, and the
+  // student/parent results + acknowledgement views. One flag rather than
+  // the old exam-schedule/results split so a school is never left in the
+  // inconsistent state of admin being able to schedule exams while
+  // students/parents can't see results (or vice versa) — see
+  // lib/db.ts's migration for how existing schools were carried over.
+  { key: 'exam-marks',         label: 'Exam Schedule & Marks',           category: 'Scheduling', portals: ['school-admin', 'student', 'parent', 'teacher'] },
 
   // ── Analytics & Intelligence ─────────────────────────────────────────────────
-  { key: 'briefing',           label: 'Daily Briefing',                  category: 'Analytics', portals: ['school-admin'] },
-  { key: 'analysis',           label: 'Student–Teacher Analysis',        category: 'Analytics', portals: ['school-admin'] },
-  { key: 'class-analytics',    label: 'Class Analytics',                 category: 'Analytics', portals: ['school-admin'] },
 
   // ── Communication ────────────────────────────────────────────────────────────
   { key: 'announcements',      label: 'Announcement Board',              category: 'Communication', portals: ['school-admin'] },
-  { key: 'notifications',      label: 'Notification Center',             category: 'Communication', portals: ['school-admin'] },
-  { key: 'parent-engagement',  label: 'Parent Engagement',               category: 'Communication', portals: ['school-admin'] },
+  { key: 'feedback-management', label: 'Feedback Management',            category: 'Communication', portals: ['school-admin'] },
 
   // ── Finance ──────────────────────────────────────────────────────────────────
-  { key: 'fee-management',     label: 'Fee Management',                  category: 'Finance', portals: ['school-admin'] },
+  { key: 'fee-management',     label: 'Fee Management',                  category: 'Finance', portals: ['school-admin', 'parent'] },
+  { key: 'online-payments',    label: 'Online Fee Payments (UPI)',       category: 'Finance', portals: ['school-admin', 'parent'] },
   { key: 'expenses',           label: 'Expense Tracking',                category: 'Finance', portals: ['school-admin'] },
 
   // ── Administration ───────────────────────────────────────────────────────────
-  { key: 'calendar',           label: 'Academic Calendar',               category: 'Administration', portals: ['school-admin'] },
-  { key: 'leaderboard',        label: 'Student Leaderboard',             category: 'Administration', portals: ['school-admin'] },
-  { key: 'export',             label: 'Export & Reports',                category: 'Administration', portals: ['school-admin'] },
+  // The school admin manages it; teachers, students and parents see it read-only (all governed by this one toggle).
+  { key: 'calendar',           label: 'Academic Calendar',               category: 'Administration', portals: ['school-admin', 'teacher', 'student', 'parent'] },
+  { key: 'export',             label: 'Export Data',                     category: 'Administration', portals: ['school-admin'] },
   { key: 'settings',           label: 'School Settings',                 category: 'Administration', portals: ['school-admin'] },
   { key: 'year-rollover',      label: 'Year Rollover',                   category: 'Administration', portals: ['school-admin'] },
-  { key: 'year-review',        label: 'Year-in-Review Report',           category: 'Administration', portals: ['school-admin'] },
-  { key: 'api-monitoring',   label: 'Watchline (API Monitoring)',       category: 'Administration', portals: ['school-admin'] },
 ]
 
 export const CATEGORY_ORDER = ['Core', 'Scheduling', 'Analytics', 'Finance', 'Communication', 'Administration']
 
 // Features that can be overridden per-school via school_feature_overrides,
 // taking precedence over the tier-level plan_features setting.
-export const OVERRIDABLE_FEATURE_KEYS = ['student-portal', 'parent-portal', 'api-monitoring']
+// NOTE: 'api-monitoring' (Watchline) is deliberately NOT in ALL_FEATURES: it is not a plan feature. It is switched on
+// per school only (Platform Admin -> school -> Watchline), stored as an override, and read by the logger.
+export const OVERRIDABLE_FEATURE_KEYS = ['student-portal', 'parent-portal', 'api-monitoring', 'online-payments']
 
 // A portal's nav key doesn't always match the ALL_FEATURES key that gates it
 // (e.g. student/parent portals call it 'syllabus', school-admin calls the
@@ -63,5 +64,11 @@ export const OVERRIDABLE_FEATURE_KEYS = ['student-portal', 'parent-portal', 'api
 // endpoint both resolve through it, so a rename never needs to happen twice.
 export const PORTAL_NAV_KEY_ALIASES: Record<string, string> = {
   'syllabus-tracking': 'curriculum',  // school-admin's own alias, pre-existing
+  'exam-schedule': 'exam-marks',      // school-admin's nav key for the combined exam/marks feature
   'syllabus': 'curriculum',           // student/parent portals' nav key for the same capability
+  'my-marks': 'exam-marks',           // student portal's results nav key
+  'results': 'exam-marks',            // parent portal's results nav key
+  'exams': 'exam-marks',              // parent portal's exam-calendar nav key
+  'fees': 'fee-management',           // parent portal's fees nav key for the same capability
+  'academic-calendar': 'calendar',    // school-admin's nav key for the Academic Calendar feature
 }

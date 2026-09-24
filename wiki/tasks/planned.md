@@ -1,57 +1,25 @@
-# Planned Tasks
+# Planned
 
-Upcoming features and improvements. Not yet started. Move to [in-progress.md](in-progress.md) when work begins.
+Intentions, not commitments. Source: factbook section 8 and `docs/KNOWN_ISSUES.md`. Nothing here is live.
 
----
+## Near term
+| Item | Notes |
+|------|-------|
+| WhatsApp integration (Meta) + parent WhatsApp OTP | Draft PR #155; `lib/whatsapp.ts` is a logging scaffold only; absence alerts are email today |
+| Timetable workflow | Built on `feature/175`, draft PR #177, awaiting sign-off |
+| Rebuilt analytics | Year-in-Review, Parent Engagement, Class Analytics (preserved on branches) |
+| Annual report card | A per-exam printable report card exists in Export Center; a multi-exam card with remarks does not |
+| API auth guards | See in-progress.md |
 
-## Features Not Yet Built
+## Later
+| Item | Notes |
+|------|-------|
+| Payment gateway | Needs field-level encryption (`lib/encryption.ts` not built) first |
+| Half-day and class-specific holidays | Attendance/Calendar limitation |
+| School health score | Composite of attendance, marks, fees |
+| LEAP integration | Only if a public API/import exists; today: absentee export |
+| Swap the transliteration endpoint | Google Input Tools is undocumented; move to a keyed service behind `/api/transliterate` |
+| AI features | Only after a clear use case; the product is **not** marketed as AI-powered |
 
-These are defined in `lib/features.ts` but have no implementation:
-
-### School Health Score
-**Portal:** School Admin — Analytics
-**Description:** Composite score combining attendance %, marks averages, task completion rate, and fee collection percentage into a single school health metric.
-**Feature key:** `school-health`
-
-### Syllabus Predictor
-**Portal:** School Admin — Analytics
-**Description:** AI-powered prediction of syllabus completion date based on current teaching pace and topic coverage.
-**Feature key:** `syllabus-predictor`
-
-### Anonymous Class Pulse
-**Portal:** School Admin — Communication
-**Description:** Anonymous student feedback system for class experience. Students submit feelings/ratings without teacher knowing who submitted.
-**Feature key:** `class-pulse`
-
-### Report Cards
-**Portal:** School Admin — Tools
-**Description:** Generate and print formatted report cards per student per exam. DB tables exist (`report_card_config`, `report_card_remarks`), API partially built, no UI.
-**Feature key:** `report-cards`
-
----
-
-## Partial Features to Complete
-
-### Student Auth — Proper Login
-**Portal:** Student
-**Description:** Replace demo dropdown with a real login form (student ID + password). Add JWT session.
-
-### Parent Auth — Persistent Login
-**Portal:** Parent
-**Description:** Add JWT-based session for parents instead of lookup-per-visit. Proper login form with phone + password.
-
-### Mark Acknowledgement UI
-**Portal:** Parent
-**Description:** Surface the mark acknowledgement feature prominently in the parent portal. API and DB exist.
-
-### Subject Templates Auto-Apply
-**Portal:** School Admin
-**Description:** Wire up subject templates to auto-apply when creating new classes. API and DB are ready.
-
-### Teacher Performance Analytics
-**Portal:** Teacher
-**Description:** Build the performance analytics component. Navigation item exists but flagged `comingSoon`.
-
-### Weekly Test UI
-**Portal:** Student
-**Description:** Surface the AI-generated MCQ weekly test in the student portal. DB table exists.
+## Removed from `dev` (preserved on branches — not planned for `dev`)
+Learning Hub & Daily Knowledge (#164), Rewards Marketplace (#165), Teacher lesson planner, weekly test (#168), Daily Briefing, Student–Teacher Analysis, Notification Centre page (#188–#190), Homework/Tasks, Doubts, Leave Requests, Emergency Cover (#143). Deleted for good: TV display kiosk, admin Student Leaderboard.

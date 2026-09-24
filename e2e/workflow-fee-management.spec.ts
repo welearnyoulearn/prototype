@@ -22,7 +22,7 @@ async function loginSchoolAdmin(identifier: string, password: string): Promise<s
   const res = await fetch(`${BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identifier, password }),
+    body: JSON.stringify({ email: identifier, password }),
     redirect: 'manual',
   })
   const setCookies = res.headers.getSetCookie?.() ?? []
@@ -46,6 +46,32 @@ function nextAcademicYear(): string {
   return `${y}-${String(y + 1).slice(2)}`
 }
 
+// A "YYYY-YY" label far in the future, distinct per `offset` — for regression
+// tests (SECTION 12 below) that need their own academic year, isolated from
+// both AY and AY_NEXT and from EACH OTHER. AY itself is closed (YE-010, never
+// reopened after) and structure-locked (the first /api/fees/generate call,
+// hundreds of lines earlier, auto-locks the plan) by the time these tests run
+// — and even AY_NEXT is shared, so one test's /api/fees/generate call
+// auto-locks it for every test that runs after. A distinct year per test
+// avoids both problems and makes each test runnable in isolation via --grep,
+// without depending on YE-004 (which creates AY_NEXT) having run first.
+function testYear(offset: number): string {
+  const y = 3000 + offset
+  return `${y}-${String(y + 1).slice(2)}`
+}
+async function ensureTestYear(
+  api: (path: string, method: string, body?: object, cookie?: string) => Promise<{ status: number; data: unknown }>,
+  schoolId: number, adminCookie: string, label: string,
+): Promise<void> {
+  const y = parseInt(label.slice(0, 4))
+  const res = await api('/api/academic-years', 'POST', {
+    school_id: schoolId, label, start_date: `${y}-04-01`, end_date: `${y + 1}-03-31`,
+  }, adminCookie)
+  if (res.status !== 201 && res.status !== 409) {
+    throw new Error(`ensureTestYear(${label}) failed: ${res.status} ${JSON.stringify(res.data)}`)
+  }
+}
+
 // ─── Test suite ──────────────────────────────────────────────────────────────
 
 test.describe.serial('Fee Management — Full Lifecycle', () => {
@@ -55,7 +81,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
 
   // Shared state across tests
   let schoolId: number
-  let schoolCode: string
+  let adminEmail: string
   let schoolPass: string
   let adminCookie: string
 
@@ -95,12 +121,12 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       address: '1 Fee Lane',
     })
     schoolId = s.id
-    schoolCode = s.school_code
+    adminEmail = s.email
     schoolPass = s.temp_password
 
     await setSubscription(platformCookie, schoolId, 'premium')
 
-    adminCookie = await loginSchoolAdmin(schoolCode, schoolPass)
+    adminCookie = await loginSchoolAdmin(adminEmail, schoolPass)
     await api('/api/auth/profile', 'PUT', { full_name: 'Fee Admin', phone: '9000000099' }, adminCookie)
 
     // Enroll students
@@ -482,7 +508,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       email: `nostr${ts}@test.com`, address: '1 Test St',
     })
     const noStrSchool = ns.id
-    const nsCookie = await loginSchoolAdmin(ns.school_code, ns.temp_password)
+    const nsCookie = await loginSchoolAdmin(ns.email, ns.temp_password)
     await api('/api/auth/profile', 'PUT', { full_name: 'Admin', phone: '9000000088' }, nsCookie)
     const { status } = await api('/api/fees/generate', 'POST', {
       school_id: noStrSchool, academic_year: AY,
@@ -638,6 +664,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       amount: 2500,   // matches edited amount_due
       payment_mode: 'cash',
       paid_date: today(),
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(201)
     const d = data as { receipt_number: string }
@@ -657,6 +684,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       ledger_id: ledgerA1,
       amount: 2000,  // partial of 5000
       payment_mode: 'cash',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(201)
     const d = data as { receipt_number: string }
@@ -678,6 +706,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       amount: 3000,  // remaining 3000
       payment_mode: 'cheque',
       transaction_ref: 'CHQ-001',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(201)
 
@@ -695,6 +724,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       ledger_id: ledgerA2,
       amount: 99999,
       payment_mode: 'cash',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(400)
     const d = data as { error: string }
@@ -708,6 +738,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       amount: 1000,
       payment_mode: 'cheque',
       transaction_ref: 'CHQ-TEST-999',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(201)
     const d = data as { transaction_ref: string }
@@ -727,6 +758,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       })(),
       amount: 100,
       payment_mode: 'upi',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(201)
   })
@@ -738,6 +770,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       amount: 100,
       payment_mode: 'cash',
       paid_date: '01-01-2025',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(400)
     const d = data as { error: string }
@@ -752,6 +785,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       ledger_id: ledgerA2, amount: 100,
       payment_mode: 'cash',
       paid_date: tomorrow.toISOString().slice(0, 10),
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(400)
   })
@@ -769,6 +803,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       school_id: schoolId, student_id: studentA,
       ledger_id: 9999999, amount: 100,
       payment_mode: 'cash',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(404)
   })
@@ -780,6 +815,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       school_id: schoolId, student_id: studentA,
       ledger_id: ledgerA2, amount: 5000,
       payment_mode: 'cash',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(s1).toBe(201)
     receiptMulti = (d1 as { receipt_number: string }).receipt_number
@@ -789,6 +825,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       school_id: schoolId, student_id: studentA,
       ledger_id: ledgerA3, amount: 2000,
       payment_mode: 'cash',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(s2).toBe(201)
     const r2 = (d2 as { receipt_number: string }).receipt_number
@@ -1276,6 +1313,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       school_id: schoolId, student_id: studentB,
       ledger_id: entries[0].id, amount: 100,
       payment_mode: 'cash',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(payStatus).toBe(409)
     const d = payData as { error: string }
@@ -1371,6 +1409,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       school_id: schoolId, student_id: studentA,
       ledger_id: ledgerAnnual, amount: 1,
       payment_mode: 'cash',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(400)
     const d = data as { error: string }
@@ -1394,6 +1433,7 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
       ledger_id: unpaid.id, amount: 100,
       payment_mode: 'cash',
       paid_date: '1999-01-01',
+      collected_by_name: 'Test Admin',
     }, adminCookie)
     expect(status).toBe(400)
   })
@@ -1419,5 +1459,430 @@ test.describe.serial('Fee Management — Full Lifecycle', () => {
     expect(status).toBe(409)
     const d = data as { error: string }
     expect(d.error).toBe('has_ledger_data')
+  })
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SECTION 13 — SECURITY, IDEMPOTENCY & INTEGRITY FIXES
+  // Coverage for the multi-angle audit fixes: cross-tenant IDOR on the parent
+  // self-report endpoint, ownership check on category-assignments, duplicate-
+  // submission protection, the ledger-delete data-loss guard, write-off vs
+  // discretionary waiver separation, and the payment_mode/percentage-waiver
+  // validation gaps.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  test('SEC-101: POST parent/fees with mismatched school_id → 403 (cross-tenant IDOR fix)', async () => {
+    // getAnySession() admits any authenticated role, including school_admin —
+    // this exercises the exact same session.schoolId !== school_id check the
+    // route applies regardless of caller role, without needing a separate
+    // parent login flow.
+    const { status } = await api('/api/parent/fees', 'POST', {
+      school_id: schoolId + 9999, student_id: studentA, ledger_id: ledgerA1, amount: 10,
+    }, adminCookie)
+    expect(status).toBe(403)
+  })
+
+  test('SEC-102: POST category-assignments rejects a student_id that does not belong to this school → 403', async () => {
+    const { status, data } = await api('/api/fees/category-assignments', 'POST', {
+      school_id: schoolId, academic_year: AY,
+      assignments: [{ student_id: 999999999, fee_category_id: catVariable, amount: 500 }],
+    }, adminCookie)
+    expect(status).toBe(403)
+    const d = data as { error: string }
+    expect(d.error).toContain('do not belong')
+  })
+
+  test('IDEM-101: Duplicate payment submission with the same idempotency_key does not double-charge', async () => {
+    const { data: ledger } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}`, 'GET', undefined, adminCookie
+    )
+    const entries = ledger as Array<{ id: number; status: string; amount_due: number; amount_paid: number }>
+    const unpaid = entries.find(e => e.status !== 'paid' && e.status !== 'waived' &&
+      parseFloat(String(e.amount_due)) > parseFloat(String(e.amount_paid)))
+    if (!unpaid) return
+    const startingPaid = parseFloat(String(unpaid.amount_paid))
+
+    const idemKey = `e2e-idem-${ts}-${unpaid.id}`
+    const body = {
+      school_id: schoolId, student_id: studentC, ledger_id: unpaid.id, amount: 1,
+      payment_mode: 'cash', collected_by_name: 'Test Admin', idempotency_key: idemKey,
+    }
+    const { status: s1, data: d1 } = await api('/api/fees/payments', 'POST', body, adminCookie)
+    expect(s1).toBe(201)
+    const receipt1 = (d1 as { receipt_number: string }).receipt_number
+    expect(receipt1).toBeTruthy()
+
+    // Same key, same body — must replay the first response, not process a second payment.
+    const { status: s2, data: d2 } = await api('/api/fees/payments', 'POST', body, adminCookie)
+    expect(s2).toBe(201)
+    const receipt2 = (d2 as { receipt_number: string }).receipt_number
+    expect(receipt2).toBe(receipt1)
+
+    const { data: ledgerAfter } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}`, 'GET', undefined, adminCookie
+    )
+    const after = (ledgerAfter as Array<{ id: number; amount_paid: number }>).find(e => e.id === unpaid.id)
+    // Exactly +1, not +2 — proves the second request never re-ran the payment logic.
+    expect(parseFloat(String(after?.amount_paid))).toBe(startingPaid + 1)
+  })
+
+  test('DEL-101: DELETE ledger entry blocked when a waiver is recorded, not just when paid', async () => {
+    // Fresh throwaway category + structure + bill so this test doesn't depend
+    // on another test's exact ledger state.
+    const { data: catData } = await api('/api/fees/categories', 'POST', {
+      school_id: schoolId, name: `Delete Guard Test ${ts}`, frequency: 'annual', category_type: 'fixed',
+    }, adminCookie)
+    const cat = catData as { id: number }
+    await api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: AY,
+      structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
+    }, adminCookie)
+    await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY }, adminCookie)
+    const { data: ledger } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentA}`, 'GET', undefined, adminCookie
+    )
+    const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
+    if (!entry) return
+
+    // Partial waiver — leaves status='partial', amount_paid=0, waiver_amount>0.
+    // The pre-existing guard only checked status IN (paid, waived) and
+    // amount_paid > 0 — a partially-waived-but-never-paid bill slipped through
+    // both and got deleted outright, cascading away the fee_waivers row too.
+    const waiverRes = await api('/api/fees/waivers', 'POST', {
+      school_id: schoolId, student_id: studentA, ledger_id: entry.id,
+      waiver_type: 'fixed_amount', waiver_value: 200, reason: 'e2e delete-guard test',
+    }, adminCookie)
+    expect(waiverRes.status).toBe(201)
+
+    const { status, data } = await api(`/api/fees/ledger/${entry.id}?school_id=${schoolId}`, 'DELETE', undefined, adminCookie)
+    expect(status).toBe(400)
+    const d = data as { error: string }
+    expect(d.error).toContain('waiver')
+  })
+
+  test('WO-101: Year-end write-off lands in waiver_breakdown.written_off, and "Waived" stays discretionary-only', async () => {
+    const { status, data } = await api(
+      `/api/fees/audit-report?school_id=${schoolId}&academic_year=${AY}`, 'GET', undefined, adminCookie
+    )
+    expect(status).toBe(200)
+    const d = data as {
+      summary: { waived: number }
+      waiver_breakdown: { discretionary: number; carried_forward: number; written_off: number; total: number }
+    }
+    // YE-005 applied a write-off decision for studentD earlier in this suite.
+    expect(d.waiver_breakdown.written_off).toBeGreaterThan(0)
+    // The headline "Waived" figure must equal the discretionary bucket exactly —
+    // this is the actual claim of the fix: write-offs no longer inflate it.
+    expect(d.summary.waived).toBeCloseTo(d.waiver_breakdown.discretionary, 2)
+  })
+
+  test('PMODE-101: Invalid payment_mode → 400', async () => {
+    const { data: ledger } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentB}`, 'GET', undefined, adminCookie
+    )
+    const entries = ledger as Array<{ id: number; status: string }>
+    const unpaid = entries.find(e => e.status !== 'paid' && e.status !== 'waived')
+    if (!unpaid) return
+    const { status, data } = await api('/api/fees/payments', 'POST', {
+      school_id: schoolId, student_id: studentB, ledger_id: unpaid.id, amount: 1,
+      payment_mode: 'bitcoin', collected_by_name: 'Test Admin',
+    }, adminCookie)
+    expect(status).toBe(400)
+    const d = data as { error: string }
+    expect(d.error).toContain('payment_mode must be one of')
+  })
+
+  test('WVPCT-101: Percentage waiver value over 100 is capped at the remaining balance, not over-waived', async () => {
+    const { data: catData } = await api('/api/fees/categories', 'POST', {
+      school_id: schoolId, name: `Pct Cap Test ${ts}`, frequency: 'annual', category_type: 'fixed',
+    }, adminCookie)
+    const cat = catData as { id: number }
+    await api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: AY,
+      structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
+    }, adminCookie)
+    await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: AY }, adminCookie)
+    const { data: ledger } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentB}`, 'GET', undefined, adminCookie
+    )
+    const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
+    if (!entry) return
+
+    const { status, data } = await api('/api/fees/waivers', 'POST', {
+      school_id: schoolId, student_id: studentB, ledger_id: entry.id,
+      waiver_type: 'percentage', waiver_value: 150, reason: 'e2e percentage-cap test',
+    }, adminCookie)
+    expect(status).toBe(201)
+    const d = data as { waiver_amount: string }
+    // 150% of a ₹1000 bill must cap at ₹1000 (the remaining balance), never ₹1500.
+    expect(parseFloat(d.waiver_amount)).toBe(1000)
+  })
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SECTION 12 — FEE MODULE FINANCIAL-INTEGRITY REGRESSIONS
+  // (audit findings — each test documents the bug it guards against)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  test('VER-101: Approving an online payment is blocked once an offline collection already covers the balance', async () => {
+    // Own dedicated academic year (see testYear's comment) — AY is closed +
+    // structure-locked by this point in the suite, and even AY_NEXT would get
+    // auto-locked by this test's own /api/fees/generate call below, blocking
+    // OWNER-101's structure creation if that test shared the same year.
+    const testAY = testYear(1)
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
+    const catRes = await api('/api/fees/categories', 'POST', {
+      school_id: schoolId, name: `Verify Overstate Test ${ts}`, frequency: 'annual', category_type: 'fixed',
+    }, adminCookie)
+    expect(catRes.status).toBe(201)
+    const cat = catRes.data as { id: number }
+    // studentA is grade 9 — this structure MUST match, or generate produces no
+    // bill for studentA and `entry` below is silently undefined.
+    const structRes = await api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: testAY,
+      structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
+    }, adminCookie)
+    expect(structRes.status).toBe(201)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie)
+    expect(genRes.status).toBe(200)
+    const { data: ledger } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentA}&academic_year=${testAY}`, 'GET', undefined, adminCookie
+    )
+    const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
+    expect(entry, 'bill for studentA must exist — category/structure/generate must have succeeded').toBeDefined()
+    if (!entry) return
+
+    // Simulate a parent's online payment landing as pending_verification (the
+    // admin endpoint accepts an explicit payment_status, matching what the
+    // parent-facing route inserts) for the FULL ₹1000 bill.
+    const { data: pendingData } = await api('/api/fees/payments', 'POST', {
+      school_id: schoolId, student_id: studentA, ledger_id: entry.id, amount: 1000,
+      payment_mode: 'online', payment_status: 'pending_verification', collected_by_name: 'Test Admin',
+    }, adminCookie)
+    const pending = pendingData as { id: number }
+
+    // Meanwhile the school collects ₹600 in cash offline, while the online
+    // payment is still awaiting verification.
+    const offlineRes = await api('/api/fees/payments', 'POST', {
+      school_id: schoolId, student_id: studentA, ledger_id: entry.id, amount: 600,
+      payment_mode: 'cash', collected_by_name: 'Test Admin',
+    }, adminCookie)
+    expect(offlineRes.status).toBe(201)
+
+    // Approving the ₹1000 online payment now would overstate collections — the
+    // bill only has ₹400 of room left. Must be rejected, not silently capped.
+    const { status, data } = await api('/api/fees/payments/verify', 'POST', {
+      payment_id: pending.id, action: 'approve', verified_by: 'Test Admin',
+    }, adminCookie)
+    expect(status).toBe(409)
+    const d = data as { error: string }
+    expect(d.error).toContain('remaining balance')
+
+    // The pending payment must still be pending — rejected approvals must not
+    // half-apply.
+    const { data: pendingList } = await api(`/api/fees/payments/verify?school_id=${schoolId}`, 'GET', undefined, adminCookie)
+    const stillPending = (pendingList as Array<{ id: number }>).find(p => p.id === pending.id)
+    expect(stillPending).toBeDefined()
+  })
+
+  test('OWNER-101: Payment/waiver creation is rejected when ledger_id belongs to a different student', async () => {
+    // Own dedicated academic year — see the comment on testYear/VER-101 above.
+    const testAY = testYear(2)
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
+    const catRes = await api('/api/fees/categories', 'POST', {
+      school_id: schoolId, name: `Owner Check Test ${ts}`, frequency: 'annual', category_type: 'fixed',
+    }, adminCookie)
+    expect(catRes.status).toBe(201)
+    const cat = catRes.data as { id: number }
+    // studentA and studentB are both grade 9 — this structure MUST match, or
+    // generate produces no bill and `entry` below is silently undefined.
+    const structRes = await api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: testAY,
+      structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
+    }, adminCookie)
+    expect(structRes.status).toBe(201)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie)
+    expect(genRes.status).toBe(200)
+    const { data: ledger } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentA}&academic_year=${testAY}`, 'GET', undefined, adminCookie
+    )
+    const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
+    expect(entry, 'bill for studentA must exist — category/structure/generate must have succeeded').toBeDefined()
+    if (!entry) return
+
+    // studentA's ledger_id, but the request claims it's for studentB.
+    const payRes = await api('/api/fees/payments', 'POST', {
+      school_id: schoolId, student_id: studentB, ledger_id: entry.id, amount: 100,
+      payment_mode: 'cash', collected_by_name: 'Test Admin',
+    }, adminCookie)
+    expect(payRes.status).toBe(404)
+
+    const waiverRes = await api('/api/fees/waivers', 'POST', {
+      school_id: schoolId, student_id: studentB, ledger_id: entry.id,
+      waiver_type: 'fixed_amount', waiver_value: 100, reason: 'e2e owner-mismatch test',
+    }, adminCookie)
+    expect(waiverRes.status).toBe(404)
+
+    // studentA's own balance must be untouched by either rejected attempt.
+    const { data: after } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentA}&academic_year=${testAY}`, 'GET', undefined, adminCookie
+    )
+    const afterEntry = (after as Array<{ id: number; amount_paid: string; waiver_amount: string }>).find(e => e.id === entry.id)
+    expect(parseFloat(String(afterEntry?.amount_paid))).toBe(0)
+    expect(parseFloat(String(afterEntry?.waiver_amount))).toBe(0)
+  })
+
+  test('WVCOR-101: Waiver correction is rejected when it would push the combined waived total past the bill', async () => {
+    // Own dedicated academic year — see the comment on testYear/VER-101 above.
+    const testAY = testYear(3)
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
+    const catRes = await api('/api/fees/categories', 'POST', {
+      school_id: schoolId, name: `Waiver Correction Test ${ts}`, frequency: 'annual', category_type: 'fixed',
+    }, adminCookie)
+    expect(catRes.status).toBe(201)
+    const cat = catRes.data as { id: number }
+    // studentC is grade 8 (not 9) — this structure MUST match, or generate
+    // produces no bill for studentC and `entry` below is silently undefined.
+    const structRes = await api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: testAY,
+      structures: [{ fee_category_id: cat.id, grade: '8', amount: 1000, due_day: 10 }],
+    }, adminCookie)
+    expect(structRes.status).toBe(201)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie)
+    expect(genRes.status).toBe(200)
+    const { data: ledger } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}&academic_year=${testAY}`, 'GET', undefined, adminCookie
+    )
+    const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
+    expect(entry, 'bill for studentC must exist — category/structure/generate must have succeeded').toBeDefined()
+    if (!entry) return
+
+    // Two waivers active on the same bill: ₹200 and ₹400 (₹400 remaining balance).
+    const { data: w1Data } = await api('/api/fees/waivers', 'POST', {
+      school_id: schoolId, student_id: studentC, ledger_id: entry.id,
+      waiver_type: 'fixed_amount', waiver_value: 200, reason: 'e2e waiver-correction test #1',
+    }, adminCookie)
+    const w1 = w1Data as { id: number }
+    const w2Res = await api('/api/fees/waivers', 'POST', {
+      school_id: schoolId, student_id: studentC, ledger_id: entry.id,
+      waiver_type: 'fixed_amount', waiver_value: 400, reason: 'e2e waiver-correction test #2',
+    }, adminCookie)
+    expect(w2Res.status).toBe(201)
+
+    // Correcting the ₹200 waiver up to ₹700 would total ₹1,100 waived on a
+    // ₹1,000 bill (ignoring the still-active ₹400 waiver) — must be rejected.
+    const { status, data } = await api('/api/fees/waivers', 'PATCH', {
+      id: w1.id, new_waiver_amount: 700, reason: 'e2e over-correction attempt',
+    }, adminCookie)
+    expect(status).toBe(400)
+    const d = data as { error: string }
+    expect(d.error).toContain('other active waivers')
+
+    // The original ₹200 waiver must still be active and unchanged.
+    const { data: waivers } = await api(`/api/fees/waivers?school_id=${schoolId}&student_id=${studentC}`, 'GET', undefined, adminCookie)
+    const stillW1 = (waivers as Array<{ id: number; waiver_amount: string }>).find(w => w.id === w1.id)
+    expect(stillW1).toBeDefined()
+    expect(parseFloat(String(stillW1?.waiver_amount))).toBe(200)
+  })
+
+  test('LEDGERAMT-101: Reducing a bill below payments + waivers combined is rejected', async () => {
+    // Own dedicated academic year — see the comment on testYear/VER-101 above.
+    const testAY = testYear(4)
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
+    const catRes = await api('/api/fees/categories', 'POST', {
+      school_id: schoolId, name: `Ledger Amount Edit Test ${ts}`, frequency: 'annual', category_type: 'fixed',
+    }, adminCookie)
+    expect(catRes.status).toBe(201)
+    const cat = catRes.data as { id: number }
+    // studentB is grade 9 — this structure MUST match, or generate produces no
+    // bill for studentB and `entry` below is silently undefined.
+    const structRes = await api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: testAY,
+      structures: [{ fee_category_id: cat.id, grade: '9', amount: 1000, due_day: 10 }],
+    }, adminCookie)
+    expect(structRes.status).toBe(201)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie)
+    expect(genRes.status).toBe(200)
+    const { data: ledger } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentB}&academic_year=${testAY}`, 'GET', undefined, adminCookie
+    )
+    const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
+    expect(entry, 'bill for studentB must exist — category/structure/generate must have succeeded').toBeDefined()
+    if (!entry) return
+
+    // ₹300 paid + ₹500 waived = ₹800 covered, ₹200 remaining.
+    const payRes = await api('/api/fees/payments', 'POST', {
+      school_id: schoolId, student_id: studentB, ledger_id: entry.id, amount: 300,
+      payment_mode: 'cash', collected_by_name: 'Test Admin',
+    }, adminCookie)
+    expect(payRes.status).toBe(201)
+    const waiverRes = await api('/api/fees/waivers', 'POST', {
+      school_id: schoolId, student_id: studentB, ledger_id: entry.id,
+      waiver_type: 'fixed_amount', waiver_value: 500, reason: 'e2e ledger-amount-edit test',
+    }, adminCookie)
+    expect(waiverRes.status).toBe(201)
+
+    // Cutting the bill to ₹400 would leave only ₹100 of room for ₹800 already
+    // covered by payments + waivers — must be rejected, not just checked against
+    // amount_paid alone.
+    const { status, data } = await api(`/api/fees/ledger/${entry.id}`, 'PATCH', {
+      new_amount: 400, reason: 'e2e over-reduction attempt', changed_by: 'Test Admin', school_id: schoolId,
+    }, adminCookie)
+    expect(status).toBe(400)
+    const d = data as { error: string }
+    expect(d.error).toContain('paid + waived')
+  })
+
+  test('DAYCLOSE-101: Resubmitting day-close recalculates system_cash and totals, not just the difference', async () => {
+    // Own dedicated academic year — see the comment on testYear/VER-101 above.
+    // Day-close itself sums by paid_date, not academic_year, so this doesn't affect it.
+    const testAY = testYear(5)
+    await ensureTestYear(api, schoolId, adminCookie, testAY)
+    const dcDate = today()
+    const catRes = await api('/api/fees/categories', 'POST', {
+      school_id: schoolId, name: `Day Close Resubmit Test ${ts}`, frequency: 'annual', category_type: 'fixed',
+    }, adminCookie)
+    expect(catRes.status).toBe(201)
+    const cat = catRes.data as { id: number }
+    // studentC is grade 8 (not 9) — this structure MUST match, or generate
+    // produces no bill for studentC and `entry` below is silently undefined.
+    const structRes = await api('/api/fees/structures', 'POST', {
+      school_id: schoolId, academic_year: testAY,
+      structures: [{ fee_category_id: cat.id, grade: '8', amount: 1000, due_day: 10 }],
+    }, adminCookie)
+    expect(structRes.status).toBe(201)
+    const genRes = await api('/api/fees/generate', 'POST', { school_id: schoolId, academic_year: testAY }, adminCookie)
+    expect(genRes.status).toBe(200)
+    const { data: ledger } = await api(
+      `/api/fees/ledger?school_id=${schoolId}&student_id=${studentC}&academic_year=${testAY}`, 'GET', undefined, adminCookie
+    )
+    const entry = (ledger as Array<{ id: number; fee_category_id: number }>).find(e => e.fee_category_id === cat.id)
+    expect(entry, 'bill for studentC must exist — category/structure/generate must have succeeded').toBeDefined()
+    if (!entry) return
+
+    // First close for today (DC-002 earlier in this suite already closed
+    // `today()` once, with whatever cash existed at that point).
+    const { data: firstClose } = await api('/api/fees/day-close', 'POST', {
+      school_id: schoolId, date: dcDate, actual_cash: 5000, submitted_by: 'Test Admin',
+    }, adminCookie)
+    const firstRecord = (firstClose as { record: { system_cash: string } }).record
+    const systemCashBefore = parseFloat(firstRecord.system_cash)
+
+    // Collect MORE cash after that first close.
+    const payRes = await api('/api/fees/payments', 'POST', {
+      school_id: schoolId, student_id: studentC, ledger_id: entry.id, amount: 250,
+      payment_mode: 'cash', collected_by_name: 'Test Admin', paid_date: dcDate,
+    }, adminCookie)
+    expect(payRes.status).toBe(201)
+
+    // Resubmit day-close for the same date — system_cash (and the other
+    // recomputed totals) must reflect the new ₹250, not stay frozen at the
+    // first submission's snapshot.
+    const { status, data } = await api('/api/fees/day-close', 'POST', {
+      school_id: schoolId, date: dcDate, actual_cash: systemCashBefore + 250, submitted_by: 'Test Admin',
+    }, adminCookie)
+    expect(status).toBe(200)
+    const d = data as { record: { system_cash: string; difference: string; txn_count: number } }
+    expect(parseFloat(d.record.system_cash)).toBeCloseTo(systemCashBefore + 250, 2)
+    // difference = actual_cash - system_cash must hold against the FRESH system_cash.
+    expect(parseFloat(d.record.difference)).toBeCloseTo(0, 2)
   })
 })
