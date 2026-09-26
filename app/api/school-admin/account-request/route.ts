@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSession } from '@/lib/auth'
 import pool from '@/lib/db'
 import { sendMail } from '@/lib/email'
+import { escapeHtml as esc } from '@/lib/html'
 
 const SCHOOL_ROLES = ['school_admin', 'principal', 'vice_principal']
 
@@ -45,23 +46,23 @@ export async function POST(req: NextRequest) {
     const body = type === 'export'
       ? `<div style="font-family:sans-serif;max-width:520px;padding:24px">
           <h2 style="color:#2563eb">Data Export Request</h2>
-          <p><strong>School:</strong> ${school?.name ?? 'Unknown'}</p>
-          <p><strong>School Code:</strong> ${school?.school_code ?? '-'}</p>
+          <p><strong>School:</strong> ${esc(school?.name ?? 'Unknown')}</p>
+          <p><strong>School Code:</strong> ${esc(school?.school_code ?? '-')}</p>
           <p><strong>School ID:</strong> ${session.schoolId}</p>
-          <p><strong>Requested by:</strong> ${school?.full_name ?? '-'} (${school?.admin_email ?? '-'})</p>
+          <p><strong>Requested by:</strong> ${esc(school?.full_name ?? '-')} (${esc(school?.admin_email ?? '-')})</p>
           <p><strong>Requested at:</strong> ${new Date().toLocaleString('en-IN')}</p>
           <hr style="margin:20px 0">
           <p>Please prepare a full data export (students, teachers, fees, attendance, exams) and send it to the school's registered email.</p>
         </div>`
       : `<div style="font-family:sans-serif;max-width:520px;padding:24px">
           <h2 style="color:#dc2626">Account Closure Request</h2>
-          <p><strong>School:</strong> ${school?.name ?? 'Unknown'}</p>
-          <p><strong>School Code:</strong> ${school?.school_code ?? '-'}</p>
+          <p><strong>School:</strong> ${esc(school?.name ?? 'Unknown')}</p>
+          <p><strong>School Code:</strong> ${esc(school?.school_code ?? '-')}</p>
           <p><strong>School ID:</strong> ${session.schoolId}</p>
-          <p><strong>Requested by:</strong> ${school?.full_name ?? '-'} (${school?.admin_email ?? '-'})</p>
+          <p><strong>Requested by:</strong> ${esc(school?.full_name ?? '-')} (${esc(school?.admin_email ?? '-')})</p>
           <p><strong>Requested at:</strong> ${new Date().toLocaleString('en-IN')}</p>
           <hr style="margin:20px 0">
-          <p><strong>Reason:</strong><br>${reason}</p>
+          <p><strong>Reason:</strong><br>${esc(reason)}</p>
           <hr style="margin:20px 0">
           <p style="color:#dc2626">⚠ Review this request carefully before deactivating the account. Contact the school first.</p>
         </div>`

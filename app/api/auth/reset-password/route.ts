@@ -8,9 +8,14 @@ export async function POST(req: NextRequest) {
     if (!token || !newPassword) return NextResponse.json({ error: 'Token and new password required' }, { status: 400 })
     if (newPassword.length < 8) return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 })
 
+    // A deactivated account can't use any set-password link, even an unused one
+    // issued before it was deactivated (deactivation also voids them, this is the
+    // backstop for links created any other way).
     const result = await pool.query(
-      `SELECT * FROM password_reset_tokens
-       WHERE token = $1 AND used = FALSE AND expires_at > NOW()`,
+      `SELECT t.* FROM password_reset_tokens t
+       JOIN users u ON u.id = t.user_id
+       WHERE t.token = $1 AND t.used = FALSE AND t.expires_at > NOW()
+         AND COALESCE(u.status, 'active') <> 'inactive'`,
       [token]
     )
 

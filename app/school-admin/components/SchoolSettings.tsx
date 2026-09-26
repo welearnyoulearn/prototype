@@ -173,6 +173,12 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const [staffSuccess, setStaffSuccess] = useState('')
   const [resendingId, setResendingId] = useState<number | null>(null)
   const [resendMsg, setResendMsg]   = useState<{ id: number; text: string; ok: boolean } | null>(null)
+  // Only a School Administrator can add / deactivate / reactivate (the server enforces it);
+  // this just stops showing buttons that would be refused. Defaults to false until known.
+  const [canManageStaff, setCanManageStaff] = useState(false)
+  // Result of the last deactivate / reactivate — shown above the list. These handlers
+  // used to ignore the server's answer and flip the row anyway.
+  const [staffActionMsg, setStaffActionMsg] = useState<string>('')
 
   // ── Security ───────────────────────────────────────────────────────────────
   const [curPwd, setCurPwd]         = useState('')
@@ -236,10 +242,20 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   }, [schoolId])
 
   const loadStaff = useCallback(async () => {
-    setStaffLoading(true)
+    setStaffLoading(true); setStaffActionMsg('')
     try {
-      const r = await fetch(`/api/school-admin/staff-accounts?school_id=${schoolId}`)
-      if (r.ok) setStaffList(await r.json())
+      // The seat limit comes from the plan and the role decides which buttons show. The
+      // plan used to be fetched only when the Plan tab was opened, so opening Staff
+      // Accounts first showed no limit and offered the Add form even when the school
+      // was already full.
+      const [listR, meR, subR] = await Promise.all([
+        fetch(`/api/school-admin/staff-accounts?school_id=${schoolId}`).catch(() => null),
+        fetch('/api/auth/me').catch(() => null),
+        fetch(`/api/schools/${schoolId}/subscription`).catch(() => null),
+      ])
+      if (listR?.ok) setStaffList(await listR.json())
+      if (meR?.ok) setCanManageStaff((await meR.json()).role === 'school_admin')
+      if (subR?.ok) setSubscription(await subR.json())
     } finally { setStaffLoading(false) }
   }, [schoolId])
 
@@ -247,6 +263,10 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   useEffect(() => { if (tab === 'academic-years') loadYears() }, [tab, loadYears])
   useEffect(() => { if (tab === 'plan') loadPlan() }, [tab, loadPlan])
   useEffect(() => { if (tab === 'staff') loadStaff() }, [tab, loadStaff])
+
+  // All seats taken → Reactivate would be refused (it uses a seat just like Add does).
+  const staffSeatsFull = subscription?.staff_limit != null &&
+    staffList.filter(x => x.status === 'active').length >= subscription.staff_limit
 
   // ── Profile save ───────────────────────────────────────────────────────────
 
@@ -505,19 +525,30 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   async function deactivateStaff(id: number) {
     const ok = await confirm('Deactivate this account? They will lose access immediately.', { title: 'Deactivate account?', confirmText: 'Deactivate', destructive: true })
     if (!ok) return
-    await fetch('/api/school-admin/staff-accounts', {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    })
-    setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s))
+    setStaffActionMsg('')
+    // Only flip the row when the server actually did it. This used to ignore the answer,
+    // so a refused request (not an admin, last administrator, network error) still
+    // showed "Deactivated" until the page was reloaded.
+    try {
+      const r = await fetch('/api/school-admin/staff-accounts', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      if (!r.ok) { setStaffActionMsg((await r.json().catch(() => ({}))).error || 'Could not deactivate this account'); return }
+      setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'inactive' } : s))
+    } catch { setStaffActionMsg('Network error — the account was not deactivated') }
   }
 
   async function reactivateStaff(id: number) {
-    await fetch('/api/school-admin/staff-accounts', {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    })
-    setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s))
+    setStaffActionMsg('')
+    try {
+      const r = await fetch('/api/school-admin/staff-accounts', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      if (!r.ok) { setStaffActionMsg((await r.json().catch(() => ({}))).error || 'Could not reactivate this account'); return }
+      setStaffList(prev => prev.map(s => s.id === id ? { ...s, status: 'active' } : s))
+    } catch { setStaffActionMsg('Network error — the account was not reactivated') }
   }
 
   async function resendCredentials(id: number) {
@@ -1264,6 +1295,15 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
             })()}
           </div>
 
+          {!staffLoading && !canManageStaff && (
+            <div className="bg-gray-50 border border-gray-200 text-gray-600 px-4 py-3 rounded-lg text-sm">
+              Only a school administrator can add, deactivate or reactivate staff accounts.
+            </div>
+          )}
+          {staffActionMsg && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{staffActionMsg}</div>
+          )}
+
           {/* Staff list */}
           {staffLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
@@ -1305,14 +1345,17 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                             className="text-xs border border-indigo-200 text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
                             {resendingId === s.id ? 'Sending…' : 'Resend Invite Link'}
                           </button>
-                          <button onClick={() => deactivateStaff(s.id)}
-                            className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">
-                            Deactivate
-                          </button>
+                          {canManageStaff && (
+                            <button onClick={() => deactivateStaff(s.id)}
+                              className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">
+                              Deactivate
+                            </button>
+                          )}
                         </>
-                      ) : (
-                        <button onClick={() => reactivateStaff(s.id)}
-                          className="text-xs border border-green-200 text-green-600 hover:bg-green-50 px-2.5 py-1.5 rounded-lg transition-colors">
+                      ) : canManageStaff && (
+                        <button onClick={() => reactivateStaff(s.id)} disabled={staffSeatsFull}
+                          title={staffSeatsFull ? 'All staff seats on your plan are in use — deactivate another account or upgrade first' : undefined}
+                          className="text-xs border border-green-200 text-green-600 hover:bg-green-50 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                           Reactivate
                         </button>
                       )}
@@ -1326,8 +1369,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
             </div>
           )}
 
-          {/* Add staff form */}
-          {(() => {
+          {/* Add staff form — School Administrators only (the server refuses everyone else) */}
+          {canManageStaff && (() => {
             const limit = subscription?.staff_limit ?? null
             const count = staffList.filter(s => s.status === 'active').length
             const atLimit = limit !== null && count >= limit

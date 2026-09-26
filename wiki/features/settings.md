@@ -18,13 +18,17 @@ School admin (owner).
 ## How it works
 
 - School profile, academic years (create, set current, history/export), grading and other settings.
-- **Staff accounts:** invite principals/vice principals/admins by email — the invitee gets a one-time set-password link (no password is emailed); resend the link; deactivate (their session ends immediately).
+- **Staff accounts:** a **school administrator** invites principals/vice principals/admins by email — the invitee gets a one-time set-password link (no password is emailed); resend the link; deactivate (their session ends immediately, unused links are voided) and reactivate. Principals and vice principals can see the list but not change it. Every create / deactivate / reactivate is recorded (who, when) in `staff_account_events`.
 - Change your own password (signs you out elsewhere); view the plan and enabled features.
 
 ## Rules and limits
 
 - Each person has their own login; staff sessions last 20 minutes idle / 12 hours maximum.
-- Platform 'reset password' resets only the owner account.
+- Platform 'reset password' resets only the owner account — and reactivates it if it had been deactivated, so a locked-out school can always be recovered.
+- **Seat limit per plan** (`plan_pricing.staff_limit`, set by the platform admin, same for every school on a plan): No plan 1 · Basic 2 · Standard 5 · Premium unlimited. Active accounts count (including invites not yet accepted). Adding **and reactivating** both need a free seat. Lowering a plan or a limit never disables existing accounts — it only blocks new ones. A blank limit means unlimited and is kept across deploys.
+- The last active school administrator cannot be deactivated, and nobody can deactivate themselves.
+- A deactivated person's email stays reserved (it is unique across all schools): use **Reactivate**, not Add.
+- The plan itself (`/api/schools/{id}/subscription`) can be read only by the platform admin or staff of that school, and changed only by the platform admin.
 
 ## Code evidence
 
@@ -63,3 +67,4 @@ API routes these screens call (all exist):
 | Date | Change | Issue |
 |------|--------|-------|
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
+| 2026-09-26 | Staff-accounts hardening: plan endpoint now needs a login (was open to anyone), accounts can only be created in your own school and only by a school administrator, reactivation respects the seat limit, last-admin and platform-recovery protection, deactivation voids unused links, audit history, safer limit saving | #234 |

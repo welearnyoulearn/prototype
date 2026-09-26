@@ -60,8 +60,13 @@ sequenceDiagram
 | Session ends on | logout · login as someone else in the same browser · deactivation · password change (others) · reset (all) |
 | Invite links | One-time, **48 h**, "Resend" voids earlier links; stored as reset tokens (`password_reset_tokens`) |
 | Last account hint | Login page remembers the last-used account (name, email, role) in `localStorage` — **never** a password or session |
-| Platform reset | Resets **only the owner** (the account with a `school_code`) |
-| Plan limit | `staff_limit` enforced on creation |
+| Platform reset | Resets **only the owner** (the account with a `school_code`) **and reactivates it** if deactivated |
+| Who can manage staff | **School administrator only** — add, deactivate, reactivate. Principal / vice principal can view the list. The school always comes from the login, never from the request |
+| Plan limit | `staff_limit` per plan: No plan 1 · Basic 2 · Standard 5 · Premium unlimited. Enforced on **add and reactivate**, counted under a per-school lock so simultaneous requests can't both take the last seat. Lowering a limit/plan never disables existing accounts |
+| Last administrator | The last active school administrator can't be deactivated; nobody can deactivate themselves |
+| Deactivation | Session ends, unused invite/reset links are voided, and no new reset link is issued while deactivated. The email stays reserved — use Reactivate |
+| History | Each create / deactivate / reactivate is written to `staff_account_events` (who, when) |
+| Plan endpoint | `/api/schools/{id}/subscription`: read = platform admin or that school's staff; change = platform admin only |
 | Active year | Once a school has a current year it cannot be switched by hand (Settings/API) — only by rollover |
 | Idle UX | `IdleSessionGuard` heartbeats while active and redirects to `/login?role=school&reason=timeout` |
 
@@ -82,7 +87,7 @@ sequenceDiagram
 | GET/POST | `/api/platform/features` | Plan feature list |
 | POST | `/api/upload/sign` | Signed upload (logo) |
 
-**Tables:** `schools`, `users`, `user_profiles`, `user_sessions`, `password_reset_tokens`, `school_subscriptions`, `plan_pricing` (`staff_limit`), `plan_features`, `academic_years`, `academic_year_snapshots`, `student_class_history`, `platform_audit_log`.
+**Tables:** `schools`, `users`, `user_profiles`, `user_sessions`, `password_reset_tokens`, `staff_account_events`, `school_subscriptions`, `plan_pricing` (`staff_limit`), `plan_features`, `academic_years`, `academic_year_snapshots`, `student_class_history`, `platform_audit_log`.
 
 **Libraries:** `lib/auth.ts` (`createStaffSession`, `revokeSession`, `revokeUserSessions`, `getSession({passive})`, `SESSION_IDLE_MINUTES = 20`, `SESSION_MAX_HOURS = 12`), `lib/staffInvite.ts`, `lib/email.ts`, `lib/features.ts`.
 
