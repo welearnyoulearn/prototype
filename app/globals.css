@@ -489,7 +489,7 @@ input, select, textarea {
 .pl-secure svg { width: 14px; height: 14px; color: var(--pl-brand); }
 
 .pl-main { flex: 1; display: flex; flex-direction: column; justify-content: center; width: min(100% - 32px, 1180px); margin: 0 auto; padding: 24px 0 40px; }
-.pl-intro { text-align: center; translate: calc(var(--mx, 0) * -8px) calc(var(--my, 0) * -6px); transition: translate 700ms cubic-bezier(.2,.8,.2,1); }
+.pl-intro { text-align: left; translate: calc(var(--mx, 0) * -8px) calc(var(--my, 0) * -6px); transition: translate 700ms cubic-bezier(.2,.8,.2,1); }
 .pl-greeting { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border: 1px solid rgb(36 91 70 / .15); border-radius: 999px; background: rgb(255 255 255 / .7); color: var(--pl-brand); font-size: 13px; font-weight: 700; backdrop-filter: blur(6px); }
 .pl-greeting svg { width: 16px; height: 16px; color: #d08a2e; animation: pl-sun 6s ease-in-out infinite; }
 .pl-greeting[data-part="evening"] svg { color: #5b6fb3; animation-name: pl-moon; }
@@ -499,7 +499,7 @@ input, select, textarea {
 .pl-intro h1 em { display: block; color: var(--pl-brand); font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 400; letter-spacing: -.03em; }
 .pl-intro > p:last-child { margin-top: 14px; color: var(--pl-muted); font-size: clamp(15px, 1.3vw, 17px); }
 
-.pl-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; margin-top: 44px; }
+.pl-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; margin-top: 40px; }
 .pl-grid > div { display: flex; }
 .pl-card {
   --accent: #a85f16;
@@ -512,7 +512,7 @@ input, select, textarea {
   flex: 1;
   flex-direction: column;
   gap: 16px;
-  min-height: 270px;
+  min-height: 240px;
   padding: 26px 24px 20px;
   border: 1px solid var(--pl-line);
   border-radius: 20px;
@@ -564,6 +564,98 @@ input, select, textarea {
 .pl-shell[data-transitioning="parent"] { --transition-color: #a44f3c; }
 .pl-shell[data-transitioning="admin"] { --transition-color: #245b46; }
 @keyframes pl-wash-in { 0% { opacity: 0; clip-path: circle(0 at var(--transition-x, 50%) var(--transition-y, 50%)); } 20% { opacity: 1; } 100% { opacity: 1; clip-path: circle(150% at var(--transition-x, 50%) var(--transition-y, 50%)); } }
+
+/* Landing hero — headline beside a living, code-drawn school scene. */
+.pl-shell { --flag: #245b46; }
+.pl-shell[data-active="student"] { --flag: #a85f16; }
+.pl-shell[data-active="teacher"] { --flag: #21686a; }
+.pl-shell[data-active="parent"] { --flag: #a44f3c; }
+.pl-hero { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); align-items: center; gap: clamp(28px, 5vw, 72px); }
+.pl-scene-wrap { min-width: 0; }
+.pl-scene {
+  position: relative;
+  aspect-ratio: 520 / 340;
+  max-height: 360px;
+  margin-left: auto;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / .8);
+  border-radius: 28px;
+  background: linear-gradient(180deg, #cfe8f2 0%, #e6f3f2 58%, #eef5ec 100%);
+  box-shadow: 0 30px 70px rgb(36 60 48 / .16), 0 2px 6px rgb(36 60 48 / .06), inset 0 1px 0 rgb(255 255 255 / .8);
+  transform: perspective(1100px) rotateY(calc(var(--mx, 0) * -5deg)) rotateX(calc(var(--my, 0) * 4deg));
+  transition: transform 700ms cubic-bezier(.2,.8,.2,1), background 800ms ease;
+}
+.pl-scene[data-part="morning"] { background: linear-gradient(180deg, #fbdcb5 0%, #fdeedb 48%, #eaf2e6 100%); }
+.pl-scene[data-part="evening"] { background: linear-gradient(180deg, #1c2744 0%, #33416a 55%, #56637a 100%); border-color: rgb(255 255 255 / .18); }
+.pl-scene svg { display: block; width: 100%; height: 100%; }
+.pl-layer { transform: translate(calc(var(--mx, 0) * var(--d, 0px)), calc(var(--my, 0) * var(--d, 0px) * .5)); transition: transform 800ms cubic-bezier(.2,.8,.2,1); }
+
+.pl-sun { fill: #ffcf5c; }
+.pl-sun-halo { fill: #ffd98a; opacity: .28; transform-box: fill-box; transform-origin: center; animation: pl-halo 5s ease-in-out infinite; }
+.pl-scene[data-part="morning"] .pl-sun { fill: #f5a95a; }
+.pl-scene[data-part="morning"] .pl-sun-halo { fill: #f8c089; }
+@keyframes pl-halo { 50% { transform: scale(1.12); opacity: .4; } }
+.pl-moon { fill: #f4efdc; display: none; }
+.pl-stars circle { fill: white; display: none; animation: pl-twinkle 3s ease-in-out infinite; }
+@keyframes pl-twinkle { 50% { opacity: .25; } }
+.pl-scene[data-part="evening"] .pl-sun, .pl-scene[data-part="evening"] .pl-sun-halo, .pl-scene[data-part="evening"] .pl-birds { display: none; }
+.pl-scene[data-part="evening"] .pl-moon, .pl-scene[data-part="evening"] .pl-stars circle { display: inline; }
+
+.pl-cloud { fill: white; opacity: .92; animation: pl-cloud var(--dur, 50s) linear infinite; }
+.pl-scene[data-part="evening"] .pl-cloud { fill: #8793ad; opacity: .45; }
+@keyframes pl-cloud { from { transform: translateX(-80px); } to { transform: translateX(620px); } }
+.pl-birds { fill: none; stroke: #4a5750; stroke-width: 1.6; stroke-linecap: round; animation: pl-birds 24s linear infinite; }
+@keyframes pl-birds { from { transform: translate(-60px, 10px); } to { transform: translate(600px, -24px); } }
+
+.pl-hill-back { fill: #cfe3cf; }
+.pl-ground { fill: #b3d2b4; }
+.pl-path { fill: #eadfc6; }
+.pl-wall { fill: #f7f0e3; stroke: #e0d2ba; }
+.pl-wing { fill: #efe5d3; stroke: #e0d2ba; }
+.pl-roof { fill: #a44f3c; }
+.pl-wing-roof { fill: #8b3f30; }
+.pl-clock { fill: white; stroke: #7a3526; stroke-width: 2.5; }
+.pl-clock-hands line { stroke: #2b2f2c; stroke-width: 2; stroke-linecap: round; }
+.pl-window { fill: #cfe6e4; stroke: #9fc3bf; stroke-width: 1.2; transition: fill 600ms ease; }
+.pl-door { fill: #a85f16; }
+.pl-step { fill: #d8c9ad; }
+.pl-pole { stroke: #7c8580; stroke-width: 3; stroke-linecap: round; }
+.pl-flag { fill: var(--flag); transform-box: fill-box; transform-origin: 0% 50%; transition: fill 400ms ease; animation: pl-flag 2.6s ease-in-out infinite; }
+@keyframes pl-flag { 50% { transform: skewY(-5deg) scaleX(.93); } }
+.pl-tree { fill: #6fa57c; transform-box: fill-box; transform-origin: 50% 100%; animation: pl-sway 6s ease-in-out infinite; }
+.pl-tree circle:first-of-type { fill: #5e9870; }
+.pl-trunk { fill: #7a5a3d; }
+@keyframes pl-sway { 50% { transform: rotate(1.8deg); } }
+.pl-bush { fill: #82b58b; }
+
+.pl-scene[data-part="evening"] .pl-hill-back { fill: #3d5754; }
+.pl-scene[data-part="evening"] .pl-ground { fill: #4a6960; }
+.pl-scene[data-part="evening"] .pl-path { fill: #7b7a70; }
+.pl-scene[data-part="evening"] .pl-wall { fill: #ddd3c0; }
+.pl-scene[data-part="evening"] .pl-wing { fill: #cfc4b0; }
+.pl-scene[data-part="evening"] .pl-tree { fill: #3f6b52; }
+.pl-scene[data-part="evening"] .pl-tree circle:first-of-type { fill: #365f48; }
+.pl-scene[data-part="evening"] .pl-bush { fill: #466f58; }
+.pl-scene[data-part="evening"] .pl-window { fill: #ffd98a; stroke: #e7b85c; filter: drop-shadow(0 0 5px rgb(255 205 110 / .85)); animation: pl-glow 4s ease-in-out infinite; }
+@keyframes pl-glow { 50% { opacity: .82; } }
+
+.pl-bubble { opacity: 0; transform: translateY(8px) scale(.94); transform-box: fill-box; transform-origin: 50% 100%; transition: opacity 260ms ease, transform 320ms cubic-bezier(.2,.8,.2,1); }
+.pl-bubble rect, .pl-bubble path { fill: white; }
+.pl-bubble rect { filter: drop-shadow(0 6px 10px rgb(23 35 29 / .15)); }
+.pl-bubble text { fill: #1f2b25; font-size: 13px; font-weight: 700; font-family: inherit; }
+.pl-shell[data-active="student"] .pl-bubble[data-portal="student"],
+.pl-shell[data-active="teacher"] .pl-bubble[data-portal="teacher"],
+.pl-shell[data-active="parent"] .pl-bubble[data-portal="parent"],
+.pl-shell[data-active="admin"] .pl-bubble[data-portal="admin"] { opacity: 1; transform: none; }
+
+@media (max-width: 900px) {
+  .pl-hero { grid-template-columns: 1fr; gap: 24px; }
+  .pl-intro { text-align: center; }
+  .pl-scene { width: min(100%, 520px); margin: 0 auto; }
+}
+@media (max-width: 640px) {
+  .pl-scene { border-radius: 20px; }
+}
 
 /* Touch screens have no hover: show what's inside each portal up front, drop keyboard hints. */
 @media (hover: none) {
@@ -662,5 +754,5 @@ input, select, textarea {
 @media (prefers-reduced-motion: reduce) {
   .pl-shell *, .portal-identity-visual * { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   .pl-wash { display: none; }
-  .pl-intro, .pl-ambient > .pl-blob, .pl-card { translate: none !important; transform: none !important; }
+  .pl-intro, .pl-ambient > .pl-blob, .pl-card, .pl-scene, .pl-layer { translate: none !important; transform: none !important; }
 }

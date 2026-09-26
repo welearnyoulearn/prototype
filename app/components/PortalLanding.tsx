@@ -8,6 +8,7 @@ import {
   ArrowRight, BarChart3, Bell, BookOpen, Building2, CalendarCheck, ClipboardCheck, IndianRupee,
   ListChecks, LockKeyhole, Moon, PenLine, Presentation, Sun, Sunrise, TrendingUp, Trophy, Users, UsersRound, Wallet,
 } from 'lucide-react'
+import SchoolScene, { type DayPart } from './SchoolScene'
 
 type PortalId = 'student' | 'teacher' | 'parent' | 'admin'
 type Icon = typeof BookOpen
@@ -36,7 +37,7 @@ function readLastPortal(): PortalId | null {
   }
 }
 
-function readDayPart(): 'morning' | 'afternoon' | 'evening' {
+function readDayPart(): DayPart {
   const hour = new Date().getHours()
   return hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening'
 }
@@ -129,19 +130,30 @@ export default function PortalLanding() {
       </header>
 
       <main className="pl-main">
-        <motion.div
-          className="pl-intro"
-          initial={reduceMotion ? false : { opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        >
-          <p className="pl-greeting" data-part={dayPart ?? undefined}>
-            <GreetingIcon aria-hidden="true" />
-            {dayPart ? `Good ${dayPart}` : 'Welcome'}
-          </p>
-          <h1>Where would you like <em>to go today?</em></h1>
-          <p>Choose your portal and sign in with the account your school gave you.</p>
-        </motion.div>
+        <section className="pl-hero">
+          <motion.div
+            className="pl-intro"
+            initial={reduceMotion ? false : { opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <p className="pl-greeting" data-part={dayPart ?? undefined}>
+              <GreetingIcon aria-hidden="true" />
+              {dayPart ? `Good ${dayPart}` : 'Welcome'}
+            </p>
+            <h1>Where would you like <em>to go today?</em></h1>
+            <p>Choose your portal and sign in with the account your school gave you.</p>
+          </motion.div>
+
+          <motion.div
+            className="pl-scene-wrap"
+            initial={reduceMotion ? false : { opacity: 0, y: 20, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.7, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <SchoolScene dayPart={dayPart} />
+          </motion.div>
+        </section>
 
         <nav className="pl-grid" aria-label="School portals" onMouseLeave={() => setActive(null)}>
           {portals.map((portal, index) => (
