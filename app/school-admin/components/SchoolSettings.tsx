@@ -44,7 +44,15 @@ type Subscription = {
   tier: 'basic' | 'standard' | 'premium' | 'none'
   staff_limit?: number | null
   updated_at?: string
+  plan_start_date?: string | null
+  plan_end_date?: string | null
+  plan_status?: 'none' | 'active' | 'expiring' | 'grace' | 'expired'
+  days_left?: number | null
+  grace_ends?: string | null
 }
+
+const fmtPlanDate = (d: string) =>
+  d ? new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' }) : ''
 
 type SettingsTab = 'profile' | 'academic-years' | 'plan' | 'staff' | 'security' | 'danger'
 
@@ -1222,9 +1230,9 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                         {subscription?.tier === 'none' ? 'No Plan Assigned' : (subscription?.tier ?? 'none')}
                       </span>
                     </div>
-                    {subscription?.updated_at && subscription.tier !== 'none' && (
-                      <p className="text-xs text-muted-foreground mt-1.5">
-                        Active since {new Date(subscription.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}
+                    {subscription?.plan_end_date && subscription.tier !== 'none' && (
+                      <p className="text-xs text-muted-foreground mt-1.5" data-testid="plan-dates">
+                        Valid {subscription.plan_start_date ? `from ${fmtPlanDate(subscription.plan_start_date)} ` : ''}until {fmtPlanDate(subscription.plan_end_date)}
                       </p>
                     )}
                   </div>
@@ -1234,6 +1242,16 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                   </a>
                 </div>
               </div>
+
+              {(subscription?.plan_status === 'expiring' || subscription?.plan_status === 'grace' || subscription?.plan_status === 'expired') && (
+                <div data-testid="plan-expiry-banner"
+                  className={`rounded-md p-4 text-sm border ${subscription.plan_status === 'expiring' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                  {subscription.plan_status === 'expiring' && `Your plan ends ${subscription.days_left === 0 ? 'today' : `in ${subscription.days_left} day${subscription.days_left === 1 ? '' : 's'}`} (${fmtPlanDate(subscription.plan_end_date ?? '')}). Renew to keep every feature.`}
+                  {subscription.plan_status === 'grace' && `Your plan ended on ${fmtPlanDate(subscription.plan_end_date ?? '')}. Everything still works until ${fmtPlanDate(subscription.grace_ends ?? '')} — renew before then.`}
+                  {subscription.plan_status === 'expired' && `Your plan expired on ${fmtPlanDate(subscription.plan_end_date ?? '')}. Your data and logins are safe; features return as soon as the plan is renewed.`}
+                  {' '}<a className="underline font-medium" href="mailto:support@welearnyoulearn.com?subject=Plan Renewal">Contact us to renew</a>
+                </div>
+              )}
 
               {/* Features grid */}
               {subscription?.tier === 'none' ? (

@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 38
+const SCHEMA_VERSION = 39
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2076,6 +2076,19 @@ async function runIncrementalMigrations() {
     )
   `)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_staff_account_events_school ON staff_account_events (school_id, created_at DESC)`)
+
+  // ── Plan-expiry reminders sent ────────────────────────────────────────────────
+  // One row per (school, end date, reminder kind), so the daily cron never emails the same
+  // reminder twice, and a renewal (new end date) starts a fresh set. (app/api/cron/plan-expiry)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS plan_expiry_notices (
+      school_id     INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      plan_end_date DATE NOT NULL,
+      kind          VARCHAR(20) NOT NULL,
+      sent_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (school_id, plan_end_date, kind)
+    )
+  `)
 
   // ── Login performance indexes (functional, case-insensitive) ─────────────────
   // teachers.email: every teacher login was a full table scan — no index existed

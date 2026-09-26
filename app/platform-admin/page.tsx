@@ -6,6 +6,8 @@ import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useConfirm } from '@/components/ui/use-confirm'
 import { overLimitMessage } from '@/lib/planChangeMessage'
+import { planStatus } from '@/lib/planExpiry'
+import { PLAN_STATUS_STYLE, planStatusLabel } from '@/lib/planStatusUi'
 import { RefreshCw, Users } from 'lucide-react'
 
 type School = {
@@ -22,6 +24,7 @@ type School = {
   created_at: string
   deleted_at?: string
   tier?: string
+  plan_end_date?: string | null
   teacher_count?: number | string
   student_count?: number | string
   admin_last_login?: string
@@ -172,7 +175,8 @@ export default function PlatformAdmin() {
         }
       }
       if (!res.ok) throw new Error()
-      setSchools(prev => prev.map(s => s.id === schoolId ? { ...s, tier: newTier } : s))
+      const saved = await res.json().catch(() => ({})) as { plan_end_date?: string | null }
+      setSchools(prev => prev.map(s => s.id === schoolId ? { ...s, tier: newTier, plan_end_date: saved.plan_end_date ?? s.plan_end_date } : s))
       fetchStats()
     } catch { setError('Failed to update plan') }
     finally   { setChangingPlanFor(null) }
@@ -801,6 +805,16 @@ export default function PlatformAdmin() {
                               }
                             </span>
                           </div>
+                          {(() => {
+                            const st = planStatus(school.tier, school.plan_end_date ?? null)
+                            if (st.status === 'none') return null
+                            return (
+                              <div data-testid={`plan-status-${school.id}`}
+                                className={`mt-1 inline-block text-[11px] px-2 py-0.5 rounded-full border ${PLAN_STATUS_STYLE[st.status]}`}>
+                                {planStatusLabel(st.status, st.days_left, st.grace_ends, school.plan_end_date ?? null)}
+                              </div>
+                            )
+                          })()}
                         </td>
 
                         {/* Staff / Students + health */}

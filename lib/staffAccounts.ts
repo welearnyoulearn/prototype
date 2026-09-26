@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg'
 import pool from '@/lib/db'
 import { sendMail } from '@/lib/email'
 import { escapeHtml } from '@/lib/html'
+import { effectiveTier } from '@/lib/planExpiry'
 
 // The school-level logins: School Administrator, Principal, Vice Principal.
 // (Teachers, students and parents have their own tables and are not "staff seats".)
@@ -22,14 +23,15 @@ export async function lockStaffSeats(client: PoolClient, schoolId: number): Prom
 // other error propagates, so a database problem can no longer silently allow an add.
 export async function getStaffLimit(schoolId: number): Promise<number | null> {
   try {
-    const { rows: [sub] } = await pool.query<{ staff_limit: number | null }>(
-      `SELECT pp.staff_limit
-       FROM school_subscriptions ss
-       LEFT JOIN plan_pricing pp ON pp.tier = ss.tier
+    // The limit follows the EFFECTIVE tier: an expired plan (enforcement on) is 'none'.
+    const { rows: [sub] } = await pool.query<{ tier: string; plan_end_date: string | null }>(
+      `SELECT ss.tier, sc.plan_end_date::text AS plan_end_date
+       FROM school_subscriptions ss LEFT JOIN schools sc ON sc.id = ss.school_id
        WHERE ss.school_id = $1`,
       [schoolId]
     )
-    return sub?.staff_limit ?? null
+    if (!sub) return null
+    return await getPlanLimit(effectiveTier(sub.tier, sub.plan_end_date))
   } catch (e) {
     if ((e as { code?: string }).code === '42703') return null
     throw e

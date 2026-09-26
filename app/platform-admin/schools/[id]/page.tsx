@@ -6,6 +6,8 @@ import { useParams, useRouter } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
 import { useConfirm } from '@/components/ui/use-confirm'
 import { overLimitMessage } from '@/lib/planChangeMessage'
+import { planStatus } from '@/lib/planExpiry'
+import { PLAN_STATUS_STYLE, planStatusLabel } from '@/lib/planStatusUi'
 
 type SchoolDetail = {
   id: number
@@ -20,6 +22,8 @@ type SchoolDetail = {
   school_code?: string
   created_at: string
   tier?: string
+  plan_start_date?: string | null
+  plan_end_date?: string | null
   teacher_count?: number
   student_count?: number
   admin_email?: string
@@ -60,6 +64,9 @@ export default function SchoolDetailPage() {
   const [selectedTier, setSelectedTier] = useState<string>('none')
   const [savingSub, setSavingSub]       = useState(false)
   const [savedSub, setSavedSub]         = useState(false)
+  const [termEnd, setTermEnd]           = useState('')
+  const [savingTerm, setSavingTerm]     = useState(false)
+  const [termMsg, setTermMsg]           = useState('')
   const [tierPopup, setTierPopup]       = useState<{ tier: string; from: string } | null>(null)
 
   // Edit mode
@@ -170,13 +177,33 @@ export default function SchoolDetailPage() {
         data = await res.json()
       }
       if (!res.ok) throw new Error(data.error)
-      setSchool(s => s ? { ...s, tier: data.tier } : s)
+      setSchool(s => s ? { ...s, tier: data.tier, plan_start_date: data.plan_start_date ?? s.plan_start_date, plan_end_date: data.plan_end_date ?? s.plan_end_date } : s)
       setSavedSub(true)
       setTierPopup({ tier: selectedTier, from: prevTier })
       setTimeout(() => setSavedSub(false), 3000)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally { setSavingSub(false) }
+  }
+
+  // Renew (one more year from the later of today / the current end) or set an exact end date.
+  // Only the plan's dates change — the tier is re-sent as-is, so no seat check is triggered.
+  async function handleTerm(body: { renew?: boolean; plan_end_date?: string }) {
+    if (!school?.tier || school.tier === 'none') return
+    setSavingTerm(true); setTermMsg(''); setError('')
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/subscription`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier: school.tier, ...body }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setSchool(s => s ? { ...s, plan_start_date: data.plan_start_date, plan_end_date: data.plan_end_date } : s)
+      setTermEnd('')
+      setTermMsg(`Plan now runs until ${data.plan_end_date}`)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to update plan dates')
+    } finally { setSavingTerm(false) }
   }
 
   async function handlePortalToggle(featureKey: string, enabled: boolean) {
@@ -540,6 +567,40 @@ export default function SchoolDetailPage() {
               {savedSub && <span className="text-green-600 text-sm font-medium">✓ Plan assigned — school admin sidebar updated</span>}
               {!hasChanged && !savedSub && <span className="text-gray-400 text-sm">No changes</span>}
             </div>
+
+            {school?.tier && school.tier !== 'none' && (() => {
+              const st = planStatus(school.tier, school.plan_end_date ?? null)
+              return (
+                <div className="mt-5 pt-5 border-t border-gray-100" data-testid="plan-term">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-sm font-semibold text-gray-800">Plan term</span>
+                    <span data-testid="plan-term-status"
+                      className={`text-xs px-2 py-0.5 rounded-full border ${PLAN_STATUS_STYLE[st.status]}`}>
+                      {planStatusLabel(st.status, st.days_left, st.grace_ends, school.plan_end_date ?? null) || 'Active'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1" data-testid="plan-term-dates">
+                    {school.plan_end_date
+                      ? `${school.plan_start_date ?? '—'} → ${school.plan_end_date}`
+                      : 'No end date set'}
+                    {' · '}Renews and end-date changes never touch staff or data.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3 mt-3">
+                    <button data-testid="plan-renew" onClick={() => handleTerm({ renew: true })} disabled={savingTerm}
+                      className="border border-purple-300 text-purple-700 hover:bg-purple-50 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+                      {savingTerm ? 'Saving…' : 'Renew 1 year'}
+                    </button>
+                    <input data-testid="plan-end-input" type="date" value={termEnd} onChange={e => setTermEnd(e.target.value)}
+                      aria-label="New plan end date" className="border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <button data-testid="plan-end-save" onClick={() => handleTerm({ plan_end_date: termEnd })} disabled={savingTerm || !termEnd}
+                      className="border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+                      Set end date
+                    </button>
+                    {termMsg && <span data-testid="plan-term-msg" className="text-green-600 text-sm font-medium">✓ {termMsg}</span>}
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         </div>
 
