@@ -25,7 +25,13 @@ School admin (owner).
 
 - Each person has their own login; staff sessions last 20 minutes idle / 12 hours maximum.
 - Platform 'reset password' resets only the owner account — and reactivates it if it had been deactivated, so a locked-out school can always be recovered.
-- **Seat limit per plan** (`plan_pricing.staff_limit`, set by the platform admin, same for every school on a plan): No plan 1 · Basic 2 · Standard 5 · Premium unlimited. Active accounts count (including invites not yet accepted). Adding **and reactivating** both need a free seat. Lowering a plan or a limit never disables existing accounts — it only blocks new ones. A blank limit means unlimited and is kept across deploys.
+- **Seat limit per plan** (`plan_pricing.staff_limit`, set by the platform admin, same for every school on a plan): No plan 1 · Basic 2 · Standard 5 · Premium unlimited. Active accounts count (including invites not yet accepted). Adding **and reactivating** both need a free seat. A blank limit means unlimited and is kept across deploys.
+- **Plan changes and seats.** Seats are active accounts only; a plan change never switches anybody off.
+  - *Downgrade that leaves the school over the new limit* (e.g. Standard with 5 active → Basic, limit 2): the platform admin is shown the exact numbers and must confirm; nothing is applied until they do. The school then keeps every account working but is **over its limit** — it cannot add or reactivate until it deactivates enough accounts (or upgrades). Its administrators get an email and a banner in Settings → Staff Accounts.
+  - *Deactivate first, then downgrade:* once active accounts fit the new limit there is no warning at all. Deactivated accounts are kept.
+  - *Upgrade:* seats open up, but nobody is reactivated automatically — the school clicks Reactivate (or adds someone new).
+  - *Lowering a plan's limit for every school* (Feature Plans page): the platform admin sees how many schools it pushes over, and which, and must confirm; those schools are handled exactly as above and emailed.
+  - Every plan change and limit change is written to the platform audit log with the admin's email, the from/to plan and the seat numbers. Re-saving the same plan never asks for confirmation.
 - The last active school administrator cannot be deactivated, and nobody can deactivate themselves.
 - A deactivated person's email stays reserved (it is unique across all schools): use **Reactivate**, not Add.
 - The plan itself (`/api/schools/{id}/subscription`) can be read only by the platform admin or staff of that school, and changed only by the platform admin.
@@ -67,4 +73,5 @@ API routes these screens call (all exist):
 | Date | Change | Issue |
 |------|--------|-------|
 | 2026-09-21 | Doc created from the code; status checked with `scripts/product-docs.mjs` | #162 |
+| 2026-09-26 | Plan-change handling for staff seats: confirm-before-downgrade with exact numbers, over-limit state (no auto-disable, adds/reactivations blocked), school banner + email, confirm before lowering a plan's limit, plan changes in the audit log | #235 |
 | 2026-09-26 | Staff-accounts hardening: plan endpoint now needs a login (was open to anyone), accounts can only be created in your own school and only by a school administrator, reactivation respects the seat limit, last-admin and platform-recovery protection, deactivation voids unused links, audit history, safer limit saving | #234 |
