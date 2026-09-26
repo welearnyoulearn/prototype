@@ -1,5 +1,4 @@
 import jwt from 'jsonwebtoken'
-import { effectiveTier } from '@/lib/planExpiry'
 import bcrypt from 'bcryptjs'
 import { randomInt, randomUUID } from 'crypto'
 import { cookies, headers } from 'next/headers'
@@ -380,15 +379,12 @@ export async function schoolHasFeature(schoolId: number, featureKey: string, db:
   if (overrideRes.rows.length > 0) return overrideRes.rows[0].enabled
 
   const subRes = await db.query(
-    `SELECT ss.tier, sc.plan_end_date::text AS plan_end_date
-     FROM school_subscriptions ss LEFT JOIN schools sc ON sc.id = ss.school_id
-     WHERE ss.school_id = $1`,
+    `SELECT tier FROM school_subscriptions WHERE school_id = $1`,
     [schoolId]
   )
   if (subRes.rows.length === 0) return false
-  // An expired plan (past its grace period) gets no features — only when PLAN_EXPIRY_ENFORCED=true.
-  const tier = effectiveTier(subRes.rows[0].tier, subRes.rows[0].plan_end_date)
-  const tiers = TIER_INCLUDES[tier] ?? [tier]
+  // An expired plan keeps its features: features are not downgraded; the school is locked instead (see proxy.ts).
+  const tiers = TIER_INCLUDES[subRes.rows[0].tier] ?? [subRes.rows[0].tier]
 
   const tierRes = await db.query(
     `SELECT bool_or(enabled) AS enabled FROM plan_features WHERE tier = ANY($1) AND feature_key = $2`,

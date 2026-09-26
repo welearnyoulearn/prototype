@@ -78,15 +78,18 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!/^\d+$/.test(id)) return NextResponse.json({ error: 'Invalid school id' }, { status: 400 })
     const schoolId = Number(id)
     try {
-      const { tier, confirm_over_limit, renew, plan_end_date } = await req.json()
+      const { tier, confirm_over_limit, renew, plan_end_date, no_expiry } = await req.json()
       if (!['none', 'basic', 'standard', 'premium'].includes(tier)) {
         return NextResponse.json({ error: 'Invalid tier' }, { status: 400 })
       }
       if (plan_end_date != null && !isDateString(plan_end_date)) {
         return NextResponse.json({ error: 'plan_end_date must be a valid YYYY-MM-DD date' }, { status: 400 })
       }
-      if ((renew === true || plan_end_date) && tier === 'none') {
+      if ((renew === true || plan_end_date || no_expiry === true) && tier === 'none') {
         return NextResponse.json({ error: 'A school with no plan has no end date to renew or set' }, { status: 400 })
+      }
+      if (no_expiry === true && (renew === true || plan_end_date)) {
+        return NextResponse.json({ error: 'Choose either "no expiry" or an end date, not both' }, { status: 400 })
       }
 
       // What would this change do to the school's staff? A school on Standard with 5 active
@@ -102,8 +105,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
       // The term only starts or moves on first activation, an expired plan, or an explicit
       // renew / end date. Re-saving the same plan, or changing tier mid-term, keeps the dates.
       const explicitEnd: string | null = plan_end_date ?? (renew === true ? renewedEnd(dates?.e ?? null, today) : null)
-      const term = nextTerm(fromTier, { start: dates?.s ?? null, end: dates?.e ?? null }, tier, explicitEnd, today)
-      if (term && daysBetween(term.start, term.end) < 0) {
+      const term = nextTerm(fromTier, { start: dates?.s ?? null, end: dates?.e ?? null }, tier, explicitEnd, today, no_expiry === true)
+      if (term && term.end && daysBetween(term.start, term.end) < 0) {
         return NextResponse.json({ error: 'The end date cannot be before the plan start date' }, { status: 400 })
       }
       const newLimit = await getPlanLimit(tier)
@@ -151,11 +154,23 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         // was renewed / its end date changed, or the tier changed. A no-op re-save sends nothing.
         const endChanged = term.end !== (dates?.e ?? null)
         if ((term.started || endChanged || tier !== fromTier) && school?.email && school?.school_code) {
-          const fmt = (d: string) => new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' })
+          const fmt = (d: string | null) => !d ? 'No end date' : new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' })
           sendPlanActivationEmail({
             to: school.email, schoolName: school.name, schoolCode: school.school_code,
             tier, startDate: fmt(term.start), endDate: fmt(term.end),
           }).catch(err => console.error('[email/plan]', err))
+        }
+
+        // A renewal request that was waiting for this school is now answered: record what was agreed
+        // (the next plan and end date) so the Renewals queue shows it.
+        if ((term.end === null || term.end >= today) && (term.started || endChanged || tier !== fromTier)) {
+          await pool.query(
+            `UPDATE plan_renewal_requests
+             SET status = 'renewed', next_tier = $2, next_end_date = $3,
+                 handled_by_email = (SELECT email FROM users WHERE id = $4), handled_at = NOW()
+             WHERE school_id = $1 AND status IN ('open', 'contacted')`,
+            [schoolId, tier, term.end, session.userId]
+          ).catch(err => console.error('[subscription/renewal-request]', err))
         }
       }
 
@@ -163,6 +178,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         ...result.rows[0], seats: { limit: newLimit, active, over },
         plan_start_date: term?.start ?? null, plan_end_date: term?.end ?? null,
         plan_status: planStatus(tier, term?.end ?? null, today).status,
+        no_expiry: !!term && term.end === null,
       })
     } catch (error) {
       console.error(error)

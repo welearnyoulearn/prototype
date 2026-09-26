@@ -80,6 +80,63 @@ async function refreshFlags(origin: string) {
   } catch { /* cache stays stale — safe */ }
 }
 
+// ── Locked schools (plan expired past grace) ─────────────────────────────────
+// When a school's plan has expired past its grace period, every request its people make to
+// /api/ with a school-side session cookie (school staff, teacher, student, parent) is answered
+// 403 PLAN_EXPIRED — whatever the method — except the few routes a locked school still needs:
+// signing in/out (the teacher / student / parent sign-in routes refuse a locked school
+// themselves; staff may still sign in), the plan routes (status, data export, renewal request),
+// usage pings, and the platform's own routes. This is the single place that enforces the lock, so
+// no individual route can forget it. Nothing is deleted.
+//
+// The set of locked schools comes from /api/internal/plan-locked (empty unless
+// PLAN_EXPIRY_ENFORCED=true) and is cached for LOCKED_TTL. If the refresh fails the previous set
+// is kept (fail-open on a cold start), and a renewal takes effect within LOCKED_TTL.
+const LOCKED_TTL = 15_000
+const LOCKED_EXEMPT_PREFIXES = [
+  '/api/auth/', '/api/teacher/auth/', '/api/student/auth/', '/api/parent/auth/', '/api/teacher-auth/',
+  '/api/usage/', '/api/internal/', '/api/cron/', '/api/platform/', '/api/plan/',
+]
+let lockedSchools = new Set<number>()
+let lockedFetchedAt = 0
+let lockedInflight: Promise<void> | null = null
+
+function refreshLocked(origin: string): Promise<void> {
+  if (Date.now() - lockedFetchedAt < LOCKED_TTL) return Promise.resolve()
+  if (!lockedInflight) {
+    lockedInflight = (async () => {
+      try {
+        const res = await fetch(`${origin}/api/internal/plan-locked`, { headers: { 'x-ingest-secret': INGEST_SECRET } })
+        if (res.ok) {
+          const { school_ids } = await res.json() as { school_ids: number[] }
+          lockedSchools = new Set(school_ids)
+        }
+      } catch { /* keep the previous set */ }
+      lockedFetchedAt = Date.now()
+      lockedInflight = null
+    })()
+  }
+  return lockedInflight
+}
+
+async function isLockedRequest(req: NextRequest, pathname: string, origin: string): Promise<boolean> {
+  if (!pathname.startsWith('/api/')) return false
+  if (LOCKED_EXEMPT_PREFIXES.some(p => pathname.startsWith(p))) return false
+  // A Platform Admin session is never restricted, even in a browser that also holds a school login.
+  if (req.cookies.get(COOKIE_PLATFORM)) return false
+  const tokens = [COOKIE_ADMIN, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT]
+    .map(name => req.cookies.get(name)?.value).filter((t): t is string => !!t)
+  if (tokens.length === 0) return false
+  await refreshLocked(origin)
+  if (lockedSchools.size === 0) return false
+  for (const token of tokens) {
+    const payload = await getTokenPayload(token)
+    const schoolId = Number(payload?.schoolId)
+    if (Number.isInteger(schoolId) && lockedSchools.has(schoolId)) return true
+  }
+  return false
+}
+
 function extractSchoolId(req: NextRequest): number | null {
   const sid = req.nextUrl.searchParams.get('school_id')
   const n = Number(sid)
@@ -132,6 +189,13 @@ export async function proxy(req: NextRequest) {
       return NextResponse.redirect(new URL('/admin', req.url))
     }
     return watchlineAndNext(req, origin, pathname)
+  }
+
+  if (await isLockedRequest(req, pathname, origin)) {
+    return NextResponse.json({
+      error: "Your school's plan has ended, so access is paused. School administrators can still export their data and request a renewal.",
+      code: 'PLAN_EXPIRED',
+    }, { status: 403 })
   }
 
   if (isPublic(pathname) || pathname === '/') return NextResponse.next()

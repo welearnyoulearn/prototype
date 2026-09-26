@@ -64,7 +64,8 @@ export default function SchoolDetailPage() {
   const [selectedTier, setSelectedTier] = useState<string>('none')
   const [savingSub, setSavingSub]       = useState(false)
   const [savedSub, setSavedSub]         = useState(false)
-  const [termEnd, setTermEnd]           = useState('')
+  const [endInput, setEndInput]         = useState('')      // plan end date being assigned ('' = default: 1 year from today)
+  const [noExpiry, setNoExpiry]         = useState(false)
   const [savingTerm, setSavingTerm]     = useState(false)
   const [termMsg, setTermMsg]           = useState('')
   const [tierPopup, setTierPopup]       = useState<{ tier: string; from: string } | null>(null)
@@ -134,6 +135,7 @@ export default function SchoolDetailPage() {
 
         setSchool(schoolData)
         setSelectedTier(schoolData.tier || 'none')
+        setEndInput(schoolData.tier && schoolData.tier !== 'none' ? (schoolData.plan_end_date ?? '') : '')
         setEditForm({
           name: schoolData.name || '', type: schoolData.type || 'Private',
           city: schoolData.city || '', country: schoolData.country || '',
@@ -164,7 +166,11 @@ export default function SchoolDetailPage() {
       const send = (confirmOverLimit: boolean) => fetch(`/api/schools/${schoolId}/subscription`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tier: selectedTier, confirm_over_limit: confirmOverLimit || undefined }),
+        body: JSON.stringify({
+          tier: selectedTier, confirm_over_limit: confirmOverLimit || undefined,
+          ...(selectedTier !== 'none' && noExpiry ? { no_expiry: true } : {}),
+          ...(selectedTier !== 'none' && !noExpiry && endInput && endInput !== (school?.plan_end_date ?? '') ? { plan_end_date: endInput } : {}),
+        }),
       })
       let res = await send(false)
       let data = await res.json()
@@ -178,6 +184,8 @@ export default function SchoolDetailPage() {
       }
       if (!res.ok) throw new Error(data.error)
       setSchool(s => s ? { ...s, tier: data.tier, plan_start_date: data.plan_start_date ?? s.plan_start_date, plan_end_date: data.plan_end_date ?? s.plan_end_date } : s)
+      setEndInput(data.plan_end_date ?? '')
+      setNoExpiry(data.no_expiry === true)
       setSavedSub(true)
       setTierPopup({ tier: selectedTier, from: prevTier })
       setTimeout(() => setSavedSub(false), 3000)
@@ -186,9 +194,9 @@ export default function SchoolDetailPage() {
     } finally { setSavingSub(false) }
   }
 
-  // Renew (one more year from the later of today / the current end) or set an exact end date.
+  // Renew: one more year from the later of today / the current end. (An exact end date is chosen when the plan is assigned.)
   // Only the plan's dates change — the tier is re-sent as-is, so no seat check is triggered.
-  async function handleTerm(body: { renew?: boolean; plan_end_date?: string }) {
+  async function handleTerm(body: { renew: true }) {
     if (!school?.tier || school.tier === 'none') return
     setSavingTerm(true); setTermMsg(''); setError('')
     try {
@@ -199,7 +207,7 @@ export default function SchoolDetailPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       setSchool(s => s ? { ...s, plan_start_date: data.plan_start_date, plan_end_date: data.plan_end_date } : s)
-      setTermEnd('')
+      setEndInput(data.plan_end_date ?? '')
       setTermMsg(`Plan now runs until ${data.plan_end_date}`)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to update plan dates')
@@ -298,7 +306,10 @@ export default function SchoolDetailPage() {
   }
 
   const inputCls   = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-purple-300'
-  const hasChanged = school?.tier !== selectedTier
+  const dateChanged = selectedTier !== 'none' && (noExpiry
+    ? !!school?.plan_end_date || school?.tier === 'none'
+    : !!endInput && endInput !== (school?.plan_end_date ?? ''))
+  const hasChanged = school?.tier !== selectedTier || dateChanged
   const currentBadge = TIER_META.find(t => t.key === (school?.tier || 'none'))
 
   if (loading) return <FullPageLoader portal="platform-admin" message="Loading school details" />
@@ -559,6 +570,33 @@ export default function SchoolDetailPage() {
               </div>
             )}
 
+            {selectedTier !== 'none' && (
+              <div className="mt-5 rounded-lg border border-gray-200 p-4" data-testid="plan-end-field">
+                <label className="block text-sm font-semibold text-gray-800" htmlFor="plan-end-date">Plan end date</label>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  After this date (plus a 14-day grace period) the school is locked: teachers, students and parents can no longer log in,
+                  and the school administrator can only export data and request a renewal. Nothing is deleted, and renewing restores everything.
+                  Leave blank for one year from today.
+                </p>
+                <div className="flex flex-wrap items-center gap-3 mt-3">
+                  <input id="plan-end-date" data-testid="plan-end-date" type="date" value={endInput} disabled={noExpiry}
+                    onChange={e => setEndInput(e.target.value)}
+                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-400" />
+                  {[{ label: '6 months', m: 6 }, { label: '1 year', m: 12 }, { label: '2 years', m: 24 }].map(o => (
+                    <button key={o.m} type="button" disabled={noExpiry} data-testid={`plan-end-preset-${o.m}`}
+                      onClick={() => { const d = new Date(); d.setMonth(d.getMonth() + o.m); setEndInput(d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })) }}
+                      className="border border-gray-300 text-gray-700 hover:bg-gray-50 px-3 py-2 rounded-lg text-xs font-medium disabled:opacity-50">
+                      {o.label}
+                    </button>
+                  ))}
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input data-testid="plan-no-expiry" type="checkbox" checked={noExpiry} onChange={e => setNoExpiry(e.target.checked)} />
+                    No expiry
+                  </label>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center gap-4 mt-5">
               <button onClick={handleSaveSub} disabled={savingSub || !hasChanged}
                 className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
@@ -586,16 +624,10 @@ export default function SchoolDetailPage() {
                     {' · '}Renews and end-date changes never touch staff or data.
                   </p>
                   <div className="flex flex-wrap items-center gap-3 mt-3">
-                    <button data-testid="plan-renew" onClick={() => handleTerm({ renew: true })} disabled={savingTerm}
+                    {school.plan_end_date ? <button data-testid="plan-renew" onClick={() => handleTerm({ renew: true })} disabled={savingTerm}
                       className="border border-purple-300 text-purple-700 hover:bg-purple-50 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
                       {savingTerm ? 'Saving…' : 'Renew 1 year'}
-                    </button>
-                    <input data-testid="plan-end-input" type="date" value={termEnd} onChange={e => setTermEnd(e.target.value)}
-                      aria-label="New plan end date" className="border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-                    <button data-testid="plan-end-save" onClick={() => handleTerm({ plan_end_date: termEnd })} disabled={savingTerm || !termEnd}
-                      className="border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
-                      Set end date
-                    </button>
+                    </button> : <span className="text-xs text-gray-500">This plan has no expiry.</span>}
                     {termMsg && <span data-testid="plan-term-msg" className="text-green-600 text-sm font-medium">✓ {termMsg}</span>}
                   </div>
                 </div>

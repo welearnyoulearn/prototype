@@ -35,11 +35,11 @@ function message(kind: Kind, r: Row, daysLeft: number): { subject: string; body:
   switch (kind) {
     case 'expired':
       return { subject: `Your WLYL plan ended on ${r.end}`, body:
-        `<p>The ${plan} ended on <strong>${r.end}</strong>. Everything keeps working for a ${GRACE_DAYS}-day grace period — please renew now to avoid any interruption.</p>` }
+        `<p>The ${plan} ended on <strong>${r.end}</strong>. Everything keeps working for a ${GRACE_DAYS}-day grace period — please renew now, before access is paused.</p>` }
     case 'grace_end':
       return { subject: 'Your WLYL plan has expired', body:
-        `<p>The grace period for the ${plan} is over.${enforced ? ' Plan features are now switched off' : ' Plan features may be switched off soon'}.
-         <strong>None of your data has been deleted</strong> and every login still works — features return as soon as the plan is renewed.</p>` }
+        `<p>The grace period for the ${plan} is over.${enforced ? ' Portal access for teachers, students and parents is now paused, and administrators can only export data and request a renewal' : ' Access may be paused soon'}.
+         <strong>None of your data has been deleted</strong> — everything returns as soon as the plan is renewed.</p>` }
     default:
       return { subject: `Your WLYL plan ends in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`, body:
         `<p>The ${plan} ends on <strong>${r.end}</strong> (${daysLeft} day${daysLeft === 1 ? '' : 's'} from now). Contact us to renew and keep every feature without a break.</p>` }

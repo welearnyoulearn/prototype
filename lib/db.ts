@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 39
+const SCHEMA_VERSION = 40
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2089,6 +2089,32 @@ async function runIncrementalMigrations() {
       PRIMARY KEY (school_id, plan_end_date, kind)
     )
   `)
+
+  // ── Plan renewal requests ─────────────────────────────────────────────────────
+  // A school administrator asks WLYL to renew / change the plan; the platform admin works the
+  // queue (Platform Admin → Renewals): contacts the school, then sets the next plan and end date.
+  // status: open -> contacted -> renewed | dismissed. At most one open/contacted request per school
+  // (partial unique index), so repeat clicks never pile up. next_* record what was agreed.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS plan_renewal_requests (
+      id                 SERIAL PRIMARY KEY,
+      school_id          INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      requested_by       INTEGER,
+      requested_by_name  VARCHAR(255),
+      requested_by_email VARCHAR(255),
+      plan_tier          VARCHAR(20),
+      plan_end_date      DATE,
+      status             VARCHAR(20) NOT NULL DEFAULT 'open',
+      note               TEXT,
+      next_tier          VARCHAR(20),
+      next_end_date      DATE,
+      handled_by_email   VARCHAR(255),
+      handled_at         TIMESTAMPTZ,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_renewal_active ON plan_renewal_requests (school_id) WHERE status IN ('open', 'contacted')`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_plan_renewal_status ON plan_renewal_requests (status, created_at DESC)`)
 
   // ── Login performance indexes (functional, case-insensitive) ─────────────────
   // teachers.email: every teacher login was a full table scan — no index existed

@@ -8,11 +8,14 @@ import { todayIST } from '@/lib/istDate'
 //   active    more than EXPIRING_DAYS left
 //   expiring  EXPIRING_DAYS or fewer left (still fully working)
 //   grace     the end date has passed, but the grace period has not — still fully working
-//   expired   grace is over. Treated as "No plan" ONLY when PLAN_EXPIRY_ENFORCED=true;
-//             otherwise it is just a status the platform admin sees.
+//   expired   grace is over. When PLAN_EXPIRY_ENFORCED=true the school is LOCKED: teachers,
+//             students and parents can no longer use their portals (login is refused), and the
+//             school's administrators can sign in only to export their data and to request a
+//             renewal — every other request is refused by proxy.ts. Otherwise it is only a
+//             status the platform admin sees.
 //
-// Expiry never deletes data or disables logins — the school keeps everything and gets
-// back its features the moment the plan is renewed.
+// A school with no end date never expires. Expiry never deletes data, and renewing restores
+// full access at once — there is nothing to restore.
 
 export const EXPIRING_DAYS = 30
 export const GRACE_DAYS = 14
@@ -67,29 +70,28 @@ export function planStatus(tier: string | null | undefined, endDate: string | nu
 
 export const planExpiryEnforced = () => process.env.PLAN_EXPIRY_ENFORCED === 'true'
 
-/** The tier the school actually gets: 'none' once expired, when enforcement is on. */
-export function effectiveTier(tier: string | null | undefined, endDate: string | null | undefined, today: string = todayIST()): string {
-  const t = tier ?? 'none'
-  if (!planExpiryEnforced()) return t
-  return planStatus(t, endDate, today).status === 'expired' ? 'none' : t
-}
+/** True when the school must be locked: expired, and enforcement is on. */
+export const isLockedStatus = (status: PlanStatus) => planExpiryEnforced() && status === 'expired'
 
-export type Term = { start: string; end: string; started: boolean }
+export type Term = { start: string; end: string | null; started: boolean }
 
 /**
  * Dates after a plan save. The term only starts (start = today, end = today + 1 year) when the
  * school had no running plan: first activation, none -> paid, or its previous plan already
  * ended (grace included). Any other save — same plan re-saved, or a mid-term tier change —
  * keeps the existing dates; previously every save silently renewed for a year.
- * `explicitEnd` (validated by the caller) overrides the end date.
+ * `explicitEnd` (validated by the caller) overrides the end date; `noExpiry` clears it (a
+ * school that never expires).
  */
 export function nextTerm(
-  fromTier: string, cur: { start: string | null; end: string | null }, newTier: string, explicitEnd: string | null, today: string = todayIST(),
+  fromTier: string, cur: { start: string | null; end: string | null }, newTier: string, explicitEnd: string | null,
+  today: string = todayIST(), noExpiry = false,
 ): Term | null {
   if (newTier === 'none') return null
-  const running = fromTier !== 'none' && !!cur.end && daysBetween(today, cur.end) >= -GRACE_DAYS
-  if (running) return { start: cur.start ?? today, end: explicitEnd ?? cur.end!, started: false }
-  return { start: today, end: explicitEnd ?? addYears(today, TERM_YEARS), started: true }
+  // A paid plan with no end date is "running" for good (an unlimited plan, or one set before dates existed).
+  const running = fromTier !== 'none' && (!cur.end || daysBetween(today, cur.end) >= -GRACE_DAYS)
+  if (running) return { start: cur.start ?? today, end: noExpiry ? null : (explicitEnd ?? cur.end), started: false }
+  return { start: today, end: noExpiry ? null : (explicitEnd ?? addYears(today, TERM_YEARS)), started: true }
 }
 
 /** Renewal: one more term counted from the later of today and the current end (early renewal loses no days). */
