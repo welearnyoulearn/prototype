@@ -10,6 +10,7 @@ import {
 import { ROLE_VISUAL } from '@/app/feedback/[code]/roleVisuals'
 import { useFeedbackFetch } from './useFeedbackFetch'
 import QrFormPreview from './QrFormPreview'
+import CategoryIcon from '@/app/feedback/[code]/CategoryIcon'
 import type { QrPoint } from './FeedbackQrPointsTab'
 
 interface Category { id: number; role: FeedbackRole; key: string; label: string; icon: string | null; department: string | null; is_active: boolean }
@@ -363,7 +364,7 @@ export default function QrPointEditor({
                                   onClick={() => toggleCategory(c.id)}
                                   className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors ${on ? 'border-[#245b46] bg-[#245b46] text-white' : 'border-gray-200 bg-white text-gray-600 hover:border-[#9bb7a4]'}`}
                                 >
-                                  <span aria-hidden="true">{c.icon}</span>{c.label}
+                                  <CategoryIcon icon={c.icon} size={18} />{c.label}
                                 </button>
                               )
                             })}

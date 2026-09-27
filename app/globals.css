@@ -389,6 +389,28 @@ input, select, textarea {
 .anim-feedback-mascot-sway {
   animation: feedbackMascotSway 2s ease-in-out infinite;
 }
+/* ── MoodFace (app/feedback/[code]/MoodFace.tsx) idle animations ── */
+@keyframes mfBlink   { 0%, 90%, 100% { transform: scaleY(1); } 94% { transform: scaleY(0.12); } }
+@keyframes mfTear    { 0% { transform: translateY(-2px); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(7px); opacity: 0; } }
+@keyframes mfTwinkle { 0%, 100% { transform: scale(0.35) rotate(0deg); opacity: 0.2; } 50% { transform: scale(1.1) rotate(25deg); opacity: 1; } }
+@keyframes mfPulse   { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+@keyframes mfSweep   { 0%, 55% { transform: translateX(0); } 100% { transform: translateX(110px); } }
+.mf-blink    { transform-box: fill-box; transform-origin: center; animation: mfBlink 4.2s ease-in-out infinite; }
+.mf-tear     { animation: mfTear 1.5s ease-in infinite; }
+.mf-tear-2   { animation-delay: 0.75s; }
+.mf-twinkle  { transform-box: fill-box; transform-origin: center; animation: mfTwinkle 1.8s ease-in-out infinite; }
+.mf-twinkle-2 { animation-delay: 0.6s; }
+.mf-twinkle-3 { animation-delay: 1.2s; }
+.mf-star-eyes { transform-box: fill-box; transform-origin: center; animation: mfPulse 1.1s ease-in-out infinite; }
+.mf-sweep    { animation: mfSweep 3.6s ease-in-out infinite; }
+/* Static faces (lists, chips): keep the 3D look, drop all motion + the sweep band */
+.mf-still .mf-blink, .mf-still .mf-tear, .mf-still .mf-twinkle, .mf-still .mf-star-eyes { animation: none; }
+.mf-still .mf-sweep { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .mf-blink, .mf-tear, .mf-twinkle, .mf-star-eyes, .mf-sweep { animation: none; }
+  .mf-sweep { display: none; }
+}
+
 /* Finite on purpose (3 pulses): a hint, not a permanent blink */
 .anim-attention-pulse {
   animation: attentionRing 1.5s ease-out 0.4s 3;

@@ -6,6 +6,8 @@ import { ADVANCED_FORM_TYPES, FEEDBACK_ROLES } from '@/lib/feedback-defaults'
 import { ADVANCED_FORM_FIELDS } from '@/app/feedback/[code]/types'
 import { ROLE_VISUAL } from '@/app/feedback/[code]/roleVisuals'
 import { RATING_FACE, Submission, avgRating, exactTime, ratingTint, timeAgo } from './submissionUi'
+import MoodFace from '@/app/feedback/[code]/MoodFace'
+import CategoryIcon from '@/app/feedback/[code]/CategoryIcon'
 
 const ISSUE_STATUS: Record<string, { label: string; cls: string }> = {
   open: { label: 'Open issue', cls: 'bg-rose-100 text-rose-800' },
@@ -50,7 +52,7 @@ function Detail({ s }: { s: Submission }) {
       <SheetHeader className="px-0">
         <div className="flex items-center gap-3">
           <span className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-3xl ${avg != null ? ratingTint(avg).avatar : 'bg-violet-100'}`}>
-            {form ? form.icon : avg != null ? RATING_FACE[Math.round(avg)].emoji : '💬'}
+            {form ? form.icon : avg != null ? <MoodFace rating={avg} size={42} animated /> : '💬'}
           </span>
           <div className="min-w-0">
             <SheetTitle className="truncate text-lg">{s.is_anonymous ? '🔒 ' : ''}{name}</SheetTitle>
@@ -90,16 +92,16 @@ function Detail({ s }: { s: Submission }) {
               return (
                 <li key={r.category_key} className="rounded-xl border border-gray-200 p-3">
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-gray-800">{r.icon} {r.category_label}</span>
+                    <span className="inline-flex items-center gap-2 text-sm font-semibold text-gray-800"><CategoryIcon icon={r.icon} size={26} />{r.category_label}</span>
                     {status && <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${status.cls}`}>🚨 {status.label}</span>}
                   </div>
                   <div className="flex gap-1" role="img" aria-label={`${RATING_FACE[r.rating].label} (${r.rating} of 5)`}>
                     {[1, 2, 3, 4, 5].map(v => (
                       <span
                         key={v}
-                        className={`flex flex-1 flex-col items-center rounded-lg py-1 text-lg transition ${v === r.rating ? `${ratingTint(v).avatar} scale-105` : 'opacity-25 grayscale'}`}
+                        className={`flex flex-1 flex-col items-center gap-0.5 rounded-lg py-1.5 transition ${v === r.rating ? `${ratingTint(v).avatar} scale-105` : 'opacity-30 grayscale'}`}
                       >
-                        {RATING_FACE[v].emoji}
+                        <MoodFace rating={v} size={v === r.rating ? 30 : 24} animated={v === r.rating} />
                         {v === r.rating && <span className="text-[9px] font-bold text-gray-700">{RATING_FACE[v].label}</span>}
                       </span>
                     ))}

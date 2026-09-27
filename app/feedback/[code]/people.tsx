@@ -1,3 +1,5 @@
+import MoodFace from './MoodFace'
+
 // Hand-built flat illustrations of people for the public feedback form —
 // inline SVG, so they are sharp at any size, need no image downloads, and
 // use a range of (South Asian) skin tones, hair and outfits. Every scene is
@@ -224,7 +226,9 @@ export function CommunityScene({ className = '' }: { className?: string }) {
       <g transform="translate(118 18)">
         <rect x="0" y="0" width="84" height="30" rx="15" fill="#fff" />
         <path d="M34 28 L30 40 L44 29 Z" fill="#fff" />
-        <text x="42" y="20" fontSize="13" fontWeight="800" fill="#245B46" textAnchor="middle" fontFamily="sans-serif">😊 🤩 😊</text>
+        <g transform="translate(12 4)"><MoodFace rating={4} size={20} /></g>
+        <g transform="translate(32 3)"><MoodFace rating={5} size={22} animated /></g>
+        <g transform="translate(54 4)"><MoodFace rating={4} size={20} /></g>
       </g>
       <Person x={8} y={58} scale={0.9} skin={SKIN.medium} hair={HAIR.black} hairStyle="long" shirt="#E07A5F" />
       <Person x={84} y={78} scale={0.72} skin={SKIN.tan} hair={HAIR.black} hairStyle="short" shirt="#2F7A5C" backpack="#F2B84B" />

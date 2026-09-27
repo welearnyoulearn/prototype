@@ -5,6 +5,8 @@ import { INK, TEAL, BORDER, SURFACE } from '@/app/components/ulearn/theme'
 import { FeedbackCategory } from '../types'
 import { ROLE_VISUAL } from '../roleVisuals'
 import { PrimaryButton, SecondaryButton } from './WizardButtons'
+import CategoryIcon, { HeroIcon } from '../CategoryIcon'
+import { FEEDBACK_ROLES } from '@/lib/feedback-defaults'
 
 const ROLE_INTRO: Record<string, [string, string]> = {
   parent:  ['Parent Feedback', 'How has your experience been?'],
@@ -29,17 +31,11 @@ export default function CategoryPickerStep({
 
   return (
     <div>
-      {visual && (
-        <div className="mb-3 flex justify-center">
-          <span className="flex h-14 w-14 items-center justify-center rounded-full" style={{ background: `${visual.color}1A` }}>
-            <visual.Icon size={26} style={{ color: visual.color }} strokeWidth={2} />
-          </span>
-        </div>
-      )}
+      {visual && <HeroIcon icon={FEEDBACK_ROLES.find(r => r.key === role)?.icon} size={72} />}
       <h1 className="text-center text-xl font-bold mb-1" style={{ color: INK }}>{title}</h1>
       <p className="text-center text-sm mb-4" style={{ color: '#6B7280' }}>{subtitle}</p>
 
-      <div className="flex max-h-[340px] flex-col gap-2 overflow-auto">
+      <div className="flex max-h-[460px] flex-col gap-2 overflow-auto">
         {categories.map(c => {
           const isSelected = selected.includes(c.key)
           return (
@@ -51,7 +47,7 @@ export default function CategoryPickerStep({
               className="flex items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition"
               style={{ borderColor: isSelected ? TEAL : BORDER, background: isSelected ? `${TEAL}0D` : SURFACE }}
             >
-              <span className="text-xl">{c.icon}</span>
+              <CategoryIcon icon={c.icon} size={40} />
               <span className="flex-1 text-sm font-semibold" style={{ color: INK }}>{c.label}</span>
               <span
                 className="flex h-[18px] w-[18px] items-center justify-center rounded-md border"

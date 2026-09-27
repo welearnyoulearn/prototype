@@ -12,6 +12,7 @@ import ThankYouStep from './steps/ThankYouStep'
 import { AdvancedFormType, FeedbackCategory, FeedbackRole, QrPointPublic, WizardStep } from './types'
 import { TEAL, INK, CORAL } from '@/app/components/ulearn/theme'
 import { GZ_CARD_SHADOW, GzBrandPanel } from './genz'
+import { HeroIcon } from './CategoryIcon'
 
 const PROGRESS_STEPS: WizardStep[] = ['welcome', 'identity', 'categories', 'rating', 'followup']
 // advancedType/advancedForm occupy the same visual progress slots as
@@ -173,7 +174,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
 
         {!loading && closedTitle && (
           <div className="py-16 text-center" data-testid="feedback-closed">
-            <div className="mb-3 text-5xl">🔒</div>
+            <HeroIcon icon="🔒" size={80} motion="none" />
             <h1 className="mb-1 text-lg font-bold" style={{ color: INK }}>Feedback for {closedTitle} is closed</h1>
             <p className="text-sm" style={{ color: '#9CA3AF' }}>Thank you for your interest! {schoolName} is no longer collecting feedback through this QR code.</p>
           </div>
@@ -181,7 +182,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
 
         {!loading && notFound && (
           <div className="py-16 text-center" data-testid="feedback-not-found">
-            <div className="mb-3 text-5xl">🙈</div>
+            <HeroIcon icon="🙈" size={80} motion="sad" />
             <h1 className="mb-1 text-lg font-bold" style={{ color: INK }}>Feedback form not available</h1>
             <p className="text-sm" style={{ color: '#9CA3AF' }}>This link may be inactive or incorrect. Please check with the school office.</p>
           </div>

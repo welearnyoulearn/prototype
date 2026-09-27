@@ -6,6 +6,7 @@ import { AlertTriangle, ArrowRight, RefreshCw, TrendingDown, TrendingUp } from '
 import { FEEDBACK_ROLES } from '@/lib/feedback-defaults'
 import { ROLE_VISUAL } from '@/app/feedback/[code]/roleVisuals'
 import { useFeedbackFetch } from './useFeedbackFetch'
+import MoodFace from '@/app/feedback/[code]/MoodFace'
 
 interface CategoryStat { category_key: string; category_label: string; count: number; avg_rating: number; negative_count: number }
 interface Stats {
@@ -49,10 +50,10 @@ const MOOD: Record<number, { emoji: string; label: string; color: string }> = {
   1: { emoji: '😭', label: 'Terrible', color: '#d03b3b' },
 }
 
-function pulseStatus(score: number): { label: string; color: string; emoji: string } {
-  if (score >= 70) return { label: 'Great', color: '#0f7a3d', emoji: '😊' }
-  if (score >= 50) return { label: 'Okay', color: '#a16207', emoji: '😐' }
-  return { label: 'Needs care', color: '#b42318', emoji: '😟' }
+function pulseStatus(score: number): { label: string; color: string; emoji: string; face: number } {
+  if (score >= 70) return { label: 'Great', color: '#0f7a3d', emoji: '😊', face: 4 }
+  if (score >= 50) return { label: 'Okay', color: '#a16207', emoji: '😐', face: 3 }
+  return { label: 'Needs care', color: '#b42318', emoji: '😟', face: 2 }
 }
 
 function ratingTone(avg: number): string {
@@ -192,7 +193,7 @@ export default function FeedbackDashboardTab({
             {stats.pulse_score != null ? (
               <>
                 <div className="text-lg font-extrabold" style={{ color: pulseStatus(stats.pulse_score).color }}>
-                  {pulseStatus(stats.pulse_score).emoji} {pulseStatus(stats.pulse_score).label}
+                  <span className="inline-flex items-center gap-1.5"><MoodFace rating={pulseStatus(stats.pulse_score).face} size={24} animated />{pulseStatus(stats.pulse_score).label}</span>
                 </div>
                 <div className="text-[11px] text-gray-500">avg ⭐ {stats.avg_rating?.toFixed(1)} of 5</div>
                 <Delta now={stats.pulse_score} before={stats.previous?.pulse_score} suffix=" pts" prevLabel={prevLabel} />
@@ -222,9 +223,9 @@ export default function FeedbackDashboardTab({
                 <div style={{ width: `${stats.percent_negative}%`, background: MOOD[1].color }} />
               </div>
               <div className="mt-3 grid grid-cols-3 text-center">
-                <div><div className="text-lg font-extrabold text-gray-900">{stats.percent_positive}%</div><div className="text-[10px] font-semibold text-gray-500">😊 Positive</div></div>
-                <div><div className="text-lg font-extrabold text-gray-900">{stats.percent_neutral}%</div><div className="text-[10px] font-semibold text-gray-500">😐 Neutral</div></div>
-                <div><div className="text-lg font-extrabold text-gray-900">{stats.percent_negative}%</div><div className="text-[10px] font-semibold text-gray-500">😞 Negative</div></div>
+                <div><div className="text-lg font-extrabold text-gray-900">{stats.percent_positive}%</div><div className="inline-flex items-center gap-1 text-[10px] font-semibold text-gray-500"><MoodFace rating={4} size={13} />Positive</div></div>
+                <div><div className="text-lg font-extrabold text-gray-900">{stats.percent_neutral}%</div><div className="inline-flex items-center gap-1 text-[10px] font-semibold text-gray-500"><MoodFace rating={3} size={13} />Neutral</div></div>
+                <div><div className="text-lg font-extrabold text-gray-900">{stats.percent_negative}%</div><div className="inline-flex items-center gap-1 text-[10px] font-semibold text-gray-500"><MoodFace rating={2} size={13} />Negative</div></div>
               </div>
             </>
           )}
@@ -321,7 +322,7 @@ export default function FeedbackDashboardTab({
                 <ul className="space-y-3" data-testid="feedback-mood-breakdown">
                   {stats.mood_breakdown.map(m => (
                     <li key={m.rating} className="flex items-center gap-3 text-xs">
-                      <span className="w-24 shrink-0 font-semibold text-gray-700">{MOOD[m.rating].emoji} {MOOD[m.rating].label}</span>
+                      <span className="inline-flex w-24 shrink-0 items-center gap-1.5 font-semibold text-gray-700"><MoodFace rating={m.rating} size={20} />{MOOD[m.rating].label}</span>
                       <div className="h-3 flex-1 overflow-hidden rounded-full bg-gray-100" title={`${m.count} rating${m.count === 1 ? '' : 's'}`}>
                         <div className="h-full rounded-full transition-all" style={{ width: `${m.percent}%`, background: MOOD[m.rating].color }} />
                       </div>

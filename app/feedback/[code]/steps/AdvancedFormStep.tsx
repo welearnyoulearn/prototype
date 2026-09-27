@@ -5,6 +5,7 @@ import { INK, TEAL, BORDER, SURFACE, CORAL } from '@/app/components/ulearn/theme
 import { ADVANCED_FORM_TYPES } from '@/lib/feedback-defaults'
 import { ADVANCED_FORM_FIELDS, AdvancedFormField, AdvancedFormType } from '../types'
 import MascotHeader from './MascotHeader'
+import MoodFace, { EMOJI_TO_RATING } from '../MoodFace'
 import { PrimaryButton, SecondaryButton } from './WizardButtons'
 
 // Local YYYY-MM-DD for today + offset days (quick-pick date chips)
@@ -47,7 +48,13 @@ function FieldInput({ field, value, onChange }: { field: AdvancedFormField; valu
               className={`${chipBase} flex flex-col items-center gap-1 px-2 py-3 hover:-translate-y-0.5`}
               style={chipStyle(on)}
             >
-              <span className={`text-2xl leading-none ${on ? 'anim-feedback-emoji-pop' : ''}`}>{field.optionEmojis?.[o] ?? '•'}</span>
+              {EMOJI_TO_RATING[field.optionEmojis?.[o] ?? ''] ? (
+                <span className={`inline-flex ${on ? 'anim-feedback-emoji-pop' : ''}`}>
+                  <MoodFace rating={EMOJI_TO_RATING[field.optionEmojis![o]]} size={30} animated={on} />
+                </span>
+              ) : (
+                <span className={`text-2xl leading-none ${on ? 'anim-feedback-emoji-pop' : ''}`}>{field.optionEmojis?.[o] ?? '•'}</span>
+              )}
               <span className="text-xs leading-tight">{o}</span>
             </button>
           )

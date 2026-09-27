@@ -7,6 +7,8 @@ import { ADVANCED_FORM_FIELDS } from '@/app/feedback/[code]/types'
 import { ROLE_VISUAL } from '@/app/feedback/[code]/roleVisuals'
 import { useFeedbackFetch } from './useFeedbackFetch'
 import SubmissionDetailSheet from './SubmissionDetailSheet'
+import MoodFace from '@/app/feedback/[code]/MoodFace'
+import CategoryIcon from '@/app/feedback/[code]/CategoryIcon'
 import {
   Mood, RATING_FACE, Submission, avgRating, dayGroup, exactTime, hasOpenIssue, moodOf, ratingTint, timeAgo,
 } from './submissionUi'
@@ -19,11 +21,12 @@ const PAGE = 200
 type MoodFilter = 'all' | Mood | 'forms'
 type Sort = 'newest' | 'oldest' | 'lowest'
 
-const MOOD_FILTERS: { key: MoodFilter; label: string }[] = [
+// face: which MoodFace to show on the chip (none for All / Forms)
+const MOOD_FILTERS: { key: MoodFilter; label: string; face?: number }[] = [
   { key: 'all', label: 'All' },
-  { key: 'unhappy', label: '😞 Unhappy' },
-  { key: 'neutral', label: '😐 Neutral' },
-  { key: 'happy', label: '😊 Happy' },
+  { key: 'unhappy', label: 'Unhappy', face: 2 },
+  { key: 'neutral', label: 'Neutral', face: 3 },
+  { key: 'happy', label: 'Happy', face: 4 },
   { key: 'forms', label: '📋 Form requests' },
 ]
 
@@ -152,7 +155,9 @@ export default function SubmissionList({ schoolId, source }: { schoolId: number;
                 <div style={{ width: `${(summary.moods.unhappy / summary.rated) * 100}%` }} className="bg-rose-600" />
               </div>
               <div className="mt-1.5 flex justify-between text-[11px] font-semibold text-gray-500">
-                <span>😊 {summary.moods.happy}</span><span>😐 {summary.moods.neutral}</span><span>😞 {summary.moods.unhappy}</span>
+                <span className="inline-flex items-center gap-1"><MoodFace rating={4} size={14} />{summary.moods.happy}</span>
+                <span className="inline-flex items-center gap-1"><MoodFace rating={3} size={14} />{summary.moods.neutral}</span>
+                <span className="inline-flex items-center gap-1"><MoodFace rating={2} size={14} />{summary.moods.unhappy}</span>
               </div>
             </>
           )}
@@ -194,7 +199,7 @@ export default function SubmissionList({ schoolId, source }: { schoolId: number;
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {MOOD_FILTERS.filter(f => f.key !== 'forms' || summary.forms > 0).map(f => (
-            <button key={f.key} type="button" aria-pressed={mood === f.key} data-testid={`feedback-submissions-mood-${f.key}`} onClick={() => setMood(f.key)} className={chip(mood === f.key)}>{f.label}</button>
+            <button key={f.key} type="button" aria-pressed={mood === f.key} data-testid={`feedback-submissions-mood-${f.key}`} onClick={() => setMood(f.key)} className={chip(mood === f.key)}>{f.face && <MoodFace rating={f.face} size={16} />}{f.label}</button>
           ))}
           <span className="mx-1 h-5 w-px bg-gray-200" aria-hidden="true" />
           <button type="button" aria-pressed={withComment} onClick={() => setWithComment(v => !v)} className={chip(withComment)}>📝 Has comment</button>
@@ -263,7 +268,7 @@ function SubmissionCard({ s, onOpen }: { s: Submission; onOpen: () => void }) {
         className={`flex w-full items-start gap-3 rounded-xl border bg-white p-4 text-left transition hover:-translate-y-px hover:shadow-md ${flagged ? 'border-rose-200' : 'border-gray-200 hover:border-[#9bb7a4]'}`}
       >
         <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-2xl ${avg != null ? ratingTint(avg).avatar : 'bg-violet-100'}`} aria-hidden="true">
-          {form ? form.icon : avg != null ? RATING_FACE[Math.round(avg)].emoji : '💬'}
+          {form ? form.icon : avg != null ? <MoodFace rating={avg} size={32} /> : '💬'}
         </span>
 
         <div className="min-w-0 flex-1">
@@ -287,7 +292,7 @@ function SubmissionCard({ s, onOpen }: { s: Submission; onOpen: () => void }) {
             <div className="mt-2 flex flex-wrap gap-1.5">
               {s.ratings.map(r => (
                 <span key={r.category_key} className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold ${ratingTint(r.rating).chip}`} title={`${r.category_label}: ${RATING_FACE[r.rating].label}`}>
-                  {RATING_FACE[r.rating].emoji}<span className="font-medium">{r.icon}</span>{r.category_label}
+                  <MoodFace rating={r.rating} size={15} /><CategoryIcon icon={r.icon} size={18} />{r.category_label}
                 </span>
               ))}
             </div>

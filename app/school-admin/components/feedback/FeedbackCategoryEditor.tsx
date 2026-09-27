@@ -7,6 +7,7 @@ import { Switch } from '@/components/ui/switch'
 import { FeedbackRole, QR_POINT_ROLES } from '@/lib/feedback-defaults'
 import { ROLE_VISUAL } from '@/app/feedback/[code]/roleVisuals'
 import CategoryPickerStep from '@/app/feedback/[code]/steps/CategoryPickerStep'
+import CategoryIcon from '@/app/feedback/[code]/CategoryIcon'
 import { useFeedbackFetch } from './useFeedbackFetch'
 import type { QrPoint } from './FeedbackQrPointsTab'
 
@@ -238,7 +239,7 @@ export default function FeedbackCategoryEditor({ schoolId, points = [] }: { scho
                 <button type="button" onClick={() => move(c, 1)} disabled={busy || index === live.length - 1} aria-label={`Move ${c.label} down`} className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-25"><ArrowDown size={13} /></button>
               </div>
             )}
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#f5f7f3] text-2xl">{c.icon || '🏷️'}</span>
+            <CategoryIcon icon={c.icon} size={44} />
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className={`truncate text-sm font-bold ${c.is_active ? 'text-gray-900' : 'text-gray-500'}`}>{c.label}</span>
@@ -397,7 +398,7 @@ export default function FeedbackCategoryEditor({ schoolId, points = [] }: { scho
               {duplicate ? (
                 <span className="font-semibold text-amber-700">&ldquo;{add.label.trim()}&rdquo; already exists for {roleMeta?.label.toLowerCase()}s{hidden.some(c => c.label.toLowerCase() === add.label.trim().toLowerCase()) ? ' (hidden — switch it back on above)' : ''}.</span>
               ) : add.label.trim() ? (
-                <span className="text-gray-500">Will appear as <span className="ml-1 inline-flex items-center gap-1 rounded-md border border-gray-200 bg-[#f5f7f3] px-2 py-0.5 font-semibold text-gray-800">{add.icon} {add.label.trim()}</span>{add.department.trim() && <> · issues go to <b>{add.department.trim()}</b></>}</span>
+                <span className="text-gray-500">Will appear as <span className="ml-1 inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-[#f5f7f3] px-2 py-0.5 font-semibold text-gray-800"><CategoryIcon icon={add.icon} size={20} />{add.label.trim()}</span>{add.department.trim() && <> · issues go to <b>{add.department.trim()}</b></>}</span>
               ) : null}
               {addError && <span className="text-red-600">{addError}</span>}
             </div>
