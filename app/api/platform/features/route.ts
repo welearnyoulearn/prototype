@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
+import pool, { ensureDB } from '@/lib/db'
 import { requirePlatformAdmin, getAnySession } from '@/lib/auth'
 import { ALL_FEATURES } from '@/lib/features'
+
+const PLAN_TIERS = ['none', 'basic', 'standard', 'premium']
+const MAX_STAFF_LIMIT = 1000
 
 // student-portal/parent-portal are no longer editable from the global
 // tier matrix — their tier default (basic=off, standard/premium=on) is
@@ -103,6 +106,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'assignments array required' }, { status: 400 })
     }
 
+    // Validate the staff limits BEFORE writing anything. Blank means unlimited; anything
+    // else must be a whole number from 1 to MAX_STAFF_LIMIT. This used to run
+    // parseInt and turn anything unreadable (a typo, "abc", "2.5x") into NULL — which
+    // means UNLIMITED — and accepted 0 and negatives, which mean nobody can ever be added.
+    const limitRows: Array<[string, number | null]> = []
+    if (staffLimits !== undefined && staffLimits !== null) {
+      if (typeof staffLimits !== 'object' || Array.isArray(staffLimits)) {
+        return NextResponse.json({ error: 'staffLimits must be an object' }, { status: 400 })
+      }
+      for (const [tier, raw] of Object.entries(staffLimits)) {
+        if (!PLAN_TIERS.includes(tier)) {
+          return NextResponse.json({ error: `Unknown plan "${tier}"` }, { status: 400 })
+        }
+        if (raw === '' || raw === null || raw === undefined) { limitRows.push([tier, null]); continue }
+        const text = String(raw).trim()
+        if (!/^\d+$/.test(text) || Number(text) < 1 || Number(text) > MAX_STAFF_LIMIT) {
+          return NextResponse.json(
+            { error: `Staff limit for ${tier} must be a whole number from 1 to ${MAX_STAFF_LIMIT}, or blank for unlimited` },
+            { status: 400 }
+          )
+        }
+        limitRows.push([tier, Number(text)])
+      }
+    }
+
+    // Keep this before pool.connect() — ensureDB() queries the shared pool, which on
+    // Vercel's max:1 pool would wait on the connection this handler is about to hold.
+    await ensureDB()
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
@@ -116,25 +147,20 @@ export async function POST(req: NextRequest) {
           [feature_key, tier, !!enabled]
         )
       }
+      // In the same transaction as the features: previously a failure here was swallowed
+      // and the admin was told "saved" while the limits had not changed at all.
+      for (const [tier, limit] of limitRows) {
+        await client.query(
+          `UPDATE plan_pricing SET staff_limit = $1, updated_at = NOW() WHERE tier = $2`,
+          [limit, tier]
+        )
+      }
       await client.query('COMMIT')
     } catch (e) {
       await client.query('ROLLBACK')
       throw e
     } finally {
       client.release()
-    }
-
-    // Save staff limits outside the main transaction — column may not exist yet
-    if (staffLimits && typeof staffLimits === 'object') {
-      try {
-        for (const [tier, limit] of Object.entries(staffLimits)) {
-          const limitVal = limit === '' || limit === null || limit === undefined ? null : parseInt(String(limit))
-          await pool.query(
-            `UPDATE plan_pricing SET staff_limit = $1, updated_at = NOW() WHERE tier = $2`,
-            [isNaN(limitVal as number) ? null : limitVal, tier]
-          )
-        }
-      } catch { /* column not yet migrated — skip silently, features already saved */ }
     }
 
     return NextResponse.json({ success: true })

@@ -1,10 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { sendPlanActivationEmail } from '@/lib/email'
+import { requirePlatformAdmin, getSession } from '@/lib/auth'
+import { STAFF_ROLES } from '@/lib/staffAccounts'
+
+// A school's plan decides which features it gets and how many staff logins it can
+// have, so reading it needs a login (the platform admin, or staff of THIS school) and
+// changing it needs the platform admin. This route had no check at all, and /api/ is a
+// public prefix in proxy.ts, so anyone could read or change any school's plan by id.
+async function canReadPlan(schoolId: number): Promise<boolean> {
+  if (await requirePlatformAdmin()) return true
+  const session = await getSession()
+  return !!session && STAFF_ROLES.includes(session.role) && Number(session.schoolId) === schoolId
+}
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params
+    if (!/^\d+$/.test(id)) return NextResponse.json({ error: 'Invalid school id' }, { status: 400 })
+    if (!(await canReadPlan(Number(id)))) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     try {
       // Try to join staff_limit — column may not exist until migration runs
       let result
@@ -35,7 +49,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
+    if (!(await requirePlatformAdmin())) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     const { id } = await params
+    if (!/^\d+$/.test(id)) return NextResponse.json({ error: 'Invalid school id' }, { status: 400 })
     try {
       const { tier } = await req.json()
       if (!['none', 'basic', 'standard', 'premium'].includes(tier)) {

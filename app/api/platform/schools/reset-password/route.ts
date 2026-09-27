@@ -24,7 +24,11 @@ export async function POST(req: NextRequest) {
       const passwordHash = await hashPassword(tempPassword)
 
       const updated = await pool.query(
-        `UPDATE users SET password_hash = $1, first_login = TRUE
+        // status = 'active' too: this is the platform admin's recovery path for a school
+        // that can't sign in. It used to reset the password but leave a deactivated
+        // owner deactivated, so the school stayed locked out with no way back short of
+        // editing the database.
+        `UPDATE users SET password_hash = $1, first_login = TRUE, status = 'active'
          WHERE school_id = $2 AND role = 'school_admin' AND school_code IS NOT NULL
          RETURNING id, email, school_code`,
         [passwordHash, school_id]
