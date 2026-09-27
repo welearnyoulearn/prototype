@@ -36,6 +36,7 @@ School admin (owner).
 - The last active school administrator cannot be deactivated, and nobody can deactivate themselves.
 - A deactivated person's email stays reserved (it is unique across all schools): use **Reactivate**, not Add.
 - The plan itself (`/api/schools/{id}/subscription`) can be read only by the platform admin or staff of that school, and changed only by the platform admin.
+- **Danger Zone (Export My Data / Request Account Closure) is removed.** Its export sent a manual request to WLYL support with up to a 2-business-day wait; that's superseded by the instant Excel export on Settings → Plan (and the locked-account screen). Request Account Closure had no replacement — removed with no equivalent. `POST /api/school-admin/account-request` no longer exists. (#249)
 
 ## Code evidence
 
@@ -53,7 +54,6 @@ API routes these screens call (all exist):
 - `GET` /api/auth/me
 - `GET` /api/plan/status
 - `GET/POST` /api/platform/features
-- `POST` /api/school-admin/account-request
 - `DELETE/GET/PATCH/POST` /api/school-admin/staff-accounts
 - `POST` /api/school-admin/staff-accounts/resend
 - `DELETE/GET/PUT` /api/schools/{}
