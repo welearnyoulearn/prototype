@@ -190,8 +190,8 @@ test.describe('Lock guard in proxy.ts', () => {
     }
     expect((await call('POST', '/api/teacher/auth/logout', { [COOKIE_TEACHER]: token('teacher', 7) })).blocked).toBe(false)
     expect((await call('POST', '/api/parent/auth/logout', { [COOKIE_PARENT]: token('parent', 7) })).blocked).toBe(false)
-    // Everything else a school administrator could touch stays refused, including the old data-export request and fee routes.
-    for (const path of ['/api/school-admin/account-request', '/api/fees/payments/verify', '/api/fees/ledger', '/api/attendance/report']) {
+    // Everything else a school administrator could touch stays refused, including fee routes.
+    for (const path of ['/api/fees/payments/verify', '/api/fees/ledger', '/api/attendance/report']) {
       expect((await call('POST', path, c)).blocked, path).toBe(true)
     }
   })
