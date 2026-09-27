@@ -38,6 +38,26 @@ type EditForm = {
 type Feature = { key: string; label: string; category: string }
 type FeatureMatrix = Record<string, Record<string, boolean>>  // feature_key → { basic, standard, premium }
 
+// Cumulative: Standard includes Basic features, Premium includes all — same rule lib/auth.ts's
+// schoolHasFeature() enforces server-side. Kept in one place so the Portal Access toggles below
+// can't drift from what a login actually checks.
+const TIER_INCLUDES: Record<string, string[]> = {
+  basic: ['basic'], standard: ['basic', 'standard'], premium: ['basic', 'standard', 'premium'],
+}
+
+/**
+ * Whether `featureKey` is actually granted for `tier` by the plan matrix alone (no override) —
+ * mirrors schoolHasFeature()'s bool_or(enabled) over every tier the plan includes. Missing rows
+ * mean "not configured", which schoolHasFeature treats as disabled, not enabled — matching that
+ * default is what this function is for.
+ */
+function planGrantsFeature(matrix: FeatureMatrix, tier: string | undefined, featureKey: string): boolean {
+  if (!tier || tier === 'none') return false
+  const fMatrix = matrix[featureKey]
+  if (!fMatrix) return false
+  return (TIER_INCLUDES[tier] ?? [tier]).some(t => fMatrix[t] === true)
+}
+
 const TIER_META = [
   { key: 'none',     label: 'No Plan',  color: 'gray',   border: 'border-gray-200',   bg: 'bg-gray-50',   ring: 'ring-2 ring-gray-400',    dot: 'border-gray-500 bg-gray-500',     badge: 'bg-gray-100 text-gray-600',     bullet: 'bg-gray-400' },
   { key: 'basic',    label: 'Basic',    color: 'green',  border: 'border-green-300',  bg: 'bg-green-50',  ring: 'ring-2 ring-green-500',   dot: 'border-green-500 bg-green-500',   badge: 'bg-green-100 text-green-700',   bullet: 'bg-green-500' },
@@ -283,13 +303,6 @@ export default function SchoolDetailPage() {
       if (!res.ok) throw new Error()
       router.push('/platform-admin')
     } catch { setError('Failed to delete school') }
-  }
-
-  // Cumulative: Standard includes Basic features, Premium includes all
-  const TIER_INCLUDES: Record<string, string[]> = {
-    basic:    ['basic'],
-    standard: ['basic', 'standard'],
-    premium:  ['basic', 'standard', 'premium'],
   }
 
   function getFeaturesForTier(tierKey: string): string[] {
@@ -650,7 +663,10 @@ export default function SchoolDetailPage() {
               { key: 'student-portal', label: 'Student Portal Access' },
               { key: 'parent-portal',  label: 'Parent Portal Access' },
             ].map(({ key, label }) => {
-              const enabled = portalOverrides[key] !== false // default true unless explicitly overridden off
+              // An explicit override wins; otherwise this must show what the plan itself grants —
+              // schoolHasFeature() denies student/parent login when the plan doesn't include the
+              // portal, so a toggle defaulting to "on" here was showing access that didn't exist.
+              const enabled = key in portalOverrides ? portalOverrides[key] : planGrantsFeature(matrix, school?.tier, key)
               return (
                 <div key={key} className="flex items-center justify-between">
                   <span className="text-sm text-gray-800">{label}</span>
@@ -686,7 +702,8 @@ export default function SchoolDetailPage() {
         </div>
 
         {/* ── AI Access ────────────────────────────────────────────────────── */}
-        <AiAccessCard schoolId={schoolId} portalOverrides={portalOverrides} />
+        <AiAccessCard schoolId={schoolId}
+          studentPortalEnabled={'student-portal' in portalOverrides ? portalOverrides['student-portal'] : planGrantsFeature(matrix, school?.tier, 'student-portal')} />
 
         {/* ── Watchline ────────────────────────────────────────────────────── */}
         <WatchlineCard schoolId={schoolId} schoolName={school?.name ?? ''} portalOverrides={portalOverrides} />
@@ -890,18 +907,13 @@ const AI_TIER_META: { key: string; label: string; desc: string }[] = [
   { key: 'ai_pro',   label: 'AI Pro',   desc: 'Full doubt-clearing AI chatbot. Coming soon — not available yet.' },
 ]
 
-function AiAccessCard({ schoolId, portalOverrides }: { schoolId: string; portalOverrides: Record<string, boolean> }) {
+function AiAccessCard({ schoolId, studentPortalEnabled }: { schoolId: string; studentPortalEnabled: boolean }) {
   const [tier, setTier]             = useState('none')
   const [selectedTier, setSelectedTier] = useState('none')
   const [loading, setLoading]       = useState(true)
   const [saving, setSaving]         = useState(false)
   const [saved, setSaved]           = useState(false)
   const [error, setError]           = useState('')
-
-  // Same override map the parent page's Portal Access section reads —
-  // re-derived on every render, so flipping the Student Portal Access toggle
-  // unlocks this card immediately with no reload.
-  const studentPortalEnabled = portalOverrides['student-portal'] !== false
 
   useEffect(() => {
     fetch(`/api/schools/${schoolId}/ai-access`)
