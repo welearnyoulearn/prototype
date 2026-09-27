@@ -21,6 +21,7 @@ interface Issue {
   is_anonymous: boolean
   submitter_name: string | null
   free_text: string | null
+  qr_point_title: string | null
 }
 
 const STATUS_OPTIONS = [
@@ -30,13 +31,13 @@ const STATUS_OPTIONS = [
   { value: 'dismissed', label: 'Dismissed' },
 ]
 
-export default function FeedbackIssueTable({ schoolId }: { schoolId: number }) {
+export default function FeedbackIssueTable({ schoolId, source }: { schoolId: number; source: string }) {
   const [statusFilter, setStatusFilter] = useState('open')
   const [updatingId, setUpdatingId] = useState<number | null>(null)
 
   const filter = statusFilter !== 'all' ? `&status=${statusFilter}` : ''
   const { data: issues, loading, error, reload } = useFeedbackFetch<Issue[]>(
-    `/api/feedback/issues?school_id=${schoolId}${filter}`, [schoolId, statusFilter], 'Failed to load issues'
+    `/api/feedback/issues?school_id=${schoolId}${filter}&source=${source}`, [schoolId, statusFilter, source], 'Failed to load issues'
   )
 
   async function updateStatus(id: number, status: string) {
@@ -91,6 +92,7 @@ export default function FeedbackIssueTable({ schoolId }: { schoolId: number }) {
                 <TableRow key={issue.id} data-testid={`feedback-issue-row-${issue.id}`}>
                   <TableCell>
                     <div className="font-medium text-gray-800">{issue.category_label}</div>
+                    {issue.qr_point_title && <div className="mt-0.5 text-[11px] font-semibold text-amber-700">📍 {issue.qr_point_title}</div>}
                     {issue.free_text && <div className="mt-0.5 line-clamp-1 text-xs text-gray-400">{issue.free_text}</div>}
                   </TableCell>
                   <TableCell className="text-gray-600">{issue.department || '—'}</TableCell>

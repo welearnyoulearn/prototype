@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 37
+const SCHEMA_VERSION = 42
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3045,6 +3045,53 @@ async function runIncrementalMigrations() {
   // field to a form type needs no migration.
   await pool.query(`ALTER TABLE feedback_submissions ADD COLUMN IF NOT EXISTS advanced_form_type VARCHAR(20)`).catch(() => {})
   await pool.query(`ALTER TABLE feedback_submissions ADD COLUMN IF NOT EXISTS advanced_form_data JSONB`).catch(() => {})
+
+  // School-editable tagline printed on the QR poster under the school name.
+  // NULL = use DEFAULT_POSTER_QUOTE from lib/feedback-defaults.ts, so the
+  // default can change without a data migration.
+  await pool.query(`ALTER TABLE feedback_settings ADD COLUMN IF NOT EXISTS poster_quote VARCHAR(160)`).catch(() => {})
+
+  // Event/place-specific QR codes ("QR points") — each has its own public
+  // code + poster, is scoped to an existing form (category ratings, or one
+  // Advanced Form type) and to chosen roles, and optionally stops accepting
+  // feedback after closes_on (inclusive, IST — the pool sets the session
+  // time zone). The school-wide feedback_settings.public_code keeps working
+  // alongside these as the general "any feedback" QR.
+  //   form_type     'rating' or an ADVANCED_FORM_TYPES key
+  //   roles         allowed FeedbackRole keys (never 'other')
+  //   category_ids  rating form only; empty = respondent picks from all
+  //                 active categories of their role
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS feedback_qr_points (
+      id            SERIAL PRIMARY KEY,
+      school_id     INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      code          VARCHAR(20) NOT NULL UNIQUE,
+      kind          VARCHAR(10) NOT NULL DEFAULT 'event',
+      title         VARCHAR(120) NOT NULL,
+      venue         VARCHAR(120),
+      event_date    DATE,
+      details       VARCHAR(300),
+      form_type     VARCHAR(20) NOT NULL DEFAULT 'rating',
+      roles         TEXT[] NOT NULL,
+      category_ids  INTEGER[] NOT NULL DEFAULT '{}',
+      poster_quote  VARCHAR(160),
+      closes_on     DATE,
+      is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_qr_points_school ON feedback_qr_points(school_id, created_at DESC)`).catch(() => {})
+  // NULL = came in through the school-wide QR.
+  await pool.query(`ALTER TABLE feedback_submissions ADD COLUMN IF NOT EXISTS qr_point_id INTEGER REFERENCES feedback_qr_points(id) ON DELETE SET NULL`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_submissions_qr_point ON feedback_submissions(qr_point_id) WHERE qr_point_id IS NOT NULL`).catch(() => {})
+
+  // Archive: "clearing" a feedback folder moves its submissions here instead
+  // of deleting them (after a mandatory Excel export). Archived rows are left
+  // out of every folder, dashboard and issue-pipeline query via
+  // lib/feedback-source.ts; the Archive folder can restore or purge them.
+  await pool.query(`ALTER TABLE feedback_submissions ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_feedback_submissions_archived ON feedback_submissions(school_id, archived_at) WHERE archived_at IS NOT NULL`).catch(() => {})
 
   // One-time backfill: seed default categories for schools that existed
   // before this feature shipped, in a single set-based query. New schools

@@ -9,8 +9,8 @@ import AdvancedFormTypeStep from './steps/AdvancedFormTypeStep'
 import AdvancedFormStep from './steps/AdvancedFormStep'
 import FollowupStep from './steps/FollowupStep'
 import ThankYouStep from './steps/ThankYouStep'
-import { AdvancedFormType, FeedbackCategory, FeedbackRole, WizardStep } from './types'
-import { TEAL, INK, CREAM, BORDER } from '@/app/components/ulearn/theme'
+import { AdvancedFormType, FeedbackCategory, FeedbackRole, QrPointPublic, WizardStep } from './types'
+import { TEAL, INK, CREAM, BORDER, CORAL } from '@/app/components/ulearn/theme'
 
 const PROGRESS_STEPS: WizardStep[] = ['welcome', 'identity', 'categories', 'rating', 'followup']
 // advancedType/advancedForm occupy the same visual progress slots as
@@ -44,6 +44,9 @@ function initialState() {
 export default function FeedbackWizard({ code }: { code: string }) {
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  // Title of a paused/expired event or place QR (410 from resolve)
+  const [closedTitle, setClosedTitle] = useState<string | null>(null)
+  const [qrPoint, setQrPoint] = useState<QrPointPublic | null>(null)
   const [schoolName, setSchoolName] = useState('')
   const [categories, setCategories] = useState<FeedbackCategory[]>([])
   const [s, setS] = useState(initialState())
@@ -51,14 +54,20 @@ export default function FeedbackWizard({ code }: { code: string }) {
   useEffect(() => {
     let cancelled = false
     fetch(`/api/feedback/resolve?code=${encodeURIComponent(code)}`)
-      .then(res => {
+      .then(async res => {
+        if (res.status === 410) {
+          const data = await res.json()
+          if (!cancelled) { setSchoolName(data.school_name); setClosedTitle(data.title); setLoading(false) }
+          return null
+        }
         if (!res.ok) throw new Error('not_found')
         return res.json()
       })
       .then(data => {
-        if (cancelled) return
+        if (cancelled || !data) return
         setSchoolName(data.school_name)
         setCategories(data.categories)
+        setQrPoint(data.qr_point ?? null)
         setLoading(false)
       })
       .catch(() => {
@@ -72,6 +81,30 @@ export default function FeedbackWizard({ code }: { code: string }) {
   const givenRatings = selectedCategories.map(c => s.ratings[c.key]).filter((r): r is number => r !== undefined)
   const overallRating = givenRatings.length > 0 ? givenRatings.reduce((sum, r) => sum + r, 0) / givenRatings.length : 3
 
+  // Where "Continue" on the identity step goes. An event/place QR fixes the
+  // form: an Advanced Form jumps straight into it (Event form prefilled with
+  // the event's name/date), and pinned categories skip the picker.
+  function afterIdentity(prev: ReturnType<typeof initialState>): ReturnType<typeof initialState> {
+    if (qrPoint) {
+      if (qrPoint.form_type !== 'rating') {
+        const date = qrPoint.event_date
+        const prefill: Record<string, string> =
+          qrPoint.form_type === 'event' ? { event_name: qrPoint.title, ...(date ? { event_date: date } : {}) }
+          : qrPoint.form_type === 'staff_meeting' ? { topic: qrPoint.title, ...(date ? { meeting_date: date } : {}) }
+          : qrPoint.form_type === 'ptm' ? (date ? { meeting_date: date } : {})
+          : {}
+        return { ...prev, advancedFormType: qrPoint.form_type, advancedFormData: { ...prefill, ...prev.advancedFormData }, step: 'advancedForm' }
+      }
+      const forRole = categories.filter(c => c.role === prev.role)
+      if (qrPoint.fixed_categories && forRole.length > 0) {
+        return { ...prev, selectedKeys: forRole.map(c => c.key), ratingIndex: 0, step: 'rating' }
+      }
+      return { ...prev, step: 'categories' }
+    }
+    return { ...prev, step: prev.role === 'other' ? 'advancedType' : 'categories' }
+  }
+  const skipsCategoryPicker = !!qrPoint?.fixed_categories && roleCategories.length > 0
+
   async function submit(body: Record<string, unknown>) {
     setS(prev => ({ ...prev, submitting: true, submitError: null }))
     try {
@@ -81,6 +114,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
         body: JSON.stringify(body),
       })
       if (res.status === 429) throw new Error('Too many submissions from this device — please try again later.')
+      if (res.status === 410) throw new Error('Sorry — this feedback form has just closed.')
       if (!res.ok) throw new Error('Something went wrong — please try again.')
       setS(prev => ({ ...prev, step: 'thankyou', submitting: false }))
     } catch (err) {
@@ -127,6 +161,14 @@ export default function FeedbackWizard({ code }: { code: string }) {
           <div className="py-24 text-center text-sm" style={{ color: '#9CA3AF' }}>Loading…</div>
         )}
 
+        {!loading && closedTitle && (
+          <div className="py-16 text-center" data-testid="feedback-closed">
+            <div className="mb-3 text-5xl">🔒</div>
+            <h1 className="mb-1 text-lg font-bold" style={{ color: INK }}>Feedback for {closedTitle} is closed</h1>
+            <p className="text-sm" style={{ color: '#9CA3AF' }}>Thank you for your interest! {schoolName} is no longer collecting feedback through this QR code.</p>
+          </div>
+        )}
+
         {!loading && notFound && (
           <div className="py-16 text-center" data-testid="feedback-not-found">
             <div className="mb-3 text-5xl">🙈</div>
@@ -135,8 +177,13 @@ export default function FeedbackWizard({ code }: { code: string }) {
           </div>
         )}
 
-        {!loading && !notFound && (
+        {!loading && !notFound && !closedTitle && (
           <>
+            {qrPoint && s.step !== 'welcome' && s.step !== 'thankyou' && (
+              <div className="mb-3 truncate text-center text-[11px] font-bold uppercase tracking-wide" style={{ color: CORAL }} data-testid="feedback-qr-point-chip">
+                {qrPoint.kind === 'event' ? '🎉' : '📍'} {qrPoint.title}
+              </div>
+            )}
             {progressIndex >= 0 && (
               <div className="mb-5 flex gap-1.5">
                 {PROGRESS_STEPS.map((step, i) => (
@@ -153,6 +200,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
             {s.step === 'welcome' && (
               <WelcomeStep
                 schoolName={schoolName}
+                qrPoint={qrPoint}
                 onSelectRole={role => setS(prev => ({ ...prev, role, step: 'identity' }))}
               />
             )}
@@ -166,7 +214,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
                 onPhoneChange={v => setS(prev => ({ ...prev, phone: v }))}
                 onAnonymousChange={v => setS(prev => ({ ...prev, isAnonymous: v }))}
                 onBack={() => setS(prev => ({ ...prev, step: 'welcome' }))}
-                onContinue={() => setS(prev => ({ ...prev, step: prev.role === 'other' ? 'advancedType' : 'categories' }))}
+                onContinue={() => setS(afterIdentity)}
               />
             )}
 
@@ -195,7 +243,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
                 total={selectedCategories.length}
                 onBack={() => setS(prev => (
                   prev.ratingIndex === 0
-                    ? { ...prev, step: 'categories' }
+                    ? { ...prev, step: skipsCategoryPicker ? 'identity' : 'categories' }
                     : { ...prev, ratingIndex: prev.ratingIndex - 1 }
                 ))}
                 onNext={() => setS(prev => (
@@ -218,7 +266,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
                 type={s.advancedFormType}
                 values={s.advancedFormData}
                 onChange={(key, value) => setS(prev => ({ ...prev, advancedFormData: { ...prev.advancedFormData, [key]: value } }))}
-                onBack={() => setS(prev => ({ ...prev, step: 'advancedType' }))}
+                onBack={() => setS(prev => ({ ...prev, step: qrPoint ? 'identity' : 'advancedType' }))}
                 onSubmit={handleAdvancedSubmit}
                 submitting={s.submitting}
                 error={s.submitError}

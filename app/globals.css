@@ -333,6 +333,13 @@ input, select, textarea {
   75%            { transform: rotate(6deg); }
 }
 
+/* Soft green ring rippling out of a button — draws the eye a few times, then stops */
+@keyframes attentionRing {
+  0%   { box-shadow: 0 0 0 0 rgba(36, 91, 70, 0.45); }
+  70%  { box-shadow: 0 0 0 10px rgba(36, 91, 70, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(36, 91, 70, 0); }
+}
+
 /* ─────────────────────────────────────────────────
    ANIMATION UTILITY CLASSES
 ───────────────────────────────────────────────── */
@@ -381,6 +388,13 @@ input, select, textarea {
 }
 .anim-feedback-mascot-sway {
   animation: feedbackMascotSway 2s ease-in-out infinite;
+}
+/* Finite on purpose (3 pulses): a hint, not a permanent blink */
+.anim-attention-pulse {
+  animation: attentionRing 1.5s ease-out 0.4s 3;
+}
+@media (prefers-reduced-motion: reduce) {
+  .anim-attention-pulse { animation: none; }
 }
 
 /* Emoji wobble on hover */

@@ -5,7 +5,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import pool from '@/lib/db'
 import { r2Config } from '@/lib/r2'
 import { getClientIp } from '@/lib/request-ip'
-import { resolveActiveFeedbackSchool } from '@/lib/feedback-public-access'
+import { resolveFeedbackCode } from '@/lib/feedback-public-access'
 import { feedbackVoiceUploadUrlSchema } from '@/lib/validation/feedback'
 
 const RATE_LIMIT_WINDOW = '10 minutes'
@@ -27,8 +27,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
     }
 
-    const resolved = await resolveActiveFeedbackSchool(pool, parsed.data.code)
-    if (!resolved) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+    const resolved = await resolveFeedbackCode(pool, parsed.data.code)
+    if (resolved.status !== 'ok') return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
     // Rate limit — this route is unauthenticated and mints a real presigned
     // R2 PUT URL, so without a cap an attacker could mint unlimited upload

@@ -18,6 +18,12 @@ All finished features and bug fixes. Most recent first.
 
 ---
 
+### 2026-09-27 — Feedback: event & place QRs, poster sharing, folders, archive, dashboard redesign (#TBD)
+**Type:** Feature + Enhancement
+**Portal:** School Admin (+ public feedback form)
+**Summary:** QR poster with school name/quote + share; per-event/place QR codes with their own poster, fixed form/audience and close date; PTM and Teachers' Meeting forms; emoji-first Advanced Forms with live preview; Submissions as folders (delete, Clear folder → Excel + Archive/restore/purge); redesigned submission list/detail and Dashboard with corrected metrics.
+**PR:** feature/feedback-qr-poster-share (no issue number — gh unavailable when started)
+
 ### 2026-09-24 — Student portal: sticker-book redesign of every screen (#229)
 **Type:** Enhancement (UI/UX)
 **Portal:** Student

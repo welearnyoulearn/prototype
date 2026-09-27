@@ -45,6 +45,7 @@ test.describe.serial('Feedback Management Workflow', () => {
   let schoolPass: string
   let schoolId: number
   let feedbackUrl: string
+  let eventQrUrl: string
 
   test.beforeAll(async () => {
     const platformCookie = await platformAdminCookie()
@@ -91,10 +92,11 @@ test.describe.serial('Feedback Management Workflow', () => {
     await expect(page.getByTestId('feedback-thankyou-heading')).toBeVisible({ timeout: 10000 })
   })
 
-  test('3. School Admin — submission appears in Submissions tab', async ({ page }) => {
+  test('3. School Admin — submission appears in the school-wide folder', async ({ page }) => {
     await loginAsSchoolAdmin(page, adminEmail, schoolPass)
     await page.getByRole('button', { name: /feedback/i }).first().click()
     await page.getByTestId('feedback-tab-submissions').click()
+    await page.getByTestId('feedback-folder-general').click()
 
     await expect(page.getByText('The bus was 45 minutes late again today.')).toBeVisible({ timeout: 10000 })
   })
@@ -113,5 +115,129 @@ test.describe.serial('Feedback Management Workflow', () => {
     await page.getByRole('option', { name: 'Resolved' }).click()
 
     await expect(statusSelect).toContainText('Resolved', { timeout: 10000 })
+  })
+
+  test('5. School Admin — create an event QR scoped to parents + one category', async ({ page }) => {
+    await loginAsSchoolAdmin(page, adminEmail, schoolPass)
+    await page.getByRole('button', { name: /feedback/i }).first().click()
+    await page.getByTestId('feedback-tab-qr-points').click()
+    await page.getByTestId('feedback-new-qr-point-btn').click()
+
+    const editor = page.getByTestId('feedback-qr-point-editor')
+    await page.getByTestId('feedback-qr-point-kind-event').click()
+    await page.getByTestId('feedback-qr-point-title-input').fill('Annual Day 2026')
+    await page.getByTestId('feedback-qr-point-venue-input').fill('Main Ground')
+    await page.getByTestId('feedback-qr-point-form-rating').click()
+    // Audience defaults to Parent only; pin the parent "Food" category
+    await editor.getByText('Food', { exact: false }).first().click()
+    await page.getByTestId('feedback-qr-point-save-btn').click()
+
+    const card = page.locator('[data-testid^="feedback-qr-point-card-"]', { hasText: 'Annual Day 2026' })
+    await expect(card).toBeVisible({ timeout: 10000 })
+    await card.locator('[data-testid^="feedback-qr-point-poster-btn-"]').click()
+    await expect(page.getByTestId('feedback-qr-point-poster-preview')).toBeVisible({ timeout: 10000 })
+    eventQrUrl = (await page.getByTestId('feedback-qr-point-url').textContent()) ?? ''
+    expect(eventQrUrl).toContain('/feedback/')
+    expect(eventQrUrl).not.toBe(feedbackUrl)
+  })
+
+  test('6. Public — event QR shows the event and goes straight to its pinned category', async ({ page }) => {
+    expect(eventQrUrl).toBeTruthy()
+    await page.goto(eventQrUrl)
+
+    await expect(page.getByTestId('feedback-qr-point-header')).toContainText('Annual Day 2026')
+    // Only one audience → no role picker
+    await expect(page.getByTestId('feedback-role-student-btn')).toHaveCount(0)
+    await page.getByTestId('feedback-start-btn').click()
+    await page.getByTestId('feedback-anonymous-checkbox').check()
+    await page.getByTestId('feedback-identity-continue-btn').click()
+
+    await page.getByTestId('feedback-rating-food-2-btn').click()
+    await page.getByTestId('feedback-rating-next-btn').click()
+    await page.getByTestId('feedback-freetext-input').fill('Food stall queues at Annual Day were too long.')
+    await page.getByTestId('feedback-submit-btn').click()
+
+    await expect(page.getByTestId('feedback-thankyou-heading')).toBeVisible({ timeout: 10000 })
+  })
+
+  test('7. School Admin — event responses are tagged and separable from the school-wide QR', async ({ page }) => {
+    await loginAsSchoolAdmin(page, adminEmail, schoolPass)
+    await page.getByRole('button', { name: /feedback/i }).first().click()
+    await page.getByTestId('feedback-tab-qr-points').click()
+
+    const card = page.locator('[data-testid^="feedback-qr-point-card-"]', { hasText: 'Annual Day 2026' })
+    await card.locator('[data-testid^="feedback-qr-point-responses-btn-"]').click()
+    await expect(page.getByText('Food stall queues at Annual Day were too long.')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText('The bus was 45 minutes late again today.')).toHaveCount(0)
+
+    await expect(page.getByTestId('feedback-folder-name')).toContainText('Annual Day 2026')
+
+    // Back to the folder list, then into the school-wide folder
+    await page.getByTestId('feedback-folders-back-btn').click()
+    await page.getByTestId('feedback-folder-general').click()
+    await expect(page.getByText('The bus was 45 minutes late again today.')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByText('Food stall queues at Annual Day were too long.')).toHaveCount(0)
+  })
+
+  test('8. School Admin — pausing the event QR closes its public form', async ({ page }) => {
+    await loginAsSchoolAdmin(page, adminEmail, schoolPass)
+    await page.getByRole('button', { name: /feedback/i }).first().click()
+    await page.getByTestId('feedback-tab-qr-points').click()
+
+    const card = page.locator('[data-testid^="feedback-qr-point-card-"]', { hasText: 'Annual Day 2026' })
+    await card.locator('[data-testid^="feedback-qr-point-toggle-btn-"]').click()
+    await expect(card).toContainText('Paused', { timeout: 10000 })
+
+    await page.goto(eventQrUrl)
+    await expect(page.getByTestId('feedback-closed')).toContainText('Annual Day 2026', { timeout: 10000 })
+  })
+
+  test('9. School Admin — deleting the event folder removes its feedback and kills the QR', async ({ page }) => {
+    await loginAsSchoolAdmin(page, adminEmail, schoolPass)
+    await page.getByRole('button', { name: /feedback/i }).first().click()
+    await page.getByTestId('feedback-tab-submissions').click()
+
+    const folder = page.locator('[data-testid^="feedback-folder-"]', { hasText: 'Annual Day 2026' }).first()
+    await folder.click()
+    await page.getByTestId('feedback-folder-delete-btn').click()
+
+    const confirmBtn = page.getByTestId('feedback-delete-folder-confirm-btn')
+    await expect(confirmBtn).toBeDisabled()
+    await page.getByTestId('feedback-delete-folder-confirm-input').fill('DELETE')
+    await confirmBtn.click()
+
+    await expect(page.getByTestId('feedback-submission-folders')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByTestId('feedback-submission-folders')).not.toContainText('Annual Day 2026')
+
+    await page.goto(eventQrUrl)
+    await expect(page.getByTestId('feedback-not-found')).toBeVisible({ timeout: 10000 })
+  })
+
+  test('10. School Admin — Clear folder needs an Excel download first, then archives; Archive can restore', async ({ page }) => {
+    await loginAsSchoolAdmin(page, adminEmail, schoolPass)
+    await page.getByRole('button', { name: /feedback/i }).first().click()
+    await page.getByTestId('feedback-tab-submissions').click()
+    await page.getByTestId('feedback-folder-general').click()
+    await page.getByTestId('feedback-folder-clear-btn').click()
+
+    const archiveBtn = page.getByTestId('feedback-clear-archive-btn')
+    await expect(archiveBtn).toBeDisabled()
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByTestId('feedback-clear-download-btn').click(),
+    ])
+    expect(download.suggestedFilename()).toMatch(/^feedback-school-wide-qr-.*\.xlsx$/)
+    await expect(archiveBtn).toBeEnabled()
+    await archiveBtn.click()
+
+    await expect(page.getByTestId('feedback-folder-notice')).toContainText('moved to the')
+    await expect(page.getByTestId('feedback-submissions-empty')).toBeVisible({ timeout: 10000 })
+
+    await page.getByTestId('feedback-folders-back-btn').click()
+    await page.getByTestId('feedback-folder-archived').click()
+    await expect(page.getByText('The bus was 45 minutes late again today.')).toBeVisible({ timeout: 10000 })
+    await page.getByTestId('feedback-archive-restore-btn').click()
+    await page.getByTestId('feedback-archive-action-confirm-btn').click()
+    await expect(page.getByTestId('feedback-folder-notice')).toContainText('restored')
   })
 })
