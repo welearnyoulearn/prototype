@@ -28,7 +28,7 @@ async function ownerClient(email: string, tempPass: string): Promise<APIRequestC
   expect((await ctx.put('/api/auth/profile', { data: { full_name: 'Owner', phone: '9000000011' } })).status()).toBe(200)
   return ctx
 }
-type Staff = { id: number; email: string; status: string; role: string }
+type Staff = { id: number; email: string; status: string; role: string; is_primary_admin?: boolean }
 async function listStaff(ctx: APIRequestContext, schoolId: number): Promise<Staff[]> {
   return (await ctx.get(`/api/school-admin/staff-accounts?school_id=${schoolId}`)).json()
 }
@@ -188,6 +188,11 @@ test.describe.serial('Staff accounts — plan security, seat limits, deactivatio
     expect((await ownerA.delete('/api/school-admin/staff-accounts', { data: { id: me.id } })).status()).toBe(400)
   })
 
+  test('10b. The account created at school setup is flagged as such', async () => {
+    const owner = (await listStaff(ownerA, a.id)).find(s => s.email === a.email)!
+    expect(owner.is_primary_admin).toBe(true)
+  })
+
   // ── Needs the DB to read the emailed invite links ─────────────────────────────
 
   test.describe('roles, invite links and recovery', () => {
@@ -249,17 +254,26 @@ test.describe.serial('Staff accounts — plan security, seat limits, deactivatio
       await anon.dispose()
     })
 
-    test('13. Platform reset gets a deactivated owner back in', async () => {
+    test('13. The account WLYL set up for the school can never be deactivated — not even by another admin', async () => {
       const adminEmail = `admin2${ts}@hardening.test`
       expect((await addStaff(ownerC, adminEmail, 'school_admin')).status()).toBe(201)
       const admin2 = await acceptInvite(adminEmail)
 
       const owner = (await listStaff(admin2, c.id)).find(s => s.email === c.email)!
-      expect((await admin2.delete('/api/school-admin/staff-accounts', { data: { id: owner.id } })).status()).toBe(200)
-      const stale = await newClient()
-      expect((await login(stale, c.email, OWNER_PASS)).status()).toBe(403)
-      await stale.dispose()
+      expect(owner.is_primary_admin).toBe(true)
+      const attempt = await admin2.delete('/api/school-admin/staff-accounts', { data: { id: owner.id } })
+      expect(attempt.status()).toBe(403)
+      expect((await attempt.json()).error).toMatch(/set up by WLYL/i)
+      expect((await listStaff(admin2, c.id)).find(s => s.id === owner.id)?.status).toBe('active')   // untouched
 
+      // The freshly-added second admin has no such protection.
+      const admin2Row = (await listStaff(ownerC, c.id)).find(s => s.email === adminEmail)!
+      expect(admin2Row.is_primary_admin).toBeFalsy()
+      expect((await ownerC.delete('/api/school-admin/staff-accounts', { data: { id: admin2Row.id } })).status()).toBe(200)
+      await admin2.dispose()
+    })
+
+    test('14. Platform reset still re-issues credentials for the setup account, deactivated or not', async () => {
       const reset = await fetch(`${BASE}/api/platform/schools/reset-password`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: platformCookie },
         body: JSON.stringify({ school_id: c.id }),
@@ -267,8 +281,8 @@ test.describe.serial('Staff accounts — plan security, seat limits, deactivatio
       expect(reset.status).toBe(200)
       const { temp_password } = await reset.json()
       const back = await newClient()
-      expect((await login(back, c.email, temp_password)).status()).toBe(200)   // reactivated and can sign in
-      await back.dispose(); await admin2.dispose()
+      expect((await login(back, c.email, temp_password)).status()).toBe(200)
+      await back.dispose()
     })
   })
 })

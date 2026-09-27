@@ -34,6 +34,7 @@ School admin (owner).
   - *Lowering a plan's limit for every school* (Feature Plans page): the platform admin sees how many schools it pushes over, and which, and must confirm; those schools are handled exactly as above and emailed.
   - Every plan change and limit change is written to the platform audit log with the admin's email, the from/to plan and the seat numbers. Re-saving the same plan never asks for confirmation.
 - The last active school administrator cannot be deactivated, and nobody can deactivate themselves.
+- The school's **setup account** — the login the platform admin created when the school was onboarded (`users.is_primary_admin`) — can never be deactivated by anyone from Staff Accounts, even by another school administrator. It's shown with a "Setup account" badge and no Deactivate button. It stays the school's recovery path: Platform → Reset Password still re-issues its credentials any time. (#244)
 - A deactivated person's email stays reserved (it is unique across all schools): use **Reactivate**, not Add.
 - The plan itself (`/api/schools/{id}/subscription`) can be read only by the platform admin or staff of that school, and changed only by the platform admin.
 
