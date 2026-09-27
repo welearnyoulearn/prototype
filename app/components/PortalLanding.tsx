@@ -2,25 +2,33 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { motion, useReducedMotion } from 'framer-motion'
-import { useCallback, useEffect, useState, useSyncExternalStore, type CSSProperties, type MouseEvent, type PointerEvent } from 'react'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import {
-  ArrowRight, BarChart3, Bell, BookOpen, Building2, CalendarCheck, ClipboardCheck, IndianRupee,
-  ListChecks, LockKeyhole, Moon, PenLine, Presentation, Sun, Sunrise, TrendingUp, Trophy, Users, UsersRound, Wallet,
+  useCallback, useEffect, useRef, useState, useSyncExternalStore,
+  type CSSProperties, type MouseEvent, type PointerEvent,
+} from 'react'
+import {
+  ArrowRight, BarChart3, Bell, BookOpen, Building2, CalendarCheck, ChevronLeft, ChevronRight, ClipboardCheck,
+  IndianRupee, ListChecks, LockKeyhole, Moon, PenLine, Presentation, Sun, Sunrise, TrendingUp, Trophy, Users,
+  UsersRound, Wallet,
 } from 'lucide-react'
-import SchoolScene, { type DayPart } from './SchoolScene'
 
 type PortalId = 'student' | 'teacher' | 'parent' | 'admin'
+type DayPart = 'morning' | 'afternoon' | 'evening'
 type Icon = typeof BookOpen
 
-const portals: Array<{ id: PortalId; testId: string; title: string; description: string; href: string; icon: Icon; features: Array<[string, Icon]> }> = [
-  { id: 'student', testId: 'student', title: 'Student', description: 'Your lessons, attendance and results', href: '/student/login', icon: BookOpen, features: [['Lessons', BookOpen], ['Attendance', CalendarCheck], ['Achievements', Trophy]] },
-  { id: 'teacher', testId: 'teacher', title: 'Teacher', description: 'Your classes and teaching day', href: '/teacher/login', icon: Presentation, features: [['Attendance', ClipboardCheck], ['Marks', PenLine], ['Syllabus', ListChecks]] },
-  { id: 'parent', testId: 'parent', title: 'Parent', description: "Stay close to your child's school day", href: '/parent/login', icon: UsersRound, features: [['Progress', TrendingUp], ['Notices', Bell], ['Fees', Wallet]] },
-  { id: 'admin', testId: 'school-admin', title: 'School', description: 'Run your whole school in one place', href: '/login?role=school', icon: Building2, features: [['People', Users], ['Fees', IndianRupee], ['Reports', BarChart3]] },
+const portals: Array<{
+  id: PortalId; testId: string; title: string; verb: string; description: string; href: string; icon: Icon; features: Array<[string, Icon]>
+}> = [
+  { id: 'student', testId: 'student', title: 'Student', verb: 'learn.', description: 'Your lessons, attendance, results and achievements.', href: '/student/login', icon: BookOpen, features: [['Lessons', BookOpen], ['Attendance', CalendarCheck], ['Achievements', Trophy]] },
+  { id: 'teacher', testId: 'teacher', title: 'Teacher', verb: 'teach.', description: 'Your classes, attendance, marks and syllabus.', href: '/teacher/login', icon: Presentation, features: [['Attendance', ClipboardCheck], ['Marks', PenLine], ['Syllabus', ListChecks]] },
+  { id: 'parent', testId: 'parent', title: 'Parent', verb: 'stay close.', description: "Your child's progress, school notices and fees.", href: '/parent/login', icon: UsersRound, features: [['Progress', TrendingUp], ['Notices', Bell], ['Fees', Wallet]] },
+  { id: 'admin', testId: 'school-admin', title: 'School', verb: 'lead.', description: 'Staff, students, fees and daily operations.', href: '/login?role=school', icon: Building2, features: [['People', Users], ['Fees', IndianRupee], ['Reports', BarChart3]] },
 ]
 
+const COUNT = portals.length
 const LAST_PORTAL_KEY = 'wlyl:last-portal'
+const AUTO_TURN_MS = 3800
 const noopSubscribe = () => () => {}
 
 function subscribeToStorage(onChange: () => void) {
@@ -43,15 +51,37 @@ function readDayPart(): DayPart {
 }
 
 const greetingIcon = { morning: Sunrise, afternoon: Sun, evening: Moon }
+const mod = (n: number) => ((n % COUNT) + COUNT) % COUNT
 
 export default function PortalLanding() {
   const router = useRouter()
   const reduceMotion = useReducedMotion()
   const lastPortal = useSyncExternalStore(subscribeToStorage, readLastPortal, () => null)
   const dayPart = useSyncExternalStore(noopSubscribe, readDayPart, () => null)
-  const [active, setActive] = useState<PortalId | null>(null)
+  const [turn, setTurn] = useState(0)
+  const [interacted, setInteracted] = useState(false)
   const [transitioning, setTransitioning] = useState<PortalId | null>(null)
   const [origin, setOrigin] = useState({ x: '50%', y: '50%' })
+  const swipeStart = useRef<number | null>(null)
+  const swiped = useRef(false)
+
+  const active = mod(turn)
+  const current = portals[active]
+
+  const select = useCallback((index: number) => {
+    setInteracted(true)
+    setTurn(t => {
+      let delta = index - mod(t)
+      if (delta > COUNT / 2) delta -= COUNT
+      if (delta < -COUNT / 2) delta += COUNT
+      return t + delta
+    })
+  }, [])
+
+  const step = useCallback((direction: 1 | -1) => {
+    setInteracted(true)
+    setTurn(t => t + direction)
+  }, [])
 
   const openPortal = useCallback((id: PortalId, href: string, point?: { x: number; y: number }) => {
     try { localStorage.setItem(LAST_PORTAL_KEY, id) } catch {}
@@ -61,7 +91,7 @@ export default function PortalLanding() {
     window.setTimeout(() => router.push(href), 260)
   }, [reduceMotion, router])
 
-  function handleClick(event: MouseEvent<HTMLAnchorElement>, id: PortalId, href: string) {
+  function enter(event: MouseEvent<HTMLAnchorElement>, id: PortalId, href: string) {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
       try { localStorage.setItem(LAST_PORTAL_KEY, id) } catch {}
       return
@@ -70,35 +100,27 @@ export default function PortalLanding() {
     openPortal(id, href, { x: event.clientX, y: event.clientY })
   }
 
+  // Gently turns on its own so first-time visitors see every portal, and
+  // stops for good the moment someone interacts.
+  useEffect(() => {
+    if (interacted || reduceMotion) return
+    const id = window.setInterval(() => setTurn(t => t + 1), AUTO_TURN_MS)
+    return () => window.clearInterval(id)
+  }, [interacted, reduceMotion])
+
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return
       const target = event.target as HTMLElement | null
       if (target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))) return
+      if (event.key === 'ArrowRight') { event.preventDefault(); step(1); return }
+      if (event.key === 'ArrowLeft') { event.preventDefault(); step(-1); return }
       const portal = portals[Number(event.key) - 1]
       if (portal) openPortal(portal.id, portal.href)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [openPortal])
-
-  function tilt(event: PointerEvent<HTMLAnchorElement>) {
-    if (reduceMotion || event.pointerType !== 'mouse') return
-    const el = event.currentTarget
-    const r = el.getBoundingClientRect()
-    const px = (event.clientX - r.left) / r.width
-    const py = (event.clientY - r.top) / r.height
-    el.style.setProperty('--ry', `${(px - 0.5) * 10}deg`)
-    el.style.setProperty('--rx', `${(0.5 - py) * 10}deg`)
-    el.style.setProperty('--gx', `${px * 100}%`)
-    el.style.setProperty('--gy', `${py * 100}%`)
-  }
-
-  function resetTilt(event: PointerEvent<HTMLAnchorElement>) {
-    const el = event.currentTarget
-    el.style.removeProperty('--rx')
-    el.style.removeProperty('--ry')
-  }
+  }, [openPortal, step])
 
   function parallax(event: PointerEvent<HTMLDivElement>) {
     if (reduceMotion || event.pointerType !== 'mouse') return
@@ -107,13 +129,33 @@ export default function PortalLanding() {
     el.style.setProperty('--my', ((event.clientY / window.innerHeight) * 2 - 1).toFixed(3))
   }
 
+  function onSwipeStart(event: PointerEvent<HTMLDivElement>) {
+    if (event.pointerType === 'mouse') return
+    swipeStart.current = event.clientX
+  }
+
+  function onSwipeEnd(event: PointerEvent<HTMLDivElement>) {
+    if (swipeStart.current === null) return
+    const dx = event.clientX - swipeStart.current
+    swipeStart.current = null
+    if (Math.abs(dx) < 40) return
+    swiped.current = true
+    step(dx < 0 ? 1 : -1)
+  }
+
+  function onSlideClick(event: MouseEvent<HTMLAnchorElement>, index: number) {
+    if (swiped.current) { swiped.current = false; event.preventDefault(); return }
+    if (index !== active) { event.preventDefault(); select(index); return }
+    enter(event, portals[index].id, portals[index].href)
+  }
+
   const GreetingIcon = dayPart ? greetingIcon[dayPart] : Sun
 
   return (
     <div
-      onPointerMove={parallax}
       className="pl-shell"
-      data-active={active ?? undefined}
+      onPointerMove={parallax}
+      data-active={current.id}
       data-transitioning={transitioning ?? undefined}
       style={{ '--transition-x': origin.x, '--transition-y': origin.y } as CSSProperties}
     >
@@ -130,74 +172,111 @@ export default function PortalLanding() {
       </header>
 
       <main className="pl-main">
-        <section className="pl-hero">
-          <motion.div
-            className="pl-intro"
-            initial={reduceMotion ? false : { opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-          >
-            <p className="pl-greeting" data-part={dayPart ?? undefined}>
-              <GreetingIcon aria-hidden="true" />
-              {dayPart ? `Good ${dayPart}` : 'Welcome'}
-            </p>
-            <h1>Where would you like <em>to go today?</em></h1>
-            <p>Choose your portal and sign in with the account your school gave you.</p>
-          </motion.div>
+        <motion.div
+          className="pl-intro"
+          initial={reduceMotion ? false : { opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+        >
+          <p className="pl-greeting" data-part={dayPart ?? undefined}>
+            <GreetingIcon aria-hidden="true" />
+            {dayPart ? `Good ${dayPart}` : 'Welcome'}
+          </p>
+          <h1>
+            A place to{' '}
+            <span className="pl-word">
+              <AnimatePresence mode="wait" initial={false}>
+                <motion.em
+                  key={current.id}
+                  initial={reduceMotion ? false : { opacity: 0, y: '45%', filter: 'blur(6px)' }}
+                  animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                  exit={reduceMotion ? undefined : { opacity: 0, y: '-45%', filter: 'blur(6px)' }}
+                  transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+                >
+                  {current.verb}
+                </motion.em>
+              </AnimatePresence>
+            </span>
+          </h1>
+          <p>Choose your portal and sign in with the account your school gave you.</p>
+        </motion.div>
 
-          <motion.div
-            className="pl-scene-wrap"
-            initial={reduceMotion ? false : { opacity: 0, y: 20, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.7, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
-          >
-            <SchoolScene dayPart={dayPart} />
-          </motion.div>
-        </section>
+        <motion.div
+          className="pl-stage"
+          role="region"
+          aria-roledescription="carousel"
+          aria-label="School portals"
+          initial={reduceMotion ? false : { opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
+          onPointerDown={onSwipeStart}
+          onPointerUp={onSwipeEnd}
+          onPointerCancel={() => { swipeStart.current = null }}
+          onMouseEnter={() => setInteracted(true)}
+        >
+          <button type="button" className="pl-nav pl-nav-prev" onClick={() => step(-1)} aria-label="Previous portal"><ChevronLeft /></button>
+          <div className="pl-ring">
+            {portals.map((portal, index) => {
+              let offset = mod(index - active)
+              if (offset === COUNT - 1) offset = -1
+              const isFront = offset === 0
+              return (
+                <Link
+                  key={portal.id}
+                  href={portal.href}
+                  className="pl-slide"
+                  data-portal={portal.id}
+                  data-offset={offset}
+                  aria-hidden={!isFront}
+                  tabIndex={isFront ? 0 : -1}
+                  onClick={event => onSlideClick(event, index)}
+                >
+                  {lastPortal === portal.id && <span className="pl-last">Last used</span>}
+                  <span className="pl-slide-top">
+                    <span className="pl-slide-icon" aria-hidden="true"><portal.icon /></span>
+                    <span className="pl-slide-title">
+                      <strong>{portal.title}</strong>
+                      <small>Portal</small>
+                    </span>
+                  </span>
+                  <span className="pl-slide-body">
+                    <span className="pl-slide-desc">{portal.description}</span>
+                    <span className="pl-chips" aria-hidden="true">
+                      {portal.features.map(([label, FeatureIcon]) => (
+                        <span key={label} className="pl-chip"><FeatureIcon />{label}</span>
+                      ))}
+                    </span>
+                    <span className="pl-slide-go">Enter {portal.title} portal <ArrowRight aria-hidden="true" /></span>
+                  </span>
+                </Link>
+              )
+            })}
+          </div>
+          <button type="button" className="pl-nav pl-nav-next" onClick={() => step(1)} aria-label="Next portal"><ChevronRight /></button>
+        </motion.div>
 
-        <nav className="pl-grid" aria-label="School portals" onMouseLeave={() => setActive(null)}>
+        <nav className="pl-switch" aria-label="Sign in to a portal">
           {portals.map((portal, index) => (
-            <motion.div
+            <Link
               key={portal.id}
-              initial={reduceMotion ? false : { opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.08 + index * 0.06, ease: [0.16, 1, 0.3, 1] }}
+              href={portal.href}
+              data-portal={portal.id}
+              data-testid={`portal-card-${portal.testId}`}
+              data-active={index === active || undefined}
+              aria-keyshortcuts={String(index + 1)}
+              onPointerEnter={event => { if (event.pointerType === 'mouse') select(index) }}
+              onFocus={() => select(index)}
+              onClick={event => enter(event, portal.id, portal.href)}
             >
-              <Link
-                href={portal.href}
-                className="pl-card"
-                data-portal={portal.id}
-                data-testid={`portal-card-${portal.testId}`}
-                aria-keyshortcuts={String(index + 1)}
-                onClick={event => handleClick(event, portal.id, portal.href)}
-                onPointerEnter={() => setActive(portal.id)}
-                onPointerMove={tilt}
-                onPointerLeave={resetTilt}
-                onFocus={() => setActive(portal.id)}
-                onBlur={() => setActive(null)}
-              >
-                {lastPortal === portal.id && <span className="pl-last">Last used</span>}
-                <span className="pl-card-icon" aria-hidden="true"><portal.icon /></span>
-                <span className="pl-card-text">
-                  <strong>{portal.title}</strong>
-                  <span>{portal.description}</span>
-                </span>
-                <span className="pl-chips" aria-hidden="true">
-                  {portal.features.map(([label, FeatureIcon], i) => (
-                    <span key={label} className="pl-chip" style={{ '--i': i } as CSSProperties}><FeatureIcon />{label}</span>
-                  ))}
-                </span>
-                <span className="pl-card-go">
-                  Sign in <ArrowRight aria-hidden="true" />
-                  <kbd className="pl-kbd" aria-hidden="true">{index + 1}</kbd>
-                </span>
-              </Link>
-            </motion.div>
+              <portal.icon aria-hidden="true" />
+              <span>{portal.title}</span>
+              <kbd aria-hidden="true">{index + 1}</kbd>
+            </Link>
           ))}
         </nav>
 
         <p className="pl-help">
-          <span className="pl-help-keys">Tip: press <kbd>1</kbd>–<kbd>4</kbd> to jump straight in. </span>
+          <span className="pl-help-keys">Use <kbd>←</kbd> <kbd>→</kbd> to browse, <kbd>1</kbd>–<kbd>4</kbd> to jump in. </span>
           No account yet? Your school office can set one up for you.
         </p>
       </main>
