@@ -93,8 +93,8 @@ export async function POST(req: NextRequest) {
     const passwordHash = await hashPassword(tempPassword)
 
     await client.query(
-      `INSERT INTO users (email, school_code, password_hash, role, school_id, first_login)
-       VALUES ($1, $2, $3, 'school_admin', $4, TRUE)
+      `INSERT INTO users (email, school_code, password_hash, role, school_id, first_login, is_primary_admin)
+       VALUES ($1, $2, $3, 'school_admin', $4, TRUE, TRUE)
        ON CONFLICT (school_code) DO NOTHING`,
       [email.trim().toLowerCase(), schoolCode, passwordHash, school.id]
     )

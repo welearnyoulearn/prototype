@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 40
+const SCHEMA_VERSION = 41
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2088,6 +2088,23 @@ async function runIncrementalMigrations() {
       sent_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       PRIMARY KEY (school_id, plan_end_date, kind)
     )
+  `)
+
+  // ── Primary admin account (created by the platform admin at school setup) ──────────
+  // POST /api/schools creates the school's first school_admin login directly (not through
+  // /api/school-admin/staff-accounts). That account is the school's recovery path if every
+  // other staff account is ever deactivated, so it must not be deactivatable from Staff
+  // Accounts — issue: a school admin could deactivate it (including their own, single account)
+  // and lock the school out until platform admin intervened.
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_primary_admin BOOLEAN NOT NULL DEFAULT FALSE`)
+  // Backfill for schools created before this column existed: the initial admin's login email
+  // was also stored as schools.email at creation time (see /api/schools POST), so it identifies
+  // the same account unless that email was since changed on either side.
+  await pool.query(`
+    UPDATE users u SET is_primary_admin = TRUE
+    FROM schools s
+    WHERE u.school_id = s.id AND u.role = 'school_admin' AND LOWER(u.email) = LOWER(s.email)
+      AND NOT EXISTS (SELECT 1 FROM users u2 WHERE u2.school_id = s.id AND u2.is_primary_admin)
   `)
 
   // ── Plan renewal requests ─────────────────────────────────────────────────────
