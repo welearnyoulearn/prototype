@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { ExportButtons, useRenewalRequest } from '@/components/PlanNotice'
 import { useRouter } from 'next/navigation'
 import { getBoardLabels } from '@/lib/board-syllabus/data'
 import { ALL_FEATURES, CATEGORY_ORDER } from '@/lib/features'
@@ -44,7 +45,15 @@ type Subscription = {
   tier: 'basic' | 'standard' | 'premium' | 'none'
   staff_limit?: number | null
   updated_at?: string
+  plan_start_date?: string | null
+  plan_end_date?: string | null
+  plan_status?: 'none' | 'active' | 'expiring' | 'grace' | 'expired'
+  days_left?: number | null
+  grace_ends?: string | null
 }
+
+const fmtPlanDate = (d: string) =>
+  d ? new Date(d + 'T00:00:00Z').toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric', timeZone: 'UTC' }) : ''
 
 type SettingsTab = 'profile' | 'academic-years' | 'plan' | 'staff' | 'security' | 'danger'
 
@@ -161,6 +170,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
 
   // ── Plan & features ────────────────────────────────────────────────────────
   const [subscription, setSubscription] = useState<Subscription | null>(null)
+  const renewal = useRenewalRequest(null)
+  const [canRequestPlan, setCanRequestPlan] = useState(false)   // school administrator / principal
   const [enabledFeatures, setEnabledFeatures] = useState<Set<string>>(new Set())
   const [planLoading, setPlanLoading] = useState(false)
 
@@ -226,7 +237,11 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const loadPlan = useCallback(async () => {
     setPlanLoading(true)
     try {
-      const subR = await fetch(`/api/schools/${schoolId}/subscription`)
+      const [subR, statusR] = await Promise.all([
+        fetch(`/api/schools/${schoolId}/subscription`),
+        fetch('/api/plan/status').catch(() => null),
+      ])
+      if (statusR?.ok) setCanRequestPlan((await statusR.json()).can_manage === true)
       if (subR.ok) {
         const sub: Subscription = await subR.json()
         setSubscription(sub)
@@ -1222,18 +1237,41 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                         {subscription?.tier === 'none' ? 'No Plan Assigned' : (subscription?.tier ?? 'none')}
                       </span>
                     </div>
-                    {subscription?.updated_at && subscription.tier !== 'none' && (
-                      <p className="text-xs text-muted-foreground mt-1.5">
-                        Active since {new Date(subscription.updated_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' })}
+                    {subscription?.plan_end_date && subscription.tier !== 'none' && (
+                      <p className="text-xs text-muted-foreground mt-1.5" data-testid="plan-dates">
+                        Valid {subscription.plan_start_date ? `from ${fmtPlanDate(subscription.plan_start_date)} ` : ''}until {fmtPlanDate(subscription.plan_end_date)}
                       </p>
                     )}
                   </div>
-                  <a href="mailto:support@welearnyoulearn.com?subject=Plan Upgrade Request"
-                    className="text-sm font-medium text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-4 py-2 rounded-lg hover:bg-indigo-50 transition-colors">
-                    Upgrade Plan →
-                  </a>
+                  {canRequestPlan && (
+                    <div className="text-right">
+                      <button data-testid="plan-request-renewal" onClick={renewal.request} disabled={renewal.sending || renewal.sent}
+                        className="text-sm font-medium text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-4 py-2 rounded-lg hover:bg-indigo-50 transition-colors disabled:opacity-60">
+                        {renewal.sent ? 'Request sent' : renewal.sending ? 'Sending…' : 'Request renewal / upgrade'}
+                      </button>
+                      {renewal.msg && <p className={`text-xs mt-1.5 ${renewal.error ? 'text-red-700' : 'text-green-700'}`} data-testid="plan-request-result">{renewal.msg}</p>}
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {(subscription?.plan_status === 'expiring' || subscription?.plan_status === 'grace' || subscription?.plan_status === 'expired') && (
+                <div data-testid="plan-expiry-banner"
+                  className={`rounded-md p-4 text-sm border ${subscription.plan_status === 'expiring' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-red-50 border-red-200 text-red-800'}`}>
+                  {subscription.plan_status === 'expiring' && `Your plan ends ${subscription.days_left === 0 ? 'today' : `in ${subscription.days_left} day${subscription.days_left === 1 ? '' : 's'}`} (${fmtPlanDate(subscription.plan_end_date ?? '')}). Renew to keep every feature.`}
+                  {subscription.plan_status === 'grace' && `Your plan ended on ${fmtPlanDate(subscription.plan_end_date ?? '')}. Everything still works until ${fmtPlanDate(subscription.grace_ends ?? '')} — renew before then.`}
+                  {subscription.plan_status === 'expired' && `Your plan expired on ${fmtPlanDate(subscription.plan_end_date ?? '')}. Your data and logins are safe; features return as soon as the plan is renewed.`}
+                  {' '}<a className="underline font-medium" href="mailto:support@welearnyoulearn.com?subject=Plan Renewal">Contact us to renew</a>
+                </div>
+              )}
+
+              {canRequestPlan && (
+                <div className="bg-white border border-gray-100 rounded-md p-5" data-testid="plan-export-card">
+                  <p className="text-sm font-semibold text-gray-800">Export your school’s data</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 mb-3">Download your records as Excel files any time. Passwords are never included.</p>
+                  <ExportButtons />
+                </div>
+              )}
 
               {/* Features grid */}
               {subscription?.tier === 'none' ? (

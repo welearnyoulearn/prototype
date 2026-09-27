@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isSchoolLocked, LOCKED_MESSAGE_PORTAL } from '@/lib/planAccess'
 import pool, { ensureDB } from '@/lib/db'
 import { hashPassword, verifyPassword, setTeacherAuthCookie } from '@/lib/auth'
 
@@ -46,6 +47,10 @@ export async function POST(req: NextRequest) {
       )
 
       // Issue token with passwordChanged=false to trigger forced change
+      // A school whose plan has ended is locked: no portal access for teachers, students or parents.
+      if (await isSchoolLocked(teacher.school_id)) {
+        return NextResponse.json({ error: LOCKED_MESSAGE_PORTAL, code: 'PLAN_EXPIRED' }, { status: 403 })
+      }
       await setTeacherAuthCookie({ teacherId: teacher.id, schoolId: school.id, role: 'teacher', passwordChanged: false, name: teacher.name, email: teacher.email ?? '' })
       return NextResponse.json({ success: true, passwordChanged: false })
     }
@@ -56,6 +61,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid employee ID or password' }, { status: 401 })
     }
 
+    if (await isSchoolLocked(teacher.school_id)) {
+      return NextResponse.json({ error: LOCKED_MESSAGE_PORTAL, code: 'PLAN_EXPIRED' }, { status: 403 })
+    }
     await setTeacherAuthCookie({
       teacherId: teacher.id,
       schoolId: school.id,

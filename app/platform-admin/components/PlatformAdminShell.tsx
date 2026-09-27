@@ -1,15 +1,16 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { BookOpen, Library, School, Settings2, ChartNoAxesCombined, Activity, ClipboardList, LogOut, Menu } from 'lucide-react'
+import { BookOpen, Library, School, Settings2, ChartNoAxesCombined, Activity, ClipboardList, LogOut, Menu, RefreshCw } from 'lucide-react'
 import PortalSidebar from '@/components/portal/PortalSidebar'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 
 const NAV_SECTIONS = [
   { label: 'Workspace', items: [
     { key: 'schools', label: 'Schools', href: '/platform-admin', icon: School },
+    { key: 'renewals', label: 'Renewals', href: '/platform-admin/renewals', icon: RefreshCw },
   ] },
   { label: 'Content', items: [
     { key: 'curriculum', label: 'Master Syllabus', href: '/platform-admin/curriculum', icon: BookOpen },
@@ -29,6 +30,16 @@ export default function PlatformAdminShell({ children }: { children: React.React
   const pathname = usePathname()
   const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [newRenewals, setNewRenewals] = useState(0)
+
+  // Badge on "Renewals": how many requests nobody has looked at yet. Refreshed on every navigation.
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/platform/renewals?status=active').then(r => r.ok ? r.json() : null).then(d => {
+      if (!cancelled && d) setNewRenewals(d.open_count ?? 0)
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [pathname])
 
   async function handleLogout() {
     const usageSessionId = getUsageSessionId()
@@ -75,6 +86,9 @@ export default function PlatformAdminShell({ children }: { children: React.React
                   const Icon = item.icon
                   return <Link key={item.key} href={item.href} onClick={() => setSidebarOpen(false)} aria-current={isActive(item.href) ? 'page' : undefined} className="portal-nav-item">
                     <Icon size={17} strokeWidth={1.7} aria-hidden="true" /><span>{item.label}</span>
+                    {item.key === 'renewals' && newRenewals > 0 && (
+                      <span data-testid="renewals-badge" className="ml-auto rounded-full bg-[#a33131] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">{newRenewals}</span>
+                    )}
                   </Link>
                 })}
               </div>
