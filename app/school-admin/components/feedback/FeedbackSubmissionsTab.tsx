@@ -129,6 +129,9 @@ export default function FeedbackSubmissionsTab({
   onPointsChanged: () => void // re-fetch the QR point list after a delete/pause
 }) {
   const [deleting, setDeleting] = useState<QrPoint | null>(null)
+  const [clearFor, setClearFor] = useState<QrPoint | null>(null)
+  // Bumped after a clear started from the delete dialog so an open folder re-fetches
+  const [listVersion, setListVersion] = useState(0)
 
   async function pauseInstead(p: QrPoint) {
     setDeleting(null)
@@ -144,13 +147,24 @@ export default function FeedbackSubmissionsTab({
     <>
       {source === 'all'
         ? <FolderHome schoolId={schoolId} points={points} onOpen={onSourceChange} onDelete={setDeleting} />
-        : <FolderContents key={source} schoolId={schoolId} source={source} points={points} onBack={() => onSourceChange('all')} onDelete={setDeleting} onChanged={onPointsChanged} />}
+        : <FolderContents key={`${source}-${listVersion}`} schoolId={schoolId} source={source} points={points} onBack={() => onSourceChange('all')} onDelete={setDeleting} onChanged={onPointsChanged} />}
       {deleting && (
         <DeleteQrPointDialog
+          schoolId={schoolId}
           point={deleting}
           onClose={() => setDeleting(null)}
           onPauseInstead={() => pauseInstead(deleting)}
+          onClearInstead={() => { setClearFor(deleting); setDeleting(null) }}
           onDeleted={() => { setDeleting(null); onSourceChange('all'); onPointsChanged() }}
+        />
+      )}
+      {clearFor && (
+        <ClearFolderDialog
+          schoolId={schoolId}
+          source={String(clearFor.id)}
+          folderName={`${QR_POINT_KINDS.find(k => k.key === clearFor.kind)?.icon ?? ''} ${clearFor.title}`}
+          onClose={() => setClearFor(null)}
+          onDone={() => { setClearFor(null); setListVersion(v => v + 1); onPointsChanged() }}
         />
       )}
     </>

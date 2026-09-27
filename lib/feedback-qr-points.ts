@@ -20,12 +20,15 @@ export async function listQrPoints(db: Pool | PoolClient, schoolId: number) {
             to_char(p.closes_on, 'YYYY-MM-DD') AS closes_on,
             (p.closes_on IS NOT NULL AND p.closes_on < CURRENT_DATE) AS is_expired,
             COALESCE(sub.response_count, 0)::int AS response_count, sub.last_response_at,
+            COALESCE(sub.archived_count, 0)::int AS archived_count,
             rat.avg_rating::float AS avg_rating,
             COALESCE(rat.open_issues, 0)::int AS open_issues
      FROM feedback_qr_points p
      LEFT JOIN LATERAL (
-       SELECT COUNT(*) AS response_count, MAX(s.created_at) AS last_response_at
-       FROM feedback_submissions s WHERE s.qr_point_id = p.id AND s.archived_at IS NULL
+       SELECT COUNT(*) FILTER (WHERE s.archived_at IS NULL) AS response_count,
+              MAX(s.created_at) FILTER (WHERE s.archived_at IS NULL) AS last_response_at,
+              COUNT(*) FILTER (WHERE s.archived_at IS NOT NULL) AS archived_count
+       FROM feedback_submissions s WHERE s.qr_point_id = p.id
      ) sub ON TRUE
      LEFT JOIN LATERAL (
        SELECT AVG(r.rating) AS avg_rating,

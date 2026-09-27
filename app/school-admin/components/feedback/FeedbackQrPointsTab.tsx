@@ -12,6 +12,7 @@ import { useFeedbackFetch } from './useFeedbackFetch'
 import PosterShareCard from './PosterShareCard'
 import QrPointEditor, { type Draft } from './QrPointEditor'
 import DeleteQrPointDialog from './DeleteQrPointDialog'
+import { ClearFolderDialog } from './FolderMaintenance'
 
 export interface QrPoint {
   id: number
@@ -31,6 +32,7 @@ export interface QrPoint {
   feedback_url: string
   response_count: number
   last_response_at: string | null
+  archived_count: number // this folder's reviews sitting in the Archive (deleted with the folder)
   avg_rating: number | null
   open_issues: number
 }
@@ -102,6 +104,7 @@ export default function FeedbackQrPointsTab({
   const [template, setTemplate] = useState<Partial<Draft> | undefined>(undefined)
   const [posterFor, setPosterFor] = useState<QrPoint | null>(null)
   const [deleting, setDeleting] = useState<QrPoint | null>(null)
+  const [clearFor, setClearFor] = useState<QrPoint | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const [actionError, setActionError] = useState('')
@@ -383,10 +386,21 @@ export default function FeedbackQrPointsTab({
 
       {deleting && (
         <DeleteQrPointDialog
+          schoolId={schoolId}
           point={deleting}
           onClose={() => setDeleting(null)}
           onPauseInstead={() => { const p = deleting; setDeleting(null); toggleActive(p) }}
+          onClearInstead={() => { setClearFor(deleting); setDeleting(null) }}
           onDeleted={() => { setDeleting(null); reload() }}
+        />
+      )}
+      {clearFor && (
+        <ClearFolderDialog
+          schoolId={schoolId}
+          source={String(clearFor.id)}
+          folderName={`${QR_POINT_KINDS.find(k => k.key === clearFor.kind)?.icon ?? ''} ${clearFor.title}`}
+          onClose={() => setClearFor(null)}
+          onDone={() => { setClearFor(null); reload() }}
         />
       )}
 
