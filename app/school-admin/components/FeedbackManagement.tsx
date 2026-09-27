@@ -51,11 +51,16 @@ export default function FeedbackManagement({ schoolId }: { schoolId: number }) {
   const [tab, setTab] = useState<string>('dashboard')
   // 'all' | 'general' (school-wide QR) | '<qr point id>'
   const [source, setSource] = useState('all')
-  // The Archive is a Submissions-only folder; Dashboard/Issues show live feedback
-  const liveSource = source === 'archived' ? 'all' : source
   const { data: points, loading: pointsLoading, error: pointsError, reload: reloadPoints } = useFeedbackFetch<QrPoint[]>(
-    `/api/feedback/qr-points?school_id=${schoolId}`, [schoolId], 'Failed to load QR codes'
+    // Re-fetched on every tab switch so QR cards and folder counts (responses,
+    // open issues) catch up with changes made in other tabs.
+    `/api/feedback/qr-points?school_id=${schoolId}`, [schoolId, tab], 'Failed to load QR codes'
   )
+  // Dashboard/Issues only ever filter by live sources: the Archive is a
+  // Submissions-only folder, and a QR point deleted elsewhere must not stay
+  // selected as a filter that no longer exists.
+  const pointExists = !/^\d+$/.test(source) || !points || points.some(p => String(p.id) === source)
+  const liveSource = source === 'archived' || !pointExists ? 'all' : source
 
   // Tab badges — re-fetched whenever the tab changes, so they catch up after
   // issues are resolved or folders cleared elsewhere on the page.

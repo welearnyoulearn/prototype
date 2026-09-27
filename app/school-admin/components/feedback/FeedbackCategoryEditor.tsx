@@ -9,6 +9,7 @@ import { ROLE_VISUAL } from '@/app/feedback/[code]/roleVisuals'
 import CategoryPickerStep from '@/app/feedback/[code]/steps/CategoryPickerStep'
 import CategoryIcon from '@/app/feedback/[code]/CategoryIcon'
 import { useFeedbackFetch } from './useFeedbackFetch'
+import { useConfirm } from '@/components/ui/use-confirm'
 import type { QrPoint } from './FeedbackQrPointsTab'
 
 interface Category {
@@ -138,6 +139,7 @@ export default function FeedbackCategoryEditor({ schoolId, points = [] }: { scho
   const [adding, setAdding] = useState(false)
   const [addError, setAddError] = useState('')
   const [previewPicked, setPreviewPicked] = useState<string[]>([])
+  const { confirm, ConfirmDialog } = useConfirm()
 
   const { data, loading, error: loadError, reload } = useFeedbackFetch<Category[]>(
     `/api/feedback/categories?school_id=${schoolId}`, [schoolId], 'Failed to load categories'
@@ -157,6 +159,21 @@ export default function FeedbackCategoryEditor({ schoolId, points = [] }: { scho
   async function run(id: number, fn: () => Promise<void>) {
     setBusyId(id); setError('')
     try { await fn(); reload() } catch (e) { setError(e instanceof Error ? e.message : 'Something went wrong') } finally { setBusyId(null) }
+  }
+
+  // Hiding a category an event/place QR asks about removes that question from
+  // its form (and can leave an audience with nothing to rate) — confirm first.
+  async function setLive(c: Category, live: boolean) {
+    const pins = pinnedOn(c.id)
+    if (!live && pins.length > 0) {
+      const names = pins.map(p => `“${p.title}”`).join(', ')
+      const ok = await confirm(
+        `${names} ${pins.length === 1 ? 'asks' : 'ask'} about “${c.label}”. Hiding it removes this question from ${pins.length === 1 ? 'that QR code' : 'those QR codes'} too — if it was the only one for an audience, they won't be able to rate anything there.`,
+        { title: 'Hide a category used by a QR code?', confirmText: 'Hide anyway', destructive: true }
+      )
+      if (!ok) return
+    }
+    await run(c.id, () => patchCategory(c.id, { is_active: live }))
   }
 
   function startEdit(c: Category) {
@@ -266,7 +283,7 @@ export default function FeedbackCategoryEditor({ schoolId, points = [] }: { scho
                 data-testid={`feedback-category-toggle-${c.key}`}
                 checked={c.is_active}
                 disabled={busy}
-                onCheckedChange={v => run(c.id, () => patchCategory(c.id, { is_active: v }))}
+                onCheckedChange={v => { void setLive(c, v) }}
                 className="data-[state=checked]:bg-[#245b46]"
               />
               <span className="w-10">{c.is_active ? 'Live' : 'Hidden'}</span>
@@ -279,6 +296,7 @@ export default function FeedbackCategoryEditor({ schoolId, points = [] }: { scho
 
   return (
     <div data-testid="feedback-category-editor" className="space-y-5">
+      {ConfirmDialog}
       <datalist id="feedback-departments">{departments.map(d => <option key={d} value={d} />)}</datalist>
 
       {/* Audience tabs */}

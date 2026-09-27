@@ -35,6 +35,12 @@ export default function CategoryPickerStep({
       <h1 className="text-center text-xl font-bold mb-1" style={{ color: INK }}>{title}</h1>
       <p className="text-center text-sm mb-4" style={{ color: '#6B7280' }}>{subtitle}</p>
 
+      {categories.length === 0 && (
+        <div className="rounded-2xl p-5 text-center" style={{ background: SURFACE }} data-testid="feedback-no-categories">
+          <p className="text-sm font-bold" style={{ color: INK }}>Nothing to rate here yet</p>
+          <p className="mt-1 text-xs" style={{ color: '#6B7280' }}>The school hasn&apos;t set up topics for this group. Go back and choose another option, or check with the school office.</p>
+        </div>
+      )}
       <div className="flex max-h-[460px] flex-col gap-2 overflow-auto">
         {categories.map(c => {
           const isSelected = selected.includes(c.key)

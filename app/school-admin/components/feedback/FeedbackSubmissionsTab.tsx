@@ -145,7 +145,8 @@ export default function FeedbackSubmissionsTab({
 
   return (
     <>
-      {source === 'all'
+      {/* A QR point deleted elsewhere can't stay open as a folder */}
+      {source === 'all' || (/^\d+$/.test(source) && points.length > 0 && !points.some(p => String(p.id) === source))
         ? <FolderHome schoolId={schoolId} points={points} onOpen={onSourceChange} onDelete={setDeleting} />
         : <FolderContents key={`${source}-${listVersion}`} schoolId={schoolId} source={source} points={points} onBack={() => onSourceChange('all')} onDelete={setDeleting} onChanged={onPointsChanged} />}
       {deleting && (

@@ -16,7 +16,8 @@ import { resolveFeedbackCode } from '@/lib/feedback-public-access'
 // 404 shape — deliberately, so scanning an old/disabled poster doesn't
 // reveal whether the code ever existed. A QR point (event/place code) that
 // is paused or past its closes_on date returns 410 with its title instead,
-// so a late scan of an event poster says "feedback for X is closed".
+// so a late scan of an event poster says "feedback for X is closed"; a
+// school-wide code switched off in Settings returns 410 with paused: true.
 //
 // For a QR point the response also carries `qr_point` (title/venue/date,
 // fixed form, allowed roles) and `categories` is narrowed to that point's
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
     const resolved = await resolveFeedbackCode(pool, code)
     if (resolved.status === 'not_found') return NextResponse.json({ error: 'not_found' }, { status: 404 })
     if (resolved.status === 'closed') {
-      return NextResponse.json({ error: 'closed', school_name: resolved.schoolName, title: resolved.title }, { status: 410 })
+      return NextResponse.json({ error: 'closed', school_name: resolved.schoolName, title: resolved.title, paused: !!resolved.paused }, { status: 410 })
     }
 
     const point = resolved.qrPoint

@@ -215,7 +215,7 @@ export default function FeedbackQrPointsTab({
 
       {actionError && <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{actionError}</div>}
 
-      {loading ? (
+      {loading && points.length === 0 ? (
         <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
       ) : error ? (
         <div className="py-16 text-center text-sm text-red-500">{error}</div>

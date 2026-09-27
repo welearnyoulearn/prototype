@@ -48,6 +48,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
   const [notFound, setNotFound] = useState(false)
   // Title of a paused/expired event or place QR (410 from resolve)
   const [closedTitle, setClosedTitle] = useState<string | null>(null)
+  const [paused, setPaused] = useState(false)
   const [qrPoint, setQrPoint] = useState<QrPointPublic | null>(null)
   const [schoolName, setSchoolName] = useState('')
   const [categories, setCategories] = useState<FeedbackCategory[]>([])
@@ -59,7 +60,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
       .then(async res => {
         if (res.status === 410) {
           const data = await res.json()
-          if (!cancelled) { setSchoolName(data.school_name); setClosedTitle(data.title); setLoading(false) }
+          if (!cancelled) { setSchoolName(data.school_name); setClosedTitle(data.title); setPaused(!!data.paused); setLoading(false) }
           return null
         }
         if (!res.ok) throw new Error('not_found')
@@ -79,6 +80,14 @@ export default function FeedbackWizard({ code }: { code: string }) {
   }, [code])
 
   const roleCategories = s.role ? categories.filter(c => c.role === s.role) : []
+  // Audiences that can actually finish the form: rating forms need at least
+  // one active category for the role (otherwise the picker would be an empty
+  // dead end); Advanced Forms need none. 'other' only exists on the
+  // school-wide QR.
+  const rolesWithTopics = new Set(categories.map(c => c.role))
+  const availableRoles = (['parent', 'student', 'teacher', 'visitor', 'other'] as FeedbackRole[]).filter(r =>
+    r === 'other' ? !qrPoint : (qrPoint && qrPoint.form_type !== 'rating') || rolesWithTopics.has(r)
+  )
   const selectedCategories = roleCategories.filter(c => s.selectedKeys.includes(c.key))
   const givenRatings = selectedCategories.map(c => s.ratings[c.key]).filter((r): r is number => r !== undefined)
   const overallRating = givenRatings.length > 0 ? givenRatings.reduce((sum, r) => sum + r, 0) / givenRatings.length : 3
@@ -175,8 +184,17 @@ export default function FeedbackWizard({ code }: { code: string }) {
         {!loading && closedTitle && (
           <div className="py-16 text-center" data-testid="feedback-closed">
             <HeroIcon icon="🔒" size={80} motion="none" />
-            <h1 className="mb-1 text-lg font-bold" style={{ color: INK }}>Feedback for {closedTitle} is closed</h1>
-            <p className="text-sm" style={{ color: '#9CA3AF' }}>Thank you for your interest! {schoolName} is no longer collecting feedback through this QR code.</p>
+            {paused ? (
+              <>
+                <h1 className="mb-1 text-lg font-bold" style={{ color: INK }}>Feedback is paused for now</h1>
+                <p className="text-sm" style={{ color: '#9CA3AF' }}>{schoolName} isn&apos;t collecting feedback at the moment. Please try again later or contact the school office.</p>
+              </>
+            ) : (
+              <>
+                <h1 className="mb-1 text-lg font-bold" style={{ color: INK }}>Feedback for {closedTitle} is closed</h1>
+                <p className="text-sm" style={{ color: '#9CA3AF' }}>Thank you for your interest! {schoolName} is no longer collecting feedback through this QR code.</p>
+              </>
+            )}
           </div>
         )}
 
@@ -217,6 +235,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
               <WelcomeStep
                 schoolName={schoolName}
                 qrPoint={qrPoint}
+                availableRoles={availableRoles}
                 onSelectRole={role => setS(prev => ({ ...prev, role, step: 'identity' }))}
               />
             )}

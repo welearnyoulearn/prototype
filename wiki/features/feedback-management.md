@@ -28,6 +28,7 @@ API routes these screens call (all exist):
 - `POST` /api/feedback/settings/regenerate-code
 - `GET` /api/feedback/stats
 - `GET` /api/feedback/submissions
+- `GET` /api/feedback/submissions/{}
 - `POST` /api/feedback/submit
 - `POST` /api/feedback/voice-upload-url
 - `GET` /api/feedback/voice/{}
@@ -109,6 +110,7 @@ Lets a school collect feedback from parents, students, teachers, and visitors vi
 |------|--------|-------|
 | 2026-09-07 | Initial build | #TBD |
 | 2026-09-26 | Event & place QR codes: per-event/place code + poster, fixed form + audience, optional close date, submissions tagged by source with a Source filter on Dashboard/Submissions/Issues | #TBD |
+| 2026-09-28 | Connection-gap fixes: issue status changes report failures; issues open the full submission (detail panel via enriched `GET /submissions/[id]`); QR/folder counts refresh on tab switch; deleted QR can't stay the active filter/folder; audiences with no active categories are hidden (+ empty-state fallbacks) so the public form has no dead end; confirm before hiding a category used by a QR; paused school-wide QR shows "paused" (410 `paused: true`) | #TBD |
 | 2026-09-28 | 3D screen-header icons: `HeroIcon` (round glossy 3D badge with glow + float) on the category picker (per-audience 3D person, incl. new student-with-cap art), identity, Advanced Form headers, thank-you (plus 3D growth path + medal) and closed/not-found; Advanced Forms list uses 3D tiles | #TBD |
 | 2026-09-28 | 3D category icons: `CategoryIcon` (`app/feedback/[code]/CategoryIcon.tsx`) renders a category's emoji as a glossy 3D tile — custom-drawn school/bus/food/broom/people art, Fluent 3D stickers where available, 3D MoodFace for faces, else the emoji raised in the tile; used on the public picker + rating badge and admin Categories, Submissions, detail panel and QR editor | #TBD |
 | 2026-09-28 | 3D mood faces: custom inline-SVG `MoodFace` (`app/feedback/[code]/MoodFace.tsx`) replaces system emoji for 1–5 ratings — spherical shading, gloss sweep, per-mood idle animation (tears / blink / sparkles), reduced-motion safe; used on the rating step, mascots, meeting-form scales, Submissions, detail panel and Dashboard | #TBD |

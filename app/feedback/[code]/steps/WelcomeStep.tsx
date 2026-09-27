@@ -24,14 +24,18 @@ const cardBase =
   'focus:outline-none focus-visible:ring-4 focus-visible:ring-[#245B46]/40'
 
 export default function WelcomeStep({
-  schoolName, qrPoint, onSelectRole,
+  schoolName, qrPoint, availableRoles, onSelectRole,
 }: {
   schoolName: string
   qrPoint: QrPointPublic | null
+  availableRoles: FeedbackRole[] // audiences that have something to rate/fill
   onSelectRole: (role: FeedbackRole) => void
 }) {
   // An event/place QR limits the audience; one allowed role skips the picker.
-  const roles = qrPoint ? FEEDBACK_ROLES.filter(r => qrPoint.roles.includes(r.key)) : FEEDBACK_ROLES
+  // Audiences with nothing to rate are left out rather than leading to an
+  // empty picker.
+  const roles = (qrPoint ? FEEDBACK_ROLES.filter(r => qrPoint.roles.includes(r.key)) : FEEDBACK_ROLES)
+    .filter(r => availableRoles.includes(r.key))
   const mainRoles = roles.filter(r => r.key !== 'other')
   const formsRole = roles.find(r => r.key === 'other')
   const eventDate = formatFeedbackDate(qrPoint?.event_date)
@@ -79,7 +83,12 @@ export default function WelcomeStep({
         ))}
       </div>
 
-      {roles.length === 1 ? (
+      {roles.length === 0 ? (
+        <div className="mt-6 rounded-2xl bg-[#F3F5F2] p-5 text-center" data-testid="feedback-not-set-up">
+          <p className="text-sm font-bold" style={{ color: GZ_INK }}>This form isn&apos;t ready yet</p>
+          <p className="mt-1 text-xs" style={{ color: GZ_MUTED }}>The school hasn&apos;t set up any topics to rate here. Please check with the school office.</p>
+        </div>
+      ) : roles.length === 1 ? (
         <button
           type="button"
           data-testid="feedback-start-btn"

@@ -110,6 +110,11 @@ test.describe.serial('Feedback Management Workflow', () => {
     await expect(row).toBeVisible({ timeout: 10000 })
     await expect(row.getByText('Transportation')).toBeVisible()
 
+    // The issue opens the full submission (comment etc.) in the detail panel
+    await row.locator('[data-testid^="feedback-issue-open-"]').click()
+    await expect(page.getByTestId('feedback-submission-detail')).toContainText('The bus was 45 minutes late again today.', { timeout: 10000 })
+    await page.keyboard.press('Escape')
+
     const statusSelect = row.locator('[data-testid^="feedback-issue-status-select-"]')
     await statusSelect.click()
     await page.getByRole('option', { name: 'Resolved' }).click()
@@ -239,5 +244,27 @@ test.describe.serial('Feedback Management Workflow', () => {
     await page.getByTestId('feedback-archive-restore-btn').click()
     await page.getByTestId('feedback-archive-action-confirm-btn').click()
     await expect(page.getByTestId('feedback-folder-notice')).toContainText('restored')
+  })
+
+  test('11. Pausing the school-wide QR shows a "paused" message, resuming brings the form back', async ({ page }) => {
+    await loginAsSchoolAdmin(page, adminEmail, schoolPass)
+    await page.getByRole('button', { name: /feedback/i }).first().click()
+    await page.getByTestId('feedback-tab-settings').click()
+    const toggle = page.getByTestId('feedback-active-toggle')
+    await expect(toggle).toHaveText('Active', { timeout: 10000 })
+    await toggle.click()
+    await expect(toggle).toHaveText('Paused', { timeout: 10000 })
+
+    await page.goto(feedbackUrl)
+    await expect(page.getByTestId('feedback-closed')).toContainText('paused', { timeout: 10000 })
+
+    await page.goBack()
+    await page.getByRole('button', { name: /feedback/i }).first().click()
+    await page.getByTestId('feedback-tab-settings').click()
+    await page.getByTestId('feedback-active-toggle').click()
+    await expect(page.getByTestId('feedback-active-toggle')).toHaveText('Active', { timeout: 10000 })
+
+    await page.goto(feedbackUrl)
+    await expect(page.getByTestId('feedback-role-parent-btn')).toBeVisible({ timeout: 10000 })
   })
 })

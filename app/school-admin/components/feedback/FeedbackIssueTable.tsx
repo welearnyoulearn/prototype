@@ -5,8 +5,10 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { EmptyState } from '@/components/ui/empty-state'
-import { Inbox } from 'lucide-react'
+import { Inbox, PanelRightOpen } from 'lucide-react'
 import { useFeedbackFetch } from './useFeedbackFetch'
+import SubmissionDetailSheet from './SubmissionDetailSheet'
+import type { Submission } from './submissionUi'
 
 interface Issue {
   id: number
@@ -34,6 +36,11 @@ const STATUS_OPTIONS = [
 export default function FeedbackIssueTable({ schoolId, source }: { schoolId: number; source: string }) {
   const [statusFilter, setStatusFilter] = useState('open')
   const [updatingId, setUpdatingId] = useState<number | null>(null)
+  const [actionError, setActionError] = useState('')
+  const [notice, setNotice] = useState('')
+  // Full submission behind an issue, shown in the shared detail panel
+  const [opened, setOpened] = useState<Submission | null>(null)
+  const [openingId, setOpeningId] = useState<number | null>(null)
 
   const filter = statusFilter !== 'all' ? `&status=${statusFilter}` : ''
   const { data: issues, loading, error, reload } = useFeedbackFetch<Issue[]>(
@@ -41,16 +48,35 @@ export default function FeedbackIssueTable({ schoolId, source }: { schoolId: num
   )
 
   async function updateStatus(id: number, status: string) {
-    setUpdatingId(id)
+    setUpdatingId(id); setActionError('')
     try {
-      await fetch(`/api/feedback/issues/${id}`, {
+      const res = await fetch(`/api/feedback/issues/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       })
+      if (!res.ok) throw new Error()
+      const label = STATUS_OPTIONS.find(o => o.value === status)?.label ?? status
+      setNotice(`Issue marked ${label.toLowerCase()}`)
+      setTimeout(() => setNotice(''), 2500)
       reload()
+    } catch {
+      setActionError('Could not update the issue — please try again.')
     } finally {
       setUpdatingId(null)
+    }
+  }
+
+  async function openSubmission(submissionId: number) {
+    setOpeningId(submissionId); setActionError('')
+    try {
+      const res = await fetch(`/api/feedback/submissions/${submissionId}`)
+      if (!res.ok) throw new Error()
+      setOpened(await res.json())
+    } catch {
+      setActionError('Could not open this feedback — please try again.')
+    } finally {
+      setOpeningId(null)
     }
   }
 
@@ -69,6 +95,9 @@ export default function FeedbackIssueTable({ schoolId, source }: { schoolId: num
         <span className="text-xs text-gray-400">{rows.length} issue{rows.length === 1 ? '' : 's'}</span>
       </div>
 
+      {actionError && <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600" data-testid="feedback-issue-error">{actionError}</div>}
+      {notice && <div className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">✅ {notice}</div>}
+
       {loading ? (
         <div className="py-16 text-center text-sm text-gray-400">Loading…</div>
       ) : error ? (
@@ -85,6 +114,7 @@ export default function FeedbackIssueTable({ schoolId, source }: { schoolId: num
                 <TableHead>Priority</TableHead>
                 <TableHead>Reported</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead className="w-24 text-right">Feedback</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -108,12 +138,26 @@ export default function FeedbackIssueTable({ schoolId, source }: { schoolId: num
                       </SelectContent>
                     </Select>
                   </TableCell>
+                  <TableCell className="text-right">
+                    <button
+                      type="button"
+                      data-testid={`feedback-issue-open-${issue.id}`}
+                      onClick={() => openSubmission(issue.submission_id)}
+                      disabled={openingId === issue.submission_id}
+                      title="See the full feedback: comment, contact, voice note"
+                      className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-[#245b46] transition-colors hover:bg-[#edf2eb] disabled:opacity-50"
+                    >
+                      <PanelRightOpen size={13} aria-hidden="true" />{openingId === issue.submission_id ? '…' : 'View'}
+                    </button>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </div>
       )}
+
+      <SubmissionDetailSheet submission={opened} onClose={() => setOpened(null)} />
     </div>
   )
 }

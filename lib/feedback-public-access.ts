@@ -20,7 +20,9 @@ export type FeedbackCodeResolution =
   | { status: 'ok'; schoolId: number; schoolName: string; qrPoint: ResolvedQrPoint | null }
   // A real QR point that is paused or past its closes_on date — lets the
   // wizard say "feedback for <event> is closed" instead of a generic 404.
-  | { status: 'closed'; schoolName: string; title: string }
+  // `paused` = the school-wide QR switched off in Settings & QR (vs an
+  // event/place QR that is paused or past its close date)
+  | { status: 'closed'; schoolName: string; title: string; paused?: boolean }
   | { status: 'not_found' }
 
 // Shared resolver for every public (no-login) feedback route. A code is
@@ -37,6 +39,16 @@ export async function resolveFeedbackCode(db: Pool | PoolClient, code: string): 
     [code]
   )
   if (general) return { status: 'ok', schoolId: general.school_id, schoolName: general.school_name, qrPoint: null }
+
+  // School-wide code that exists but is switched off → "paused", not "not found"
+  const { rows: [pausedGeneral] } = await db.query(
+    `SELECT s.name AS school_name
+     FROM feedback_settings fs
+     JOIN schools s ON s.id = fs.school_id AND s.deleted_at IS NULL AND s.status = 'active'
+     WHERE fs.public_code = $1 AND fs.is_active = FALSE`,
+    [code]
+  )
+  if (pausedGeneral) return { status: 'closed', schoolName: pausedGeneral.school_name, title: pausedGeneral.school_name, paused: true }
 
   const { rows: [point] } = await db.query(
     `SELECT p.id, p.school_id, s.name AS school_name, p.kind, p.title, p.venue, p.details,
