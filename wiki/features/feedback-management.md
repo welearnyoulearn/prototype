@@ -109,13 +109,14 @@ Lets a school collect feedback from parents, students, teachers, and visitors vi
 |------|--------|-------|
 | 2026-09-07 | Initial build | #TBD |
 | 2026-09-26 | Event & place QR codes: per-event/place code + poster, fixed form + audience, optional close date, submissions tagged by source with a Source filter on Dashboard/Submissions/Issues | #TBD |
+| 2026-09-28 | Voice notes: 1-minute limit with live timer/progress/mic level, countdown, auto-save, too-short guard, cancel; Safari/iOS support (audio/mp4); server-side 3 MB + audio-type check | #TBD |
 | 2026-09-26 | QR poster: school name + editable quote, canvas-rendered (replaces html2canvas, which can't parse Tailwind v4 `oklch()` colours), PNG download, share via native sheet/WhatsApp/email/copy | #TBD |
 
 ## Known issues
 
 - [ ] Full user-flow not smoke-tested against a live database in this environment (no local Postgres available; `.env.local` points at the shared Supabase dev DB, so no test school was created there) — the Playwright spec (`e2e/workflow-feedback-management.spec.ts`) is written but unrun. The DB migrations themselves (new tables, category backfill) *were* run live against that DB during development and are confirmed working, including a real bug caught this way: the category backfill's generated SQL failed on `sort_order`'s type (fixed in `lib/feedback-defaults.ts` with explicit `::integer`/`::varchar` casts — see `/code-review` history)
 - [ ] No GitHub issue logged yet — branch is `feature/feedback-management` without an issue number
-- [ ] Presigned voice upload has no server-enforced max file size (client-side ~60s recording cap only)
+- [x] ~~Presigned voice upload has no server-enforced max file size~~ — fixed 2026-09-28: submit rejects (and deletes) voice objects over `VOICE_MAX_BYTES` (3 MB) or with a non-audio content type; the recorder caps at `VOICE_MAX_SECONDS` (60 s) with a visible timer, last-10-seconds countdown and auto-save
 - [ ] `/code-review medium` ran and found several issues, all fixed: missing `is_active`/school-active checks on the public submit and voice-upload routes, no rate limit on voice-upload-url, no dedup/max-size cap on submitted ratings, an unused `cn` npm package pulled in by the shadcn CLI, and three admin tabs missing `res.ok` checks before rendering API responses. A few lower-priority simplification/reuse suggestions (shared fetch-on-mount hook, role-definition duplication across files, adopting the existing Dialog/Table primitives) were deferred as follow-up cleanup, not fixed in this pass.
 
 ## Notes

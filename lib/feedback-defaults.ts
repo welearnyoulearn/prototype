@@ -81,6 +81,22 @@ export function formatFeedbackDate(iso: string | null | undefined): string {
 export const QR_POINT_ROLES = FEEDBACK_ROLES.filter(r => r.key !== 'other')
 export const QR_POINT_ROLE_KEYS = QR_POINT_ROLES.map(r => r.key) as [FeedbackRole, ...FeedbackRole[]]
 
+// ── Voice notes (public feedback form) ───────────────────────────────────
+// One place for the limits the recorder shows and the server enforces.
+// 60 s of Opus at the recorder's 32 kbps is ~250 KB; 3 MB leaves generous
+// headroom for browsers that ignore the bitrate hint (e.g. Safari's AAC).
+export const VOICE_MAX_SECONDS = 60
+export const VOICE_MIN_SECONDS = 1
+export const VOICE_MAX_BYTES = 3 * 1024 * 1024
+// Safari/iOS can't record webm, so the recorder picks whichever the browser
+// supports and the upload URL is signed for that exact type.
+export const VOICE_FORMATS = {
+  'audio/webm': 'webm',
+  'audio/mp4': 'm4a',
+} as const
+export type VoiceContentType = keyof typeof VOICE_FORMATS
+export const VOICE_CONTENT_TYPES = Object.keys(VOICE_FORMATS) as [VoiceContentType, ...VoiceContentType[]]
+
 // Tagline shown on the QR poster when the school hasn't set its own
 // (feedback_settings.poster_quote IS NULL).
 export const DEFAULT_POSTER_QUOTE = 'Your voice helps us grow. Tell us how we are doing!'

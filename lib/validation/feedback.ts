@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import {
-  FEEDBACK_ROLE_KEYS, ADVANCED_FORM_TYPE_KEYS, POSTER_QUOTE_MAX,
+  FEEDBACK_ROLE_KEYS, ADVANCED_FORM_TYPE_KEYS, POSTER_QUOTE_MAX, VOICE_CONTENT_TYPES,
   QR_POINT_KIND_KEYS, QR_POINT_FORM_TYPE_KEYS, QR_POINT_ROLE_KEYS,
 } from '../feedback-defaults'
 
@@ -36,6 +36,7 @@ export const feedbackSubmitSchema = z.object({
 
 export const feedbackVoiceUploadUrlSchema = z.object({
   code: z.string().min(1).max(20),
+  content_type: z.enum(VOICE_CONTENT_TYPES).default('audio/webm'),
 })
 
 export const feedbackCategoryCreateSchema = z.object({

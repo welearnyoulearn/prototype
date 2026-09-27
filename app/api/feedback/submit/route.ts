@@ -1,11 +1,12 @@
 import { createHash } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
-import { HeadObjectCommand } from '@aws-sdk/client-s3'
+import { DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
 import pool from '@/lib/db'
 import { r2Config } from '@/lib/r2'
 import { getClientIp } from '@/lib/request-ip'
 import { resolveFeedbackCode } from '@/lib/feedback-public-access'
 import { feedbackSubmitSchema } from '@/lib/validation/feedback'
+import { VOICE_MAX_BYTES } from '@/lib/feedback-defaults'
 
 const RATE_LIMIT_WINDOW = '10 minutes'
 const RATE_LIMIT_MAX = 5
@@ -93,13 +94,20 @@ export async function POST(req: NextRequest) {
       if (!body.voice_key.startsWith(`feedback/${schoolId}/`)) {
         return NextResponse.json({ error: 'Invalid voice_key' }, { status: 400 })
       }
+      const r2 = r2Config()
+      let head
       try {
-        const r2 = r2Config()
-        await r2.client.send(new HeadObjectCommand({ Bucket: r2.bucket, Key: body.voice_key }))
-        voiceKey = body.voice_key
+        head = await r2.client.send(new HeadObjectCommand({ Bucket: r2.bucket, Key: body.voice_key }))
       } catch {
         return NextResponse.json({ error: 'Voice recording not found — please re-record and try again' }, { status: 400 })
       }
+      // The presigned PUT can't cap size, so enforce it here: an oversized or
+      // non-audio object is deleted and the submission asked to re-record.
+      if ((head.ContentLength ?? 0) > VOICE_MAX_BYTES || !(head.ContentType ?? '').startsWith('audio/')) {
+        await r2.client.send(new DeleteObjectCommand({ Bucket: r2.bucket, Key: body.voice_key })).catch(() => {})
+        return NextResponse.json({ error: 'Voice note is too long — please keep it under 1 minute' }, { status: 400 })
+      }
+      voiceKey = body.voice_key
     }
 
     // Resolve each rated category against this school's live category rows
