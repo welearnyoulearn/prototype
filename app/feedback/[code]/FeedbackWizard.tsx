@@ -10,7 +10,8 @@ import AdvancedFormStep from './steps/AdvancedFormStep'
 import FollowupStep from './steps/FollowupStep'
 import ThankYouStep from './steps/ThankYouStep'
 import { AdvancedFormType, FeedbackCategory, FeedbackRole, QrPointPublic, WizardStep } from './types'
-import { TEAL, INK, CREAM, BORDER, CORAL } from '@/app/components/ulearn/theme'
+import { TEAL, INK, CORAL } from '@/app/components/ulearn/theme'
+import { GZ_CARD_SHADOW, GzBrandPanel } from './genz'
 
 const PROGRESS_STEPS: WizardStep[] = ['welcome', 'identity', 'categories', 'rating', 'followup']
 // advancedType/advancedForm occupy the same visual progress slots as
@@ -151,12 +152,21 @@ export default function FeedbackWizard({ code }: { code: string }) {
   const progressIndex = PROGRESS_INDEX[s.step] ?? -1
 
   return (
-    <div className="relative flex min-h-screen items-start justify-center overflow-hidden p-6" style={{ background: CREAM }}>
-      {/* Soft decorative shapes instead of a full-bleed gradient — quieter, less "generated hero" */}
-      <div className="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full opacity-[0.07]" style={{ background: TEAL }} />
-      <div className="pointer-events-none absolute -bottom-28 -left-20 h-64 w-64 rounded-full opacity-[0.06]" style={{ background: '#D2603A' }} />
+    <div
+      className="relative min-h-screen overflow-hidden"
+      style={{
+        // Soft aurora glow in the brand greens + warm accents, behind the card
+        background: 'radial-gradient(60% 50% at 10% 0%, #DDF1E6 0%, transparent 60%), radial-gradient(45% 40% at 95% 10%, #FDE6DA 0%, transparent 60%), radial-gradient(50% 45% at 85% 100%, #E7E3FA 0%, transparent 60%), #F7F8F5',
+      }}
+    >
 
-      <div className="relative mt-8 w-full max-w-[390px] rounded-3xl border bg-white p-6 pb-5 shadow-sm" style={{ borderColor: BORDER }}>
+      <div className="relative mx-auto flex max-w-6xl items-start justify-center gap-16 px-4 py-5 sm:px-6 sm:py-10 lg:py-16">
+      {!loading && !notFound && !closedTitle && <GzBrandPanel schoolName={schoolName} />}
+
+      <main
+        className="relative w-full max-w-[480px] rounded-[32px] bg-white/85 p-5 pb-5 ring-1 ring-black/[0.05] backdrop-blur-xl sm:p-7"
+        style={{ boxShadow: GZ_CARD_SHADOW }}
+      >
         {loading && (
           <div className="py-24 text-center text-sm" style={{ color: '#9CA3AF' }}>Loading…</div>
         )}
@@ -185,15 +195,20 @@ export default function FeedbackWizard({ code }: { code: string }) {
               </div>
             )}
             {progressIndex >= 0 && (
-              <div className="mb-5 flex gap-1.5">
-                {PROGRESS_STEPS.map((step, i) => (
-                  <span key={step} className="h-[5px] flex-1 overflow-hidden rounded" style={{ background: BORDER }}>
-                    <span
-                      className="block h-full rounded transition-all duration-300"
-                      style={{ width: i <= progressIndex ? '100%' : '0%', background: TEAL }}
-                    />
-                  </span>
-                ))}
+              <div className="mb-5" data-testid="feedback-progress">
+                <div className="mb-1.5 flex items-center justify-between text-[11px] font-extrabold uppercase tracking-wider" style={{ color: '#8A948E' }}>
+                  <span>Step {progressIndex + 1} of {PROGRESS_STEPS.length}</span>
+                </div>
+                <div className="flex gap-1.5">
+                  {PROGRESS_STEPS.map((step, i) => (
+                    <span key={step} className="h-1.5 flex-1 overflow-hidden rounded-full" style={{ background: '#E8EDE9' }}>
+                      <span
+                        className="block h-full rounded-full transition-all duration-300"
+                        style={{ width: i <= progressIndex ? '100%' : '0%', background: `linear-gradient(90deg, ${TEAL}, #3E9B74)` }}
+                      />
+                    </span>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -299,6 +314,7 @@ export default function FeedbackWizard({ code }: { code: string }) {
             )}
           </>
         )}
+      </main>
       </div>
     </div>
   )
