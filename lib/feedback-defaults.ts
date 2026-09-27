@@ -83,11 +83,20 @@ export const QR_POINT_ROLE_KEYS = QR_POINT_ROLES.map(r => r.key) as [FeedbackRol
 
 // ── Voice notes (public feedback form) ───────────────────────────────────
 // One place for the limits the recorder shows and the server enforces.
-// 60 s of Opus at the recorder's 32 kbps is ~250 KB; 3 MB leaves generous
+// 30 s of Opus at the recorder's 32 kbps is ~125 KB; 2 MB leaves generous
 // headroom for browsers that ignore the bitrate hint (e.g. Safari's AAC).
-export const VOICE_MAX_SECONDS = 60
+export const VOICE_MAX_SECONDS: number = 30
 export const VOICE_MIN_SECONDS = 1
-export const VOICE_MAX_BYTES = 3 * 1024 * 1024
+export const VOICE_MAX_BYTES = 2 * 1024 * 1024
+
+// Human wording of the limit, derived so every message follows the constant:
+// 30 → "30 seconds" / "30 sec" / "30-second", 60 → "1 minute" / "1 min" / "1-minute"
+export const VOICE_LIMIT_LABEL = VOICE_MAX_SECONDS % 60 === 0
+  ? `${VOICE_MAX_SECONDS / 60} minute${VOICE_MAX_SECONDS === 60 ? '' : 's'}`
+  : `${VOICE_MAX_SECONDS} seconds`
+export const VOICE_LIMIT_SHORT = VOICE_MAX_SECONDS % 60 === 0 ? `${VOICE_MAX_SECONDS / 60} min` : `${VOICE_MAX_SECONDS} sec`
+// Adjective form for "the 30-second limit"
+export const VOICE_LIMIT_ADJ = VOICE_MAX_SECONDS % 60 === 0 ? `${VOICE_MAX_SECONDS / 60}-minute` : `${VOICE_MAX_SECONDS}-second`
 // Safari/iOS can't record webm, so the recorder picks whichever the browser
 // supports and the upload URL is signed for that exact type.
 export const VOICE_FORMATS = {

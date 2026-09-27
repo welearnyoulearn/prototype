@@ -6,7 +6,7 @@ import { r2Config } from '@/lib/r2'
 import { getClientIp } from '@/lib/request-ip'
 import { resolveFeedbackCode } from '@/lib/feedback-public-access'
 import { feedbackSubmitSchema } from '@/lib/validation/feedback'
-import { VOICE_MAX_BYTES } from '@/lib/feedback-defaults'
+import { VOICE_LIMIT_LABEL, VOICE_MAX_BYTES } from '@/lib/feedback-defaults'
 
 const RATE_LIMIT_WINDOW = '10 minutes'
 const RATE_LIMIT_MAX = 5
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
       // non-audio object is deleted and the submission asked to re-record.
       if ((head.ContentLength ?? 0) > VOICE_MAX_BYTES || !(head.ContentType ?? '').startsWith('audio/')) {
         await r2.client.send(new DeleteObjectCommand({ Bucket: r2.bucket, Key: body.voice_key })).catch(() => {})
-        return NextResponse.json({ error: 'Voice note is too long — please keep it under 1 minute' }, { status: 400 })
+        return NextResponse.json({ error: `Voice note is too long — please keep it under ${VOICE_LIMIT_LABEL}` }, { status: 400 })
       }
       voiceKey = body.voice_key
     }

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Mic, RotateCcw, Square, Trash2, X } from 'lucide-react'
 import { INK, TEAL, BORDER, SURFACE, CORAL } from '@/app/components/ulearn/theme'
-import { VOICE_MAX_SECONDS, VOICE_MIN_SECONDS, VoiceContentType } from '@/lib/feedback-defaults'
+import { VOICE_LIMIT_ADJ, VOICE_LIMIT_LABEL, VOICE_LIMIT_SHORT, VOICE_MAX_SECONDS, VOICE_MIN_SECONDS, VoiceContentType } from '@/lib/feedback-defaults'
 
 const WARN_AT = 10 // seconds left when the bar turns amber and a countdown shows
 const BARS = 5
@@ -136,7 +136,7 @@ export default function VoiceRecorder({
         return
       }
       setDuration(Math.min(secs, VOICE_MAX_SECONDS))
-      if (autoStoppedRef.current) setNotice('⏱️ Reached the 1-minute limit — your voice note was saved.')
+      if (autoStoppedRef.current) setNotice(`⏱️ Reached the ${VOICE_LIMIT_ADJ} limit — your voice note was saved.`)
       void uploadRecording(new Blob(chunksRef.current, { type: format }), format)
     }
     mediaRecorderRef.current = recorder
@@ -216,7 +216,7 @@ export default function VoiceRecorder({
             <Mic size={16} style={{ color: TEAL }} />
           </span>
           Tap &amp; speak instead
-          <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: `${TEAL}14`, color: TEAL }}>up to 1 min</span>
+          <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: `${TEAL}14`, color: TEAL }}>up to {VOICE_LIMIT_SHORT}</span>
         </button>
       )}
 
@@ -243,7 +243,7 @@ export default function VoiceRecorder({
             <div className="h-full rounded-full transition-[width] duration-200 ease-linear" style={{ width: `${pct}%`, background: barColor }} />
           </div>
           <p className="mt-1.5 min-h-[16px] text-[11px] font-semibold" style={{ color: warn ? barColor : '#9CA3AF' }} aria-live="polite">
-            {warn ? `⏳ ${Math.ceil(left)} second${Math.ceil(left) === 1 ? '' : 's'} left — it will save automatically` : 'Speak clearly — it stops by itself at 1 minute'}
+            {warn ? `⏳ ${Math.ceil(left)} second${Math.ceil(left) === 1 ? '' : 's'} left — it will save automatically` : `Speak clearly — it stops by itself at ${VOICE_LIMIT_LABEL}`}
           </p>
 
           <div className="mt-2 flex gap-2">
