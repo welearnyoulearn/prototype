@@ -3,9 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { ExportButtons, useRenewalRequest } from '@/components/PlanNotice'
 import { useRouter } from 'next/navigation'
-import { getBoardLabels } from '@/lib/board-syllabus/data'
 import { ALL_FEATURES, CATEGORY_ORDER } from '@/lib/features'
-import { useFeature } from '@/lib/features-context'
 import { useConfirm } from '@/components/ui/use-confirm'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -13,12 +11,10 @@ import { useConfirm } from '@/components/ui/use-confirm'
 type SchoolData = {
   id: number; name: string; type: string; city: string; country: string
   phone: string; email: string; address: string
-  school_code: string; grading_scheme: GradeRow[]; board?: string
+  school_code: string
   logo_url?: string | null; receipt_header_blocks?: ReceiptHeaderBlock[]
   logo_align?: 'left' | 'center' | 'right' | null
 }
-
-type GradeRow = { grade: string; min: number; max: number }
 
 type ReceiptHeaderBlock = {
   text: string
@@ -58,18 +54,6 @@ const fmtPlanDate = (d: string) =>
 type SettingsTab = 'profile' | 'academic-years' | 'plan' | 'staff' | 'security' | 'danger'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-const BOARDS = getBoardLabels()
-
-const DEFAULT_GRADING: GradeRow[] = [
-  { grade: 'A+', min: 90, max: 100 },
-  { grade: 'A',  min: 80, max: 89  },
-  { grade: 'B+', min: 70, max: 79  },
-  { grade: 'B',  min: 60, max: 69  },
-  { grade: 'C',  min: 50, max: 59  },
-  { grade: 'D',  min: 35, max: 49  },
-  { grade: 'F',  min: 0,  max: 34  },
-]
 
 const ROLE_LABELS: Record<string, string> = {
   school_admin: 'School Admin', principal: 'Principal', vice_principal: 'Vice Principal',
@@ -126,9 +110,8 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   const [error, setError]     = useState('')
   const [profile, setProfile] = useState({
     name: '', type: '', city: '', country: '', phone: '', email: '',
-    address: '', board: '',
+    address: '',
   })
-  const [scheme, setScheme] = useState<GradeRow[]>(DEFAULT_GRADING)
   const [logoUrl, setLogoUrl] = useState('')
   const [logoAlign, setLogoAlign] = useState<'left' | 'center' | 'right'>('center')
   const [headerBlocks, setHeaderBlocks] = useState<ReceiptHeaderBlock[]>([])
@@ -217,9 +200,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
         name: d.name ?? '', type: d.type ?? '', city: d.city ?? '',
         country: d.country ?? '', phone: d.phone ?? '', email: d.email ?? '',
         address: d.address ?? '',
-        board: d.board ?? '',
       })
-      if (d.grading_scheme?.length) setScheme(d.grading_scheme)
       setLogoUrl(d.logo_url ?? '')
       setLogoAlign(d.logo_align ?? 'center')
       setHeaderBlocks(d.receipt_header_blocks?.length ? d.receipt_header_blocks : [])
@@ -292,7 +273,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
       const r = await fetch(`/api/schools/${schoolId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...profile, board: profile.board || null,
+          ...profile,
           logo_url: logoUrl || null,
           logo_align: logoAlign,
           receipt_header_blocks: headerBlocks.filter(b => b.text.trim()),
@@ -349,24 +330,6 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     } finally {
       setLogoUploading(false)
     }
-  }
-
-  async function saveGrading(e: React.FormEvent) {
-    e.preventDefault()
-    for (let i = 0; i < scheme.length; i++) {
-      if (scheme[i].min > scheme[i].max) { setError(`Row ${i + 1}: min must be ≤ max`); return }
-    }
-    setSaving(true); setError(''); setSaved(false)
-    try {
-      const r = await fetch(`/api/schools/${schoolId}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ grading_scheme: scheme }),
-      })
-      if (!r.ok) throw new Error((await r.json()).error)
-      setSaved(true); setTimeout(() => setSaved(false), 3000)
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to save grading scheme')
-    } finally { setSaving(false) }
   }
 
   // ── Academic year actions ──────────────────────────────────────────────────
@@ -657,8 +620,6 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
     { key: 'danger',         label: 'Danger Zone',      icon: '⚠️' },
   ]
 
-  const hasExamSchedule = useFeature('exam-marks')
-
   if (loading) return <div className="text-center py-12 text-muted-foreground text-sm">Loading settings…</div>
 
   return (
@@ -747,65 +708,6 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
               <textarea rows={2} placeholder="Full address…" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
                 value={profile.address} onChange={e => setProfile(f => ({ ...f, address: e.target.value }))} />
             </div>
-
-            {/* Board */}
-            <div className="border-t border-gray-100 pt-5 space-y-3">
-              <div>
-                <h3 className="text-sm font-semibold text-gray-700">Curriculum Board</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Used for syllabus management and curriculum planning</p>
-              </div>
-              <div className="max-w-xs">
-                <select value={profile.board} onChange={e => setProfile(f => ({ ...f, board: e.target.value }))}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                  <option value="">— Select Board —</option>
-                  {BOARDS.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
-                </select>
-              </div>
-            </div>
-
-            {/* Grading scheme — only when exam-schedule feature is enabled */}
-            {hasExamSchedule && (
-              <div className="border-t border-gray-100 pt-5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-700">Grading Scheme</h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">Used for exam results and report cards</p>
-                  </div>
-                  <button type="button" onClick={() => setScheme(DEFAULT_GRADING)}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-3 py-1.5 rounded-lg">
-                    Reset to Default
-                  </button>
-                </div>
-                <div className="border border-gray-100 rounded-md overflow-hidden">
-                  <div className="grid grid-cols-4 bg-gray-50 border-b border-gray-100">
-                    {['Grade Label','Min %','Max %',''].map(h => (
-                      <div key={h} className="px-4 py-2.5 text-xs font-semibold text-gray-500">{h}</div>
-                    ))}
-                  </div>
-                  <div className="divide-y divide-gray-50">
-                    {scheme.map((row, idx) => (
-                      <div key={idx} className="grid grid-cols-4 items-center px-4 py-2 gap-2">
-                        <input className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-20"
-                          value={row.grade} maxLength={4} placeholder="A+"
-                          onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, grade: e.target.value } : r))} />
-                        <input type="number" min={0} max={100}
-                          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-24"
-                          value={row.min} onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, min: Number(e.target.value) } : r))} />
-                        <input type="number" min={0} max={100}
-                          className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-indigo-500 w-24"
-                          value={row.max} onChange={e => setScheme(prev => prev.map((r, i) => i === idx ? { ...r, max: Number(e.target.value) } : r))} />
-                        <button type="button" onClick={() => setScheme(prev => prev.filter((_, i) => i !== idx))}
-                          className="text-red-400 hover:text-red-600 text-xs justify-self-start">Remove</button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <button type="button" onClick={() => setScheme(prev => [...prev, { grade: '', min: 0, max: 0 }])}
-                  className="text-sm text-indigo-600 hover:text-indigo-800 border border-indigo-200 px-4 py-2 rounded-lg">
-                  + Add Grade
-                </button>
-              </div>
-            )}
 
             {/* Receipt Branding — logo + styled header lines shown on printed fee receipts */}
             <div className="border-t border-gray-100 pt-5 space-y-3">
@@ -962,8 +864,6 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                 className={`px-6 py-2.5 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60 ${saved ? 'bg-green-600 hover:bg-green-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
                 {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save Profile & Settings'}
               </button>
-              <button type="button" onClick={() => { saveGrading(new Event('submit') as unknown as React.FormEvent) }}
-                className="hidden" />
             </div>
           </form>
         </div>
