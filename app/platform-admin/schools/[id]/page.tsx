@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
 import { useConfirm } from '@/components/ui/use-confirm'
+import { overLimitMessage } from '@/lib/planChangeMessage'
 
 type SchoolDetail = {
   id: number
@@ -153,12 +154,21 @@ export default function SchoolDetailPage() {
     setSavingSub(true); setSavedSub(false); setError('')
     const prevTier = school?.tier || 'none'
     try {
-      const res = await fetch(`/api/schools/${schoolId}/subscription`, {
+      const send = (confirmOverLimit: boolean) => fetch(`/api/schools/${schoolId}/subscription`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tier: selectedTier }),
+        body: JSON.stringify({ tier: selectedTier, confirm_over_limit: confirmOverLimit || undefined }),
       })
-      const data = await res.json()
+      let res = await send(false)
+      let data = await res.json()
+      // A downgrade that leaves the school with more active staff than the new plan allows
+      // is refused until the admin has seen the numbers and confirmed.
+      if (res.status === 409 && data.code === 'OVER_SEAT_LIMIT') {
+        const ok = await confirm(overLimitMessage(data), { title: 'This leaves the school over its staff limit', confirmText: 'Apply anyway', destructive: true })
+        if (!ok) return
+        res = await send(true)
+        data = await res.json()
+      }
       if (!res.ok) throw new Error(data.error)
       setSchool(s => s ? { ...s, tier: data.tier } : s)
       setSavedSub(true)

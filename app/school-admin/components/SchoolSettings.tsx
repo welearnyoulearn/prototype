@@ -1295,6 +1295,23 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
             })()}
           </div>
 
+          {/* Over the plan's limit — after a downgrade, or when the plan's limit was lowered. */}
+          {!staffLoading && (() => {
+            const limit = subscription?.staff_limit ?? null
+            const active = staffList.filter(s => s.status === 'active').length
+            const over = limit !== null ? Math.max(0, active - limit) : 0
+            if (over === 0) return null
+            return (
+              <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3 text-sm text-amber-800 space-y-1" data-testid="staff-over-limit-banner">
+                <p className="font-semibold">Your plan allows {limit} staff account{limit === 1 ? '' : 's'}, but {active} are active.</p>
+                <p>
+                  Everyone keeps working — nobody has been switched off. Until you deactivate {over} more account{over === 1 ? '' : 's'}
+                  {' '}(or your school moves to a larger plan) you can&apos;t add or reactivate staff accounts.
+                  Deactivated accounts are kept and can be reactivated later when there is room.
+                </p>
+              </div>
+            )
+          })()}
           {!staffLoading && !canManageStaff && (
             <div className="bg-gray-50 border border-gray-200 text-gray-600 px-4 py-3 rounded-lg text-sm">
               Only a school administrator can add, deactivate or reactivate staff accounts.

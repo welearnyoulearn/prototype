@@ -21,6 +21,7 @@ The WLYL team's console: create schools, set plans, switch features per plan and
 
 ## Rules
 
+- Changing a school's plan, or lowering a plan's staff limit, asks for confirmation when it would leave schools with more active staff than the new limit (numbers shown; nobody is disabled). Both are recorded in the audit log with the admin and the seat numbers — see settings.md.
 - Feature flags are two-layer: tier (`plan_features`) then per-school override (`school_feature_overrides`); Watchline is per school only.
 - "Reset password" for a school resets only the owner account.
 - **Known security gap:** several `/api/platform/*` routes and `/api/schools/{id}/subscription` have no auth guard (see `docs/KNOWN_ISSUES.md`).

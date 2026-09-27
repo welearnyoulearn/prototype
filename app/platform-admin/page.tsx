@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useUsageHeartbeat } from '@/lib/useUsageHeartbeat'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useConfirm } from '@/components/ui/use-confirm'
+import { overLimitMessage } from '@/lib/planChangeMessage'
 import { RefreshCw, Users } from 'lucide-react'
 
 type School = {
@@ -154,11 +155,22 @@ export default function PlatformAdmin() {
   async function handlePlanChange(schoolId: number, newTier: string) {
     setChangingPlanFor(schoolId)
     try {
-      const res = await fetch(`/api/schools/${schoolId}/subscription`, {
+      const send = (confirmOverLimit: boolean) => fetch(`/api/schools/${schoolId}/subscription`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tier: newTier }),
+        body: JSON.stringify({ tier: newTier, confirm_over_limit: confirmOverLimit || undefined }),
       })
+      let res = await send(false)
+      // A downgrade that leaves the school with more active staff than the new plan allows
+      // is refused until the admin has seen the numbers and confirmed.
+      if (res.status === 409) {
+        const d = await res.json().catch(() => ({}))
+        if (d.code === 'OVER_SEAT_LIMIT') {
+          const ok = await confirm(overLimitMessage(d), { title: 'This leaves the school over its staff limit', confirmText: 'Apply anyway', destructive: true })
+          if (!ok) return
+          res = await send(true)
+        }
+      }
       if (!res.ok) throw new Error()
       setSchools(prev => prev.map(s => s.id === schoolId ? { ...s, tier: newTier } : s))
       fetchStats()
