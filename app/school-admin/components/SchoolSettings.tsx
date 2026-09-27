@@ -187,6 +187,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
   // Only a School Administrator can add / deactivate / reactivate (the server enforces it);
   // this just stops showing buttons that would be refused. Defaults to false until known.
   const [canManageStaff, setCanManageStaff] = useState(false)
+  const [myStaffId, setMyStaffId] = useState<number | null>(null)
   // Result of the last deactivate / reactivate — shown above the list. These handlers
   // used to ignore the server's answer and flip the row anyway.
   const [staffActionMsg, setStaffActionMsg] = useState<string>('')
@@ -269,7 +270,7 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
         fetch(`/api/schools/${schoolId}/subscription`).catch(() => null),
       ])
       if (listR?.ok) setStaffList(await listR.json())
-      if (meR?.ok) setCanManageStaff((await meR.json()).role === 'school_admin')
+      if (meR?.ok) { const me = await meR.json(); setCanManageStaff(me.role === 'school_admin'); setMyStaffId(me.id ?? null) }
       if (subR?.ok) setSubscription(await subR.json())
     } finally { setStaffLoading(false) }
   }, [schoolId])
@@ -1400,7 +1401,9 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                             className="text-xs border border-indigo-200 text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
                             {resendingId === s.id ? 'Sending…' : 'Resend Invite Link'}
                           </button>
-                          {canManageStaff && (
+                          {/* You can never deactivate yourself — the server refuses it too, but showing a button
+                              that always fails is just confusing (issue: it appeared even with a single account). */}
+                          {canManageStaff && s.id !== myStaffId && (
                             <button onClick={() => deactivateStaff(s.id)}
                               className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">
                               Deactivate
