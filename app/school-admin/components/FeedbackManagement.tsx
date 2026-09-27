@@ -176,7 +176,7 @@ export default function FeedbackManagement({ schoolId }: { schoolId: number }) {
             onViewResponses={viewPointResponses}
           />
         </TabsContent>
-        <TabsContent value="categories"><FeedbackCategoryEditor schoolId={schoolId} /></TabsContent>
+        <TabsContent value="categories"><FeedbackCategoryEditor schoolId={schoolId} points={points ?? []} /></TabsContent>
         <TabsContent value="settings"><FeedbackQrPoster schoolId={schoolId} /></TabsContent>
       </Tabs>
     </div>
