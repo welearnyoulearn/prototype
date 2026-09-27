@@ -383,6 +383,7 @@ export async function schoolHasFeature(schoolId: number, featureKey: string, db:
     [schoolId]
   )
   if (subRes.rows.length === 0) return false
+  // An expired plan keeps its features: features are not downgraded; the school is locked instead (see proxy.ts).
   const tiers = TIER_INCLUDES[subRes.rows[0].tier] ?? [subRes.rows[0].tier]
 
   const tierRes = await db.query(

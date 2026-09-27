@@ -24,7 +24,7 @@ School admin.
 
 ## Rules and limits
 
-- Plan limits (staff_limit) are enforced when accounts are created.
+- Plan limits (staff_limit) are enforced when school-level accounts are created **and when they are reactivated** (No plan 1 · Basic 2 · Standard 5 · Premium unlimited) — see settings.md.
 - Teachers are scoped to their school; a deactivated teacher cannot mark attendance.
 
 ## Code evidence

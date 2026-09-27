@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 42
+const SCHEMA_VERSION = 43
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -2039,16 +2039,82 @@ async function runIncrementalMigrations() {
   `).catch(() => {})
 
   // ── Staff limit per plan tier ─────────────────────────────────────────────────
+  // The defaults are seeded ONLY when the column is first created. NULL is a real,
+  // meaningful value here ("unlimited"), so `WHERE staff_limit IS NULL` cannot be used to
+  // find "not configured yet": this block re-runs every time SCHEMA_VERSION is bumped, and
+  // it used to put 1/2/5 back on any tier whose limit the platform admin had deliberately
+  // cleared — so "unlimited" silently reverted after an unrelated deploy.
+  const { rows: staffLimitCol } = await pool.query(
+    `SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = 'plan_pricing' AND column_name = 'staff_limit'`
+  ).catch(() => ({ rows: [{}] as unknown[] }))
   await pool.query(`ALTER TABLE plan_pricing ADD COLUMN IF NOT EXISTS staff_limit INTEGER DEFAULT NULL`).catch(() => {})
+  if (staffLimitCol.length === 0) {
+    await pool.query(`
+      UPDATE plan_pricing SET staff_limit = CASE
+        WHEN tier = 'none'     THEN 1
+        WHEN tier = 'basic'    THEN 2
+        WHEN tier = 'standard' THEN 5
+        WHEN tier = 'premium'  THEN NULL
+      END
+    `).catch(() => {})
+  }
+
+  // ── Staff account history ─────────────────────────────────────────────────────
+  // Who created / deactivated / reactivated which staff login, and when. Written in the
+  // same transaction as the change (lib/staffAccounts.ts). No FK on user ids so the
+  // history outlives the accounts it describes.
   await pool.query(`
-    UPDATE plan_pricing SET staff_limit = CASE
-      WHEN tier = 'none'     THEN 1
-      WHEN tier = 'basic'    THEN 2
-      WHEN tier = 'standard' THEN 5
-      WHEN tier = 'premium'  THEN NULL
-    END
-    WHERE staff_limit IS NULL
-  `).catch(() => {})
+    CREATE TABLE IF NOT EXISTS staff_account_events (
+      id            SERIAL PRIMARY KEY,
+      school_id     INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      user_id       INTEGER NOT NULL,
+      action        VARCHAR(20) NOT NULL,
+      actor_user_id INTEGER,
+      detail        JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_staff_account_events_school ON staff_account_events (school_id, created_at DESC)`)
+
+  // ── Plan-expiry reminders sent ────────────────────────────────────────────────
+  // One row per (school, end date, reminder kind), so the daily cron never emails the same
+  // reminder twice, and a renewal (new end date) starts a fresh set. (app/api/cron/plan-expiry)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS plan_expiry_notices (
+      school_id     INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      plan_end_date DATE NOT NULL,
+      kind          VARCHAR(20) NOT NULL,
+      sent_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (school_id, plan_end_date, kind)
+    )
+  `)
+
+  // ── Plan renewal requests ─────────────────────────────────────────────────────
+  // A school administrator asks WLYL to renew / change the plan; the platform admin works the
+  // queue (Platform Admin → Renewals): contacts the school, then sets the next plan and end date.
+  // status: open -> contacted -> renewed | dismissed. At most one open/contacted request per school
+  // (partial unique index), so repeat clicks never pile up. next_* record what was agreed.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS plan_renewal_requests (
+      id                 SERIAL PRIMARY KEY,
+      school_id          INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      requested_by       INTEGER,
+      requested_by_name  VARCHAR(255),
+      requested_by_email VARCHAR(255),
+      plan_tier          VARCHAR(20),
+      plan_end_date      DATE,
+      status             VARCHAR(20) NOT NULL DEFAULT 'open',
+      note               TEXT,
+      next_tier          VARCHAR(20),
+      next_end_date      DATE,
+      handled_by_email   VARCHAR(255),
+      handled_at         TIMESTAMPTZ,
+      created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_plan_renewal_active ON plan_renewal_requests (school_id) WHERE status IN ('open', 'contacted')`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_plan_renewal_status ON plan_renewal_requests (status, created_at DESC)`)
 
   // ── Login performance indexes (functional, case-insensitive) ─────────────────
   // teachers.email: every teacher login was a full table scan — no index existed

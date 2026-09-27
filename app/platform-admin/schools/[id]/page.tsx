@@ -5,6 +5,9 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { FullPageLoader } from '@/components/loaders'
 import { useConfirm } from '@/components/ui/use-confirm'
+import { overLimitMessage } from '@/lib/planChangeMessage'
+import { planStatus } from '@/lib/planExpiry'
+import { PLAN_STATUS_STYLE, planStatusLabel } from '@/lib/planStatusUi'
 
 type SchoolDetail = {
   id: number
@@ -19,6 +22,8 @@ type SchoolDetail = {
   school_code?: string
   created_at: string
   tier?: string
+  plan_start_date?: string | null
+  plan_end_date?: string | null
   teacher_count?: number
   student_count?: number
   admin_email?: string
@@ -32,6 +37,26 @@ type EditForm = {
 
 type Feature = { key: string; label: string; category: string }
 type FeatureMatrix = Record<string, Record<string, boolean>>  // feature_key → { basic, standard, premium }
+
+// Cumulative: Standard includes Basic features, Premium includes all — same rule lib/auth.ts's
+// schoolHasFeature() enforces server-side. Kept in one place so the Portal Access toggles below
+// can't drift from what a login actually checks.
+const TIER_INCLUDES: Record<string, string[]> = {
+  basic: ['basic'], standard: ['basic', 'standard'], premium: ['basic', 'standard', 'premium'],
+}
+
+/**
+ * Whether `featureKey` is actually granted for `tier` by the plan matrix alone (no override) —
+ * mirrors schoolHasFeature()'s bool_or(enabled) over every tier the plan includes. Missing rows
+ * mean "not configured", which schoolHasFeature treats as disabled, not enabled — matching that
+ * default is what this function is for.
+ */
+function planGrantsFeature(matrix: FeatureMatrix, tier: string | undefined, featureKey: string): boolean {
+  if (!tier || tier === 'none') return false
+  const fMatrix = matrix[featureKey]
+  if (!fMatrix) return false
+  return (TIER_INCLUDES[tier] ?? [tier]).some(t => fMatrix[t] === true)
+}
 
 const TIER_META = [
   { key: 'none',     label: 'No Plan',  color: 'gray',   border: 'border-gray-200',   bg: 'bg-gray-50',   ring: 'ring-2 ring-gray-400',    dot: 'border-gray-500 bg-gray-500',     badge: 'bg-gray-100 text-gray-600',     bullet: 'bg-gray-400' },
@@ -59,6 +84,10 @@ export default function SchoolDetailPage() {
   const [selectedTier, setSelectedTier] = useState<string>('none')
   const [savingSub, setSavingSub]       = useState(false)
   const [savedSub, setSavedSub]         = useState(false)
+  const [endInput, setEndInput]         = useState('')      // plan end date being assigned ('' = default: 1 year from today)
+  const [noExpiry, setNoExpiry]         = useState(false)
+  const [savingTerm, setSavingTerm]     = useState(false)
+  const [termMsg, setTermMsg]           = useState('')
   const [tierPopup, setTierPopup]       = useState<{ tier: string; from: string } | null>(null)
 
   // Edit mode
@@ -126,6 +155,7 @@ export default function SchoolDetailPage() {
 
         setSchool(schoolData)
         setSelectedTier(schoolData.tier || 'none')
+        setEndInput(schoolData.tier && schoolData.tier !== 'none' ? (schoolData.plan_end_date ?? '') : '')
         setEditForm({
           name: schoolData.name || '', type: schoolData.type || 'Private',
           city: schoolData.city || '', country: schoolData.country || '',
@@ -153,20 +183,55 @@ export default function SchoolDetailPage() {
     setSavingSub(true); setSavedSub(false); setError('')
     const prevTier = school?.tier || 'none'
     try {
-      const res = await fetch(`/api/schools/${schoolId}/subscription`, {
+      const send = (confirmOverLimit: boolean) => fetch(`/api/schools/${schoolId}/subscription`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tier: selectedTier }),
+        body: JSON.stringify({
+          tier: selectedTier, confirm_over_limit: confirmOverLimit || undefined,
+          ...(selectedTier !== 'none' && noExpiry ? { no_expiry: true } : {}),
+          ...(selectedTier !== 'none' && !noExpiry && endInput && endInput !== (school?.plan_end_date ?? '') ? { plan_end_date: endInput } : {}),
+        }),
       })
-      const data = await res.json()
+      let res = await send(false)
+      let data = await res.json()
+      // A downgrade that leaves the school with more active staff than the new plan allows
+      // is refused until the admin has seen the numbers and confirmed.
+      if (res.status === 409 && data.code === 'OVER_SEAT_LIMIT') {
+        const ok = await confirm(overLimitMessage(data), { title: 'This leaves the school over its staff limit', confirmText: 'Apply anyway', destructive: true })
+        if (!ok) return
+        res = await send(true)
+        data = await res.json()
+      }
       if (!res.ok) throw new Error(data.error)
-      setSchool(s => s ? { ...s, tier: data.tier } : s)
+      setSchool(s => s ? { ...s, tier: data.tier, plan_start_date: data.plan_start_date ?? s.plan_start_date, plan_end_date: data.plan_end_date ?? s.plan_end_date } : s)
+      setEndInput(data.plan_end_date ?? '')
+      setNoExpiry(data.no_expiry === true)
       setSavedSub(true)
       setTierPopup({ tier: selectedTier, from: prevTier })
       setTimeout(() => setSavedSub(false), 3000)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save')
     } finally { setSavingSub(false) }
+  }
+
+  // Renew: one more year from the later of today / the current end. (An exact end date is chosen when the plan is assigned.)
+  // Only the plan's dates change — the tier is re-sent as-is, so no seat check is triggered.
+  async function handleTerm(body: { renew: true }) {
+    if (!school?.tier || school.tier === 'none') return
+    setSavingTerm(true); setTermMsg(''); setError('')
+    try {
+      const res = await fetch(`/api/schools/${schoolId}/subscription`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier: school.tier, ...body }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setSchool(s => s ? { ...s, plan_start_date: data.plan_start_date, plan_end_date: data.plan_end_date } : s)
+      setEndInput(data.plan_end_date ?? '')
+      setTermMsg(`Plan now runs until ${data.plan_end_date}`)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to update plan dates')
+    } finally { setSavingTerm(false) }
   }
 
   async function handlePortalToggle(featureKey: string, enabled: boolean) {
@@ -240,13 +305,6 @@ export default function SchoolDetailPage() {
     } catch { setError('Failed to delete school') }
   }
 
-  // Cumulative: Standard includes Basic features, Premium includes all
-  const TIER_INCLUDES: Record<string, string[]> = {
-    basic:    ['basic'],
-    standard: ['basic', 'standard'],
-    premium:  ['basic', 'standard', 'premium'],
-  }
-
   function getFeaturesForTier(tierKey: string): string[] {
     if (tierKey === 'none') return []
     const tiers = TIER_INCLUDES[tierKey] ?? [tierKey]
@@ -261,7 +319,10 @@ export default function SchoolDetailPage() {
   }
 
   const inputCls   = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-purple-300'
-  const hasChanged = school?.tier !== selectedTier
+  const dateChanged = selectedTier !== 'none' && (noExpiry
+    ? !!school?.plan_end_date || school?.tier === 'none'
+    : !!endInput && endInput !== (school?.plan_end_date ?? ''))
+  const hasChanged = school?.tier !== selectedTier || dateChanged
   const currentBadge = TIER_META.find(t => t.key === (school?.tier || 'none'))
 
   if (loading) return <FullPageLoader portal="platform-admin" message="Loading school details" />
@@ -522,6 +583,33 @@ export default function SchoolDetailPage() {
               </div>
             )}
 
+            {selectedTier !== 'none' && (
+              <div className="mt-5 rounded-lg border border-gray-200 p-4" data-testid="plan-end-field">
+                <label className="block text-sm font-semibold text-gray-800" htmlFor="plan-end-date">Plan end date</label>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  After this date (plus a 14-day grace period) the school is locked: teachers, students and parents can no longer log in,
+                  and the school administrator can only export data and request a renewal. Nothing is deleted, and renewing restores everything.
+                  Leave blank for one year from today.
+                </p>
+                <div className="flex flex-wrap items-center gap-3 mt-3">
+                  <input id="plan-end-date" data-testid="plan-end-date" type="date" value={endInput} disabled={noExpiry}
+                    onChange={e => setEndInput(e.target.value)}
+                    className="border border-gray-300 rounded-lg px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-400" />
+                  {[{ label: '6 months', m: 6 }, { label: '1 year', m: 12 }, { label: '2 years', m: 24 }].map(o => (
+                    <button key={o.m} type="button" disabled={noExpiry} data-testid={`plan-end-preset-${o.m}`}
+                      onClick={() => { const d = new Date(); d.setMonth(d.getMonth() + o.m); setEndInput(d.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })) }}
+                      className="border border-gray-300 text-gray-700 hover:bg-gray-50 px-3 py-2 rounded-lg text-xs font-medium disabled:opacity-50">
+                      {o.label}
+                    </button>
+                  ))}
+                  <label className="flex items-center gap-2 text-sm text-gray-700">
+                    <input data-testid="plan-no-expiry" type="checkbox" checked={noExpiry} onChange={e => setNoExpiry(e.target.checked)} />
+                    No expiry
+                  </label>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center gap-4 mt-5">
               <button onClick={handleSaveSub} disabled={savingSub || !hasChanged}
                 className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
@@ -530,6 +618,34 @@ export default function SchoolDetailPage() {
               {savedSub && <span className="text-green-600 text-sm font-medium">✓ Plan assigned — school admin sidebar updated</span>}
               {!hasChanged && !savedSub && <span className="text-gray-400 text-sm">No changes</span>}
             </div>
+
+            {school?.tier && school.tier !== 'none' && (() => {
+              const st = planStatus(school.tier, school.plan_end_date ?? null)
+              return (
+                <div className="mt-5 pt-5 border-t border-gray-100" data-testid="plan-term">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-sm font-semibold text-gray-800">Plan term</span>
+                    <span data-testid="plan-term-status"
+                      className={`text-xs px-2 py-0.5 rounded-full border ${PLAN_STATUS_STYLE[st.status]}`}>
+                      {planStatusLabel(st.status, st.days_left, st.grace_ends, school.plan_end_date ?? null) || 'Active'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1" data-testid="plan-term-dates">
+                    {school.plan_end_date
+                      ? `${school.plan_start_date ?? '—'} → ${school.plan_end_date}`
+                      : 'No end date set'}
+                    {' · '}Renews and end-date changes never touch staff or data.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3 mt-3">
+                    {school.plan_end_date ? <button data-testid="plan-renew" onClick={() => handleTerm({ renew: true })} disabled={savingTerm}
+                      className="border border-purple-300 text-purple-700 hover:bg-purple-50 px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50">
+                      {savingTerm ? 'Saving…' : 'Renew 1 year'}
+                    </button> : <span className="text-xs text-gray-500">This plan has no expiry.</span>}
+                    {termMsg && <span data-testid="plan-term-msg" className="text-green-600 text-sm font-medium">✓ {termMsg}</span>}
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         </div>
 
@@ -547,7 +663,10 @@ export default function SchoolDetailPage() {
               { key: 'student-portal', label: 'Student Portal Access' },
               { key: 'parent-portal',  label: 'Parent Portal Access' },
             ].map(({ key, label }) => {
-              const enabled = portalOverrides[key] !== false // default true unless explicitly overridden off
+              // An explicit override wins; otherwise this must show what the plan itself grants —
+              // schoolHasFeature() denies student/parent login when the plan doesn't include the
+              // portal, so a toggle defaulting to "on" here was showing access that didn't exist.
+              const enabled = key in portalOverrides ? portalOverrides[key] : planGrantsFeature(matrix, school?.tier, key)
               return (
                 <div key={key} className="flex items-center justify-between">
                   <span className="text-sm text-gray-800">{label}</span>
@@ -583,7 +702,8 @@ export default function SchoolDetailPage() {
         </div>
 
         {/* ── AI Access ────────────────────────────────────────────────────── */}
-        <AiAccessCard schoolId={schoolId} portalOverrides={portalOverrides} />
+        <AiAccessCard schoolId={schoolId}
+          studentPortalEnabled={'student-portal' in portalOverrides ? portalOverrides['student-portal'] : planGrantsFeature(matrix, school?.tier, 'student-portal')} />
 
         {/* ── Watchline ────────────────────────────────────────────────────── */}
         <WatchlineCard schoolId={schoolId} schoolName={school?.name ?? ''} portalOverrides={portalOverrides} />
@@ -787,18 +907,13 @@ const AI_TIER_META: { key: string; label: string; desc: string }[] = [
   { key: 'ai_pro',   label: 'AI Pro',   desc: 'Full doubt-clearing AI chatbot. Coming soon — not available yet.' },
 ]
 
-function AiAccessCard({ schoolId, portalOverrides }: { schoolId: string; portalOverrides: Record<string, boolean> }) {
+function AiAccessCard({ schoolId, studentPortalEnabled }: { schoolId: string; studentPortalEnabled: boolean }) {
   const [tier, setTier]             = useState('none')
   const [selectedTier, setSelectedTier] = useState('none')
   const [loading, setLoading]       = useState(true)
   const [saving, setSaving]         = useState(false)
   const [saved, setSaved]           = useState(false)
   const [error, setError]           = useState('')
-
-  // Same override map the parent page's Portal Access section reads —
-  // re-derived on every render, so flipping the Student Portal Access toggle
-  // unlocks this card immediately with no reload.
-  const studentPortalEnabled = portalOverrides['student-portal'] !== false
 
   useEffect(() => {
     fetch(`/api/schools/${schoolId}/ai-access`)

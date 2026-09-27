@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { isSchoolLocked, LOCKED_MESSAGE_PORTAL } from '@/lib/planAccess'
 import pool, { ensureDB } from '@/lib/db'
 import { verifyPassword, setStudentAuthCookie, StudentJWTPayload, schoolHasFeature } from '@/lib/auth'
 import { recordSessionStart } from '@/lib/usageTracking'
@@ -54,6 +55,14 @@ export async function POST(req: NextRequest) {
       grade: student.grade,
       section: student.section,
       rollNumber: student.roll_number,
+    }
+
+    // A school whose plan has ended is locked: no portal access for teachers, students or parents.
+
+    if (await isSchoolLocked(student.school_id)) {
+
+      return NextResponse.json({ error: LOCKED_MESSAGE_PORTAL, code: 'PLAN_EXPIRED' }, { status: 403 })
+
     }
 
     await setStudentAuthCookie(payload)

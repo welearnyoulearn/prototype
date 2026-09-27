@@ -1,5 +1,5 @@
-import PremiumLanding from './components/PremiumLanding'
+import PortalLanding from './components/PortalLanding'
 
 export default function Home() {
-  return <PremiumLanding />
+  return <PortalLanding />
 }

@@ -2765,7 +2765,6 @@ sequenceDiagram
 |---|---|---|
 | GET/POST/PATCH/DELETE | `/api/school-admin/staff-accounts` | List / invite / edit / deactivate |
 | POST | `/api/school-admin/staff-accounts/resend` | New invite link (voids old) |
-| POST | `/api/school-admin/account-request` | Emails WLYL support for a data-export or account-closure request |
 | POST | `/api/auth/login`, `/logout`, `/change-password`, `/forgot-password`, `/reset-password`; GET `/api/auth/me`; GET/POST `/api/auth/session` | Staff auth and heartbeat |
 | GET/POST/PATCH/PUT | `/api/academic-years`; GET `/{id}/history`, `/{id}/snapshot-export` | Years and history |
 | GET/PUT | `/api/schools/{id}`; GET `/api/schools/{id}/subscription` | Profile, plan view |

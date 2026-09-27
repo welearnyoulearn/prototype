@@ -60,8 +60,14 @@ sequenceDiagram
 | Session ends on | logout · login as someone else in the same browser · deactivation · password change (others) · reset (all) |
 | Invite links | One-time, **48 h**, "Resend" voids earlier links; stored as reset tokens (`password_reset_tokens`) |
 | Last account hint | Login page remembers the last-used account (name, email, role) in `localStorage` — **never** a password or session |
-| Platform reset | Resets **only the owner** (the account with a `school_code`) |
-| Plan limit | `staff_limit` enforced on creation |
+| Platform reset | Resets **only the owner** (the account with a `school_code`) **and reactivates it** if deactivated |
+| Who can manage staff | **School administrator only** — add, deactivate, reactivate. Principal / vice principal can view the list. The school always comes from the login, never from the request |
+| Plan limit | `staff_limit` per plan: No plan 1 · Basic 2 · Standard 5 · Premium unlimited. Enforced on **add and reactivate**, counted under a per-school lock so simultaneous requests can't both take the last seat. Lowering a limit/plan never disables existing accounts: a downgrade that leaves the school over its limit needs the platform admin's confirmation (exact numbers shown), then the school is "over limit" — everything keeps working but add/reactivate are blocked until it deactivates enough accounts or upgrades; its admins are emailed and see a banner. Upgrading frees seats and reactivates nobody. Lowering a plan's limit for all schools lists the affected schools first |
+| Plan end date | `plan_start_date`/`plan_end_date` on `schools`. Term starts only on first activation, none → paid, or after grace; re-saves and mid-term tier changes keep the dates. Platform admin: Renew 1 year / set end date (audited). Status active → expiring (≤30d) → grace (14d) → expired; school banner in Settings → Plan; reminder emails 30/7/1d, ended, grace over via cron `/api/cron/plan-expiry` (deduped in `plan_expiry_notices`). Assign Plan takes the end date (or No expiry). After grace the school is **locked** (only when `PLAN_EXPIRY_ENFORCED=true`): teachers, students and parents cannot log in or pay fees; the school administrator / principal can only export data (Excel, audited) and request a renewal — `proxy.ts` refuses everything else (403 `PLAN_EXPIRED`). Banner + daily login reminder + Request renewal for the school admin; requests are worked in Platform Admin → Renewals (contact, set next plan and end date, closes as Renewed). Expiry never deletes data |
+| Last administrator | The last active school administrator can't be deactivated; nobody can deactivate themselves |
+| Deactivation | Session ends, unused invite/reset links are voided, and no new reset link is issued while deactivated. The email stays reserved — use Reactivate |
+| History | Each create / deactivate / reactivate is written to `staff_account_events` (who, when) |
+| Plan endpoint | `/api/schools/{id}/subscription`: read = platform admin or that school's staff; change = platform admin only |
 | Active year | Once a school has a current year it cannot be switched by hand (Settings/API) — only by rollover |
 | Idle UX | `IdleSessionGuard` heartbeats while active and redirects to `/login?role=school&reason=timeout` |
 
@@ -75,14 +81,13 @@ sequenceDiagram
 |---|---|---|
 | GET/POST/PATCH/DELETE | `/api/school-admin/staff-accounts` | List / invite / edit / deactivate |
 | POST | `/api/school-admin/staff-accounts/resend` | New invite link (voids old) |
-| POST | `/api/school-admin/account-request` | Emails WLYL support for a data-export or account-closure request |
 | POST | `/api/auth/login`, `/logout`, `/change-password`, `/forgot-password`, `/reset-password`; GET `/api/auth/me`; GET/POST `/api/auth/session` | Staff auth and heartbeat |
 | GET/POST/PATCH/PUT | `/api/academic-years`; GET `/{id}/history`, `/{id}/snapshot-export` | Years and history |
 | GET/PUT | `/api/schools/{id}`; GET `/api/schools/{id}/subscription` | Profile, plan view |
 | GET/POST | `/api/platform/features` | Plan feature list |
 | POST | `/api/upload/sign` | Signed upload (logo) |
 
-**Tables:** `schools`, `users`, `user_profiles`, `user_sessions`, `password_reset_tokens`, `school_subscriptions`, `plan_pricing` (`staff_limit`), `plan_features`, `academic_years`, `academic_year_snapshots`, `student_class_history`, `platform_audit_log`.
+**Tables:** `schools`, `users`, `user_profiles`, `user_sessions`, `password_reset_tokens`, `staff_account_events`, `school_subscriptions`, `plan_pricing` (`staff_limit`), `plan_features`, `academic_years`, `academic_year_snapshots`, `student_class_history`, `platform_audit_log`.
 
 **Libraries:** `lib/auth.ts` (`createStaffSession`, `revokeSession`, `revokeUserSessions`, `getSession({passive})`, `SESSION_IDLE_MINUTES = 20`, `SESSION_MAX_HOURS = 12`), `lib/staffInvite.ts`, `lib/email.ts`, `lib/features.ts`.
 
