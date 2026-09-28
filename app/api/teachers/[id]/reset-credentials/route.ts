@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { requireSchoolAdmin, generateTempPassword, hashPassword } from '@/lib/auth'
+import { requireSchoolAdmin, generateTempPassword, hashPortalPassword, revokePortalSessions, schoolHasFeature } from '@/lib/auth'
 import { sendTeacherWelcomeEmail } from '@/lib/email'
 
 // POST /api/teachers/[id]/reset-credentials
@@ -32,6 +32,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const teacher = teacherRes.rows[0]
   if (teacher.school_id !== admin.schoolId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!admin.schoolId || !await schoolHasFeature(admin.schoolId, 'staff')) {
+    return NextResponse.json({ error: 'Staff Management is not enabled for this school', code: 'FEATURE_DISABLED' }, { status: 403 })
+  }
 
   // A deactivated/removed teacher can't log in either way — resetting their
   // password would just email fresh credentials to an account nobody can use.
@@ -44,12 +47,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const tempPassword = generateTempPassword(10)
-  const passwordHash = await hashPassword(tempPassword)
+  const passwordHash = await hashPortalPassword(tempPassword)
 
-  await pool.query(
-    `UPDATE teachers SET password_hash = $1, password_changed = FALSE WHERE id = $2`,
-    [passwordHash, teacherId]
-  )
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query(
+      `UPDATE teachers SET password_hash = $1, password_changed = FALSE WHERE id = $2`,
+      [passwordHash, teacherId]
+    )
+    await revokePortalSessions('teacher', teacherId, undefined, client)
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {})
+    throw error
+  } finally {
+    client.release()
+  }
 
   const appUrl = process.env.APP_URL || 'http://localhost:3000'
   sendTeacherWelcomeEmail({

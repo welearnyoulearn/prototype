@@ -45,18 +45,30 @@ type Props = {
 export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllabus }: Props) {
   const [entries, setEntries] = useState<ClassEntry[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const teacherId = teacher.id
+  const classTeacherGrade = teacher.class_teacher_grade
+  const classTeacherSection = teacher.class_teacher_section
 
 
   useEffect(() => {
     Promise.all([
-      fetch(`/api/teachers/${teacher.id}/class-subjects`).then(r => r.json()).catch(() => []),
-      fetch(`/api/classes?school_id=${schoolId}`).then(r => r.json()).catch(() => []),
+      fetch(`/api/teachers/${teacherId}/class-subjects`).then(async r => {
+        if (!r.ok) throw new Error('Could not load your subject assignments')
+        const data = await r.json()
+        return Array.isArray(data) ? data : []
+      }),
+      fetch(`/api/classes?school_id=${schoolId}`).then(async r => {
+        if (!r.ok) throw new Error('Could not load school classes')
+        const data = await r.json()
+        return Array.isArray(data) ? data : []
+      }),
     ]).then(([classSubjects, allClasses]: [ClassSubjectAssignment[], ClassOption[]]) => {
       const classMap = new Map<string, ClassEntry>()
 
       // Own class first
-      if (teacher.class_teacher_grade && teacher.class_teacher_section) {
-        const cls = allClasses.find(c => c.grade === teacher.class_teacher_grade && c.section === teacher.class_teacher_section)
+      if (classTeacherGrade && classTeacherSection) {
+        const cls = allClasses.find(c => c.grade === classTeacherGrade && c.section === classTeacherSection)
         if (cls) classMap.set(`${cls.grade}-${cls.section}`, { cls, subjects: [], isOwn: true })
       }
 
@@ -76,13 +88,20 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
       })
 
       setEntries(Array.from(classMap.values()))
+    }).catch(err => {
+      setEntries([])
+      setError(err instanceof Error ? err.message : 'Could not load your classes')
     }).finally(() => setLoading(false))
-  }, [teacher, schoolId])
+  }, [teacherId, classTeacherGrade, classTeacherSection, schoolId])
 
   if (loading) {
     return (
       <InlineLoader portal="teacher" label="Loading your classes…" size="lg" className="min-h-64" />
     )
+  }
+
+  if (error) {
+    return <div role="alert" className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}. Please refresh and try again.</div>
   }
 
   if (entries.length === 0) {
