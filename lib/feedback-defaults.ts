@@ -30,16 +30,86 @@ export const FEEDBACK_ROLE_KEYS = FEEDBACK_ROLES.map(r => r.key) as [FeedbackRol
 // role — these skip category emoji-ratings entirely and collect real
 // structured fields instead (see ADVANCED_FORM_FIELDS in
 // app/feedback/[code]/types.ts for the per-type field definitions).
-export type AdvancedFormType = 'meeting' | 'event' | 'exam' | 'academic'
+export type AdvancedFormType = 'meeting' | 'event' | 'exam' | 'academic' | 'ptm' | 'staff_meeting'
 
-export const ADVANCED_FORM_TYPES: { key: AdvancedFormType; icon: string; label: string; description: string }[] = [
-  { key: 'meeting',  icon: '🗓️', label: 'Meeting',  description: 'Request a meeting with a teacher or the office' },
-  { key: 'event',    icon: '🎉', label: 'Event',    description: 'Share feedback about a school event' },
-  { key: 'exam',     icon: '📝', label: 'Exam',     description: 'Raise a concern about an exam' },
-  { key: 'academic', icon: '📚', label: 'Academic', description: 'Share an academic concern or suggestion' },
+// heading/submitLabel: wording on the public form (requests vs feedback).
+// audience: who the form is meant for — shown on the admin's form tiles and
+// used to pre-fill a QR point's allowed roles when the form is picked.
+export const ADVANCED_FORM_TYPES: {
+  key: AdvancedFormType; icon: string; label: string; description: string
+  heading: string; submitLabel: string; audience: FeedbackRole[]
+}[] = [
+  { key: 'meeting',  icon: '🗓️', label: 'Meeting request', description: 'Ask for a meeting with a teacher or the office', heading: 'Meeting request', submitLabel: 'Send request', audience: ['parent', 'student'] },
+  { key: 'ptm',      icon: '👨‍👩‍👧', label: 'Parent–Teacher Meeting', description: 'Parents rate how their PTM went', heading: 'How was your PTM?', submitLabel: 'Send feedback', audience: ['parent'] },
+  { key: 'staff_meeting', icon: '👩‍🏫', label: "Teachers' Meeting", description: 'Staff give feedback on a staff meeting', heading: "Teachers' meeting feedback", submitLabel: 'Send feedback', audience: ['teacher'] },
+  { key: 'event',    icon: '🎉', label: 'Event',    description: 'Share feedback about a school event', heading: 'Event feedback', submitLabel: 'Send feedback', audience: ['parent', 'student', 'teacher', 'visitor'] },
+  { key: 'exam',     icon: '📝', label: 'Exam',     description: 'Raise a concern about an exam', heading: 'Exam concern', submitLabel: 'Send concern', audience: ['student', 'parent'] },
+  { key: 'academic', icon: '📚', label: 'Academic', description: 'Share an academic concern or suggestion', heading: 'Academic concern', submitLabel: 'Send concern', audience: ['parent', 'student'] },
 ]
 
 export const ADVANCED_FORM_TYPE_KEYS = ADVANCED_FORM_TYPES.map(t => t.key) as [AdvancedFormType, ...AdvancedFormType[]]
+
+// ── QR points (event/place-specific QR codes) ────────────────────────────
+export type QrPointKind = 'event' | 'place'
+export const QR_POINT_KINDS: { key: QrPointKind; label: string; icon: string }[] = [
+  { key: 'event', label: 'Event', icon: '🎉' },
+  { key: 'place', label: 'Place', icon: '📍' },
+]
+export const QR_POINT_KIND_KEYS = QR_POINT_KINDS.map(k => k.key) as [QrPointKind, ...QrPointKind[]]
+
+// A QR point uses one existing form: the category-rating form, or one of
+// the Advanced Forms.
+export type QrPointFormType = 'rating' | AdvancedFormType
+export const QR_POINT_FORM_TYPE_KEYS = ['rating', ...ADVANCED_FORM_TYPE_KEYS] as [QrPointFormType, ...QrPointFormType[]]
+export function qrPointFormLabel(formType: QrPointFormType): string {
+  if (formType === 'rating') return '⭐ Rating form'
+  const t = ADVANCED_FORM_TYPES.find(a => a.key === formType)
+  return t ? `${t.icon} ${t.label} form` : formType
+}
+
+// 'YYYY-MM-DD' → "Sat, 14 Dec 2026" — parsed as a local date, not UTC
+// midnight, so it never shifts a day. Used on QR point cards, posters and
+// the public wizard header.
+export function formatFeedbackDate(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+// 'other' is the "Advanced Forms" role card on the general QR — on a QR
+// point the form is fixed by the admin, so only real audiences are offered.
+export const QR_POINT_ROLES = FEEDBACK_ROLES.filter(r => r.key !== 'other')
+export const QR_POINT_ROLE_KEYS = QR_POINT_ROLES.map(r => r.key) as [FeedbackRole, ...FeedbackRole[]]
+
+// ── Voice notes (public feedback form) ───────────────────────────────────
+// One place for the limits the recorder shows and the server enforces.
+// 30 s of Opus at the recorder's 32 kbps is ~125 KB; 2 MB leaves generous
+// headroom for browsers that ignore the bitrate hint (e.g. Safari's AAC).
+export const VOICE_MAX_SECONDS: number = 30
+export const VOICE_MIN_SECONDS = 1
+export const VOICE_MAX_BYTES = 2 * 1024 * 1024
+
+// Human wording of the limit, derived so every message follows the constant:
+// 30 → "30 seconds" / "30 sec" / "30-second", 60 → "1 minute" / "1 min" / "1-minute"
+export const VOICE_LIMIT_LABEL = VOICE_MAX_SECONDS % 60 === 0
+  ? `${VOICE_MAX_SECONDS / 60} minute${VOICE_MAX_SECONDS === 60 ? '' : 's'}`
+  : `${VOICE_MAX_SECONDS} seconds`
+export const VOICE_LIMIT_SHORT = VOICE_MAX_SECONDS % 60 === 0 ? `${VOICE_MAX_SECONDS / 60} min` : `${VOICE_MAX_SECONDS} sec`
+// Adjective form for "the 30-second limit"
+export const VOICE_LIMIT_ADJ = VOICE_MAX_SECONDS % 60 === 0 ? `${VOICE_MAX_SECONDS / 60}-minute` : `${VOICE_MAX_SECONDS}-second`
+// Safari/iOS can't record webm, so the recorder picks whichever the browser
+// supports and the upload URL is signed for that exact type.
+export const VOICE_FORMATS = {
+  'audio/webm': 'webm',
+  'audio/mp4': 'm4a',
+} as const
+export type VoiceContentType = keyof typeof VOICE_FORMATS
+export const VOICE_CONTENT_TYPES = Object.keys(VOICE_FORMATS) as [VoiceContentType, ...VoiceContentType[]]
+
+// Tagline shown on the QR poster when the school hasn't set its own
+// (feedback_settings.poster_quote IS NULL).
+export const DEFAULT_POSTER_QUOTE = 'Your voice helps us grow. Tell us how we are doing!'
+export const POSTER_QUOTE_MAX = 160
 
 export interface DefaultFeedbackCategory {
   role: FeedbackRole
