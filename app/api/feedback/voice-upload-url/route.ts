@@ -5,14 +5,15 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import pool from '@/lib/db'
 import { r2Config } from '@/lib/r2'
 import { getClientIp } from '@/lib/request-ip'
-import { resolveActiveFeedbackSchool } from '@/lib/feedback-public-access'
+import { resolveFeedbackCode } from '@/lib/feedback-public-access'
 import { feedbackVoiceUploadUrlSchema } from '@/lib/validation/feedback'
+import { VOICE_FORMATS } from '@/lib/feedback-defaults'
 
 const RATE_LIMIT_WINDOW = '10 minutes'
 const RATE_LIMIT_MAX = 10
 
 // POST /api/feedback/voice-upload-url
-// Body: { code }
+// Body: { code, content_type? }  (audio/webm default; audio/mp4 for Safari/iOS)
 //
 // Public, code-gated (same trust model as GET /api/feedback/resolve) — mints
 // a short-lived presigned PUT URL so the browser can upload a voice note
@@ -27,8 +28,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
     }
 
-    const resolved = await resolveActiveFeedbackSchool(pool, parsed.data.code)
-    if (!resolved) return NextResponse.json({ error: 'not_found' }, { status: 404 })
+    const resolved = await resolveFeedbackCode(pool, parsed.data.code)
+    if (resolved.status !== 'ok') return NextResponse.json({ error: 'not_found' }, { status: 404 })
 
     // Rate limit — this route is unauthenticated and mints a real presigned
     // R2 PUT URL, so without a cap an attacker could mint unlimited upload
@@ -48,11 +49,12 @@ export async function POST(req: NextRequest) {
       [resolved.schoolId, ipHash]
     )
 
-    const key = `feedback/${resolved.schoolId}/${randomUUID()}.webm`
+    const contentType = parsed.data.content_type
+    const key = `feedback/${resolved.schoolId}/${randomUUID()}.${VOICE_FORMATS[contentType]}`
     const r2 = r2Config()
     const uploadUrl = await getSignedUrl(
       r2.client,
-      new PutObjectCommand({ Bucket: r2.bucket, Key: key, ContentType: 'audio/webm' }),
+      new PutObjectCommand({ Bucket: r2.bucket, Key: key, ContentType: contentType }),
       { expiresIn: 300 }
     )
 

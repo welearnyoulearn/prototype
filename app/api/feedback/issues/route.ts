@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { requireFeeAccess } from '@/lib/auth'
+import { feedbackSourceFilter } from '@/lib/feedback-source'
 
-// GET /api/feedback/issues?school_id=&status=&priority=&department=
+// GET /api/feedback/issues?school_id=&status=&priority=&department=&source=
 // An "issue" is a single low-rated category-rating (priority IS NOT NULL),
 // not a whole submission — one submission can produce zero, one, or several
 // issues if it rated multiple categories poorly.
@@ -21,13 +22,17 @@ export async function GET(req: NextRequest) {
       const value = sp.get(param)
       if (value) { params.push(value); filters += ` AND ${col} = $${params.length}` }
     }
+    const sourceFilter = feedbackSourceFilter(sp.get('source'), 's', params)
+    if (sourceFilter === null) return NextResponse.json({ error: 'Invalid source' }, { status: 400 })
+    filters += sourceFilter
 
     const { rows } = await pool.query(`
       SELECT r.id, r.submission_id, r.category_key, r.category_label, r.department,
              r.rating, r.priority, r.status, r.created_at, r.updated_at,
-             s.role, s.is_anonymous, s.submitter_name, s.free_text
+             s.role, s.is_anonymous, s.submitter_name, s.free_text, p.title AS qr_point_title
       FROM feedback_submission_ratings r
       JOIN feedback_submissions s ON s.id = r.submission_id
+      LEFT JOIN feedback_qr_points p ON p.id = s.qr_point_id
       WHERE r.school_id = $1 AND r.priority IS NOT NULL ${filters}
       ORDER BY (r.priority = 'high') DESC, r.created_at DESC
     `, params)
