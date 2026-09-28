@@ -18,7 +18,7 @@ import NotificationBell from '../components/NotificationBell'
 import AttendanceCalendar from '../components/AttendanceCalendar'
 import SchoolCalendarView from '../components/SchoolCalendarView'
 import PortalSidebar from '@/components/portal/PortalSidebar'
-import { CalendarDays } from 'lucide-react'
+import { CalendarDays, Phone } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // Used by printParentReceipt below — fee category names (admin-set),
@@ -29,6 +29,12 @@ import { Skeleton } from '@/components/ui/skeleton'
 // contents or, depending on the browser, execute.
 function escHtml(s: unknown): string {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
+}
+
+// tel: only wants digits (and a leading +) — the stored number may have spaces/dashes for
+// readability, so strip everything else before building the link.
+function telHref(phone: string): string {
+  return `tel:${phone.replace(/[^\d+]/g, '')}`
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -139,6 +145,12 @@ function ParentDashboard() {
   const [showChildPicker, setShowChildPicker] = useState(false)
   const [student, setStudent] = useState<Student | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
+  // Who to call: the class teacher and the school's own administration line/address —
+  // shown on Overview so a parent doesn't need to hunt for a separate screen.
+  const [contact, setContact] = useState<{
+    class_teacher: { name: string; phone: string | null } | null
+    school: { name: string; phone: string | null; email: string | null; address: string | null } | null
+  } | null>(null)
   // Sidebar section nav lives in the URL's `tab` param — real navigation, so
   // the browser/phone Back button moves through the portal's own screens.
   // resetNav replaces instead of pushing, used when switching between
@@ -266,7 +278,13 @@ function ParentDashboard() {
     setStudent(s)
     setShowChildPicker(false)
     setSummary(null); setFeeLedger([]); setFeePayments([]); setFeeWaivers([]); setFeeSummary(null)
+    setContact(null)
     resetNav('overview'); setVisited(new Set(['overview']))
+
+    fetch(`/api/parent/subjects?student_id=${child.id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setContact(d ? { class_teacher: d.class_teacher ?? null, school: d.school ?? null } : null))
+      .catch(() => setContact(null))
 
     await loadSummary(s)
     Promise.all([
@@ -680,6 +698,45 @@ function ParentDashboard() {
               )}
             </div>
 
+            {/* Contact & Support — who to call, right from Overview */}
+            {contact && (contact.class_teacher || contact.school) && (
+              <section className="border-b border-border pb-6" aria-labelledby="parent-contact">
+                <p id="parent-contact" className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Contact &amp; Support</p>
+                <div className="flex flex-wrap gap-3">
+                  {contact.class_teacher && (
+                    <div className="flex items-center justify-between gap-3 flex-1 min-w-64 rounded-lg border border-border bg-white px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">{contact.class_teacher.name}</p>
+                        <p className="text-xs text-muted-foreground">Class teacher</p>
+                      </div>
+                      {contact.class_teacher.phone && (
+                        <a href={telHref(contact.class_teacher.phone)} data-testid="call-class-teacher"
+                          className="inline-flex items-center justify-center w-10 h-10 shrink-0 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors" title={`Call ${contact.class_teacher.name}`}>
+                          <Phone size={17} aria-hidden="true" />
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {contact.school && (
+                    <div className="flex items-center justify-between gap-3 flex-1 min-w-64 rounded-lg border border-border bg-white px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">{contact.school.name}</p>
+                        <p className="text-xs text-muted-foreground">School administration</p>
+                      </div>
+                      {contact.school.phone && (
+                        <a href={telHref(contact.school.phone)} data-testid="call-administration"
+                          className="inline-flex items-center justify-center w-10 h-10 shrink-0 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors" title={`Call ${contact.school.name}`}>
+                          <Phone size={17} aria-hidden="true" />
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {contact.school?.address && (
+                  <p className="mt-3 text-xs text-muted-foreground whitespace-pre-line">{contact.school.address}</p>
+                )}
+              </section>
+            )}
 
             {/* Latest result */}
             {isNavItemVisible('results') && latestResult && (
@@ -756,6 +813,7 @@ function ParentDashboard() {
             <ParentSyllabus
               schoolId={student.school_id}
               classId={student.class_id}
+              studentId={student.id}
               studentName={student.name}
               grade={student.grade}
               section={student.section}

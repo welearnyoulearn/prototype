@@ -65,6 +65,10 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
   const [activeClassSemester, setActiveClassSemester] = useState('')
   const [activeTopic, setActiveTopic] = useState<Topic | null>(null)
   const [materials, setMaterials] = useState<Material[]>([])
+  // subject name -> who teaches it (class_subjects, via /api/student/subjects) — a
+  // separate assignment from the syllabus/topics data above, so it's fetched separately
+  // and just looked up by name when rendering each subject's header.
+  const [teacherOf, setTeacherOf] = useState<Record<string, string>>({})
   const reduceMotion = useReducedMotion()
 
   useEffect(() => {
@@ -79,6 +83,16 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
       })
       .catch(() => setLoading(false))
   }, [schoolId, classId])
+
+  useEffect(() => {
+    fetch('/api/student/subjects')
+      .then(r => r.json())
+      .then(d => {
+        const rows: { subject_name: string; teacher_name: string | null }[] = Array.isArray(d.subjects) ? d.subjects : []
+        setTeacherOf(Object.fromEntries(rows.filter(r => r.teacher_name).map(r => [r.subject_name, r.teacher_name as string])))
+      })
+      .catch(() => setTeacherOf({}))
+  }, [])
 
   // Textbooks uploaded once per subject on the platform side — students only
   // ever see the 'textbook' type, never handbooks.
@@ -165,6 +179,9 @@ export default function StudentSyllabus({ schoolId, classId, grade }: Props) {
             <Sticker name={subjectSticker(subject.subject)} size="hero" tilt={-8} className="hidden sm:inline-block" />
             <div className="min-w-0">
               <h2 className="sb-display truncate text-3xl sm:text-4xl">{subject.subject}</h2>
+              {teacherOf[subject.subject] && (
+                <span className="sb-chip mt-2" data-tone="paper" data-testid="syllabus-subject-teacher">Taught by {teacherOf[subject.subject]}</span>
+              )}
               <div className="mt-3 max-w-md"><StudentProgressTrack value={subject.completion_pct} tone={meterTone} label={`${subject.covered} of ${subject.total} topics taught`} /></div>
             </div>
             <div className="sb-score-badge" data-testid="syllabus-coverage">
