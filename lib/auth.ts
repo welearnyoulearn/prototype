@@ -393,6 +393,38 @@ export async function schoolHasFeature(schoolId: number, featureKey: string, db:
   return tierRes.rows[0]?.enabled === true
 }
 
+// schoolHasFeature for every school at once, inverted: school id → the given feature keys it
+// does NOT have. Same resolution as above (override, else tier plus inherited tiers, else
+// disabled), in three queries instead of three per school per key. Used by proxy.ts, through
+// /api/internal/feature-denials, to refuse feature APIs a school is not entitled to (#253).
+export async function disabledFeaturesBySchool(featureKeys: readonly string[], db: PgPool | PoolClient = pool): Promise<Record<number, string[]>> {
+  const [schools, overrides, plan] = await Promise.all([
+    db.query<{ id: number; tier: string | null }>(
+      `SELECT s.id, ss.tier FROM schools s LEFT JOIN school_subscriptions ss ON ss.school_id = s.id WHERE s.deleted_at IS NULL`
+    ),
+    db.query<{ school_id: number; feature_key: string; enabled: boolean }>(
+      `SELECT school_id, feature_key, enabled FROM school_feature_overrides WHERE feature_key = ANY($1)`, [featureKeys]
+    ),
+    db.query<{ tier: string; feature_key: string }>(
+      `SELECT tier, feature_key FROM plan_features WHERE enabled = TRUE AND feature_key = ANY($1)`, [featureKeys]
+    ),
+  ])
+  const override = new Map(overrides.rows.map(r => [`${r.school_id}:${r.feature_key}`, r.enabled]))
+  const tierHas = new Set(plan.rows.map(r => `${r.tier}:${r.feature_key}`))
+
+  const out: Record<number, string[]> = {}
+  for (const s of schools.rows) {
+    const tiers = s.tier ? (TIER_INCLUDES[s.tier] ?? [s.tier]) : []
+    const denied = featureKeys.filter(key => {
+      const o = override.get(`${s.id}:${key}`)
+      if (o !== undefined) return !o
+      return !tiers.some(t => tierHas.has(`${t}:${key}`))
+    })
+    if (denied.length) out[s.id] = denied
+  }
+  return out
+}
+
 // ─── Any authenticated session ────────────────────────────────────────────────
 // Returns the schoolId and role for whichever session cookie is present.
 // Used on routes accessible by teachers, students, and school admins alike.

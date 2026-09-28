@@ -171,27 +171,13 @@ Branches: `dev` (this snapshot) → `wlylV1` (preview) → `wlylV1_main` (produc
 
 ## 12. Honest technical limits (do not hide these in due diligence)
 
-### 12.1 Security findings — **fix before external due diligence or a public pilot**
+### 12.1 Authorization (fixed in #253)
 
-Found by scanning every state-changing API handler for a session/role guard (2026-09-21, `dev` @ `29f0e6a`). These handlers accept a request with **no login and no school check**:
+Every state-changing and data-reading API authenticates on the server and takes the school from the signed session; a `school_id` in the request is only accepted when it matches. #253 closed the last gaps found by scanning every handler (2026-09-28): notification writes, master-task writes, platform catalog/stats reads, textbooks, the per-id change-password routes, `academic-year/current`, usage heartbeats, upload signing (now role- and folder-restricted), and student/parent access to the student and staff directories. The legacy `POST /api/parent/lookup` was removed. `e2e/security-authz.spec.ts` calls each of these directly and expects a refusal.
 
-| Route | Methods | What an unauthenticated caller could do |
-|---|---|---|
-| `/api/schools/{id}/subscription` | GET, **PUT** | Read or **change any school's plan tier** (and trigger the activation email) |
-| `/api/announcements` | **POST** | Post an announcement into any school |
-| `/api/announcements/{id}` | **PATCH, DELETE** | Edit or delete any school's announcement by id |
-| `/api/textbooks` | GET, **POST** | List or **upload** textbooks for any school |
-| `/api/textbooks/{id}` | **DELETE** | Delete any school's textbook |
-| `/api/platform/tasks` | **POST, DELETE** | Modify platform master-syllabus tasks |
-| `/api/platform/stats`, `/api/platform/subjects/{id}/full`, `/api/platform/subjects/{id}/chapters`, `/api/platform/chapters/{id}/topics`, `/api/platform/chapters/{id}/tasks` | GET | Read platform-wide statistics and the master catalog |
-| `/api/students/{id}/change-password`, `/api/teachers/{id}/change-password` | POST | Guarded only by knowing the *current* password (no session) — acceptable but inconsistent with the other portals |
-| `/api/parent/lookup` | POST | Legacy student-id + phone lookup; no session |
-| `/api/init` | GET | Runs `ensureDB()`; harmless but public |
-| `/api/usage/heartbeat` | POST | Accepts a usage session id with no auth |
+**Plan features are enforced on the API, not just the menu:** `proxy.ts` refuses a school's requests to a feature area its plan does not include (`403 FEATURE_DISABLED`), resolved exactly like `schoolHasFeature` (see DECISIONS 2026-09-28).
 
-Intentionally public and fine: login / forgot / reset routes, `/api/health`, `/api/openapi`, the three public feedback routes (rate-limited), `/api/materials/file` (presigned pattern), `/api/auth/setup-admin` (protected by `SETUP_SECRET`). Cron routes authenticate with `CRON_SECRET`.
-
-**Recommended fix (small):** add `requirePlatformAdmin()` to the platform and subscription routes, `requireSchoolAdmin()` + `school_id === session.schoolId` to announcements and textbooks (teachers may upload textbooks — use `getAnySession` and role check), then extend `e2e` with an "unauthenticated request is refused" test per route. This was **not** changed as part of the documentation work.
+Intentionally public: login / forgot / reset routes, `/api/health`, `/api/openapi`, `/api/init` (runs `ensureDB()` only), the three public feedback routes (rate-limited, and only for schools with Feedback Management), `/api/materials/file` (presigned pattern), `/api/auth/setup-admin` (`SETUP_SECRET`). Cron routes use `CRON_SECRET`; internal routes use `INGEST_SECRET`.
 
 ### 12.2 Other limits
 

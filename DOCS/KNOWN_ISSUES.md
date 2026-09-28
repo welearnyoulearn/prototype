@@ -40,17 +40,11 @@ Current bugs and workarounds for the WLYL School prototype.
 
 ## Active Issues
 
-### [#131] API operations with no session check — confirmed list (2026-09-21 scan)
-- **Severity:** High
-- **Confirmed unguarded state-changing routes:** `PUT /api/schools/{id}/subscription` (change any school's plan tier), `POST /api/announcements`, `PATCH|DELETE /api/announcements/{id}`, `POST /api/textbooks`, `DELETE /api/textbooks/{id}`, `POST|DELETE /api/platform/tasks`; unguarded reads: `GET /api/schools/{id}/subscription`, `GET /api/textbooks`, `GET /api/platform/stats`, `/api/platform/subjects/{id}/full|chapters`, `/api/platform/chapters/{id}/topics|tasks`. `proxy.ts` lets every `/api/` path through, so each route must guard itself.
-- **Fix:** `requirePlatformAdmin()` on platform/subscription routes; `requireSchoolAdmin()` + school match on announcements; role-checked session on textbooks; add e2e tests that anonymous and cross-school calls are refused.
-- **Status:** Follow-up task raised; not yet fixed. See `docs/product/features/00-platform-architecture.md` §12.1.
-
-### [#131] 75 API operations have no session check
-- **Severity:** High
-- **Detail:** The OpenAPI spec marks 75 of 362 operations as public. Some are intentional (sign-in, password reset, public feedback form, health, the spec itself). Others expose student data or allow writes without a login, for example attendance analytics, per-student homework submissions and rewards, the weekly test, notification writes and school calendar writes. `/api-docs` is public by product decision, so this list is visible to anyone.
-- **Workaround:** None. Search `/api-docs` for routes with the red Public badge.
-- **Status:** Needs a separate issue to triage each route. Out of scope for #131, which only documents current behaviour.
+### [#253] Remaining authorization limits after the #253 fix
+- **Severity:** Low
+- **Detail:** #253 closed the confirmed #131 list (every route there now refuses anonymous and cross-school calls). Left as is, on purpose: `GET /api/init` stays public (runs `ensureDB()` only); teachers can still list every student in their own school through `/api/students` (students and parents cannot); the feature gate in `proxy.ts` fails **open** on a cold start if `/api/internal/feature-denials` cannot be reached, and it needs `INGEST_SECRET` set in production (same as the plan lock and Watchline) — without it no feature API is gated.
+- **Workaround:** Set `INGEST_SECRET` in every deployment.
+- **Status:** Tighten the teacher roster to their own classes if a school asks.
 
 ### [#116] Syllabus Translate relies on Google's undocumented Input Tools endpoint
 - **Severity:** Medium

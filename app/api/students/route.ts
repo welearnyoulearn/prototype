@@ -33,6 +33,11 @@ async function handleGET(req: NextRequest) {
   try {
     const session = await getAnySession()
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    // A school directory is for staff. getAnySession() also admits student and parent logins,
+    // which could otherwise list every classmate's (or every teacher's) contact details.
+    if (session.role === 'student' || session.role === 'parent') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     try {
       const { searchParams } = new URL(req.url)

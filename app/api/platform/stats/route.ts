@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { requirePlatformAdmin } from '@/lib/auth'
 
 export async function GET() {
+  if (!await requirePlatformAdmin()) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   try {
     const [schools, teachers, students, subs, growth, deleted] = await Promise.all([
       pool.query(`
