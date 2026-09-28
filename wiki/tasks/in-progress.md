@@ -18,10 +18,3 @@ Move an entry to [completed.md](completed.md) when it ships. Add new entries at 
 **Portals:** all five
 **Status:** Uncommitted on `dev` (`app/portal.css`, `components/portal/`, restyled Overview/dashboards, `components/ui/*`).
 **Tracker:** [`UI_PROGRESS.md`](../../UI_PROGRESS.md)
-
-### API authentication guards (security)
-**Type:** Bug fix
-**Summary:** State-changing routes found with no session check: plan/subscription update, announcements create/edit/delete, textbooks upload/delete, several `/api/platform/*` routes. Listed in `docs/KNOWN_ISSUES.md` (#131) and `docs/product/features/00-platform-architecture.md` §12.1.
-**Progress:**
-- [ ] Log a GitHub issue, branch `fix/<n>-api-auth-guards`
-- [ ] Add guards + e2e tests proving anonymous and cross-school calls are refused

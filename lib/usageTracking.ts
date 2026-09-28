@@ -23,9 +23,16 @@ export async function recordSessionStart(params: {
   }
 }
 
-export async function recordHeartbeat(sessionId: number): Promise<void> {
+// `actors` = the (role, id) pairs of the caller's live sessions; only a row owned by one of them is touched.
+export async function recordHeartbeat(sessionId: number, actors: { role: string; id: number }[]): Promise<void> {
+  if (actors.length === 0) return
   try {
-    await pool.query('UPDATE usage_sessions SET last_seen_at = NOW() WHERE id = $1 AND ended_at IS NULL', [sessionId])
+    await pool.query(
+      `UPDATE usage_sessions SET last_seen_at = NOW()
+       WHERE id = $1 AND ended_at IS NULL
+         AND (actor_role, actor_id) IN (SELECT * FROM unnest($2::text[], $3::int[]))`,
+      [sessionId, actors.map(a => a.role), actors.map(a => a.id)]
+    )
   } catch { /* fire-and-forget */ }
 }
 
