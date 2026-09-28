@@ -38683,6 +38683,106 @@
         ]
       }
     },
+    "/api/parent/subjects": {
+      "get": {
+        "tags": [
+          "Parent portal"
+        ],
+        "summary": "One child's subjects, class teacher and school contact details",
+        "description": "One of the parent's own children: their class's subjects with each subject's teacher, the class teacher's own name and phone, and the school's contact details (administration phone, email, address) — everything needed to call or write to someone.\n\n**Who can call:** Parent.\n\n**Checks:** Parent session only. The child must be linked to the logged-in parent (student_parents) — an id that is not theirs is refused (403).",
+        "operationId": "getParentSubjects",
+        "security": [
+          {
+            "parent": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subjects and contacts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "subjects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "subject_name": {
+                            "type": "string"
+                          },
+                          "teacher_name": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    },
+                    "class_teacher": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "phone": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    },
+                    "school": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "phone": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "email": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "address": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "student_id required"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden — not this parent's child"
+          },
+          "404": {
+            "description": "Student not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Parent",
+            "color": "#be185d"
+          }
+        ],
+        "x-source-file": "app/api/parent/subjects/route.ts"
+      }
+    },
     "/api/parent/child-summary": {
       "get": {
         "tags": [
@@ -42746,6 +42846,66 @@
             }
           }
         ]
+      }
+    },
+    "/api/student/subjects": {
+      "get": {
+        "tags": [
+          "Student portal"
+        ],
+        "summary": "My subjects and who teaches each one",
+        "description": "This student's own class's subjects, each with its teacher's name. The class comes from the session's own school/grade/section, never a query param — a student can only ever see their own class.\n\n**Who can call:** Student.\n\n**Checks:** Student session only.",
+        "operationId": "getStudentSubjects",
+        "security": [
+          {
+            "student": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Subjects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "subjects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "subject_name": {
+                            "type": "string"
+                          },
+                          "teacher_name": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Student not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Student",
+            "color": "#047857"
+          }
+        ],
+        "x-source-file": "app/api/student/subjects/route.ts"
       }
     },
     "/api/school-calendar/settings": {

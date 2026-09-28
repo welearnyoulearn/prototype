@@ -18,7 +18,7 @@ Students (own data only).
 ## How it works
 
 - **Look and feel (#229):** a student-only "sticker-book" design — bold outlined cards, 3D Fluent Emoji stickers, a display + handwritten font pair, and a per-screen colour (the page wash and the active nav chip change colour per section). Each screen uses the pattern that fits its job: dashboard quest tiles and a notice pinboard, syllabus subject folders with notebook chapters, a library bookshelf, birthday greeting cards with chat-bubble wishes, a report-card marks page with a certificate score card, a habit-tracker attendance calendar, a wall-planner school calendar, an ID-card profile and retro-window AI Hub. The school's uploaded logo shows top-left, as in the school admin portal. Styles live in `app/student-ui.css`, scoped to `[data-student-ui]`, so no other portal changes.
-- Dashboard (attendance note, quests, announcements), Syllabus progress, Digital Library, **My Attendance** (own calendar, month/year %, trend, upcoming holidays), School Calendar, My Marks, Class Circle (classmates' birthdays), profile and password.
+- Dashboard (attendance note, quests, announcements), Syllabus progress (each subject panel shows a "Taught by …" chip, from `/api/student/subjects` — the class_subjects assignment, not the syllabus data itself), Digital Library, **My Attendance** (own calendar, month/year %, trend, upcoming holidays), School Calendar, My Marks, Class Circle (classmates' birthdays), profile and password.
 - **AI Hub** is a page of links to external AI assistants (Gemini, Claude, ChatGPT), shown only for schools with AI access enabled — it is not a built-in tutor.
 - Removed from `dev` (each preserved on its own branch): the Learning Hub and Daily Knowledge (#164), the weekly test (#168) and the rewards marketplace (#165).
 
@@ -48,6 +48,7 @@ API routes these screens call (all exist):
 - `GET` /api/student/auth/me
 - `GET` /api/student/class-circle
 - `POST` /api/student/class-circle/wish
+- `GET` /api/student/subjects
 - `GET` /api/students/{}/exams
 - `DELETE/GET/POST` /api/syllabus
 
