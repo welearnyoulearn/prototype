@@ -4,8 +4,8 @@ import { ChevronRight } from 'lucide-react'
 import { INK, BORDER } from '@/app/components/ulearn/theme'
 import { ADVANCED_FORM_TYPES } from '@/lib/feedback-defaults'
 import { AdvancedFormType } from '../types'
-import { ADVANCED_TYPE_VISUAL } from '../advancedFormVisuals'
 import { SecondaryButton } from './WizardButtons'
+import CategoryIcon from '../CategoryIcon'
 
 export default function AdvancedFormTypeStep({
   onSelect, onBack,
@@ -20,19 +20,16 @@ export default function AdvancedFormTypeStep({
 
       <div className="flex flex-col gap-2">
         {ADVANCED_FORM_TYPES.map(t => {
-          const { Icon, color } = ADVANCED_TYPE_VISUAL[t.key]
           return (
             <button
               key={t.key}
               type="button"
               data-testid={`feedback-advanced-type-${t.key}-btn`}
               onClick={() => onSelect(t.key)}
-              className="flex items-center gap-3 rounded-2xl border bg-white p-3 text-left transition hover:shadow-sm"
+              className="group flex items-center gap-3 rounded-2xl border bg-white p-3 text-left transition hover:-translate-y-0.5 hover:shadow-md"
               style={{ borderColor: BORDER }}
             >
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full" style={{ background: `${color}1A` }}>
-                <Icon size={20} style={{ color }} strokeWidth={2} />
-              </span>
+              <CategoryIcon icon={t.icon} size={46} />
               <span className="flex-1">
                 <span className="block text-sm font-semibold" style={{ color: INK }}>{t.label}</span>
                 <span className="block text-xs" style={{ color: '#9CA3AF' }}>{t.description}</span>

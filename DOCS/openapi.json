@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "WLYL School Management API",
-    "version": "2026-09-22",
+    "version": "2026-09-28",
     "description": "Every API route in the WLYL platform, generated from the route handlers on the `dev` branch.\n\n## How to read this\n\n- **Sections and subcategories.** The sidebar groups routes by area, such as Fees & finance, then by topic, such as Waivers.\n- **Who can call.** The coloured badges on each route show which signed-in users it accepts. A red **Public** badge means the route has no sign-in check in code.\n- **Checks.** Extra rules inside the route, such as \"parent must own this student\", are listed under Checks.\n- **Feature flag.** Routes that are switched off unless the school's plan includes a feature say which one.\n\n## Signing in\n\nEach portal has its own session cookie: `wlyl-platform`, `wlyl-auth` (school admin), `wlyl-teacher`, `wlyl-student` and `wlyl-parent`. Sign in to the app in this browser, then use **Test Request** on any route. Scheduled jobs take `Authorization: Bearer $CRON_SECRET`."
   },
   "servers": [
@@ -37286,6 +37286,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "description": "all (default) | general (school-wide QR) | <QR point id> | archived. Every value except 'archived' excludes archived submissions.",
+            "schema": {
+              "type": "string"
+            }
           }
         ]
       }
@@ -37508,7 +37517,7 @@
           "Feedback dashboard"
         ],
         "summary": "Resolve a public feedback code",
-        "description": "Resolves a feedback public_code to the school's name and its active feedback categories. Unknown and deactivated codes (or inactive/deleted schools) return the same 404.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** Unauthenticated; gated only by knowing an active public_code.",
+        "description": "Resolves a feedback public_code to the school's name and its active feedback categories. Unknown codes and inactive/deleted schools return 404; a paused school-wide code or a paused/expired event or place code returns 410 (see responses).\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** Unauthenticated; gated only by knowing an active public_code.\n\nFor an event/place QR the response also includes qr_point (title, venue, date, form_type, roles, fixed_categories) and categories narrowed to that scope.",
         "operationId": "getFeedbackResolve",
         "security": [],
         "responses": {
@@ -37567,6 +37576,9 @@
           },
           "500": {
             "description": "Internal server error"
+          },
+          "410": {
+            "description": "Closed: an event/place QR paused or past closes_on, or the school-wide QR paused (paused: true). Body: { error: 'closed', school_name, title, paused }"
           }
         },
         "x-badges": [
@@ -37835,7 +37847,7 @@
           "Feedback dashboard"
         ],
         "summary": "Get feedback dashboard stats",
-        "description": "Returns pulse score, totals, positive/negative percentages, today's rating breakdown, best/worst 5 categories, category share and count of open high-priority issues.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id).",
+        "description": "Dashboard KPIs for a period and source: pulse score (avg rating mapped 1★→0 … 5★→100), totals split into ratings vs form requests, positive/neutral/negative %, deltas vs the previous equal period, zero-filled daily trend, by-audience counts, category stats, best (≥3.5★) vs needs-attention (<3.5★) categories, and current open / high-priority issue counts. Archived submissions are excluded.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id).",
         "operationId": "getFeedbackStats",
         "security": [
           {
@@ -37852,98 +37864,38 @@
               "application/json": {
                 "schema": {
                   "type": "object",
+                  "additionalProperties": true,
                   "properties": {
                     "pulse_score": {
-                      "type": "integer"
+                      "type": "integer",
+                      "nullable": true
                     },
                     "total_feedback": {
+                      "type": "integer"
+                    },
+                    "form_submissions": {
+                      "type": "integer"
+                    },
+                    "total_ratings": {
                       "type": "integer"
                     },
                     "percent_positive": {
                       "type": "integer"
                     },
+                    "percent_neutral": {
+                      "type": "integer"
+                    },
                     "percent_negative": {
                       "type": "integer"
                     },
-                    "today_mood_breakdown": {
+                    "trend": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "rating": {
-                            "type": "integer"
-                          },
-                          "count": {
-                            "type": "integer"
-                          },
-                          "percent": {
-                            "type": "integer"
-                          }
-                        }
+                        "type": "object"
                       }
                     },
-                    "best_categories": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "category_key": {
-                            "type": "string"
-                          },
-                          "category_label": {
-                            "type": "string"
-                          },
-                          "count": {
-                            "type": "integer"
-                          },
-                          "avg_rating": {
-                            "type": "number"
-                          }
-                        }
-                      }
-                    },
-                    "worst_categories": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "category_key": {
-                            "type": "string"
-                          },
-                          "category_label": {
-                            "type": "string"
-                          },
-                          "count": {
-                            "type": "integer"
-                          },
-                          "avg_rating": {
-                            "type": "number"
-                          }
-                        }
-                      }
-                    },
-                    "category_share": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "category_key": {
-                            "type": "string"
-                          },
-                          "category_label": {
-                            "type": "string"
-                          },
-                          "count": {
-                            "type": "integer"
-                          },
-                          "avg_rating": {
-                            "type": "number"
-                          },
-                          "percent": {
-                            "type": "integer"
-                          }
-                        }
-                      }
+                    "open_issues_count": {
+                      "type": "integer"
                     },
                     "high_priority_open_count": {
                       "type": "integer"
@@ -37982,6 +37934,30 @@
             "description": "School id",
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "description": "all (default) | general (school-wide QR) | <QR point id> | archived. Every value except 'archived' excludes archived submissions.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "description": "today | 7d | 30d (default) | all",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "today",
+                "7d",
+                "30d",
+                "all"
+              ]
             }
           }
         ]
@@ -38176,6 +38152,15 @@
             "description": "Default 0",
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "description": "all (default) | general (school-wide QR) | <QR point id> | archived. Every value except 'archived' excludes archived submissions.",
+            "schema": {
+              "type": "string"
             }
           }
         ]
@@ -40788,6 +40773,57 @@
             }
           }
         }
+      }
+    },
+    "/api/internal/feature-denials": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "summary": "Gated features each school does not have (proxy.ts entitlement gate, #253)",
+        "description": "Returns the gated features (lib/featureRoutes.ts) each school does NOT have, resolved like schoolHasFeature (override, else tier). Polled by proxy.ts every 15 seconds to refuse feature APIs a school is not entitled to (403 FEATURE_DISABLED); returns 500 on DB error so the proxy keeps its previous copy.\n\n**Who can call:** Cron.\n\n**Checks:** x-ingest-secret header must equal INGEST_SECRET (isValidIngestSecret); rejected if INGEST_SECRET is unset in production.",
+        "operationId": "getInternalFeatureDenials",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Denied feature keys per school id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "denials": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Invalid ingest secret"
+          },
+          "500": {
+            "description": "Database error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/internal/feature-denials/route.ts"
       }
     },
     "/api/internal/watchline-flags": {
@@ -44470,55 +44506,701 @@
         }
       }
     },
-    "/api/internal/feature-denials": {
+    "/api/feedback/qr-points": {
       "get": {
         "tags": [
-          "Operations"
+          "Feedback dashboard"
         ],
-        "summary": "Gated features each school does not have (proxy.ts entitlement gate, #253)",
-        "description": "Returns the gated features (lib/featureRoutes.ts) each school does NOT have, resolved like schoolHasFeature (override, else tier). Polled by proxy.ts every 15 seconds to refuse feature APIs a school is not entitled to (403 FEATURE_DISABLED); returns 500 on DB error so the proxy keeps its previous copy.\n\n**Who can call:** Cron.\n\n**Checks:** x-ingest-secret header must equal INGEST_SECRET (isValidIngestSecret); rejected if INGEST_SECRET is unset in production.",
-        "operationId": "getInternalFeatureDenials",
+        "summary": "List event & place QR codes",
+        "description": "The school's QR points with per-point response_count, archived_count, last_response_at, avg_rating and open_issues (archived submissions excluded from live counts).\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id) — tenant-matched school staff only.",
+        "operationId": "getFeedbackQrPoints",
         "security": [
           {
-            "cron": []
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
           }
         ],
         "responses": {
           "200": {
-            "description": "Denied feature keys per school id",
+            "description": "QR points",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "school_id required"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/feedback/qr-points/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Feedback dashboard"
+        ],
+        "summary": "Create an event or place QR code",
+        "description": "Mints a public code unique across feedback_settings and feedback_qr_points and stores the QR point.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id) — tenant-matched school staff only.",
+        "operationId": "postFeedbackQrPoints",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "denials": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      }
+                    "id": {
+                      "type": "integer"
                     }
                   }
                 }
               }
             }
           },
-          "403": {
-            "description": "Invalid ingest secret"
+          "400": {
+            "description": "Invalid body or category scope"
+          },
+          "401": {
+            "description": "Unauthorized"
           },
           "500": {
-            "description": "Database error"
+            "description": "Internal server error"
           }
         },
         "x-badges": [
           {
-            "name": "Cron",
-            "color": "#475569"
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
           }
         ],
-        "x-source-file": "app/api/internal/watchline-flags/route.ts"
+        "x-source-file": "app/api/feedback/qr-points/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "event",
+                      "place"
+                    ]
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "venue": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "nullable": true
+                  },
+                  "event_date": {
+                    "type": "string",
+                    "format": "date",
+                    "nullable": true
+                  },
+                  "details": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "nullable": true
+                  },
+                  "form_type": {
+                    "type": "string",
+                    "enum": [
+                      "rating",
+                      "meeting",
+                      "event",
+                      "exam",
+                      "academic",
+                      "ptm",
+                      "staff_meeting"
+                    ]
+                  },
+                  "roles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "parent",
+                        "student",
+                        "teacher",
+                        "visitor"
+                      ]
+                    },
+                    "minItems": 1
+                  },
+                  "category_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "description": "Rating form only; empty = respondent picks from all active categories of their role. Each allowed role needs ≥1 pinned category when any are pinned."
+                  },
+                  "poster_quote": {
+                    "type": "string",
+                    "maxLength": 160,
+                    "nullable": true
+                  },
+                  "closes_on": {
+                    "type": "string",
+                    "format": "date",
+                    "nullable": true,
+                    "description": "Inclusive (IST); after it the code returns 410 closed"
+                  }
+                },
+                "required": [
+                  "school_id",
+                  "kind",
+                  "title",
+                  "form_type",
+                  "roles"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/feedback/qr-points/{id}": {
+      "patch": {
+        "tags": [
+          "Feedback dashboard"
+        ],
+        "summary": "Update or pause a QR code",
+        "description": "Partial update of any editable field incl. is_active (pause/resume). The public code never changes. Category scope is re-validated against the merged values.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id) — tenant-matched school staff only.",
+        "operationId": "patchFeedbackQrPointsId",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid body or category scope"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/feedback/qr-points/[id]/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "feedback_qr_points id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "event",
+                      "place"
+                    ]
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "venue": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "nullable": true
+                  },
+                  "event_date": {
+                    "type": "string",
+                    "format": "date",
+                    "nullable": true
+                  },
+                  "details": {
+                    "type": "string",
+                    "maxLength": 300,
+                    "nullable": true
+                  },
+                  "form_type": {
+                    "type": "string",
+                    "enum": [
+                      "rating",
+                      "meeting",
+                      "event",
+                      "exam",
+                      "academic",
+                      "ptm",
+                      "staff_meeting"
+                    ]
+                  },
+                  "roles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "parent",
+                        "student",
+                        "teacher",
+                        "visitor"
+                      ]
+                    },
+                    "minItems": 1
+                  },
+                  "category_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "description": "Rating form only; empty = respondent picks from all active categories of their role. Each allowed role needs ≥1 pinned category when any are pinned."
+                  },
+                  "poster_quote": {
+                    "type": "string",
+                    "maxLength": 160,
+                    "nullable": true
+                  },
+                  "closes_on": {
+                    "type": "string",
+                    "format": "date",
+                    "nullable": true,
+                    "description": "Inclusive (IST); after it the code returns 410 closed"
+                  },
+                  "is_active": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Feedback dashboard"
+        ],
+        "summary": "Delete a QR code and its folder",
+        "description": "Permanently deletes the QR point and every submission filed under it (ratings/issues cascade) in one transaction; voice notes are removed from R2 best-effort. The printed poster stops resolving.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id) — tenant-matched school staff only.",
+        "operationId": "deleteFeedbackQrPointsId",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "deleted_submissions": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/feedback/qr-points/[id]/route.ts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "feedback_qr_points id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/feedback/export": {
+      "get": {
+        "tags": [
+          "Feedback dashboard"
+        ],
+        "summary": "Download a folder as Excel",
+        "description": "Excel (.xlsx) of every submission in a folder — sheets Feedback (one row per submission), Ratings (one row per rating) and Summary. Required step before Clear folder.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id) — tenant-matched school staff only.",
+        "operationId": "getFeedbackExport",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "xlsx file",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filter"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/feedback/export/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "description": "all (default) | general (school-wide QR) | <QR point id> | archived. Every value except 'archived' excludes archived submissions.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "older_than_days",
+            "in": "query",
+            "required": false,
+            "description": "Only submissions older than N days (1–3650)",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/feedback/archive": {
+      "get": {
+        "tags": [
+          "Feedback dashboard"
+        ],
+        "summary": "Preview a Clear folder / Archive action",
+        "description": "How many submissions (and open issues) a folder + optional age cut-off covers, with the oldest/newest dates.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id) — tenant-matched school staff only.",
+        "operationId": "getFeedbackArchive",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Preview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    },
+                    "open_issues": {
+                      "type": "integer"
+                    },
+                    "oldest": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "newest": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filter"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/feedback/archive/route.ts",
+        "parameters": [
+          {
+            "name": "school_id",
+            "in": "query",
+            "required": true,
+            "description": "School id",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "description": "all (default) | general (school-wide QR) | <QR point id> | archived. Every value except 'archived' excludes archived submissions.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "older_than_days",
+            "in": "query",
+            "required": false,
+            "description": "Only submissions older than N days",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Feedback dashboard"
+        ],
+        "summary": "Archive, restore or purge feedback",
+        "description": "archive — Clear folder: move a live folder's submissions (optionally older than N days) to the Archive (nothing deleted). restore — move archived submissions back. purge — permanently delete archived submissions (+ voice notes). restore/purge only accept source 'archived'; archive never does.\n\n**Who can call:** Platform admin, School admin.\n\n**Checks:** requireFeeAccess(school_id) — tenant-matched school staff only.",
+        "operationId": "postFeedbackArchive",
+        "security": [
+          {
+            "platformAdmin": []
+          },
+          {
+            "schoolAdmin": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Done",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or source/action mismatch"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Platform admin",
+            "color": "#6d28d9"
+          },
+          {
+            "name": "School admin",
+            "color": "#1d4ed8"
+          }
+        ],
+        "x-source-file": "app/api/feedback/archive/route.ts",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "school_id": {
+                    "type": "integer"
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "archive",
+                      "restore",
+                      "purge"
+                    ]
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "older_than_days": {
+                    "type": "integer",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "school_id",
+                  "action",
+                  "source"
+                ]
+              }
+            }
+          }
+        }
       }
     }
   },

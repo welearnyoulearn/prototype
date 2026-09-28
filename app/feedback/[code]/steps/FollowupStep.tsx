@@ -28,7 +28,7 @@ export default function FollowupStep({
 
   return (
     <div>
-      <MascotHeader emoji={mascot.emoji} mood={mascot.mood} />
+      <MascotHeader emoji={mascot.emoji} mood={mascot.mood} rating={mascot.rating} />
       <h1 className="text-xl font-bold mb-1" style={{ color: INK }}>Anything else you’d like to share?</h1>
       <p className="text-sm mb-4" style={{ color: '#6B7280' }}>Pick everything that applies — all optional</p>
 

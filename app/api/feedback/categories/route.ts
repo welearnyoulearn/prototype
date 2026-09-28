@@ -4,6 +4,7 @@ import { requireFeeAccess } from '@/lib/auth'
 import { feedbackCategoryCreateSchema } from '@/lib/validation/feedback'
 
 // GET /api/feedback/categories?school_id=&role=
+// Each row also carries rating_count / avg_rating / open_issues / last_rated_at.
 export async function GET(req: NextRequest) {
   try {
     const sp = req.nextUrl.searchParams
@@ -16,10 +17,27 @@ export async function GET(req: NextRequest) {
     const role = sp.get('role')
     const params: (string | number)[] = [access.schoolId]
     let roleFilter = ''
-    if (role) { params.push(role); roleFilter = `AND role = $${params.length}` }
+    if (role) { params.push(role); roleFilter = `AND c.role = $${params.length}` }
 
+    // Live usage per category (archived submissions excluded) so the admin
+    // can see which categories people actually rate and where issues are.
     const { rows } = await pool.query(
-      `SELECT * FROM feedback_categories WHERE school_id = $1 ${roleFilter} ORDER BY role, sort_order`,
+      `SELECT c.*,
+              COALESCE(st.rating_count, 0)::int AS rating_count,
+              st.avg_rating::float AS avg_rating,
+              COALESCE(st.open_issues, 0)::int AS open_issues,
+              st.last_rated_at
+       FROM feedback_categories c
+       LEFT JOIN LATERAL (
+         SELECT COUNT(*) AS rating_count, AVG(r.rating) AS avg_rating,
+                COUNT(*) FILTER (WHERE r.priority IS NOT NULL AND r.status = 'open') AS open_issues,
+                MAX(r.created_at) AS last_rated_at
+         FROM feedback_submission_ratings r
+         JOIN feedback_submissions s ON s.id = r.submission_id AND s.archived_at IS NULL
+         WHERE r.category_id = c.id
+       ) st ON TRUE
+       WHERE c.school_id = $1 ${roleFilter}
+       ORDER BY c.role, c.sort_order, c.id`,
       params
     )
     return NextResponse.json(rows)
