@@ -103,6 +103,34 @@ export async function isSubjectTeacherOf(teacherId: number, examSubjectId: numbe
   return rows.length > 0
 }
 
+// Reads one exam_notification_settings toggle for a school (spec section 11),
+// defaulting to enabled when the school has no row yet — matches the
+// settings API's own seed default so "never configured" behaves identically
+// to "explicitly on".
+export async function examNotificationEnabled(schoolId: number, column: 'notify_schedule_change' | 'notify_cancelled' | 'notify_marks_published'): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT ${column} AS enabled FROM exam_notification_settings WHERE school_id = $1`,
+    [schoolId]
+  )
+  return rows.length === 0 || rows[0].enabled
+}
+
+// True if this teacher has any real relationship to classId — class teacher,
+// OR teaches at least one of its class_subjects, OR is assigned to at least
+// one of its exam_subjects. Used to scope GET /api/exams and
+// GET /api/exams/calendar so a teacher session can't enumerate another
+// class's exam schedule just by passing its class_id — those routes
+// previously only checked "some teacher session exists in this school".
+export async function isTeacherLinkedToClass(teacherId: number, classId: number): Promise<boolean> {
+  const { rows } = await pool.query(`
+    SELECT 1 FROM classes WHERE id = $1 AND class_teacher_id = $2
+    UNION ALL
+    SELECT 1 FROM class_subjects WHERE class_id = $1 AND teacher_id = $2
+    LIMIT 1
+  `, [classId, teacherId])
+  return rows.length > 0
+}
+
 // Resolves whether a parent session actually has a claim to this student —
 // closes the "any authenticated user can act on any student" gap for
 // acknowledgement. A parent may act on a student only if student_parents

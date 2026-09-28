@@ -38,7 +38,7 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 | Attendance Dashboard | Built | School-wide view per day. Mark per class per session. Offline support via service worker |
 | Leave Requests | Built | List all pending/approved/rejected leaves. Approve/reject. Shows substitute coverage status |
 | Emergency Cover | Built | View uncovered periods from approved leaves. Assign substitute teachers. Shows availability |
-| Exam Schedule | Built | Create exams, add subjects, track marks entry status, publish marks, exam calendar |
+| Exam Schedule | Built | Create exams (time/room/syllabus/instructions/invigilator/specific-student targeting), conflict detection, edit/reschedule/cancel/delete, filterable Manage Exams list, reminder settings, add subjects, track marks entry status, publish marks, exam calendar. See [exam-management.md](exam-management.md) |
 
 ### Analytics
 
@@ -96,7 +96,7 @@ The School Admin portal is the primary management interface at `/school-admin`. 
 | `GET/POST /api/attendance` | Attendance marking |
 | `GET/POST/PUT /api/leave-requests` | Leave management |
 | `GET/POST /api/substitutes` | Substitute assignments |
-| `GET/POST /api/exams` | Exam CRUD |
+| `GET/POST /api/exams`, `/api/exams/schedule`, `/api/exams/[id]`, `/api/exams/[id]/cancel` | Exam CRUD, schedule, reschedule, cancel — see [exam-management.md](exam-management.md) |
 | `GET/POST /api/announcements` | Announcement CRUD |
 | `GET/POST /api/fees/*` | Fee management |
 | `POST /api/academic-years/rollover` | Year rollover |

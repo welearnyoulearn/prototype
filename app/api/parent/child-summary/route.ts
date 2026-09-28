@@ -45,12 +45,19 @@ export async function GET(req: NextRequest) {
     try {
       const today = new Date().toISOString().slice(0, 10)
       const cutoff = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+      // status != 'scheduled' previously excluded almost every real upcoming
+      // exam — 'scheduled' is the status every future exam sits in right up
+      // until the day after it happens (see /api/cron/exam-status-sweep), so
+      // this silently emptied "Upcoming Exams" for parents. Only 'cancelled'
+      // is excluded now. Also matches student_scope='specific' exams
+      // targeted at this exact student, not just whole-class exams.
       const { rows } = await pool.query(`
         SELECT
           e.id,
           e.exam_name,
           e.exam_type,
           TO_CHAR(e.exam_date, 'YYYY-MM-DD') AS exam_date,
+          e.start_time, e.end_time, e.duration_minutes, e.room,
           e.status,
           e.class_id,
           c.grade,
@@ -63,13 +70,17 @@ export async function GET(req: NextRequest) {
         FROM exam_records e
         JOIN classes c ON c.id = e.class_id
         LEFT JOIN exam_subjects es ON es.exam_id = e.id
-        WHERE c.grade = $1 AND c.section = $2 AND e.school_id = $3
+        WHERE e.school_id = $3
+          AND (
+            (e.student_scope = 'all' AND c.grade = $1 AND c.section = $2)
+            OR (e.student_scope = 'specific' AND EXISTS (SELECT 1 FROM exam_applicable_students eas WHERE eas.exam_id = e.id AND eas.student_id = $6))
+          )
           AND e.exam_date >= $4 AND e.exam_date <= $5
-          AND e.status != 'scheduled'
+          AND e.status != 'cancelled'
         GROUP BY e.id, c.grade, c.section
         ORDER BY e.exam_date ASC
         LIMIT 10
-      `, [student.grade, student.section, scid, today, cutoff])
+      `, [student.grade, student.section, scid, today, cutoff, sid])
       upcoming_exams = rows
     } catch (_) {
       upcoming_exams = []

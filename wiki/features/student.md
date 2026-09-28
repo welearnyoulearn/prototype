@@ -33,7 +33,7 @@ The Student portal is the learning interface at `/student`. It covers tasks, dou
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| My Marks | Built | Exam marks per subject. Pass/fail status. Cross-exam comparison |
+| My Marks | Built | Results tab: exam marks per subject, pass/fail, cross-exam comparison. Upcoming Exams tab: calendar, countdown ("Starts in 45 Minutes"), Today's/Completed exams, syllabus &amp; instructions. See [exam-management.md](exam-management.md) |
 | Test Calendar | Built | Upcoming tests/exams |
 | Rewards | Built | Total points, streak, earned badges with dates |
 | Weekly Test | Partial | DB table (`weekly_tests`) designed for AI-generated MCQ tests. Not surfaced in UI |

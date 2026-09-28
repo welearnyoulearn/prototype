@@ -20,6 +20,7 @@ The Parent portal provides read-only visibility into a child's school life at `/
 | Fee Ledger | Built | Outstanding fees, payment history, waiver details. Amount due vs paid per category |
 | Learning Activity | Built | Child's recent activity: tasks submitted, doubts asked, newspapers read, rewards earned |
 | Timetable View | Built | Child's class timetable (read-only) |
+| Exam Calendar | Built | Upcoming exams list + calendar view for the selected child — date/time/room/duration only, never syllabus or instructions. Multi-child selector switches the whole tab. See [exam-management.md](exam-management.md) |
 | Parent Login | Partial | Lookup by parent phone + child roll number works. No proper JWT session — no persistent login |
 | Mark Acknowledgement | Partial | API and DB table exist. Not prominently surfaced in parent portal UI |
 

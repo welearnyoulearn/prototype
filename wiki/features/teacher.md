@@ -36,7 +36,8 @@ The Teacher portal is the daily workspace for teachers at `/teacher`. It covers 
 | Tasks | Built | Create tasks (homework/practice/test), set due date, publish. View submissions, grade with score + feedback, request resubmission, send reminders |
 | Doubt Center | Built | View open doubts. Live chat with students. Mark resolved. Toggle as class FAQ. View AI-generated initial answers |
 | Syllabus Tracker | Built | Chapter/topic list per subject per class. Mark topics as covered with date |
-| Test Calendar | Built | Upcoming tests/exams in calendar format |
+| Test Calendar | Built | Upcoming tests/exams in calendar format (class-view scoped) |
+| Exam Schedule | Built | Portal-wide exam calendar across all assigned classes/subjects — class teachers see every subject for their own class. See [exam-management.md](exam-management.md) |
 | Performance Analytics | Partial | Navigation item exists but flagged `comingSoon: true`. No component loaded |
 
 ### My Account
