@@ -16,6 +16,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     const { file_url, file_name } = await req.json()
     if (!file_url) return NextResponse.json({ error: 'file_url required' }, { status: 400 })
+    // Only a file this school uploaded through /api/upload/sign (folder expense-bills/school-{id}),
+    // never an arbitrary URL that would later be shown to staff as "the bill".
+    const cloud = process.env.CLOUDINARY_CLOUD_NAME
+    const allowedPrefix = new RegExp(
+      `^https://res\\.cloudinary\\.com/${cloud}/(image|raw|video)/upload/(v\\d+/)?expense-bills/school-${Number(expense.school_id)}/[^/?#]+$`
+    )
+    if (typeof file_url !== 'string' || !cloud || !allowedPrefix.test(file_url)) {
+      return NextResponse.json({ error: 'file_url must be an expense bill uploaded for this school' }, { status: 400 })
+    }
 
     const { rows: [row] } = await pool.query(
       `INSERT INTO expense_attachments (expense_id, file_url, file_name) VALUES ($1, $2, $3) RETURNING *`,

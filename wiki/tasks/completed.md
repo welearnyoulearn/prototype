@@ -18,6 +18,12 @@ All finished features and bug fixes. Most recent first.
 
 ---
 
+### 2026-09-28 — Backend authorization and tenant boundaries (#253)
+**Type:** Bug Fix (Security, Critical)
+**Portal:** All
+**Summary:** Closed the remaining unauthenticated and cross-role API operations (notifications, master tasks, platform catalog/stats, textbooks, change-password, heartbeat, academic year), blocked students and parents from the student/staff directories, restricted upload signing to server-chosen folders, removed the legacy parent lookup, and enforced plan features on the API centrally in `proxy.ts`. Covered by `e2e/security-authz.spec.ts`.
+**PR:** fix/253-backend-authz
+
 ### 2026-09-24 — Student portal: sticker-book redesign of every screen (#229)
 **Type:** Enhancement (UI/UX)
 **Portal:** Student

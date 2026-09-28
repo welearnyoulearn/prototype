@@ -76,7 +76,7 @@ flowchart LR
 
 **Libraries:** `lib/auth.ts` (`requirePlatformAdmin`, `schoolHasFeature`), `lib/features.ts`, `lib/watchline.ts`, `lib/usageTracking.ts`, `proxy.ts`.
 
-**⚠ INTERNAL security finding:** several `/api/platform/*` routes and `/api/schools/{id}/subscription` **have no auth guard** (details and fix in [architecture §12.1](00-platform-architecture.md)). Fix before any pilot with real data.
+**Security:** every `/api/platform/*` route requires a platform-admin session (the last catalog/stats/task routes were closed in #253); see [architecture §12.1](00-platform-architecture.md).
 
 **Tests:** `auth-admin.spec.ts`, `watchline-config.spec.ts`, `workflow-full-platform.spec.ts`.
 

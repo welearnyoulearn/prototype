@@ -39281,107 +39281,6 @@
         }
       }
     },
-    "/api/parent/lookup": {
-      "post": {
-        "tags": [
-          "Parent portal"
-        ],
-        "summary": "Look up student by roll and phone",
-        "description": "Finds an active student by school_id + roll_number and returns basic details if parent_phone matches the student's stored parent_phone.\n\n**Who can call:** anyone, no sign-in check.\n\n**Checks:** No session; possession of roll_number + matching parent_phone is the only check.",
-        "operationId": "postParentLookup",
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Student",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "student": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "integer"
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "grade": {
-                          "type": "string"
-                        },
-                        "section": {
-                          "type": "string"
-                        },
-                        "roll_number": {
-                          "type": "string"
-                        },
-                        "school_id": {
-                          "type": "integer"
-                        },
-                        "class_id": {
-                          "type": "integer"
-                        },
-                        "parent_name": {
-                          "type": "string",
-                          "nullable": true
-                        },
-                        "parent_phone": {
-                          "type": "string",
-                          "nullable": true
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "school_id, roll_number, parent_phone required"
-          },
-          "401": {
-            "description": "Student not found or phone does not match"
-          },
-          "500": {
-            "description": "Failed to lookup student"
-          }
-        },
-        "x-badges": [
-          {
-            "name": "Public",
-            "color": "#dc2626"
-          }
-        ],
-        "x-source-file": "app/api/parent/lookup/route.ts",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "school_id": {
-                    "type": "integer"
-                  },
-                  "roll_number": {
-                    "type": "string"
-                  },
-                  "parent_phone": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "school_id",
-                  "roll_number",
-                  "parent_phone"
-                ]
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/student/class-circle": {
       "get": {
         "tags": [
@@ -44569,6 +44468,57 @@
             "description": "Internal server error"
           }
         }
+      }
+    },
+    "/api/internal/feature-denials": {
+      "get": {
+        "tags": [
+          "Operations"
+        ],
+        "summary": "Gated features each school does not have (proxy.ts entitlement gate, #253)",
+        "description": "Returns the gated features (lib/featureRoutes.ts) each school does NOT have, resolved like schoolHasFeature (override, else tier). Polled by proxy.ts every 15 seconds to refuse feature APIs a school is not entitled to (403 FEATURE_DISABLED); returns 500 on DB error so the proxy keeps its previous copy.\n\n**Who can call:** Cron.\n\n**Checks:** x-ingest-secret header must equal INGEST_SECRET (isValidIngestSecret); rejected if INGEST_SECRET is unset in production.",
+        "operationId": "getInternalFeatureDenials",
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Denied feature keys per school id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "denials": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Invalid ingest secret"
+          },
+          "500": {
+            "description": "Database error"
+          }
+        },
+        "x-badges": [
+          {
+            "name": "Cron",
+            "color": "#475569"
+          }
+        ],
+        "x-source-file": "app/api/internal/watchline-flags/route.ts"
       }
     }
   },

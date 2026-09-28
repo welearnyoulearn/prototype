@@ -15,7 +15,7 @@
 
 | Doc | Read it for |
 |---|---|
-| [`00-platform-architecture.md`](00-platform-architecture.md) | System architecture, security model, feature flags, data, jobs, tests — **and the security findings to fix before due diligence (§12.1)** |
+| [`00-platform-architecture.md`](00-platform-architecture.md) | System architecture, security model, feature flags, data, jobs, tests — and the authorization model (§12.1) |
 | [`00-roles-access-and-plans.md`](00-roles-access-and-plans.md) | Five roles, permission matrix, which portals each feature reaches, plans as seeded |
 | [`00-deck-storyline.md`](00-deck-storyline.md) | Investor and school slide storylines mapped to these dossiers, demo order, "say / never say" |
 

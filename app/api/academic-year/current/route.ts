@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
+import { getAnySession } from '@/lib/auth'
 
 // GET /api/academic-year/current?school_id=X
 // Returns the current academic year for a school.
 // Falls back to the most recent year if none is flagged is_current.
+// Any signed-in school user (staff, teacher, student, parent), for their own school only.
 export async function GET(req: NextRequest) {
   try {
-    const school_id = req.nextUrl.searchParams.get('school_id')
-    if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
+    const session = await getAnySession()
+    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const raw = req.nextUrl.searchParams.get('school_id')
+    if (raw !== null && Number(raw) !== session.schoolId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const school_id = session.schoolId
 
     try {
       // First try is_current=true

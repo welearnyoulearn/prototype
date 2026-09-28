@@ -93,7 +93,7 @@ sequenceDiagram
 
 **Design note:** `getSession()` validates the JWT **and** the `user_sessions` row (not revoked, within idle/max, user active). Normal API calls count as activity; pollers pass `{ passive: true }` so a background check cannot keep a session alive forever.
 
-**⚠ INTERNAL security note:** `GET/PUT /api/schools/{id}/subscription` currently has no auth guard (see [architecture §12.1](00-platform-architecture.md)); the plan view here should read it only after that fix.
+**Security:** `GET/PUT /api/schools/{id}/subscription` is guarded (platform admin, or the school's own staff for reads); see [architecture §12.1](00-platform-architecture.md).
 
 **Tests:** `workflow-staff-sessions.spec.ts`, `auth-admin.spec.ts`, `workflow-school-admin.spec.ts`.
 
