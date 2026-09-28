@@ -3,7 +3,7 @@
 **Platform Admin feature key:** `settings`
 **Portal:** School Admin
 **Status:** Built (working on dev)
-**Last verified against the code:** 2026-09-21
+**Last verified against the code:** 2026-09-28
 
 ---
 
@@ -33,7 +33,7 @@ School admin (owner).
   - *Upgrade:* seats open up, but nobody is reactivated automatically — the school clicks Reactivate (or adds someone new).
   - *Lowering a plan's limit for every school* (Feature Plans page): the platform admin sees how many schools it pushes over, and which, and must confirm; those schools are handled exactly as above and emailed.
   - Every plan change and limit change is written to the platform audit log with the admin's email, the from/to plan and the seat numbers. Re-saving the same plan never asks for confirmation.
-- The last active school administrator cannot be deactivated, and nobody can deactivate themselves.
+- The last active school administrator cannot be deactivated, and nobody can deactivate themselves. The onboarding admin (`users.is_primary_admin`, the one carrying `school_code`, the only account platform 'reset password' recovers) can never be deactivated by anyone, including another school administrator — the Deactivate button is replaced with a "Setup account" badge, and the server refuses it (403) regardless of who asks. (#247)
 - A deactivated person's email stays reserved (it is unique across all schools): use **Reactivate**, not Add.
 - The plan itself (`/api/schools/{id}/subscription`) can be read only by the platform admin or staff of that school, and changed only by the platform admin.
 - **Danger Zone (Export My Data / Request Account Closure) is removed.** Its export sent a manual request to WLYL support with up to a 2-business-day wait; that's superseded by the instant Excel export on Settings → Plan (and the locked-account screen). Request Account Closure had no replacement — removed with no equivalent. `POST /api/school-admin/account-request` no longer exists. (#249)
@@ -78,3 +78,4 @@ API routes these screens call (all exist):
 | 2026-09-26 | Plan end date: no more silent renewal on re-save, renew / set end date, status badges, school banner, reminder cron, optional enforcement | #236 |
 | 2026-09-26 | Plan-change handling for staff seats: confirm-before-downgrade with exact numbers, over-limit state (no auto-disable, adds/reactivations blocked), school banner + email, confirm before lowering a plan's limit, plan changes in the audit log | #235 |
 | 2026-09-26 | Staff-accounts hardening: plan endpoint now needs a login (was open to anyone), accounts can only be created in your own school and only by a school administrator, reactivation respects the seat limit, last-admin and platform-recovery protection, deactivation voids unused links, audit history, safer limit saving | #234 |
+| 2026-09-28 | The onboarding admin (`users.is_primary_admin`) can no longer be deactivated by another school administrator — hidden Deactivate button, "Setup account" badge, server-side 403 | #247 |
