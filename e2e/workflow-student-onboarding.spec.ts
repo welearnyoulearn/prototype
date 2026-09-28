@@ -22,6 +22,7 @@ async function uiLogin(page: Page, identifier: string, password: string): Promis
 }
 
 async function goToOnboarding(page: Page) {
+  await expect(page.getByRole('button', { name: /Student Management/i })).toBeVisible({ timeout: 60000 })
   await page.getByRole('button', { name: /Student Management/i }).click()
   await expect(page.getByText('Student List')).toBeVisible({ timeout: 10000 })
   await page.getByRole('button', { name: /Onboard Students/i }).click()
@@ -126,8 +127,8 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
 
     await expect(page.getByText('Enrollment Complete — Credentials')).toBeVisible({ timeout: 30000 })
     await expect(page.getByText('Student Credentials')).toBeVisible()
-    // No email → login column shows the "no email" placeholder
-    await expect(page.getByText(/no email/i)).toBeVisible()
+    // Email is optional; the generated globally unique WLYL student id is the login.
+    await expect(page.getByText(/wlyl-stu-/i).first()).toBeVisible()
 
     const found = await studentIdsByNames(['Mehta Arjun'])
     found.forEach((s: { id: number }) => createdStudentIds.push(s.id))

@@ -3,6 +3,7 @@
 import { useRef, useState, useEffect, useCallback, useMemo } from 'react'
 import { parseCSV } from '@/lib/parseCSV'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { EMAIL_RE, INDIAN_MOBILE_RE } from '@/lib/studentValidation'
 
 type Props = { schoolId: number; onRefresh?: () => void }
 
@@ -83,6 +84,8 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
   const [dupRollError, setDupRollError] = useState('')
   const [error, setError] = useState('')
   const [csvWarn, setCsvWarn] = useState('')
+  const [sessionExpired, setSessionExpired] = useState(false)
+  const [draftReady, setDraftReady] = useState(false)
   const [studentCount, setStudentCount] = useState<number | null>(null)
   const [copiedAll, setCopiedAll] = useState(false)
   const [resetingId, setResetingId] = useState<number | null>(null)
@@ -91,6 +94,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
   const [showDupPreview, setShowDupPreview] = useState(false)
   const [pendingStudents, setPendingStudents] = useState<{ name: string; grade?: string; section?: string; school_roll_number?: number; phone?: string; parent_phone?: string; email?: string; parent_name?: string; parent_email?: string }[] | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const draftKey = `student-onboarding-draft:${schoolId}`
 
   const [existingRollKeys, setExistingRollKeys] = useState<Set<string>>(new Set())
 
@@ -157,6 +161,29 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
 
   useEffect(() => { fetchStudentCount(); fetchExistingRolls(); fetchPortalStatus() }, [fetchStudentCount, fetchExistingRolls, fetchPortalStatus])
 
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(draftKey)
+      if (raw) {
+        const draft = JSON.parse(raw) as { savedAt: number; rows: StudentRow[]; mode: 'manual' | 'csv'; filterGrade: string; filterSection: string }
+        if (Date.now() - draft.savedAt < 2 * 60 * 60 * 1000 && Array.isArray(draft.rows) && draft.rows.length > 0) {
+          setRows(draft.rows)
+          setMode(draft.mode)
+          setFilterGrade(draft.filterGrade || '')
+          setFilterSection(draft.filterSection || '')
+        } else {
+          sessionStorage.removeItem(draftKey)
+        }
+      }
+    } catch { sessionStorage.removeItem(draftKey) }
+    setDraftReady(true)
+  }, [draftKey])
+
+  useEffect(() => {
+    if (!draftReady) return
+    sessionStorage.setItem(draftKey, JSON.stringify({ savedAt: Date.now(), rows, mode, filterGrade, filterSection }))
+  }, [draftReady, draftKey, rows, mode, filterGrade, filterSection])
+
   function updateRow(index: number, field: keyof StudentRow, value: string) {
     setRows(prev => prev.map((r, i) => i === index ? { ...r, [field]: value } : r))
   }
@@ -177,7 +204,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     setCsvWarn('')
     const allRows = parseCSV(text.trim())
     if (allRows.length === 0) return
-    const firstRowLower = allRows[0].map(c => c.toLowerCase().trim())
+    const firstRowLower = allRows[0].map(c => c.toLowerCase().trim().replace(/\s*\*$/, '').replace(/\s+/g, '_'))
     const hasHeader = firstRowLower.some(c => ['last_name', 'first_name', 'name', 'email', 'grade', 'student'].includes(c))
     if (hasHeader) {
       const isStaffCsv = STAFF_CSV_MARKERS.some(m => firstRowLower.includes(m))
@@ -199,13 +226,34 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
     if (parsed.length > 0) { setRows(parsed); setMode('manual') }
   }
 
-  function handleFileImport(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => { parseText(ev.target?.result as string) }
-    reader.readAsText(file)
     e.target.value = ''
+    setError('')
+    try {
+      if (file.name.toLowerCase().endsWith('.xlsx')) {
+        const ExcelJS = await import('exceljs')
+        const workbook = new ExcelJS.Workbook()
+        await workbook.xlsx.load(new Uint8Array(await file.arrayBuffer()) as never)
+        const sheet = workbook.worksheets[0]
+        if (!sheet) throw new Error('The Excel file has no worksheet')
+        const values: string[][] = []
+        sheet.eachRow(row => {
+          const cells = Array.from({ length: 10 }, (_, index) => row.getCell(index + 1).text.trim())
+          if (cells.every(value => !value)) return
+          if (cells[0].startsWith('★') || cells[0].toLowerCase().startsWith('yellow columns')) return
+          values.push(cells)
+        })
+        if (values.length < 2) throw new Error('The Excel file contains no student rows')
+        const csvText = values.map(row => row.map(value => `"${value.replace(/"/g, '""')}"`).join(',')).join('\n')
+        parseText(csvText)
+      } else {
+        parseText(await file.text())
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to read the selected file')
+    }
   }
 
   function buildStudentsPayload(valid: StudentRow[]) {
@@ -227,6 +275,11 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
         body: JSON.stringify({ school_id: schoolId, students }),
       })
       const data: OnboardingResult & { error?: string } = await res.json()
+      if (res.status === 401) {
+        setSessionExpired(true)
+        setError('Your session expired. This onboarding draft is saved in this tab. Sign in again to continue.')
+        return
+      }
       if (res.status === 409) { setDupRollError(data.error || 'Duplicate roll number'); return }
       if (!res.ok) throw new Error(data.error)
 
@@ -236,6 +289,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       if (data.inserted > 0) {
         setShowCredentials(true)
         setRows([{ ...EMPTY_ROW }])
+        sessionStorage.removeItem(draftKey)
         fetchStudentCount()
         fetchExistingRolls()
         window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -266,12 +320,15 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       else if (!isValidName(r.last_name)) missing.push(`Row ${i + 1}: Last Name — ${NAME_INVALID_MESSAGE}`)
       if (!r.first_name.trim())   missing.push(`Row ${i + 1}: First Name is required`)
       else if (!isValidName(r.first_name)) missing.push(`Row ${i + 1}: First Name — ${NAME_INVALID_MESSAGE}`)
-      if (r.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email.trim())) missing.push(`Row ${i + 1}: Invalid student email`)
-      if (r.parent_email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.parent_email.trim())) missing.push(`Row ${i + 1}: Invalid parent email`)
+      if (r.email.trim() && !EMAIL_RE.test(r.email.trim())) missing.push(`Row ${i + 1}: Invalid student email`)
+      if (r.parent_email.trim() && !EMAIL_RE.test(r.parent_email.trim())) missing.push(`Row ${i + 1}: Invalid parent email`)
       if (!r.grade.trim())        missing.push(`Row ${i + 1}: Grade is required`)
+      if (!r.section.trim())      missing.push(`Row ${i + 1}: Section is required`)
       if (!r.parent_name.trim())  missing.push(`Row ${i + 1}: Parent Name is required`)
       else if (!isValidName(r.parent_name)) missing.push(`Row ${i + 1}: Parent Name — ${NAME_INVALID_MESSAGE}`)
       if (!r.parent_phone.trim()) missing.push(`Row ${i + 1}: Parent Phone is required`)
+      else if (!INDIAN_MOBILE_RE.test(r.parent_phone.trim())) missing.push(`Row ${i + 1}: Parent Phone must be a valid 10-digit Indian mobile number`)
+      if (r.phone.trim() && !INDIAN_MOBILE_RE.test(r.phone.trim())) missing.push(`Row ${i + 1}: Student Phone must be a valid 10-digit Indian mobile number`)
       if (!r.school_roll_number.trim()) missing.push(`Row ${i + 1}: Roll No is required`)
       else if (!/^\d+$/.test(r.school_roll_number.trim()) || parseInt(r.school_roll_number.trim()) <= 0)
         missing.push(`Row ${i + 1}: Roll No must be a positive number`)
@@ -302,6 +359,11 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
         body: JSON.stringify({ school_id: schoolId, students }),
       })
       const data = await res.json()
+      if (res.status === 401) {
+        setSessionExpired(true)
+        setError('Your session expired. This onboarding draft is saved in this tab. Sign in again to continue.')
+        return
+      }
       if (data.existing_count > 0) {
         setDupPreview(data)
         setShowDupPreview(true)
@@ -371,8 +433,8 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
+        <div className="flex items-center gap-4 flex-wrap">
           <div>
             <h2 className="text-xl font-bold text-gray-900">Student Onboarding</h2>
             <p className="text-sm text-gray-500 mt-0.5">Bulk enroll students — parent phone required, emails optional</p>
@@ -387,7 +449,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
             </div>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {portalStatus && portalStatus.pendingCount > 0 && (portalStatus.studentPortalEnabled || portalStatus.parentPortalEnabled) && (
             <button onClick={() => setShowBackfillConfirm(true)} disabled={backfilling}
               data-testid="activate-portal-access-btn"
@@ -418,7 +480,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
-            Import CSV
+            Import CSV / Excel
           </button>
           <button onClick={() => setMode(m => m === 'csv' ? 'manual' : 'csv')}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${mode === 'csv' ? 'bg-green-600 text-white' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
@@ -435,8 +497,8 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       )}
 
       {error && (
-        <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
-          <span>{error}</span>
+        <div role="alert" aria-live="assertive" className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
+          <span>{error}{sessionExpired && <> <a href="/login?role=school&reason=timeout" className="font-semibold underline">Sign in again</a></>}</span>
           <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 ml-4">✕</button>
         </div>
       )}
@@ -451,7 +513,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 </svg>
               </div>
               <div>
-                <h3 className="font-semibold text-gray-900 text-base">Duplicate Roll Number</h3>
+                <h3 className="font-semibold text-gray-900 text-base">Import Conflict</h3>
                 <p className="text-sm text-red-700 mt-1">{dupRollError}</p>
               </div>
             </div>
@@ -466,9 +528,9 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       {/* Duplicate preview modal */}
       {showDupPreview && dupPreview && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-lg shadow-2xl w-full max-w-lg">
+          <div role="dialog" aria-modal="true" aria-labelledby="duplicate-preview-title" className="bg-white rounded-lg shadow-2xl w-full max-w-lg">
             <div className="px-6 py-5 border-b border-gray-200">
-              <h3 className="text-lg font-bold text-gray-900">Students Already Exist</h3>
+              <h3 id="duplicate-preview-title" className="text-lg font-bold text-gray-900">Students Already Exist</h3>
               <div className="flex gap-4 mt-3">
                 <div className="flex-1 bg-green-50 rounded-md px-4 py-3 text-center">
                   <p className="text-2xl font-semibold text-green-600">{dupPreview.new_count}</p>
@@ -496,7 +558,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
               </div>
             </div>
             <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-2xl text-xs text-gray-500">
-              Duplicates will be skipped automatically — only new students will be enrolled.
+              Only rows confirmed as new will be submitted. The import remains all-or-nothing.
             </div>
             <div className="px-6 py-4 flex gap-3 justify-end">
               <button
@@ -507,7 +569,12 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
               </button>
               <button
                 data-testid="upload-new-only-btn"
-                onClick={async () => { setShowDupPreview(false); await doSubmit(pendingStudents) }}
+                onClick={async () => {
+                  const duplicateRows = new Set(dupPreview.existing.map(match => match.row))
+                  const newStudents = pendingStudents?.filter((_, index) => !duplicateRows.has(index + 1)) ?? null
+                  setShowDupPreview(false)
+                  await doSubmit(newStudents)
+                }}
                 className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium">
                 Upload Only New ({dupPreview.new_count})
               </button>
@@ -552,18 +619,20 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       {/* Credentials modal */}
       {showCredentials && result && (
         <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 overflow-y-auto py-8 px-4">
-          <div className="bg-white rounded-lg shadow-2xl w-full max-w-3xl">
+          <div role="dialog" aria-modal="true" aria-labelledby="enrollment-result-title" className="bg-white rounded-lg shadow-2xl w-full max-w-3xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
               <div>
-                <h3 className="text-lg font-bold text-gray-900">Enrollment Complete — Credentials</h3>
-                <p className="text-xs text-amber-600 mt-0.5">Save these now — passwords are shown once and cannot be recovered</p>
+                <h3 id="enrollment-result-title" className="text-lg font-bold text-gray-900">Enrollment Complete — Credentials</h3>
+                <p className={`text-xs mt-0.5 ${hasCredentials ? 'text-amber-600' : 'text-gray-500'}`}>
+                  {hasCredentials ? 'Save these credentials now — passwords are shown once and cannot be recovered' : `${result.inserted} student${result.inserted !== 1 ? 's were' : ' was'} added to the roster; no portal credentials were created`}
+                </p>
               </div>
               <div className="flex gap-2">
-                <button onClick={handleCopyAll} data-testid="copy-all-credentials-btn"
+                {hasCredentials && <button onClick={handleCopyAll} data-testid="copy-all-credentials-btn"
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${copiedAll ? 'bg-green-100 text-green-700' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                   {copiedAll ? '✓ Copied!' : 'Copy All'}
-                </button>
-                <button onClick={() => { setShowCredentials(false); onRefresh?.() }} className="text-muted-foreground hover:text-gray-600 text-2xl leading-none px-1">×</button>
+                </button>}
+                <button aria-label="Close enrollment result" onClick={() => { setShowCredentials(false); onRefresh?.() }} className="text-muted-foreground hover:text-gray-600 text-2xl leading-none px-1">×</button>
               </div>
             </div>
 
@@ -585,7 +654,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 <div className="bg-gray-50 border border-gray-200 rounded-md px-4 py-3 text-sm text-gray-600">
                   Student portal is not enabled for this school — students were added to the roster without logins.
                 </div>
-              ) : (
+              ) : result.credentials.students.length > 0 ? (
               <div>
                 <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                   <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs flex items-center justify-center font-bold">S</span>
@@ -641,7 +710,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                   </table>
                 </div>
               </div>
-              )}
+              ) : null}
 
               {result.parentPortalEnabled === false ? (
                 <div className="bg-gray-50 border border-gray-200 rounded-md px-4 py-3 text-sm text-gray-600">
@@ -680,17 +749,17 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                 </div>
               )}
 
-              <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3 text-xs text-amber-700">
+              {hasCredentials && <div className="bg-amber-50 border border-amber-200 rounded-md px-4 py-3 text-xs text-amber-700">
                 <strong>Note:</strong> These credentials are shown once only. After closing this panel, you can reset individual student passwords using the &quot;View Credentials&quot; button above.
                 {' '}When WhatsApp is configured for your school, credentials will be sent automatically to parent phones.
-              </div>
+              </div>}
             </div>
 
             <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
-              <button onClick={handleCopyAll}
+              {hasCredentials && <button onClick={handleCopyAll}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${copiedAll ? 'bg-green-100 text-green-700' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
                 {copiedAll ? '✓ Copied!' : 'Copy All'}
-              </button>
+              </button>}
               <button onClick={() => { setShowCredentials(false); onRefresh?.() }}
                 className="bg-gray-900 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
                 Done
@@ -703,9 +772,9 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
       {/* ── Backfill Confirmation Popup ── */}
       {showBackfillConfirm && portalStatus && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-sm shadow-2xl overflow-hidden">
+          <div role="dialog" aria-modal="true" aria-labelledby="backfill-title" className="bg-white rounded-lg w-full max-w-sm shadow-2xl overflow-hidden">
             <div className="bg-teal-50 border-b border-teal-100 px-6 py-5">
-              <h3 className="font-bold text-gray-900 text-base">Activate Portal Access?</h3>
+              <h3 id="backfill-title" className="font-bold text-gray-900 text-base">Activate Portal Access?</h3>
             </div>
             <div className="px-6 py-5">
               <p className="text-sm text-gray-600">
@@ -775,7 +844,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[110px]">First Name <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[140px]">Student Email <span className="text-muted-foreground font-normal text-xs">(optional)</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Grade <span className="text-red-400">*</span></th>
-                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Section</th>
+                    <th className="text-left px-3 py-2.5 font-medium text-gray-500 w-16">Section <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[120px]">Parent Name <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-700 min-w-[110px] bg-blue-50">Parent Phone <span className="text-red-400">*</span></th>
                     <th className="text-left px-3 py-2.5 font-medium text-gray-500 min-w-[150px]">Parent Email <span className="text-muted-foreground font-normal text-xs">(optional)</span></th>
@@ -791,6 +860,7 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                         <input
                           className={`${inputCls} ${rowDupWarnings[i] ? 'border-red-400 ring-1 ring-red-300' : !row.school_roll_number.trim() ? 'border-amber-300' : ''}`}
                           placeholder="1" type="number" min="1" value={row.school_roll_number}
+                          aria-label={`Row ${i + 1} roll number`}
                           aria-invalid={!!rowDupWarnings[i]}
                           data-testid={`roll-input-${i}`}
                           onChange={e => updateRow(i, 'school_roll_number', e.target.value)} />
@@ -800,20 +870,21 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
                           </p>
                         )}
                       </td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="Last name" value={row.last_name} onChange={e => updateRow(i, 'last_name', e.target.value)} /></td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="First name" value={row.first_name} onChange={e => updateRow(i, 'first_name', e.target.value)} /></td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="Email (optional)" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="10" value={row.grade} onChange={e => updateRow(i, 'grade', e.target.value)} /></td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="A" value={row.section} onChange={e => updateRow(i, 'section', e.target.value)} /></td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="Parent name" value={row.parent_name} onChange={e => updateRow(i, 'parent_name', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input aria-label={`Row ${i + 1} last name`} className={inputCls} placeholder="Last name" value={row.last_name} onChange={e => updateRow(i, 'last_name', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input aria-label={`Row ${i + 1} first name`} className={inputCls} placeholder="First name" value={row.first_name} onChange={e => updateRow(i, 'first_name', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input aria-label={`Row ${i + 1} student email`} className={inputCls} placeholder="Email (optional)" type="email" value={row.email} onChange={e => updateRow(i, 'email', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input aria-label={`Row ${i + 1} grade`} className={inputCls} placeholder="10" value={row.grade} onChange={e => updateRow(i, 'grade', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input aria-label={`Row ${i + 1} section`} className={inputCls} placeholder="A" value={row.section} onChange={e => updateRow(i, 'section', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input aria-label={`Row ${i + 1} parent name`} className={inputCls} placeholder="Parent name" value={row.parent_name} onChange={e => updateRow(i, 'parent_name', e.target.value)} /></td>
                       <td className="px-3 py-2 bg-blue-50/40">
                         <input className={`${inputCls} ${!row.parent_phone.trim() ? 'border-blue-300' : ''}`}
+                          aria-label={`Row ${i + 1} parent phone`}
                           placeholder="Phone *" value={row.parent_phone} onChange={e => updateRow(i, 'parent_phone', e.target.value)} />
                       </td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="parent@email.com (optional)" type="email" value={row.parent_email} onChange={e => updateRow(i, 'parent_email', e.target.value)} /></td>
-                      <td className="px-3 py-2"><input className={inputCls} placeholder="Phone" value={row.phone} onChange={e => updateRow(i, 'phone', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input aria-label={`Row ${i + 1} parent email`} className={inputCls} placeholder="parent@email.com (optional)" type="email" value={row.parent_email} onChange={e => updateRow(i, 'parent_email', e.target.value)} /></td>
+                      <td className="px-3 py-2"><input aria-label={`Row ${i + 1} student phone`} className={inputCls} placeholder="Phone" value={row.phone} onChange={e => updateRow(i, 'phone', e.target.value)} /></td>
                       <td className="px-3 py-2">
-                        <button onClick={() => removeRow(i)} className="text-red-400 hover:text-red-600 text-base leading-none">×</button>
+                        <button aria-label={`Remove row ${i + 1}`} onClick={() => removeRow(i)} className="text-red-400 hover:text-red-600 text-base leading-none">×</button>
                       </td>
                     </tr>
                   ))}
@@ -825,12 +896,6 @@ export default function StudentOnboarding({ schoolId, onRefresh }: Props) {
               <p className="text-xs text-muted-foreground">Student/Parent Email optional — credentials sent by email if provided, else share manually</p>
               <p className="text-xs text-amber-600">Roll No unique within Grade + Section</p>
             </div>
-            {error && (
-              <div className="px-4 py-2 bg-red-50 border-t border-red-200 text-red-700 text-xs flex items-start justify-between gap-3">
-                <span>{error}</span>
-                <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 shrink-0">✕</button>
-              </div>
-            )}
             <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
               <button onClick={addRow} className="text-sm text-green-600 hover:text-green-800 font-medium">+ Add Row</button>
               <div className="flex items-center gap-3">

@@ -27,6 +27,7 @@ async function uiLogin(page: Page, identifier: string, password: string): Promis
 }
 
 async function goToOnboarding(page: Page) {
+  await expect(page.getByRole('button', { name: /Student Management/i })).toBeVisible({ timeout: 60000 })
   await page.getByRole('button', { name: /Student Management/i }).click()
   await expect(page.getByText('Student List')).toBeVisible({ timeout: 10000 })
   await page.getByRole('button', { name: /Onboard Students/i }).click()
@@ -104,8 +105,8 @@ test.describe.serial('Student Onboarding — CSV File Import (UI)', () => {
 
     const csv = [
       'roll_no,last_name,first_name,email,grade,section,parent_name,parent_phone,parent_email,phone',
-      `1,Rao,${`Ananya${tsSuffix}`},,10,A,Suresh Rao,${phone(1)},,`,
-      `2,Iyer,${`Kabir${tsSuffix}`},,10,A,Meena Iyer,${phone(2)},,`,
+      `1,Rao,Ananya,,10,A,Suresh Rao,${phone(1)},,`,
+      `2,Iyer,Kabir,,10,A,Meena Iyer,${phone(2)},,`,
     ].join('\n')
 
     await uploadCsv(page, csv)
@@ -116,13 +117,13 @@ test.describe.serial('Student Onboarding — CSV File Import (UI)', () => {
     const table = page.getByTestId('onboarding-table')
     await expect(table.locator('tbody tr')).toHaveCount(2)
     await expect(table.locator('tbody tr').nth(0).locator('td').nth(2).locator('input')).toHaveValue('Rao')
-    await expect(table.locator('tbody tr').nth(0).locator('td').nth(3).locator('input')).toHaveValue(`Ananya${tsSuffix}`)
+    await expect(table.locator('tbody tr').nth(0).locator('td').nth(3).locator('input')).toHaveValue('Ananya')
     await expect(table.locator('tbody tr').nth(1).locator('td').nth(2).locator('input')).toHaveValue('Iyer')
 
     await page.getByTestId('enroll-students-btn').click()
     await expect(page.getByTestId('copy-all-credentials-btn')).toBeVisible({ timeout: 15000 })
 
-    const created = await studentIdsByNames([`Rao Ananya${tsSuffix}`, `Iyer Kabir${tsSuffix}`])
+    const created = await studentIdsByNames(['Rao Ananya', 'Iyer Kabir'])
     expect(created.length).toBe(2)
     createdStudentIds.push(...created.map((s: { id: number }) => s.id))
   })
