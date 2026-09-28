@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcryptjs'
-import { randomInt, randomUUID } from 'crypto'
+import { createHash, randomBytes, randomInt, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'crypto'
 import { cookies, headers } from 'next/headers'
 import { NextRequest } from 'next/server'
 import type { Pool as PgPool, PoolClient } from 'pg'
@@ -34,6 +34,7 @@ export type TeacherJWTPayload = {
   passwordChanged: boolean
   name: string
   email: string
+  sid?: string
 }
 
 export type StudentJWTPayload = {
@@ -45,6 +46,7 @@ export type StudentJWTPayload = {
   grade: string
   section: string
   rollNumber: string
+  sid?: string
 }
 
 export type ParentJWTPayload = {
@@ -54,6 +56,7 @@ export type ParentJWTPayload = {
   passwordChanged: boolean
   name: string
   email: string
+  sid?: string
 }
 
 // ─── Password helpers ─────────────────────────────────────────────────────────
@@ -61,8 +64,78 @@ export function hashPassword(plain: string): Promise<string> {
   return bcrypt.hash(plain, 12)
 }
 
+function scryptAsync(
+  plain: string,
+  salt: Buffer,
+  keyLength: number,
+  options: { N: number; r: number; p: number; maxmem: number },
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scryptCallback(plain, salt, keyLength, options, (error, derivedKey) => {
+      if (error) reject(error)
+      else resolve(derivedKey)
+    })
+  })
+}
+const PORTAL_SCRYPT_N = 32768
+const PORTAL_SCRYPT_R = 8
+const PORTAL_SCRYPT_P = 1
+const PORTAL_SCRYPT_KEYLEN = 64
+
+// Bulk admission can create dozens of portal credentials at once. bcryptjs is
+// CPU-bound JavaScript and made an 11-student batch take ~30 seconds. scrypt is
+// memory-hard and runs in Node's native worker pool, preserving a strong password
+// hash while allowing independent credentials to be derived concurrently.
+export async function hashPortalPassword(plain: string): Promise<string> {
+  const salt = randomBytes(16)
+  const derived = await scryptAsync(plain, salt, PORTAL_SCRYPT_KEYLEN, {
+    N: PORTAL_SCRYPT_N,
+    r: PORTAL_SCRYPT_R,
+    p: PORTAL_SCRYPT_P,
+    maxmem: 64 * 1024 * 1024,
+  })
+  return `scrypt$${PORTAL_SCRYPT_N}$${PORTAL_SCRYPT_R}$${PORTAL_SCRYPT_P}$${salt.toString('hex')}$${derived.toString('hex')}`
+}
+
+async function verifyScryptPassword(plain: string, encoded: string): Promise<boolean> {
+  const parts = encoded.split('$')
+  if (parts.length !== 6 || parts[0] !== 'scrypt') return false
+  const [n, r, p] = parts.slice(1, 4).map(Number)
+  if (n !== PORTAL_SCRYPT_N || r !== PORTAL_SCRYPT_R || p !== PORTAL_SCRYPT_P) return false
+  const salt = Buffer.from(parts[4], 'hex')
+  const expected = Buffer.from(parts[5], 'hex')
+  if (salt.length !== 16 || expected.length !== PORTAL_SCRYPT_KEYLEN) return false
+  const actual = await scryptAsync(plain, salt, expected.length, {
+    N: n, r, p, maxmem: 64 * 1024 * 1024,
+  })
+  return timingSafeEqual(actual, expected)
+}
+
 export function verifyPassword(plain: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(plain, hash)
+  return hash.startsWith('scrypt$') ? verifyScryptPassword(plain, hash) : bcrypt.compare(plain, hash)
+}
+
+const DUMMY_PASSWORD_HASH = '$2b$12$gd232DmMflF.IPscOO49YOIHulvSZfj1S.bsdMIkiuUQnr7mSaVu6'
+export function verifyPasswordForLogin(plain: string, hash?: string | null): Promise<boolean> {
+  return hash ? verifyPassword(plain, hash) : bcrypt.compare(plain, DUMMY_PASSWORD_HASH)
+}
+
+const COMMON_PASSWORDS = new Set([
+  'password', 'password1', 'password123', '12345678', '123456789',
+  'qwerty123', 'admin123', 'welcome1', 'letmein1', 'student123',
+])
+
+export function validateNewPassword(password: unknown, identity?: string | null): string | null {
+  if (typeof password !== 'string') return 'Password is required'
+  if (password.length < 8) return 'Password must be at least 8 characters'
+  if (password.length > 128) return 'Password must be no more than 128 characters'
+  if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password)) {
+    return 'Password must include uppercase, lowercase, and a number'
+  }
+  const normalized = password.toLowerCase()
+  if (COMMON_PASSWORDS.has(normalized)) return 'Choose a less common password'
+  if (identity && normalized === identity.trim().toLowerCase()) return 'Password cannot match your login identifier'
+  return null
 }
 
 export function generateTempPassword(length = 10): string {
@@ -77,6 +150,10 @@ export function generateResetToken(): string {
   let out = ''
   for (let i = 0; i < 48; i++) out += chars[randomInt(chars.length)]
   return out
+}
+
+export function hashResetToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
 }
 
 // Public feedback-form entry code — deliberately unrelated to school_code
@@ -108,7 +185,9 @@ function sign<T extends object>(payload: T, expiresIn: jwt.SignOptions['expiresI
 function verify<T extends object>(token: string): T | null {
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as T & { iat?: number; exp?: number }
-    const { iat: _i, exp: _e, ...payload } = decoded as T & { iat?: number; exp?: number }
+    const payload = { ...decoded }
+    delete payload.iat
+    delete payload.exp
     return payload as T
   } catch {
     return null
@@ -143,7 +222,7 @@ export async function setAuthCookie(payload: JWTPayload) {
   await setCookie(COOKIE_ADMIN, signToken(payload, `${SESSION_MAX_HOURS}h`), false)
 }
 export async function clearAuthCookie()                        { await clearCookie(COOKIE_ADMIN) }
-export async function setPlatformAuthCookie(payload: JWTPayload) { await setCookie(COOKIE_PLATFORM, signToken(payload)) }
+export async function setPlatformAuthCookie(payload: JWTPayload) { await setCookie(COOKIE_PLATFORM, signToken(payload, `${SESSION_MAX_HOURS}h`), false) }
 export async function clearPlatformAuthCookie()                  { await clearCookie(COOKIE_PLATFORM) }
 
 // ─── School-staff sessions (server-side, revocable) ───────────────────────────
@@ -164,8 +243,8 @@ export async function revokeSession(sid: string): Promise<void> {
 
 // Ends every live session of a user (deactivation, password reset). exceptSid keeps
 // the caller's own session alive when they change their own password.
-export async function revokeUserSessions(userId: number, exceptSid?: string): Promise<void> {
-  await pool.query(
+export async function revokeUserSessions(userId: number, exceptSid?: string, db: PgPool | PoolClient = pool): Promise<void> {
+  await db.query(
     `UPDATE user_sessions SET revoked_at = NOW()
      WHERE user_id = $1 AND revoked_at IS NULL AND ($2::uuid IS NULL OR id <> $2::uuid)`,
     [userId, exceptSid ?? null]
@@ -176,6 +255,12 @@ export async function revokeUserSessions(userId: number, exceptSid?: string): Pr
 // previous session even when it has already idled out.
 export async function getSessionIdFromCookie(): Promise<string | null> {
   const token = (await cookies()).get(COOKIE_ADMIN)?.value
+  if (!token) return null
+  return verifyToken(token)?.sid ?? null
+}
+
+export async function getPlatformSessionIdFromCookie(): Promise<string | null> {
+  const token = (await cookies()).get(COOKIE_PLATFORM)?.value
   if (!token) return null
   return verifyToken(token)?.sid ?? null
 }
@@ -216,8 +301,10 @@ async function validateStaffSession(touch: boolean, db: PgPool | PoolClient = po
 // pollers (e.g. the notification bell) must pass { passive: true } — otherwise an
 // abandoned tab would keep its session alive forever.
 // `db` — see requireFeeAccess's matching parameter; threaded through to validateStaffSession.
-export async function getSession(opts: { passive?: boolean; db?: PgPool | PoolClient } = {}): Promise<JWTPayload | null> {
-  return validateStaffSession(!opts.passive, opts.db)
+export async function getSession(opts: { passive?: boolean; db?: PgPool | PoolClient; allowFirstLogin?: boolean } = {}): Promise<JWTPayload | null> {
+  const session = await validateStaffSession(!opts.passive, opts.db)
+  if (session?.firstLogin && !opts.allowFirstLogin) return null
+  return session
 }
 
 // Explicit activity ping, used by the browser heartbeat (POST /api/auth/session) for
@@ -230,12 +317,25 @@ export async function getPlatformSession(): Promise<JWTPayload | null> {
   const cookieStore = await cookies()
   const token = cookieStore.get(COOKIE_PLATFORM)?.value
   if (!token) return null
-  return verifyToken(token)
+  const payload = verifyToken(token)
+  if (!payload?.sid || payload.role !== 'platform_admin') return null
+  const { rows } = await pool.query(
+    `SELECT 1 FROM user_sessions s
+     JOIN users u ON u.id = s.user_id
+     WHERE s.id = $1 AND s.user_id = $2
+       AND s.revoked_at IS NULL AND s.expires_at > NOW()
+       AND s.last_seen_at > NOW() - make_interval(mins => $3)
+       AND u.role = 'platform_admin' AND COALESCE(u.status, 'active') = 'active'`,
+    [payload.sid, payload.userId, SESSION_IDLE_MINUTES],
+  )
+  if (!rows.length) return null
+  await pool.query(`UPDATE user_sessions SET last_seen_at = NOW() WHERE id = $1 AND last_seen_at < NOW() - INTERVAL '30 seconds'`, [payload.sid])
+  return payload
 }
 
 export async function requirePlatformAdmin(): Promise<JWTPayload | null> {
   const session = await getPlatformSession()
-  if (!session || session.role !== 'platform_admin') return null
+  if (!session || session.role !== 'platform_admin' || session.firstLogin) return null
   return session
 }
 
@@ -247,17 +347,82 @@ export async function requireSchoolAdmin(): Promise<JWTPayload | null> {
   return session
 }
 
+type PortalActorType = 'teacher' | 'student' | 'parent'
+
+export async function createPortalSession(actorType: PortalActorType, actorId: number, schoolId: number): Promise<string> {
+  const sid = randomUUID()
+  const userAgent = (await headers()).get('user-agent')?.slice(0, 300) ?? null
+  await pool.query(
+    `INSERT INTO portal_sessions (id, actor_type, actor_id, school_id, expires_at, user_agent)
+     VALUES ($1, $2, $3, $4, NOW() + make_interval(hours => $5), $6)`,
+    [sid, actorType, actorId, schoolId, SESSION_MAX_HOURS, userAgent],
+  )
+  return sid
+}
+
+export async function revokePortalSession(sid: string): Promise<void> {
+  await pool.query(`UPDATE portal_sessions SET revoked_at = NOW() WHERE id = $1 AND revoked_at IS NULL`, [sid])
+}
+
+export async function revokePortalSessions(
+  actorType: PortalActorType,
+  actorId: number,
+  exceptSid?: string,
+  db: PgPool | PoolClient = pool,
+): Promise<void> {
+  await db.query(
+    `UPDATE portal_sessions SET revoked_at = NOW()
+      WHERE actor_type = $1 AND actor_id = $2 AND revoked_at IS NULL
+        AND ($3::uuid IS NULL OR id <> $3::uuid)`,
+    [actorType, actorId, exceptSid ?? null],
+  )
+}
+
+async function validatePortalSession<T extends { sid?: string; schoolId: number }>(
+  payload: T | null,
+  actorType: PortalActorType,
+  actorId: number,
+): Promise<T | null> {
+  if (!payload?.sid) return null
+  const { rows } = await pool.query(
+    `SELECT 1 FROM portal_sessions
+      WHERE id = $1 AND actor_type = $2 AND actor_id = $3 AND school_id = $4
+        AND revoked_at IS NULL AND expires_at > NOW()
+        AND last_seen_at > NOW() - make_interval(mins => $5)`,
+    [payload.sid, actorType, actorId, payload.schoolId, SESSION_IDLE_MINUTES],
+  )
+  if (!rows.length) return null
+  await pool.query(`UPDATE portal_sessions SET last_seen_at = NOW() WHERE id = $1 AND last_seen_at < NOW() - INTERVAL '30 seconds'`, [payload.sid])
+  return payload
+}
+
+export async function getPortalSessionIdFromCookie(actorType: PortalActorType): Promise<string | null> {
+  const cookieStore = await cookies()
+  if (actorType === 'teacher') return verifyTeacherToken(cookieStore.get(COOKIE_TEACHER)?.value || '')?.sid ?? null
+  if (actorType === 'student') return verifyStudentToken(cookieStore.get(COOKIE_STUDENT)?.value || '')?.sid ?? null
+  return verifyParentToken(cookieStore.get(COOKIE_PARENT)?.value || '')?.sid ?? null
+}
+
 // ─── Teacher JWT ──────────────────────────────────────────────────────────────
 export function signTeacherToken(payload: TeacherJWTPayload): string              { return sign(payload) }
 export function verifyTeacherToken(token: string): TeacherJWTPayload | null       { return verify<TeacherJWTPayload>(token) }
-export async function setTeacherAuthCookie(payload: TeacherJWTPayload)            { await setCookie(COOKIE_TEACHER, signTeacherToken(payload)) }
+export async function setTeacherAuthCookie(payload: TeacherJWTPayload)            { await setCookie(COOKIE_TEACHER, sign(payload, `${SESSION_MAX_HOURS}h`), false) }
 export async function clearTeacherAuthCookie()                                    { await clearCookie(COOKIE_TEACHER) }
 
-export async function getTeacherSession(): Promise<TeacherJWTPayload | null> {
+export async function getTeacherSession(opts: { allowFirstLogin?: boolean } = {}): Promise<TeacherJWTPayload | null> {
   const cookieStore = await cookies()
   const token = cookieStore.get(COOKIE_TEACHER)?.value
   if (!token) return null
-  return verifyTeacherToken(token)
+  const payload = verifyTeacherToken(token)
+  const validated = await validatePortalSession(payload, 'teacher', payload?.teacherId ?? 0)
+  if (!validated) return null
+  const { rows } = await pool.query(
+    `SELECT 1 FROM teachers
+     WHERE id = $1 AND school_id = $2 AND status = 'active' AND removed_at IS NULL`,
+    [validated.teacherId, validated.schoolId],
+  )
+  if (!rows.length || (!validated.passwordChanged && !opts.allowFirstLogin)) return null
+  return validated
 }
 
 export function getTeacherSessionFromRequest(req: NextRequest): TeacherJWTPayload | null {
@@ -269,14 +434,22 @@ export function getTeacherSessionFromRequest(req: NextRequest): TeacherJWTPayloa
 // ─── Student JWT ──────────────────────────────────────────────────────────────
 export function signStudentToken(payload: StudentJWTPayload): string              { return sign(payload) }
 export function verifyStudentToken(token: string): StudentJWTPayload | null       { return verify<StudentJWTPayload>(token) }
-export async function setStudentAuthCookie(payload: StudentJWTPayload)            { await setCookie(COOKIE_STUDENT, signStudentToken(payload)) }
+export async function setStudentAuthCookie(payload: StudentJWTPayload)            { await setCookie(COOKIE_STUDENT, sign(payload, `${SESSION_MAX_HOURS}h`), false) }
 export async function clearStudentAuthCookie()                                    { await clearCookie(COOKIE_STUDENT) }
 
-export async function getStudentSession(): Promise<StudentJWTPayload | null> {
+export async function getStudentSession(opts: { allowFirstLogin?: boolean } = {}): Promise<StudentJWTPayload | null> {
   const cookieStore = await cookies()
   const token = cookieStore.get(COOKIE_STUDENT)?.value
   if (!token) return null
-  return verifyStudentToken(token)
+  const payload = verifyStudentToken(token)
+  const validated = await validatePortalSession(payload, 'student', payload?.studentId ?? 0)
+  if (!validated) return null
+  const { rows } = await pool.query(
+    `SELECT 1 FROM students WHERE id = $1 AND school_id = $2 AND status = 'active'`,
+    [validated.studentId, validated.schoolId],
+  )
+  if (!rows.length || (!validated.passwordChanged && !opts.allowFirstLogin)) return null
+  return validated
 }
 
 export function getStudentSessionFromRequest(req: NextRequest): StudentJWTPayload | null {
@@ -288,14 +461,22 @@ export function getStudentSessionFromRequest(req: NextRequest): StudentJWTPayloa
 // ─── Parent JWT ───────────────────────────────────────────────────────────────
 export function signParentToken(payload: ParentJWTPayload): string                { return sign(payload) }
 export function verifyParentToken(token: string): ParentJWTPayload | null         { return verify<ParentJWTPayload>(token) }
-export async function setParentAuthCookie(payload: ParentJWTPayload)              { await setCookie(COOKIE_PARENT, signParentToken(payload)) }
+export async function setParentAuthCookie(payload: ParentJWTPayload)              { await setCookie(COOKIE_PARENT, sign(payload, `${SESSION_MAX_HOURS}h`), false) }
 export async function clearParentAuthCookie()                                     { await clearCookie(COOKIE_PARENT) }
 
-export async function getParentSession(): Promise<ParentJWTPayload | null> {
+export async function getParentSession(opts: { allowFirstLogin?: boolean } = {}): Promise<ParentJWTPayload | null> {
   const cookieStore = await cookies()
   const token = cookieStore.get(COOKIE_PARENT)?.value
   if (!token) return null
-  return verifyParentToken(token)
+  const payload = verifyParentToken(token)
+  const validated = await validatePortalSession(payload, 'parent', payload?.parentId ?? 0)
+  if (!validated) return null
+  const { rows } = await pool.query(
+    `SELECT 1 FROM parents WHERE id = $1 AND school_id = $2`,
+    [validated.parentId, validated.schoolId],
+  )
+  if (!rows.length || (!validated.passwordChanged && !opts.allowFirstLogin)) return null
+  return validated
 }
 
 export function getParentSessionFromRequest(req: NextRequest): ParentJWTPayload | null {

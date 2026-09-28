@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
 
   try {
     let query = 'SELECT * FROM master_subjects WHERE 1=1'
-    const args: any[] = []
+    const args: string[] = []
 
     if (board) {
       query += ' AND board = $' + (args.length + 1)

@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 44
+const SCHEMA_VERSION = 45
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3480,6 +3480,70 @@ async function runIncrementalMigrations() {
     )
   `)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id) WHERE revoked_at IS NULL`)
+
+  // Revocable sessions for teacher, student and parent portals.  A generic
+  // actor key is used because those identities live in three separate tables.
+  // The JWT only carries this row's UUID; deleting a cookie is therefore not
+  // the security boundary and copied cookies stop working after revocation.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS portal_sessions (
+      id UUID PRIMARY KEY,
+      actor_type VARCHAR(10) NOT NULL CHECK (actor_type IN ('teacher', 'student', 'parent')),
+      actor_id INTEGER NOT NULL,
+      school_id INTEGER NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ,
+      user_agent VARCHAR(300)
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_portal_sessions_actor ON portal_sessions(actor_type, actor_id) WHERE revoked_at IS NULL`)
+
+  // Shared, database-backed throttling works across serverless instances. Keys
+  // are SHA-256 digests, so email addresses, phone numbers and IPs are not kept
+  // in this operational table.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS auth_rate_limits (
+      key_hash VARCHAR(64) PRIMARY KEY,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      blocked_until TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_auth_rate_limits_cleanup ON auth_rate_limits(updated_at)`)
+
+  // roll_number is the globally unique WLYL student login id (not the class
+  // roll number). Legacy rows may already contain a collision, so a normal
+  // unique index cannot always be installed safely. This serialized trigger
+  // rejects every future duplicate without rewriting an existing student's
+  // login behind their back.
+  await pool.query(`
+    CREATE OR REPLACE FUNCTION enforce_unique_student_login_id()
+    RETURNS trigger AS $$
+    BEGIN
+      IF NEW.roll_number IS NULL OR BTRIM(NEW.roll_number) = '' THEN
+        RETURN NEW;
+      END IF;
+      PERFORM pg_advisory_xact_lock(hashtext(LOWER(NEW.roll_number)));
+      IF EXISTS (
+        SELECT 1 FROM students
+         WHERE LOWER(roll_number) = LOWER(NEW.roll_number)
+           AND id IS DISTINCT FROM NEW.id
+      ) THEN
+        RAISE EXCEPTION 'student login id already exists' USING ERRCODE = '23505';
+      END IF;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+  `)
+  await pool.query(`DROP TRIGGER IF EXISTS trg_unique_student_login_id ON students`)
+  await pool.query(`
+    CREATE TRIGGER trg_unique_student_login_id
+    BEFORE INSERT OR UPDATE OF roll_number ON students
+    FOR EACH ROW EXECUTE FUNCTION enforce_unique_student_login_id()
+  `)
 
   // School ID is no longer a login credential, so every onboarding admin needs an email.
   // Older schools were created with the school's contact email optional — backfill the

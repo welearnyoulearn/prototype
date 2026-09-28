@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool, { ensureDB } from '@/lib/db'
-import { getSession, verifyPassword, hashPassword, setAuthCookie, revokeUserSessions } from '@/lib/auth'
+import pool from '@/lib/db'
+import { getSession, getPlatformSession, verifyPassword, hashPassword, setAuthCookie, setPlatformAuthCookie, revokeUserSessions, validateNewPassword } from '@/lib/auth'
 
 export async function POST(req: NextRequest) {
   try {
 
-    const session = await getSession()
+    const session = await getSession({ allowFirstLogin: true }) || await getPlatformSession()
     if (!session) return NextResponse.json({ error: 'Unauthenticated' }, { status: 401 })
 
     try {
       const { currentPassword, newPassword } = await req.json()
-      if (!newPassword || newPassword.length < 8) {
-        return NextResponse.json({ error: 'New password must be at least 8 characters' }, { status: 400 })
-      }
+      const identity = await pool.query('SELECT email FROM users WHERE id = $1', [session.userId])
+      const policyError = validateNewPassword(newPassword, identity.rows[0]?.email)
+      if (policyError) return NextResponse.json({ error: policyError }, { status: 400 })
 
       const result = await pool.query('SELECT password_hash, first_login FROM users WHERE id = $1', [session.userId])
       if (result.rows.length === 0) return NextResponse.json({ error: 'User not found' }, { status: 404 })
@@ -38,11 +38,12 @@ export async function POST(req: NextRequest) {
       if (session.sid) await revokeUserSessions(session.userId, session.sid)
 
       // Re-issue token with firstLogin = false (same server session, same sid)
-      await setAuthCookie({ ...session, firstLogin: false })
+      if (session.role === 'platform_admin') await setPlatformAuthCookie({ ...session, firstLogin: false })
+      else await setAuthCookie({ ...session, firstLogin: false })
 
       const profileRes = await pool.query('SELECT profile_completed FROM users WHERE id = $1', [session.userId])
       const profileCompleted = profileRes.rows[0]?.profile_completed ?? false
-      return NextResponse.json({ success: true, profileCompleted })
+      return NextResponse.json({ success: true, profileCompleted, role: session.role })
     } catch (error) {
       console.error('[auth/change-password]', error)
       return NextResponse.json({ error: 'Failed to change password' }, { status: 500 })

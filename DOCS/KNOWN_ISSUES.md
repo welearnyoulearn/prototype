@@ -40,12 +40,6 @@ Current bugs and workarounds for the WLYL School prototype.
 
 ## Active Issues
 
-### [#253] Remaining authorization limits after the #253 fix
-- **Severity:** Low
-- **Detail:** #253 closed the confirmed #131 list (every route there now refuses anonymous and cross-school calls). Left as is, on purpose: `GET /api/init` stays public (runs `ensureDB()` only); teachers can still list every student in their own school through `/api/students` (students and parents cannot); the feature gate in `proxy.ts` fails **open** on a cold start if `/api/internal/feature-denials` cannot be reached, and it needs `INGEST_SECRET` set in production (same as the plan lock and Watchline) — without it no feature API is gated.
-- **Workaround:** Set `INGEST_SECRET` in every deployment.
-- **Status:** Tighten the teacher roster to their own classes if a school asks.
-
 ### [#116] Syllabus Translate relies on Google's undocumented Input Tools endpoint
 - **Severity:** Medium
 - **Detail:** `GET /api/transliterate` proxies `inputtools.google.com`, which has no published quota, SLA, pricing or API terms. Google can throttle or block it at any time, and on Vercel all schools share the same outbound IPs.

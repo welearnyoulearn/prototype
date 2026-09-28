@@ -5,6 +5,7 @@ import { escapeHtml } from '@/lib/html'
 import { todayIST } from '@/lib/istDate'
 import { planStatus, planExpiryEnforced, GRACE_DAYS } from '@/lib/planExpiry'
 import { tierLabel } from '@/lib/staffAccounts'
+import { checkCronAuth } from '@/lib/backup'
 
 // Daily (vercel.json). Emails each school's administrators about a plan that is about to end,
 // has ended, or whose grace period is over. Auth: Authorization: Bearer <CRON_SECRET>; a plain
@@ -92,10 +93,12 @@ async function run() {
 }
 
 export async function GET(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const auth = req.headers.get('authorization') ?? ''
-    if (auth.replace('Bearer ', '') !== cronSecret) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const unauthorized = checkCronAuth(req)
+  if (unauthorized) {
+    return NextResponse.json(
+      { error: unauthorized === 503 ? 'Cron authentication is not configured' : 'Unauthorized' },
+      { status: unauthorized },
+    )
   }
   try {
     return NextResponse.json({ ok: true, ...(await run()) })
