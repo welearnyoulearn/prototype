@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { Bell, CalendarDays, Check, ClipboardList, Clock, RefreshCw, UserRound, XCircle, type LucideIcon } from 'lucide-react'
+import { Bell, CalendarDays, Check, ClipboardList, Clock, Megaphone, RefreshCw, UserRound, XCircle, type LucideIcon } from 'lucide-react'
 
 type Notification = {
   id: number
@@ -28,6 +28,7 @@ const TYPE_ICONS: Record<string, LucideIcon> = {
   substitute_needed: RefreshCw,
   substitute_assigned: UserRound,
   marks_entry_required: ClipboardList,
+  marks_entry_nudge: Bell,
   marks_submitted: Check,
   marks_published: ClipboardList,
   exam_scheduled: CalendarDays,
@@ -41,6 +42,7 @@ const TYPE_ICONS: Record<string, LucideIcon> = {
   exam_reminder_7day: CalendarDays,
   exam_reminder_1day: Bell,
   exam_reminder_today: Clock,
+  teacher_broadcast: Megaphone,
 }
 
 function NotificationTypeIcon({ type }: { type: string }) {
@@ -53,6 +55,7 @@ const TYPE_COLORS: Record<string, string> = {
   substitute_needed: 'text-orange-600 bg-orange-50',
   substitute_assigned: 'text-teal-600 bg-teal-50',
   marks_entry_required: 'text-orange-700 bg-orange-50',
+  marks_entry_nudge: 'text-amber-700 bg-amber-50',
   marks_submitted: 'text-green-700 bg-green-50',
   marks_published: 'text-blue-700 bg-blue-50',
   exam_scheduled: 'text-indigo-700 bg-indigo-50',
@@ -66,10 +69,12 @@ const TYPE_COLORS: Record<string, string> = {
   exam_reminder_7day: 'text-indigo-700 bg-indigo-50',
   exam_reminder_1day: 'text-amber-700 bg-amber-50',
   exam_reminder_today: 'text-red-700 bg-red-50',
+  teacher_broadcast: 'text-teal-700 bg-teal-50',
 }
 
 const TYPE_NAV: Record<string, string> = {
   marks_entry_required: 'class-view',  // teacher: open class's marks tab
+  marks_entry_nudge: 'class-view',      // subject teacher: reminded to enter marks
   marks_submitted: 'class-view',        // class teacher: see marks submission
   marks_published: 'my-marks',          // student: go to marks page
   exam_scheduled: 'my-marks',           // student: go to Upcoming Exams tab (was 'weekly-test', a dead nav key)
@@ -166,7 +171,7 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
             examId: parsed.exam_id,
             classId: parsed.class_id,
             subjectName: parsed.subject_name,
-            tab: (n.type === 'marks_entry_required' || n.type === 'marks_submitted') ? 'Marks & Results' : undefined,
+            tab: (n.type === 'marks_entry_required' || n.type === 'marks_entry_nudge' || n.type === 'marks_submitted') ? 'Marks & Results' : undefined,
           }
         } catch { /* malformed data */ }
       }

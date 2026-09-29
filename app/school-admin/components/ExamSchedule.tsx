@@ -2,12 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import TestCalendar from '../../components/TestCalendar'
-import { GRADE_COLORS, type ExamGrade } from '@/lib/examGrading'
 
 type ClassOption = { id: number; grade: string; section: string }
 type ClassSubject = { id: number; subject_name: string; teacher_name: string | null }
 type ClassExamRow = { id: number; exam_name: string; exam_date: string; status: string }
-type TeacherOption = { id: number; name: string }
 type StudentOption = { id: number; name: string; roll_number: string; school_roll_number: number | null }
 type ExamConflict = { exam_id: number; exam_name: string; exam_date: string; start_time: string | null; end_time: string | null; grade: string; section: string }
 
@@ -25,10 +23,10 @@ type StudentResult = {
   student_id: number; name: string; roll_number: string
   subjects: Record<string, { marks_obtained: number | null; is_absent: boolean }>
   total_obtained: number | null; total_max: number
-  percentage: number | null; pass: boolean | null; grade: string | null; all_entered: boolean
+  percentage: number | null; pass: boolean | null; all_entered: boolean
 }
 type MarksData = {
-  exam: ExamListRow; subjects: Array<{ subject_name: string; max_marks: number }>
+  exam: ExamListRow; subjects: Array<{ subject_name: string; max_marks: number; pass_marks: number | null }>
   students: StudentResult[]; subject_stats: SubjectStat[]
   pass_count: number; fail_count: number; total_max: number
 }
@@ -51,6 +49,14 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   teacher_reviewed: { label: 'Awaiting Release', color: 'bg-violet-100 text-violet-700' },
   released:         { label: 'Released',         color: 'bg-emerald-100 text-emerald-700' },
   cancelled:        { label: 'Cancelled',        color: 'bg-red-100 text-red-600' },
+}
+
+// Turns a raw API error into something an admin can act on — a bare
+// "Forbidden" from an expired/missing session is meaningless to a user who
+// just clicked a button, so surface the actual actionable cause instead.
+function friendlyExamError(rawError: string | undefined, status: number): string {
+  if (status === 403) return 'Your session has expired or you no longer have access. Please refresh the page and sign in again.'
+  return rawError || 'Something went wrong. Please try again.'
 }
 
 type Props = { schoolId: number }
@@ -105,18 +111,31 @@ type NotifSettings = {
   notify_schedule_change: boolean; notify_cancelled: boolean; notify_marks_published: boolean
 }
 
-const NOTIF_TOGGLES: { key: keyof NotifSettings; label: string; hint: string }[] = [
-  { key: 'remind_7_day',            label: '7 days before',       hint: '📢 Upcoming Exam reminder' },
-  { key: 'remind_1_day',            label: '1 day before',        hint: '🔔 Exam Tomorrow reminder' },
-  { key: 'remind_exam_day',         label: 'Exam day',            hint: '📝 Exam Today reminder' },
-  { key: 'notify_schedule_change',  label: 'Schedule changed',    hint: 'Reschedule, venue, or instruction updates' },
-  { key: 'notify_cancelled',        label: 'Exam cancelled',      hint: '❌ Exam Cancelled notice' },
-  { key: 'notify_marks_published',  label: 'Marks published',     hint: 'Results released notice' },
+const NOTIF_GROUPS: { title: string; hint: string; toggles: { key: keyof NotifSettings; label: string; hint: string; icon: string }[] }[] = [
+  {
+    title: 'Reminders',
+    hint: 'Sent automatically in the run-up to an exam.',
+    toggles: [
+      { key: 'remind_7_day',    label: '7 days before', hint: 'Upcoming Exam reminder', icon: '📢' },
+      { key: 'remind_1_day',    label: '1 day before',  hint: 'Exam Tomorrow reminder', icon: '🔔' },
+      { key: 'remind_exam_day', label: 'Exam day',      hint: 'Exam Today reminder',    icon: '📝' },
+    ],
+  },
+  {
+    title: 'Status Updates',
+    hint: 'Sent the moment something about the exam changes.',
+    toggles: [
+      { key: 'notify_schedule_change', label: 'Schedule changed',  hint: 'Reschedule, venue, or instruction updates', icon: '🔁' },
+      { key: 'notify_cancelled',       label: 'Exam cancelled',    hint: 'Exam Cancelled notice',                     icon: '❌' },
+      { key: 'notify_marks_published', label: 'Marks published',   hint: 'Results released notice',                  icon: '📊' },
+    ],
+  },
 ]
 
 function NotificationSettings({ schoolId }: { schoolId: number }) {
   const [settings, setSettings] = useState<NotifSettings | null>(null)
   const [saving, setSaving] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState('')
 
   useEffect(() => {
     fetch(`/api/exam-notification-settings?school_id=${schoolId}`).then(r => r.json())
@@ -126,34 +145,68 @@ function NotificationSettings({ schoolId }: { schoolId: number }) {
 
   async function toggle(key: keyof NotifSettings) {
     if (!settings) return
+    const prev = settings
     const next = { ...settings, [key]: !settings[key] }
     setSettings(next)
     setSaving(key)
+    setSaveError('')
     try {
-      await fetch('/api/exam-notification-settings', {
+      const res = await fetch('/api/exam-notification-settings', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ school_id: schoolId, [key]: next[key] }),
       })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setSettings(prev)
+        setSaveError(friendlyExamError(data.error, res.status))
+      }
+    } catch {
+      setSettings(prev)
+      setSaveError('Connection error — that change was not saved.')
     } finally { setSaving(null) }
   }
 
   if (!settings) return <div className="py-12 text-center text-gray-400 text-sm">Loading reminder settings…</div>
 
   return (
-    <div className="max-w-xl bg-white rounded-2xl border border-gray-200 p-6 space-y-1">
-      <h3 className="text-sm font-bold text-gray-800 mb-1">Reminder &amp; Notification Settings</h3>
-      <p className="text-xs text-gray-400 mb-4">Choose which automatic notifications are sent to students, parents, and teachers. Turning one off never sends it twice — it simply stops sending.</p>
-      {NOTIF_TOGGLES.map(({ key, label, hint }) => (
-        <label key={key} className="flex items-center justify-between gap-4 py-2.5 border-b border-gray-50 last:border-b-0 cursor-pointer">
-          <div>
-            <p className="text-sm font-semibold text-gray-700">{label}</p>
-            <p className="text-xs text-gray-400">{hint}</p>
+    <div className="max-w-2xl bg-white rounded-2xl border border-gray-200 p-6 space-y-5">
+      <div>
+        <h3 className="text-sm font-bold text-gray-800 mb-1">Reminder &amp; Notification Settings</h3>
+        <p className="text-xs text-gray-400">Choose which automatic notifications are sent to students, parents, and teachers. Turning one off never sends it twice — it simply stops sending.</p>
+      </div>
+
+      {saveError && <p className="text-xs font-semibold text-red-500 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{saveError}</p>}
+
+      {NOTIF_GROUPS.map(group => (
+        <div key={group.title}>
+          <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wide mb-0.5">{group.title}</p>
+          <p className="text-[11px] text-gray-300 mb-2">{group.hint}</p>
+          <div className="border border-gray-100 rounded-xl divide-y divide-gray-50 overflow-hidden">
+            {group.toggles.map(({ key, label, hint, icon }) => {
+              const on = settings[key]
+              const isSaving = saving === key
+              return (
+                <div key={key} className={`flex items-center justify-between gap-4 px-4 py-3 ${on ? 'bg-emerald-50/40' : 'bg-white'}`}>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm flex-shrink-0 ${on ? 'bg-emerald-100' : 'bg-gray-100 grayscale opacity-60'}`}>{icon}</span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-700">{label}</p>
+                      <p className="text-xs text-gray-400 truncate">{hint}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => toggle(key)} disabled={isSaving} data-testid={`notif-toggle-${key}`}
+                    aria-pressed={on}
+                    className={`flex items-center gap-2 flex-shrink-0 disabled:opacity-50 ${isSaving ? 'cursor-wait' : 'cursor-pointer'}`}>
+                    <span className={`text-[11px] font-bold w-7 text-right ${on ? 'text-emerald-600' : 'text-gray-400'}`}>{isSaving ? '…' : on ? 'On' : 'Off'}</span>
+                    <span className={`w-11 h-6 rounded-full transition-colors relative ${on ? 'bg-emerald-500' : 'bg-gray-200'}`}>
+                      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow ${on ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </span>
+                  </button>
+                </div>
+              )
+            })}
           </div>
-          <button onClick={() => toggle(key)} disabled={saving === key} data-testid={`notif-toggle-${key}`}
-            className={`w-10 h-6 rounded-full transition-colors flex-shrink-0 relative disabled:opacity-50 ${settings[key] ? 'bg-indigo-600' : 'bg-gray-200'}`}>
-            <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow ${settings[key] ? 'translate-x-4' : 'translate-x-0.5'}`} />
-          </button>
-        </label>
+        </div>
       ))}
     </div>
   )
@@ -447,7 +500,7 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
       })
       const data = await res.json()
       if (!res.ok) {
-        setSaveError(data.error || 'Failed to schedule exam')
+        setSaveError(res.status === 409 ? (data.error || 'Failed to schedule exam') : friendlyExamError(data.error, res.status))
         if (Array.isArray(data.conflicts)) setSaveConflicts(data.conflicts)
         setSaving(false)
         return
@@ -786,14 +839,21 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
                                         className={`border rounded-lg px-2 py-1.5 flex items-center justify-between gap-1 min-h-[30px] ${subject ? 'border-emerald-200 bg-emerald-50' : 'border-dashed border-gray-200'}`}>
                                         <span className="text-[9px] font-semibold text-gray-400">{slotLabel}</span>
                                         {subject ? (
-                                          <span draggable
-                                            onDragStart={() => setDraggedSubject({ classId, subjectId: subject.id })}
-                                            onDragEnd={() => setDraggedSubject(null)}
-                                            onDoubleClick={() => unassignSlot(classId, date, slotIndex)}
-                                            data-testid={`exam-date-subject-${classId}-${date}-${slotIndex}`}
-                                            title="Double-click to remove"
-                                            className="text-[9px] bg-white border border-emerald-300 text-emerald-700 px-1.5 py-0.5 rounded cursor-grab active:cursor-grabbing font-semibold">
-                                            {subject.subject_name}
+                                          <span className="flex items-center gap-1 bg-white border border-emerald-300 text-emerald-700 pl-1.5 pr-1 py-0.5 rounded">
+                                            <span draggable
+                                              onDragStart={() => setDraggedSubject({ classId, subjectId: subject.id })}
+                                              onDragEnd={() => setDraggedSubject(null)}
+                                              data-testid={`exam-date-subject-${classId}-${date}-${slotIndex}`}
+                                              title="Drag to move, or click × to remove"
+                                              className="text-[9px] cursor-grab active:cursor-grabbing font-semibold">
+                                              {subject.subject_name}
+                                            </span>
+                                            <button type="button" onClick={() => unassignSlot(classId, date, slotIndex)}
+                                              data-testid={`exam-date-subject-remove-${classId}-${date}-${slotIndex}`}
+                                              title="Remove — wrong subject assigned?"
+                                              className="text-emerald-500 hover:text-red-600 hover:bg-red-50 rounded-full w-3.5 h-3.5 flex items-center justify-center leading-none text-[10px] font-bold">
+                                              ×
+                                            </button>
                                           </span>
                                         ) : (
                                           <span className="text-[9px] text-gray-300">Drop here</span>
@@ -1021,7 +1081,7 @@ function ManageExams({ schoolId }: { schoolId: number }) {
         body: JSON.stringify({ school_id: schoolId, reason: reason || null }),
       })
       const data = await res.json()
-      if (!res.ok) { setActionError(data.error || 'Failed to cancel'); return }
+      if (!res.ok) { setActionError(friendlyExamError(data.error, res.status)); return }
       setCancelling(null)
       await load()
     } catch { setActionError('Connection error') }
@@ -1032,7 +1092,7 @@ function ManageExams({ schoolId }: { schoolId: number }) {
     try {
       const res = await fetch(`/api/exams/${exam.id}?school_id=${schoolId}`, { method: 'DELETE' })
       const data = await res.json()
-      if (!res.ok) { setActionError(data.error || 'Failed to delete'); return }
+      if (!res.ok) { setActionError(friendlyExamError(data.error, res.status)); return }
       setDeleting(null)
       await load()
     } catch { setActionError('Connection error') }
@@ -1218,28 +1278,20 @@ function EditExamModal({ exam, schoolId, onClose, onSaved, onConflict }: {
     exam_date: exam.exam_date ? exam.exam_date.slice(0, 10) : '',
     start_time: exam.start_time ? exam.start_time.slice(0, 5) : '',
     end_time: exam.end_time ? exam.end_time.slice(0, 5) : '',
-    room: exam.room ?? '',
-    passing_pct: exam.passing_pct,
-    assigned_teacher_id: (exam.assigned_teacher_id ?? '') as string | number,
-    syllabus: '' as string,
     instructions: '' as string,
   })
-  const [teachers, setTeachers] = useState<TeacherOption[]>([])
   const [detailLoaded, setDetailLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch(`/api/teachers?school_id=${schoolId}`).then(r => r.json())
-      .then(data => setTeachers(Array.isArray(data) ? data : (Array.isArray(data?.teachers) ? data.teachers : [])))
-      .catch(() => {})
-    // The Manage Exams list row doesn't carry syllabus/instructions (kept out
-    // of the list query — they're long free text, not needed to browse the
-    // table); fetch the full detail once when the edit modal opens so an
-    // edit never silently blanks out existing syllabus/instructions.
+    // The Manage Exams list row doesn't carry instructions (kept out of the
+    // list query — long free text, not needed to browse the table); fetch
+    // the full detail once when the edit modal opens so an edit never
+    // silently blanks out existing instructions.
     fetch(`/api/exams/${exam.id}?school_id=${schoolId}`).then(r => r.json())
       .then(data => {
-        setForm(f => ({ ...f, syllabus: data.syllabus ?? '', instructions: data.instructions ?? '' }))
+        setForm(f => ({ ...f, instructions: data.instructions ?? '' }))
         setDetailLoaded(true)
       })
       .catch(() => setDetailLoaded(true))
@@ -1257,17 +1309,13 @@ function EditExamModal({ exam, schoolId, onClose, onSaved, onConflict }: {
           exam_date: form.exam_date || undefined,
           start_time: form.start_time || null,
           end_time: form.end_time || null,
-          room: form.room.trim() || null,
-          passing_pct: form.passing_pct,
-          assigned_teacher_id: form.assigned_teacher_id || null,
-          syllabus: form.syllabus.trim() || null,
           instructions: form.instructions.trim() || null,
         }),
       })
       const data = await res.json()
       if (!res.ok) {
         if (res.status === 409) { onConflict(data.error, data.conflicts ?? []); onClose(); return }
-        setError(data.error || 'Failed to save'); setSaving(false); return
+        setError(friendlyExamError(data.error, res.status)); setSaving(false); return
       }
       onSaved()
     } catch { setError('Connection error'); setSaving(false) }
@@ -1282,20 +1330,12 @@ function EditExamModal({ exam, schoolId, onClose, onSaved, onConflict }: {
           <input type="text" value={form.exam_name} onChange={e => setForm(f => ({ ...f, exam_name: e.target.value }))}
             className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Exam Type</label>
-            <select value={form.exam_type} onChange={e => setForm(f => ({ ...f, exam_type: e.target.value }))}
-              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
-              {EXAM_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Passing %</label>
-            <input type="number" min={0} max={100} value={form.passing_pct}
-              onChange={e => setForm(f => ({ ...f, passing_pct: parseInt(e.target.value) || 35 }))}
-              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-          </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">Exam Type</label>
+          <select value={form.exam_type} onChange={e => setForm(f => ({ ...f, exam_type: e.target.value }))}
+            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+            {EXAM_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
         </div>
         <div className="grid grid-cols-3 gap-3">
           <div>
@@ -1314,27 +1354,6 @@ function EditExamModal({ exam, schoolId, onClose, onSaved, onConflict }: {
             <input type="time" value={form.end_time} onChange={e => setForm(f => ({ ...f, end_time: e.target.value }))}
               className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
           </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Room</label>
-            <input type="text" value={form.room} onChange={e => setForm(f => ({ ...f, room: e.target.value }))}
-              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Assigned Teacher</label>
-            <select value={form.assigned_teacher_id} onChange={e => setForm(f => ({ ...f, assigned_teacher_id: e.target.value }))}
-              className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
-              <option value="">None assigned</option>
-              {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </div>
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-1">Syllabus / Chapters</label>
-          <textarea rows={2} value={form.syllabus} disabled={!detailLoaded}
-            onChange={e => setForm(f => ({ ...f, syllabus: e.target.value }))}
-            className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 resize-none disabled:bg-gray-50" />
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-600 mb-1">Exam Instructions</label>
@@ -1393,7 +1412,7 @@ function ResultsAndRelease({ schoolId }: { schoolId: number }) {
         body: JSON.stringify({ school_id: schoolId }),
       })
       const data = await res.json()
-      if (!res.ok) { setReleaseError(data.error || 'Failed to release'); setReleasing(false); return }
+      if (!res.ok) { setReleaseError(friendlyExamError(data.error, res.status)); setReleasing(false); return }
       await loadExamList()
       await loadMarks({ ...selectedExam, status: 'released' })
     } catch { setReleaseError('Connection error') }
@@ -1574,8 +1593,6 @@ function ExamAnalysisPanel({ data }: { data: MarksData }) {
     .filter(s => s.percentage !== null)
     .sort((a, b) => (b.percentage ?? 0) - (a.percentage ?? 0))
 
-  const gradeColor = (g: string | null) => g ? (GRADE_COLORS[g as ExamGrade]?.split(' ')[1] ?? 'text-gray-500') : 'text-gray-300'
-
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-md border border-gray-200 px-5 py-4">
@@ -1697,7 +1714,6 @@ function ExamAnalysisPanel({ data }: { data: MarksData }) {
                 ))}
                 <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500">Total</th>
                 <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500">%</th>
-                <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500">Grade</th>
                 <th className="text-center px-3 py-2.5 text-xs font-semibold text-gray-500">Result</th>
               </tr>
             </thead>
@@ -1720,9 +1736,13 @@ function ExamAnalysisPanel({ data }: { data: MarksData }) {
                       if (!m) return <td key={sub.subject_name} className="px-3 py-2.5 text-center text-xs text-gray-200">—</td>
                       if (m.is_absent) return <td key={sub.subject_name} className="px-3 py-2.5 text-center"><span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">AB</span></td>
                       const subPct = m.marks_obtained !== null ? (m.marks_obtained / sub.max_marks) * 100 : null
+                      // A subject with its own configured pass_marks is judged
+                      // against that directly; falls back to the exam-wide
+                      // percentage for a subject nobody's configured yet.
+                      const subFailed = m.marks_obtained !== null && (sub.pass_marks != null ? m.marks_obtained < sub.pass_marks : subPct !== null && subPct < exam.passing_pct)
                       return (
                         <td key={sub.subject_name} className="px-3 py-2.5 text-center">
-                          <span className={`text-xs font-semibold ${subPct === null ? 'text-gray-300' : subPct >= exam.passing_pct ? 'text-gray-700' : 'text-red-500'}`}>
+                          <span className={`text-xs font-semibold ${subPct === null ? 'text-gray-300' : subFailed ? 'text-red-500' : 'text-gray-700'}`}>
                             {m.marks_obtained ?? '—'}
                           </span>
                         </td>
@@ -1738,7 +1758,6 @@ function ExamAnalysisPanel({ data }: { data: MarksData }) {
                         </span>
                       ) : <span className="text-xs text-gray-300">—</span>}
                     </td>
-                    <td className={`px-3 py-2.5 text-center text-xs font-semibold ${gradeColor(s.grade)}`}>{s.grade ?? '—'}</td>
                     <td className="px-3 py-2.5 text-center">
                       {s.pass === null
                         ? <span className="text-xs text-gray-300">Pending</span>

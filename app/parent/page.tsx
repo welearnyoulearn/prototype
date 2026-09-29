@@ -47,6 +47,11 @@ type Student = {
 }
 type ParentInfo = { id: number; name: string; email: string; school_id: number; school_name: string; children: Child[]; date_of_birth?: string | null }
 
+type SubjectMark = {
+  subject_name: string; max_marks: number; marks_obtained: number | null
+  is_absent: boolean; percentage: number | null; pass: boolean | null
+}
+
 type Summary = {
   upcoming_exams: Array<{
     id: number; exam_name: string; exam_type: string; exam_date: string
@@ -214,6 +219,26 @@ function ParentDashboard() {
   const [ackingId, setAckingId] = useState<number | null>(null)
   const [ackSaving, setAckSaving] = useState(false)
   const [ackError, setAckError]   = useState('')
+
+  // Per-subject breakdown for a result card, loaded on demand when the
+  // parent expands it — the summary list only ever carried the overall
+  // total, never a subject-by-subject view.
+  const [expandedResultId, setExpandedResultId] = useState<number | null>(null)
+  const [resultSubjects, setResultSubjects] = useState<Record<number, SubjectMark[] | 'loading' | 'error'>>({})
+
+  async function toggleResultDetail(examId: number) {
+    if (expandedResultId === examId) { setExpandedResultId(null); return }
+    setExpandedResultId(examId)
+    if (resultSubjects[examId] || !student) return
+    setResultSubjects(prev => ({ ...prev, [examId]: 'loading' }))
+    try {
+      const data = await fetch(`/api/students/${student.id}/exams?school_id=${student.school_id}&class_id=${student.class_id}`).then(r => r.json())
+      const exam = Array.isArray(data) ? data.find((e: { exam_id: number }) => e.exam_id === examId) : null
+      setResultSubjects(prev => ({ ...prev, [examId]: exam?.subjects ?? 'error' }))
+    } catch {
+      setResultSubjects(prev => ({ ...prev, [examId]: 'error' }))
+    }
+  }
 
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -1355,6 +1380,46 @@ function ParentDashboard() {
                       )}
                     </div>
                   </div>
+                  <button onClick={() => toggleResultDetail(r.id)}
+                    className="w-full flex items-center justify-between px-4 py-2 text-xs font-semibold text-blue-600 border-b border-gray-100 hover:bg-blue-50/50 transition-colors">
+                    {expandedResultId === r.id ? 'Hide subject-wise marks' : 'View subject-wise marks'}
+                    <span className={`transition-transform ${expandedResultId === r.id ? 'rotate-180' : ''}`}>⌄</span>
+                  </button>
+                  {expandedResultId === r.id && (
+                    <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/50">
+                      {resultSubjects[r.id] === 'loading' ? (
+                        <p className="text-xs text-muted-foreground text-center py-2">Loading subjects…</p>
+                      ) : resultSubjects[r.id] === 'error' || !resultSubjects[r.id] ? (
+                        <p className="text-xs text-red-500 text-center py-2">Couldn&rsquo;t load subject marks.</p>
+                      ) : (
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-left text-muted-foreground">
+                              <th className="font-semibold pb-1.5">Subject</th>
+                              <th className="font-semibold pb-1.5 text-right">Marks</th>
+                              <th className="font-semibold pb-1.5 text-right pl-3">Result</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {(resultSubjects[r.id] as SubjectMark[]).map(sub => (
+                              <tr key={sub.subject_name}>
+                                <td className="py-1.5 text-gray-700">{sub.subject_name}</td>
+                                <td className="py-1.5 text-right tabular-nums text-gray-700">
+                                  {sub.is_absent ? 'Absent' : sub.marks_obtained !== null ? `${sub.marks_obtained}/${sub.max_marks}` : '—'}
+                                </td>
+                                <td className="py-1.5 text-right pl-3">
+                                  {sub.pass === null ? <span className="text-gray-300">—</span> :
+                                    <span className={`font-bold px-1.5 py-0.5 rounded-full ${sub.pass ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                                      {sub.pass ? 'Pass' : 'Fail'}
+                                    </span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
                   <div className="px-4 py-3">
                     {r.parent_acknowledged ? (
                       <div className="flex items-center gap-2 text-xs text-green-700 bg-green-50 rounded-lg px-3 py-2">

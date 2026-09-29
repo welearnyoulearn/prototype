@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAccess } from '@/lib/examsAuth'
-import { calcGrade, isPassing } from '@/lib/examGrading'
+import { isPassing } from '@/lib/examGrading'
 
 // GET /api/students/[id]/exams?school_id=&class_id=
 // Returns all released exams with this student's marks.
@@ -91,7 +91,6 @@ export async function GET(
           marks_obtained: obtained,
           is_absent: m?.is_absent ?? false,
           percentage: subPct !== null ? Math.round(subPct * 10) / 10 : null,
-          grade: subPct !== null ? calcGrade(subPct) : null,
           pass: subPct !== null ? isPassing(subPct, exam.passing_pct) : null,
         }
       })
@@ -115,7 +114,6 @@ export async function GET(
         total_obtained: allEntered ? totalObtained : null,
         total_max: totalMax,
         percentage: totalPct,
-        grade: totalPct !== null ? calcGrade(totalPct) : null,
         pass: totalPct !== null ? isPassing(totalPct, exam.passing_pct) : null,
         parent_acknowledged: !!ack,
         parent_ack_name: ack?.parent_name ?? null,
