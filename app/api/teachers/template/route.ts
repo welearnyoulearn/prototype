@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
-import pool from '@/lib/db'
-import { resolveAcademicYear } from '@/lib/academicYear'
-import { requireFeeAccess } from '@/lib/auth'
+import { requireFeeAccess, schoolHasFeature } from '@/lib/auth'
+import { getStaffSubjectOptions } from '@/lib/staffSubjectOptions'
 
 const MANDATORY_COLS = new Set(['Name', 'Email', 'Subject', 'Phone'])
 
 // GET /api/teachers/template?school_id=X
-// Same column layout as the plain-CSV template (name,email,subject,phone,
-// department,qualification,date_of_joining,staff_type,teaches_grades), but
-// the Subject column gets a real in-cell dropdown — the school's currently
-// subscribed subjects when it has any, so a filled-in-Excel import can never
-// introduce a spelling variant ("Mathematics") that silently fails to match
+// Excel is intentional here: its in-cell dropdowns keep subjects, staff types
+// and grades aligned with the values the product understands.
+// the Subject column gets a real in-cell dropdown — all master subjects plus
+// custom subjects owned by this school, so a filled-in Excel import cannot
+// introduce a spelling variant that silently fails to match
 // school_subjects.subject_name the way free-typed CSV text can. If the
 // school hasn't subscribed to anything (no Syllabus feature, or feature
 // present but unused), fall back to the full platform master catalog —
@@ -19,42 +18,31 @@ const MANDATORY_COLS = new Set(['Name', 'Email', 'Subject', 'Phone'])
 export async function GET(req: NextRequest) {
   const school_id = req.nextUrl.searchParams.get('school_id')
   if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
-  if (!await requireFeeAccess(school_id)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-
-  let subjectNames: string[] = []
-  let isSubscribedList = false
-  try {
-    const academic_year = await resolveAcademicYear(school_id)
-    const { rows } = await pool.query(
-      'SELECT DISTINCT subject_name FROM school_subjects WHERE school_id = $1 AND academic_year = $2 ORDER BY subject_name',
-      [school_id, academic_year]
-    )
-    subjectNames = rows.map(r => r.subject_name)
-    isSubscribedList = subjectNames.length > 0
-  } catch {
-    // No academic year found at all — treated the same as zero subscriptions.
+  const schoolId = Number(school_id)
+  if (!Number.isInteger(schoolId) || schoolId <= 0) return NextResponse.json({ error: 'Invalid school_id' }, { status: 400 })
+  if (!await requireFeeAccess(schoolId)) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  if (!(await schoolHasFeature(schoolId, 'staff'))) {
+    return NextResponse.json({ error: 'Staff Management is not enabled for this school', code: 'FEATURE_DISABLED' }, { status: 403 })
   }
 
-  if (subjectNames.length === 0) {
-    const { rows } = await pool.query('SELECT DISTINCT subject_name FROM master_subjects ORDER BY subject_name')
-    subjectNames = rows.map(r => r.subject_name)
-  }
+  const subjectOptions = await getStaffSubjectOptions(schoolId)
+  const subjectNames = subjectOptions.map(option => option.name)
 
   const wb = new ExcelJS.Workbook()
   const ws = wb.addWorksheet('Staff')
 
   const headers = [
-    'Name', 'Email', 'Subject', 'Phone', 'Department',
+    'Name *', 'Email *', 'Subject *', 'Phone *', 'Department',
     'Qualification', 'Date of Joining', 'Staff Type', 'Teaches Grades',
   ]
   ws.columns = headers.map(h => ({
     header: h, key: h,
-    width: h === 'Email' ? 26 : h === 'Department' || h === 'Qualification' ? 18 : 16,
+    width: h.startsWith('Email') ? 26 : h === 'Department' || h === 'Qualification' ? 18 : 16,
   }))
 
   const headerRow = ws.getRow(1)
   headerRow.eachCell(cell => {
-    const isMandatory = MANDATORY_COLS.has(cell.value as string)
+    const isMandatory = MANDATORY_COLS.has(String(cell.value).replace(/\s*\*$/, ''))
     cell.font = { bold: true, color: { argb: isMandatory ? 'FF7B2F00' : 'FF374151' } }
     cell.fill = {
       type: 'pattern', pattern: 'solid',
@@ -75,7 +63,7 @@ export async function GET(req: NextRequest) {
   // inline list formula ('"A,B,C"') caps out around 255 characters, which a
   // long subject list could exceed — so the allowed values live on a hidden
   // reference sheet instead, and the dropdown points at that range.
-  const lastRow = 1000 // comfortably covers a full staff roster in one upload
+  const lastRow = 501 // header + the same 500-row ceiling enforced by the API
   if (subjectNames.length > 0) {
     const refSheet = wb.addWorksheet('_subjects')
     refSheet.state = 'veryHidden'
@@ -93,10 +81,8 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Staff Type dropdown (column H) — same two values the manual onboarding
-  // table and the API both already accept (anything else normalizes to
-  // 'teaching' server-side), given a real dropdown here so a typo can't
-  // silently produce the wrong default.
+  // Staff Type dropdown (column H) — the same two values accepted by the UI
+  // and API. Invalid values are rejected server-side.
   for (let r = 2; r <= lastRow; r++) {
     ws.getCell(`H${r}`).dataValidation = {
       type: 'list',
@@ -130,9 +116,8 @@ export async function GET(req: NextRequest) {
   const noteRow = ws.addRow([])
   ws.mergeCells(`A${noteRow.number}:I${noteRow.number}`)
   const noteCell = ws.getCell(`A${noteRow.number}`)
-  const subjectNote = isSubscribedList
-    ? 'Subject must be one of the school’s subscribed subjects — click the cell and use the dropdown.'
-    : 'This school hasn’t subscribed to any subjects yet, so Subject uses the full master catalog — click the cell and use the dropdown.'
+  const customCount = subjectOptions.filter(option => option.source === 'custom').length
+  const subjectNote = `Subject contains the full master syllabus${customCount ? ` plus ${customCount} custom subject${customCount === 1 ? '' : 's'} from this school` : ''} — click the cell and use the dropdown.`
   noteCell.value = `★ Yellow columns are MANDATORY. ${subjectNote} Non-teaching staff can leave Subject blank. Staff Type: pick teaching or non_teaching from the dropdown. Teaches Grades: for one grade, use the dropdown — for several, type them comma-separated with no spaces, e.g. 8,9,10 (leave blank to teach all grades).`
   noteCell.font = { italic: true, color: { argb: 'FFB45309' }, size: 9 }
   noteCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF9E6' } }

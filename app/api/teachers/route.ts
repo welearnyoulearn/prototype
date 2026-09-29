@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { getCache, setCache } from '@/lib/responseCache'
-import { getAnySession } from '@/lib/auth'
+import { getPlatformSession, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
 
 // Never `SELECT t.*`: teachers carries password_hash, which would otherwise be
 // serialised straight to the browser. Enumerate every safe column instead.
@@ -21,13 +21,9 @@ function parseCount(raw: string | null, fallback: number): number {
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getAnySession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    // A school directory is for staff. getAnySession() also admits student and parent logins,
-    // which could otherwise list every classmate's (or every teacher's) contact details.
-    if (session.role === 'student' || session.role === 'parent') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    const platform = await getPlatformSession()
+    const admin = platform ? null : await requireSchoolAdmin()
+    if (!platform && !admin?.schoolId) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     try {
       const { searchParams } = new URL(req.url)
@@ -35,23 +31,16 @@ export async function GET(req: NextRequest) {
       const staff_type = searchParams.get('staff_type')
       const department = searchParams.get('department')
 
-      // getAnySession() only confirms SOME valid login exists — without
-      // this, a teacher/student logged into School A could pass School B's
-      // id and read School B's full staff directory including phone/email.
-      if (session.role !== 'platform_admin' && school_id && Number(school_id) !== Number(session.schoolId)) {
+      if (!platform && school_id && Number(school_id) !== Number(admin?.schoolId)) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
 
-      // ...and the scope itself comes from the SESSION, not from the presence of the
-      // param: omitting school_id used to leave the WHERE clause empty, so the guard
-      // above never fired and the query returned every school's staff. Only
-      // platform_admin may retarget the scope, and even then it falls back to their
-      // own school (getAnySession never returns a session without a schoolId).
-      const scopedSchoolId = session.role === 'platform_admin' && school_id
-        ? Number(school_id)
-        : session.schoolId
-      if (!Number.isInteger(scopedSchoolId)) {
+      const scopedSchoolId = platform?.role === 'platform_admin' ? Number(school_id) : Number(admin?.schoolId)
+      if (!Number.isInteger(scopedSchoolId) || scopedSchoolId <= 0) {
         return NextResponse.json({ error: 'Invalid school_id' }, { status: 400 })
+      }
+      if (!platform && !(await schoolHasFeature(scopedSchoolId, 'staff'))) {
+        return NextResponse.json({ error: 'Staff Management is not enabled for this school', code: 'FEATURE_DISABLED', feature: 'staff' }, { status: 403 })
       }
 
       // school_id is seeded as $1 rather than pushed conditionally, so there is no
