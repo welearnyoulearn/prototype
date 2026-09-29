@@ -423,6 +423,7 @@ export function SyllabusTracking({
   const [inactiveChaptersLoading, setInactiveChaptersLoading] = useState(false)
   const [expandedChapter, setExpandedChapter] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [markingId, setMarkingId] = useState<number | null>(null)
   const { toast, flash, copyPrompt } = useToast()
   const { confirm, ConfirmDialog } = useConfirm()
@@ -513,6 +514,7 @@ export function SyllabusTracking({
 
   const loadSyllabus = useCallback(async () => {
     setLoading(true)
+    setLoadError('')
     try {
       // Always fetch every subject for this class, never scoped to
       // selectedSubject — this function is also called to refresh after any
@@ -522,6 +524,7 @@ export function SyllabusTracking({
       const yearParam = academicYear ? `&academic_year=${encodeURIComponent(academicYear)}` : ''
       const res = await fetch(`/api/syllabus?school_id=${schoolId}&class_id=${classId}${yearParam}`)
       const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to load syllabus')
       const fetched: SylSubject[] = Array.isArray(data.subjects) ? data.subjects : []
       // Class teachers see every subject for their own class; everyone else
       // is gated to exactly what Class Management assigned them.
@@ -534,6 +537,8 @@ export function SyllabusTracking({
         const own = teacher && !isClassTeacher ? list.find(s => s.subject === teacher.subject) : null
         setSelectedSubject(own ? own.subject : list[0].subject)
       }
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load syllabus')
     } finally {
       setLoading(false)
     }
@@ -561,6 +566,7 @@ export function SyllabusTracking({
       try {
         const res = await fetch(`/api/syllabus/setup?school_id=${schoolId}&class_id=${classId}&subject=${encodeURIComponent(selectedSubject)}${yearParam}`)
         const data: { setup_completed_at: string | null; chapters?: SetupChapter[] } = await res.json()
+        if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to load syllabus setup')
 
         // Resolve the sibling check (if needed) BEFORE writing setupStatus —
         // setupStatus is this effect's own dependency, so writing it triggers
@@ -588,6 +594,7 @@ export function SyllabusTracking({
           try {
             const siblingRes = await fetch(`/api/syllabus/setup/siblings?school_id=${schoolId}&class_id=${classId}&subject=${encodeURIComponent(selectedSubject)}${yearParam}`)
             const siblingData = await siblingRes.json()
+            if (!siblingRes.ok) throw new Error(siblingData.error || 'Failed to load sibling syllabus setup')
             if (cancelled) return
             if (Array.isArray(siblingData.siblings) && siblingData.siblings.length > 0) {
               setSiblingSetups(siblingData.siblings)
@@ -768,7 +775,7 @@ export function SyllabusTracking({
       const res = await fetch(`/api/syllabus/chapters/${chapter.school_chapter_id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ school_id: schoolId, chapter_name: name }),
+        body: JSON.stringify({ school_id: schoolId, class_id: classId, chapter_name: name }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to rename chapter')
@@ -1115,16 +1122,20 @@ export function SyllabusTracking({
     const newStatus = topic.status === 'covered' ? 'pending' : 'covered'
     setMarkingId(topic.id)
     try {
-      await fetch(`/api/syllabus/${topic.id}`, {
+      const res = await fetch(`/api/syllabus/${topic.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ school_id: schoolId, class_id: classId, status: newStatus, covered_by: teacher.id }),
       })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Failed to update topic progress')
       flash(newStatus === 'covered' ? `"${topic.topic_name}" marked taught` : `"${topic.topic_name}" marked pending`)
       // Reload to sync counts — loadSyllabus always fetches every subject
       // for this class, so this can't truncate `subjects` down to just the
       // one being edited.
       await loadSyllabus()
+    } catch (err) {
+      flash(err instanceof Error ? err.message : 'Failed to update topic progress')
     } finally {
       setMarkingId(null)
     }
@@ -1134,6 +1145,15 @@ export function SyllabusTracking({
     <div className="py-16 text-center">
       <Loader2 size={22} className="animate-spin mx-auto mb-3" style={{ color: GOLD }} />
       <p className="text-muted-foreground text-sm">Loading syllabus...</p>
+    </div>
+  )
+
+  if (loadError) return (
+    <div role="alert" className="bg-white rounded-lg border border-red-200 py-10 text-center">
+      <p className="text-sm text-red-600 mb-3">{loadError}</p>
+      <button type="button" onClick={() => void loadSyllabus()} className="text-sm px-3 py-2 rounded-md border" style={{ borderColor: BORDER, color: INK }}>
+        Try again
+      </button>
     </div>
   )
 
@@ -1157,7 +1177,17 @@ export function SyllabusTracking({
             const active = selectedSubject === s.subject
             return (
               <button key={s.subject}
-                onClick={() => { setSelectedSubject(s.subject); setExpandedChapter(null); setShowInactiveChapters(false); setInactiveChaptersTree(null) }}
+                onClick={() => {
+                  setSelectedSubject(s.subject)
+                  setExpandedChapter(null)
+                  setSetupMode('closed')
+                  setSetupTree(null)
+                  setSetupError('')
+                  setSiblingSetups([])
+                  setPreviewSibling(null)
+                  setShowInactiveChapters(false)
+                  setInactiveChaptersTree(null)
+                }}
                 data-testid={`syllabus-subject-${s.subject}`}
                 className="px-4 py-2 rounded-md text-sm font-medium border transition-colors"
                 style={{ background: active ? GOLD : 'white', color: active ? 'white' : INK, borderColor: active ? GOLD : BORDER }}>

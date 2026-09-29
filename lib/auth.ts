@@ -609,15 +609,24 @@ export async function disabledFeaturesBySchool(featureKeys: readonly string[], d
 // ─── Any authenticated session ────────────────────────────────────────────────
 // Returns the schoolId and role for whichever session cookie is present.
 // Used on routes accessible by teachers, students, and school admins alike.
-export async function getAnySession(): Promise<{ schoolId: number; role: string } | null> {
-  const teacher = await getTeacherSession()
-  if (teacher) return { schoolId: teacher.schoolId, role: 'teacher' }
-  const student = await getStudentSession()
-  if (student) return { schoolId: student.schoolId, role: 'student' }
-  const parent = await getParentSession()
-  if (parent) return { schoolId: parent.schoolId, role: 'parent' }
+export type SyllabusSession = {
+  schoolId: number
+  role: string
+  actorId?: number
+}
+
+export async function getAnySession(): Promise<SyllabusSession | null> {
+  // Prefer the school-staff cookie when multiple portal cookies coexist in
+  // one browser. Otherwise a stale teacher/student cookie can shadow a valid
+  // school-admin session and incorrectly downgrade legitimate admin requests.
   const admin = await getSession()
-  if (admin && admin.schoolId) return { schoolId: admin.schoolId, role: admin.role }
+  if (admin && admin.schoolId) return { schoolId: admin.schoolId, role: admin.role, actorId: admin.userId }
+  const teacher = await getTeacherSession()
+  if (teacher) return { schoolId: teacher.schoolId, role: 'teacher', actorId: teacher.teacherId }
+  const student = await getStudentSession()
+  if (student) return { schoolId: student.schoolId, role: 'student', actorId: student.studentId }
+  const parent = await getParentSession()
+  if (parent) return { schoolId: parent.schoolId, role: 'parent', actorId: parent.parentId }
   return null
 }
 
@@ -626,12 +635,12 @@ export async function getAnySession(): Promise<{ schoolId: number; role: string 
 // parent sessions (getAnySession) since syllabus is read by every school role
 // and written by teachers, not just school-admin staff.
 export async function requireSyllabusAccess(requestedSchoolId: string | number | null | undefined):
-  Promise<{ schoolId: number; role: string } | null> {
+  Promise<SyllabusSession | null> {
   const platformSession = await getPlatformSession()
   if (platformSession?.role === 'platform_admin') {
     const sid = requestedSchoolId != null ? Number(requestedSchoolId) : (platformSession.schoolId ?? 0)
     if (!sid) return null
-    return { schoolId: sid, role: 'platform_admin' }
+    return { schoolId: sid, role: 'platform_admin', actorId: platformSession.userId }
   }
 
   const session = await getAnySession()
@@ -645,10 +654,80 @@ export async function requireSyllabusAccess(requestedSchoolId: string | number |
 // Write-capable roles only (teacher, school admin/principal/VP) — students and
 // parents get requireSyllabusAccess for reads but must never mark/add/delete.
 export async function requireSyllabusWriteAccess(requestedSchoolId: string | number | null | undefined):
-  Promise<{ schoolId: number; role: string } | null> {
+  Promise<SyllabusSession | null> {
   const session = await requireSyllabusAccess(requestedSchoolId)
   if (!session) return null
   const WRITE_ROLES = ['teacher', 'school_admin', 'principal', 'vice_principal', 'platform_admin']
   if (!WRITE_ROLES.includes(session.role)) return null
   return session
+}
+
+// Enforces record-level syllabus access after the tenant/session guard above.
+// A class teacher may manage every subject in their class; a subject teacher
+// may manage only their assigned class+subject. Students may read only their
+// own class and parents only classes containing one of their linked children.
+// Staff admins and platform admins retain their intended school-wide access.
+export async function canAccessSyllabusClass(
+  session: SyllabusSession,
+  classId: string | number,
+  subject?: string | null,
+): Promise<boolean> {
+  const { rows: [classRow] } = await pool.query(
+    `SELECT id, school_id, grade, section, class_teacher_id
+       FROM classes
+      WHERE id = $1 AND school_id = $2 AND deleted_at IS NULL`,
+    [classId, session.schoolId],
+  )
+  if (!classRow) return false
+
+  if (['platform_admin', 'school_admin', 'principal', 'vice_principal'].includes(session.role)) return true
+  if (!session.actorId) return false
+
+  if (session.role === 'teacher') {
+    if (Number(classRow.class_teacher_id) === Number(session.actorId)) return true
+    const params: Array<string | number> = [classId, session.actorId]
+    let sql = `SELECT 1 FROM class_subjects
+                WHERE class_id = $1 AND teacher_id = $2`
+    if (subject) {
+      params.push(subject)
+      sql += ` AND LOWER(TRIM(subject_name)) = LOWER(TRIM($3))`
+    }
+    sql += ' LIMIT 1'
+    return (await pool.query(sql, params)).rows.length > 0
+  }
+
+  if (session.role === 'student') {
+    const { rows } = await pool.query(
+      `SELECT 1 FROM students
+        WHERE id = $1 AND school_id = $2 AND status = 'active'
+          AND grade = $3 AND section = $4
+        LIMIT 1`,
+      [session.actorId, session.schoolId, classRow.grade, classRow.section],
+    )
+    return rows.length > 0
+  }
+
+  if (session.role === 'parent') {
+    const { rows } = await pool.query(
+      `SELECT 1
+         FROM student_parents sp
+         JOIN students s ON s.id = sp.student_id
+        WHERE sp.parent_id = $1 AND s.school_id = $2 AND s.status = 'active'
+          AND s.grade = $3 AND s.section = $4
+        LIMIT 1`,
+      [session.actorId, session.schoolId, classRow.grade, classRow.section],
+    )
+    return rows.length > 0
+  }
+
+  return false
+}
+
+export async function canWriteSyllabusClass(
+  session: SyllabusSession,
+  classId: string | number,
+  subject?: string | null,
+): Promise<boolean> {
+  if (!['teacher', 'school_admin', 'principal', 'vice_principal', 'platform_admin'].includes(session.role)) return false
+  return canAccessSyllabusClass(session, classId, subject)
 }
