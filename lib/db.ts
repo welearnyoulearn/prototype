@@ -84,7 +84,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 46
+const SCHEMA_VERSION = 47
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3652,6 +3652,14 @@ async function runIncrementalMigrations() {
     UPDATE users SET is_primary_admin = TRUE
     WHERE role = 'school_admin' AND school_code IS NOT NULL AND is_primary_admin = FALSE
   `)
+
+  // Per-subject pass mark — exam_subjects already had max_marks (defaulted
+  // to 100 at creation, editable via PATCH /api/exams/[id]/subjects/[subjectId]).
+  // pass_marks stays NULL until a teacher explicitly configures it right
+  // before entering marks for that subject; NULL means "not configured yet"
+  // and callers fall back to exam_records.passing_pct (the old exam-wide
+  // percentage) so existing exams keep working unchanged.
+  await pool.query(`ALTER TABLE exam_subjects ADD COLUMN IF NOT EXISTS pass_marks INTEGER`)
 
   // Syllabus integrity hardening: reject invalid future progress values and
   // retain the same chapter-weighted percentage in historical snapshots that

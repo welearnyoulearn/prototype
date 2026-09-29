@@ -22,6 +22,15 @@ type Subject = {
   periods_per_week: number
 }
 
+type ClassAnalytics = {
+  releasedCount: number
+  totalExamCount: number
+  classAvgPct: number | null
+  passRate: number | null
+  perExam: { id: number; name: string; type: string; date: string | null; avgPct: number | null; passCount: number; failCount: number }[]
+  perSubject: { name: string; avgPct: number; passRate: number | null }[]
+}
+
 type Student = {
   id: number
   name: string
@@ -2115,6 +2124,22 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
   const [activeTab, setActiveTab] = useState(initialTab && tabs.includes(initialTab) ? initialTab : tabs[0])
   const [detailStudent, setDetailStudent] = useState<Student | null>(null)
 
+  // Full Analytics modal — class-wide exam performance, computed from every
+  // released exam's marks (nothing to show for an exam still in progress).
+  const [showAnalytics, setShowAnalytics] = useState(false)
+  const [analyticsLoading, setAnalyticsLoading] = useState(false)
+  const [analyticsData, setAnalyticsData] = useState<ClassAnalytics | null>(null)
+
+  // Broadcast Message modal — a quick one-off notification to this class's
+  // students and/or parents, same audience choice as a school announcement.
+  const [showBroadcast, setShowBroadcast] = useState(false)
+  const [broadcastAudience, setBroadcastAudience] = useState<'students' | 'parents' | 'both'>('both')
+  const [broadcastTitle, setBroadcastTitle] = useState('')
+  const [broadcastMessage, setBroadcastMessage] = useState('')
+  const [broadcastSending, setBroadcastSending] = useState(false)
+  const [broadcastResult, setBroadcastResult] = useState('')
+  const [broadcastError, setBroadcastError] = useState('')
+
   // Today's attendance (for the overview card)
   const [todayAtt, setTodayAtt] = useState<AttendanceRecord[]>([])
 
@@ -2252,6 +2277,87 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
     return <span className="text-muted-foreground text-xs">·</span>
   }
 
+  // Aggregates every released exam's marks into one class-performance view —
+  // class average, pass rate, and a per-subject breakdown so a class teacher
+  // can spot a weak subject without opening each exam one at a time.
+  async function loadAnalytics() {
+    setAnalyticsLoading(true)
+    try {
+      const examList = await fetch(`/api/exams?school_id=${schoolId}&class_id=${classId}`).then(r => r.json()).catch(() => [])
+      const released = (Array.isArray(examList) ? examList : []).filter((e: { status: string }) => e.status === 'released')
+
+      const perExam: ClassAnalytics['perExam'] = []
+      const subjectTotals = new Map<string, { pctSum: number; count: number; passCount: number; failCount: number }>()
+      let classPctSum = 0, classPctCount = 0, overallPass = 0, overallFail = 0
+
+      for (const exam of released) {
+        const data = await fetch(`/api/exams/${exam.id}/marks?school_id=${schoolId}`).then(r => r.json()).catch(() => null)
+        if (!data?.students) continue
+        const pcts = data.students.filter((s: { percentage: number | null }) => s.percentage !== null).map((s: { percentage: number }) => s.percentage)
+        const examAvg = pcts.length > 0 ? pcts.reduce((a: number, b: number) => a + b, 0) / pcts.length : null
+        perExam.push({
+          id: exam.id, name: exam.exam_name, type: exam.exam_type, date: exam.exam_date,
+          avgPct: examAvg, passCount: data.pass_count ?? 0, failCount: data.fail_count ?? 0,
+        })
+        if (examAvg !== null) { classPctSum += examAvg; classPctCount++ }
+        overallPass += data.pass_count ?? 0
+        overallFail += data.fail_count ?? 0
+
+        for (const sub of data.subject_stats ?? []) {
+          if (sub.max_marks <= 0 || sub.avg_marks === null) continue
+          const pct = (sub.avg_marks / sub.max_marks) * 100
+          const entry = subjectTotals.get(sub.subject_name) ?? { pctSum: 0, count: 0, passCount: 0, failCount: 0 }
+          entry.pctSum += pct; entry.count++
+          entry.passCount += sub.pass_count ?? 0
+          entry.failCount += sub.fail_count ?? 0
+          subjectTotals.set(sub.subject_name, entry)
+        }
+      }
+
+      const perSubject = Array.from(subjectTotals.entries()).map(([name, t]) => ({
+        name, avgPct: Math.round((t.pctSum / t.count) * 10) / 10,
+        passRate: (t.passCount + t.failCount) > 0 ? Math.round((t.passCount / (t.passCount + t.failCount)) * 100) : null,
+      })).sort((a, b) => b.avgPct - a.avgPct)
+
+      setAnalyticsData({
+        releasedCount: released.length,
+        totalExamCount: Array.isArray(examList) ? examList.length : 0,
+        classAvgPct: classPctCount > 0 ? Math.round((classPctSum / classPctCount) * 10) / 10 : null,
+        passRate: (overallPass + overallFail) > 0 ? Math.round((overallPass / (overallPass + overallFail)) * 100) : null,
+        perExam,
+        perSubject,
+      })
+    } finally {
+      setAnalyticsLoading(false)
+    }
+  }
+
+  function openAnalytics() {
+    setShowAnalytics(true)
+    if (!analyticsData) loadAnalytics()
+  }
+
+  async function sendBroadcast() {
+    if (!broadcastTitle.trim() || !broadcastMessage.trim()) { setBroadcastError('Title and message are both required'); return }
+    setBroadcastSending(true); setBroadcastError(''); setBroadcastResult('')
+    try {
+      const res = await fetch(`/api/classes/${classId}/broadcast`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ school_id: schoolId, audience: broadcastAudience, title: broadcastTitle.trim(), message: broadcastMessage.trim() }),
+      }).then(r => r.json())
+      if (res.error) { setBroadcastError(res.error); setBroadcastSending(false); return }
+      const parts: string[] = []
+      if (res.students_notified) parts.push(`${res.students_notified} student(s)`)
+      if (res.parents_notified) parts.push(`${res.parents_notified} parent(s)`)
+      setBroadcastResult(parts.length > 0 ? `Sent to ${parts.join(' and ')}.` : 'Sent — no matching recipients found.')
+      setBroadcastTitle(''); setBroadcastMessage('')
+    } catch {
+      setBroadcastError('Connection error')
+    } finally {
+      setBroadcastSending(false)
+    }
+  }
+
   return (
     <div>
       {/* Breadcrumb */}
@@ -2276,15 +2382,20 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <button className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
-              Upload Marks
-            </button>
-            <button className="flex items-center gap-2 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+            {tabs.includes('Marks & Results') && (
+              <button onClick={() => { setActiveTab('Marks & Results'); setDetailStudent(null) }} data-testid="header-upload-marks"
+                className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+                Upload Marks
+              </button>
+            )}
+            <button onClick={openAnalytics} data-testid="header-full-analytics"
+              className="flex items-center gap-2 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
               Full Analytics
             </button>
-            <button className="flex items-center gap-2 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">
+            <button onClick={() => { setShowBroadcast(true); setBroadcastResult(''); setBroadcastError('') }} data-testid="header-broadcast-message"
+              className="flex items-center gap-2 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" /></svg>
               Broadcast Message
             </button>
@@ -2788,6 +2899,169 @@ export default function ClassView({ classId, grade, section, schoolId, teacherNa
           academicYear={academicYear}
           readOnly={readOnly}
         />
+      )}
+
+      {/* ── FULL ANALYTICS MODAL ────────────────────────────────────────────── */}
+      {showAnalytics && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-3xl w-full max-h-[85vh] overflow-y-auto space-y-5">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="font-bold text-gray-900 text-lg">{className} — Full Analytics</h3>
+                <p className="text-sm text-gray-500 mt-0.5">Performance across every released exam. An exam still collecting or awaiting release isn&rsquo;t counted yet.</p>
+              </div>
+              <button onClick={() => setShowAnalytics(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {analyticsLoading ? (
+              <div className="py-16 text-center text-sm text-gray-400">Crunching the numbers…</div>
+            ) : !analyticsData || analyticsData.releasedCount === 0 ? (
+              <div className="py-16 text-center">
+                <p className="text-sm font-medium text-gray-600">No released exams yet</p>
+                <p className="text-xs text-gray-400 mt-1">Analytics fill in as soon as an exam&rsquo;s results are reviewed and released.</p>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="border border-gray-100 rounded-xl p-3">
+                    <p className="text-2xl font-bold text-gray-800">{analyticsData.releasedCount}<span className="text-sm font-normal text-gray-400">/{analyticsData.totalExamCount}</span></p>
+                    <p className="text-xs text-gray-400 mt-0.5">Exams released</p>
+                  </div>
+                  <div className="border border-gray-100 rounded-xl p-3">
+                    <p className="text-2xl font-bold text-blue-600">{analyticsData.classAvgPct != null ? `${analyticsData.classAvgPct}%` : '—'}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Class average</p>
+                  </div>
+                  <div className="border border-gray-100 rounded-xl p-3">
+                    <p className="text-2xl font-bold text-emerald-600">{analyticsData.passRate != null ? `${analyticsData.passRate}%` : '—'}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Pass rate</p>
+                  </div>
+                  <div className="border border-gray-100 rounded-xl p-3">
+                    <p className="text-sm font-bold text-gray-800 truncate">{analyticsData.perSubject[0]?.name ?? '—'}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Strongest subject{analyticsData.perSubject[0] ? ` · ${analyticsData.perSubject[0].avgPct}%` : ''}</p>
+                  </div>
+                </div>
+
+                {analyticsData.perSubject.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">By Subject</h4>
+                    <div className="border border-gray-100 rounded-xl overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">Subject</th>
+                            <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500">Average</th>
+                            <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500">Pass Rate</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {analyticsData.perSubject.map(s => (
+                            <tr key={s.name}>
+                              <td className="px-3 py-2 font-medium text-gray-700">{s.name}</td>
+                              <td className={`px-3 py-2 text-center font-semibold ${s.avgPct < 40 ? 'text-red-500' : s.avgPct < 60 ? 'text-amber-500' : 'text-emerald-600'}`}>{s.avgPct}%</td>
+                              <td className="px-3 py-2 text-center text-gray-500">{s.passRate != null ? `${s.passRate}%` : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {analyticsData.perExam.length > 0 && (
+                  <div>
+                    <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">By Exam</h4>
+                    <div className="border border-gray-100 rounded-xl overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">Exam</th>
+                            <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500">Average</th>
+                            <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500">Pass / Fail</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50">
+                          {analyticsData.perExam.map(e => (
+                            <tr key={e.id}>
+                              <td className="px-3 py-2">
+                                <p className="font-medium text-gray-700">{e.name}</p>
+                                <p className="text-xs text-gray-400">{e.date ? new Date(e.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</p>
+                              </td>
+                              <td className="px-3 py-2 text-center font-semibold text-gray-700">{e.avgPct != null ? `${Math.round(e.avgPct * 10) / 10}%` : '—'}</td>
+                              <td className="px-3 py-2 text-center text-gray-500">
+                                <span className="text-emerald-600 font-semibold">{e.passCount}</span> / <span className="text-red-500 font-semibold">{e.failCount}</span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── BROADCAST MESSAGE MODAL ─────────────────────────────────────────── */}
+      {showBroadcast && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="font-bold text-gray-900">Broadcast Message</h3>
+                <p className="text-xs text-gray-400 mt-0.5">Send a one-off notification to {className}.</p>
+              </div>
+              <button onClick={() => setShowBroadcast(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1.5">Send to</label>
+              <div className="flex gap-2">
+                {([
+                  { key: 'both', label: 'Students & Parents' },
+                  { key: 'students', label: 'Only Students' },
+                  { key: 'parents', label: 'Only Parents' },
+                ] as const).map(({ key, label }) => (
+                  <button key={key} onClick={() => setBroadcastAudience(key)} data-testid={`broadcast-audience-${key}`}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                      broadcastAudience === key ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-gray-600 border-gray-200 hover:border-orange-300'
+                    }`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Title</label>
+              <input type="text" value={broadcastTitle} onChange={e => setBroadcastTitle(e.target.value)}
+                placeholder="e.g. Bring notebooks tomorrow" data-testid="broadcast-title-input"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Message</label>
+              <textarea rows={4} value={broadcastMessage} onChange={e => setBroadcastMessage(e.target.value)}
+                placeholder="Write what you'd like to tell them…" data-testid="broadcast-message-input"
+                className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 resize-none" />
+            </div>
+
+            {broadcastError && <p className="text-xs text-red-500">{broadcastError}</p>}
+            {broadcastResult && <p className="text-xs text-emerald-600 font-semibold">{broadcastResult}</p>}
+
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowBroadcast(false)} className="px-4 py-2 text-sm font-semibold text-gray-500">Close</button>
+              <button onClick={sendBroadcast} disabled={broadcastSending} data-testid="broadcast-send"
+                className="px-4 py-2 text-sm font-bold text-white bg-orange-500 rounded-xl hover:bg-orange-600 disabled:opacity-50">
+                {broadcastSending ? 'Sending…' : 'Send'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAdmin, examNotificationEnabled } from '@/lib/examsAuth'
-import { calcGrade, isPassing } from '@/lib/examGrading'
+import { isPassing } from '@/lib/examGrading'
 import { awardPoints } from '@/lib/rewards'
 
 // POST /api/exams/[id]/release
@@ -61,7 +61,6 @@ export async function POST(
       )
       const total = totalRaw ? parseFloat(totalRaw) : 0
       const pct = totalMax > 0 ? (total / totalMax) * 100 : 0
-      const grade = calcGrade(pct)
       const pass = isPassing(pct, exam.passing_pct)
 
       if (marksNotifsOn) {
@@ -72,10 +71,8 @@ export async function POST(
           `, [
             actor.schoolId, student.id,
             `${exam.exam_name} results released`,
-            pass
-              ? `Your results for ${exam.exam_name} are available — ${pct.toFixed(1)}% (${grade}).`
-              : `Your results for ${exam.exam_name} are available — ${pct.toFixed(1)}%.`,
-            JSON.stringify({ exam_id: Number(exam_id), percentage: pct.toFixed(1), grade, pass }),
+            `Your results for ${exam.exam_name} are available — ${pct.toFixed(1)}%.`,
+            JSON.stringify({ exam_id: Number(exam_id), percentage: pct.toFixed(1), pass }),
           ])
           notified++
         } catch { /* non-critical */ }

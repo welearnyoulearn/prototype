@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { requireExamsAccess, requireExamsTeacher, isClassTeacherOf } from '@/lib/examsAuth'
-import { calcGrade, isPassing } from '@/lib/examGrading'
+import { isPassing } from '@/lib/examGrading'
 
 // GET /api/exams/[id]/marks?school_id=&student_id=
 // Returns all marks for an exam, organized by student. Used by teacher
@@ -95,7 +95,12 @@ export async function GET(
 
       for (const sub of subjects) {
         const m = marksMap[s.id]?.[sub.subject_name]
-        if (!m) { allEntered = false; subjMarks[sub.subject_name] = { marks_obtained: null, is_absent: false }; continue }
+        // A row with no mark and not absent carries no real data — treat it
+        // the same as no row at all, so it never counts as "entered" (a
+        // teacher backing out of a half-filled grid should never make a
+        // student look like they scored 0 and failed every subject).
+        const hasRealData = !!m && (m.marks_obtained !== null || m.is_absent)
+        if (!hasRealData) { allEntered = false; subjMarks[sub.subject_name] = { marks_obtained: null, is_absent: false }; continue }
         subjMarks[sub.subject_name] = { marks_obtained: m.marks_obtained, is_absent: m.is_absent }
         if (m.is_absent) { anyAbsent = true }
         else if (m.marks_obtained !== null) { totalObtained += m.marks_obtained }
@@ -113,7 +118,6 @@ export async function GET(
         total_max: totalMaxMarks,
         percentage: pct,
         pass,
-        grade: pct !== null ? calcGrade(pct) : null,
         all_entered: allEntered,
         any_absent: anyAbsent,
       }
@@ -122,12 +126,18 @@ export async function GET(
     const subjectStats = subjects.map(sub => {
       const subMarks = marks.filter(m => m.subject_name === sub.subject_name && !m.is_absent && m.marks_obtained !== null)
       const avg = subMarks.length > 0 ? subMarks.reduce((s, m) => s + parseFloat(m.marks_obtained), 0) / subMarks.length : null
-      const passCount = subMarks.filter(m => (parseFloat(m.marks_obtained) / sub.max_marks) * 100 >= exam.passing_pct).length
+      // A subject with its own configured pass_marks is judged against that
+      // directly; an older/unconfigured subject falls back to the exam-wide
+      // passing percentage against its max_marks, same as before this existed.
+      const passCount = subMarks.filter(m =>
+        sub.pass_marks != null ? parseFloat(m.marks_obtained) >= sub.pass_marks : (parseFloat(m.marks_obtained) / sub.max_marks) * 100 >= exam.passing_pct
+      ).length
       const absentCount = marks.filter(m => m.subject_name === sub.subject_name && m.is_absent).length
       return {
         exam_subject_id: sub.id,
         subject_name: sub.subject_name,
         max_marks: sub.max_marks,
+        pass_marks: sub.pass_marks,
         teacher_id: sub.teacher_id,
         teacher_name: sub.teacher_name,
         status: sub.status,
@@ -251,8 +261,10 @@ export async function POST(
     }
 
     // Submit locks a subject once every active student in the class has a
-    // mark row (present, not necessarily non-null — an explicit "absent" row
-    // counts as entered). This is unchanged from v1's completeness rule.
+    // mark row with real data — a mark or an explicit Absent. A row that
+    // exists but carries neither (marks_obtained NULL, is_absent false) is
+    // not "entered", just noise — counting it would let a subject submit
+    // with students nobody actually recorded anything for.
     const submittedSubjects: { id: number; subject_name: string }[] = []
     if (Array.isArray(submit_subject_ids) && submit_subject_ids.length > 0) {
       const { rows: [{ total: totalStudents }] } = await pool.query(
@@ -266,7 +278,7 @@ export async function POST(
         if (subj.status === 'submitted') continue
 
         const { rows: [{ cnt: enteredCount }] } = await pool.query(
-          `SELECT COUNT(*)::int AS cnt FROM exam_marks WHERE exam_id = $1 AND subject_name = $2`,
+          `SELECT COUNT(*)::int AS cnt FROM exam_marks WHERE exam_id = $1 AND subject_name = $2 AND (marks_obtained IS NOT NULL OR is_absent)`,
           [exam_id, subj.subject_name]
         )
         if (enteredCount < totalStudents) {
