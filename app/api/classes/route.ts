@@ -4,22 +4,38 @@ import { getSubjectsForGrade } from '@/lib/curricula'
 import { matchTeacher } from '@/lib/matchTeacher'
 import { getCache, setCache, invalidateCache } from '@/lib/responseCache'
 import { gradeOrderSql } from '@/lib/grades'
-import { getAnySession, requireFeeAccess } from '@/lib/auth'
+import {
+  getPlatformSession, getSession, getTeacherSession, getStudentSession, getParentSession,
+  requireFeeAccess, schoolHasFeature,
+} from '@/lib/auth'
 import { resolveAcademicYear } from '@/lib/academicYear'
 
 export async function GET(req: NextRequest) {
   try {
-    const session = await getAnySession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const platform = await getPlatformSession()
+    const admin = platform ? null : await getSession()
+    const teacher = platform || admin ? null : await getTeacherSession()
+    const student = platform || admin || teacher ? null : await getStudentSession()
+    const parent = platform || admin || teacher || student ? null : await getParentSession()
+    if (!platform && !admin && !teacher && !student && !parent) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
     const school_id = req.nextUrl.searchParams.get('school_id')
     if (!school_id) return NextResponse.json({ error: 'school_id required' }, { status: 400 })
-    if (session.schoolId !== parseInt(school_id)) {
+    const requestedSchoolId = Number(school_id)
+    const actorSchoolId = Number(admin?.schoolId ?? teacher?.schoolId ?? student?.schoolId ?? parent?.schoolId)
+    if (!platform && actorSchoolId !== requestedSchoolId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
     const removed = req.nextUrl.searchParams.get('removed') === 'true'
+    if (removed && !platform && !admin) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (admin && !(await schoolHasFeature(requestedSchoolId, 'class-management'))) {
+      return NextResponse.json({ error: 'Feature not enabled' }, { status: 403 })
+    }
 
-    if (!removed) {
+    const unrestricted = !!platform || !!admin
+    if (!removed && unrestricted) {
       const cached = getCache(`classes:${school_id}`)
       if (cached) return NextResponse.json(cached)
     }
@@ -31,16 +47,39 @@ export async function GET(req: NextRequest) {
         ? `c.deleted_at DESC, ${gradeOrderSql('c.grade')}, c.section`
         : `${gradeOrderSql('c.grade')}, c.section`
 
+      const values: (string | number)[] = [requestedSchoolId, studentStatus]
+      const scope: string[] = []
+      if (teacher) {
+        values.push(teacher.teacherId)
+        scope.push(`AND (c.class_teacher_id = $${values.length} OR EXISTS (
+          SELECT 1 FROM class_subjects cs WHERE cs.class_id = c.id AND cs.teacher_id = $${values.length}
+        ))`)
+      } else if (student) {
+        values.push(student.studentId)
+        scope.push(`AND EXISTS (
+          SELECT 1 FROM students s WHERE s.id = $${values.length} AND s.school_id = c.school_id
+            AND s.grade = c.grade AND s.section = c.section AND COALESCE(s.status, 'active') = 'active'
+        )`)
+      } else if (parent) {
+        values.push(parent.parentId)
+        scope.push(`AND EXISTS (
+          SELECT 1 FROM student_parents sp JOIN students s ON s.id = sp.student_id
+          WHERE sp.parent_id = $${values.length} AND s.school_id = c.school_id
+            AND s.grade = c.grade AND s.section = c.section AND COALESCE(s.status, 'active') = 'active'
+        )`)
+      }
+
       const result = await pool.query(
         `SELECT c.*, t.name AS class_teacher_name,
                 (SELECT COUNT(*) FROM students s WHERE s.grade = c.grade AND s.section = c.section AND s.school_id = c.school_id AND s.status = $2) AS student_count
          FROM classes c
          LEFT JOIN teachers t ON c.class_teacher_id = t.id
          WHERE c.school_id = $1 AND c.deleted_at ${deletedFilter}
+         ${scope.join('\n')}
          ORDER BY ${orderBy}`,
-        [school_id, studentStatus]
+        values
       )
-      if (!removed) setCache(`classes:${school_id}`, result.rows, 60_000)
+      if (!removed && unrestricted) setCache(`classes:${school_id}`, result.rows, 60_000)
       return NextResponse.json(result.rows)
     } catch (error) {
       console.error(error)

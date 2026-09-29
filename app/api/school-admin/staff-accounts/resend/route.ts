@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { getSession, generateResetToken } from '@/lib/auth'
+import { getSession, generateResetToken, hashResetToken } from '@/lib/auth'
 import { sendStaffInviteEmail } from '@/lib/email'
 import { INVITE_LINK_HOURS } from '@/lib/staffInvite'
 
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     await pool.query(
       `INSERT INTO password_reset_tokens (user_id, token, expires_at)
        VALUES ($1, $2, NOW() + make_interval(hours => $3))`,
-      [user.id, token, INVITE_LINK_HOURS]
+      [user.id, hashResetToken(token), INVITE_LINK_HOURS]
     )
 
     const appUrl = process.env.APP_URL || 'http://localhost:3000'

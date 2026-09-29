@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
-import pool from '@/lib/db'
-import { generateResetToken } from '@/lib/auth'
+import pool, { ensureDB } from '@/lib/db'
 import { sendPasswordResetEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
+import { issueResetToken } from '@/lib/passwordReset'
+import { checkAuthRateLimit, RECOVERY_LIMIT } from '@/lib/authRateLimit'
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureDB()
     // Accepts either email or phone in one field, matching the login route
     // (§01) — a parent who signs in with their phone number needs a way to
     // trigger a reset too, not just parents who use email.
     const body = await req.json()
     const identifier = typeof body.identifier === 'string' ? body.identifier.trim() : (typeof body.email === 'string' ? body.email.trim() : '')
     if (!identifier) return NextResponse.json({ success: true })
+    if (!await checkAuthRateLimit(req, 'parent-recovery', identifier, RECOVERY_LIMIT)) return NextResponse.json({ success: true })
 
     const result = await pool.query(
       `SELECT id, school_id, name, email, phone FROM parents
@@ -28,12 +31,7 @@ export async function POST(req: NextRequest) {
     const resetUrl = (token: string) => `${process.env.APP_URL || 'http://localhost:3000'}/parent/reset-password?token=${token}`
 
     for (const parent of parents) {
-      const token = generateResetToken()
-      const expiresAt = new Date(Date.now() + 60 * 60 * 1000)
-      await pool.query(
-        `INSERT INTO password_reset_tokens (token, expires_at, role, reference_id) VALUES ($1, $2, 'parent', $3)`,
-        [token, expiresAt, parent.id]
-      )
+      const token = await issueResetToken('parent', parent.id)
       const url = resetUrl(token)
       const name = parent.name || identifier
       if (parent.email) {

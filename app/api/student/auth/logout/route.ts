@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { clearStudentAuthCookie } from '@/lib/auth'
+import { clearStudentAuthCookie, getPortalSessionIdFromCookie, revokePortalSession } from '@/lib/auth'
 import { recordSessionEnd } from '@/lib/usageTracking'
 
 export async function POST(req: NextRequest) {
   try {
+    const sid = await getPortalSessionIdFromCookie('student')
+    if (sid) await revokePortalSession(sid)
     await clearStudentAuthCookie()
 
     const { usageSessionId } = await req.json().catch(() => ({ usageSessionId: null }))

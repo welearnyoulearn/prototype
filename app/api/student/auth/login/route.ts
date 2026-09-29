@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { isSchoolLocked, LOCKED_MESSAGE_PORTAL } from '@/lib/planAccess'
 import pool, { ensureDB } from '@/lib/db'
-import { verifyPassword, setStudentAuthCookie, StudentJWTPayload, schoolHasFeature } from '@/lib/auth'
+import { verifyPasswordForLogin, setStudentAuthCookie, StudentJWTPayload, schoolHasFeature, createPortalSession } from '@/lib/auth'
 import { recordSessionStart } from '@/lib/usageTracking'
+import { checkAuthRateLimit, clearAuthRateLimit, LOGIN_LIMIT } from '@/lib/authRateLimit'
 
 export async function POST(req: NextRequest) {
   try {
@@ -10,6 +11,10 @@ export async function POST(req: NextRequest) {
     const { rollNumber, password } = await req.json()
     if (!rollNumber || !password) {
       return NextResponse.json({ error: 'Roll number and password are required' }, { status: 400 })
+    }
+    const normalizedId = String(rollNumber).trim().toLowerCase()
+    if (!await checkAuthRateLimit(req, 'student-login', normalizedId, LOGIN_LIMIT)) {
+      return NextResponse.json({ error: 'Too many login attempts. Please try again later.' }, { status: 429, headers: { 'Retry-After': '900' } })
     }
 
     const result = await pool.query(
@@ -19,31 +24,27 @@ export async function POST(req: NextRequest) {
        FROM students s
        JOIN schools sc ON sc.id = s.school_id
        WHERE LOWER(s.roll_number) = LOWER($1)
-       LIMIT 1`,
-      [rollNumber.trim()]
+       ORDER BY s.id`,
+      [normalizedId]
     )
 
     if (result.rows.length === 0) {
+      await verifyPasswordForLogin(password)
       return NextResponse.json({ error: 'Invalid roll number or password' }, { status: 401 })
     }
 
-    const student = result.rows[0]
-
-    if (!student.password_hash) {
-      return NextResponse.json({ error: 'Account not activated. Please contact your school admin.' }, { status: 401 })
+    const matching = []
+    for (const candidate of result.rows) {
+      if (await verifyPasswordForLogin(password, candidate.password_hash)) matching.push(candidate)
     }
+    if (matching.length !== 1 || matching[0].status !== 'active') {
+      return NextResponse.json({ error: 'Invalid roll number or password' }, { status: 401 })
+    }
+    const student = matching[0]
+    await clearAuthRateLimit(req, 'student-login', normalizedId)
 
     if (!(await schoolHasFeature(student.school_id, 'student-portal'))) {
       return NextResponse.json({ error: "You don't have access. Please contact your school admin." }, { status: 403 })
-    }
-
-    if (student.status !== 'active') {
-      return NextResponse.json({ error: 'Your account is inactive. Contact your school admin.' }, { status: 403 })
-    }
-
-    const valid = await verifyPassword(password, student.password_hash)
-    if (!valid) {
-      return NextResponse.json({ error: 'Invalid roll number or password' }, { status: 401 })
     }
 
     const payload: StudentJWTPayload = {
@@ -65,6 +66,7 @@ export async function POST(req: NextRequest) {
 
     }
 
+    payload.sid = await createPortalSession('student', student.id, student.school_id)
     await setStudentAuthCookie(payload)
 
     const usageSessionId = await recordSessionStart({

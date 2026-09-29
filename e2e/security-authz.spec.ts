@@ -11,9 +11,9 @@ import { BASE, platformAdminCookie, createSchool, setSubscription } from './fixt
 // #253 — backend authorization and tenant boundaries, exercised by calling the API directly
 // (no frontend), the way an attacker would.
 
-// Teacher / student / parent sessions are signed JWTs with no server-side row, so a test can
-// mint one. School-staff sessions need a live user_sessions row and are not forged here.
-// The dev server reads JWT_SECRET from .env; load the same file so the tokens verify there.
+// These deliberately lack a live portal_sessions row. A valid signature must
+// still be refused because copied/forged cookies are not the security boundary.
+// The dev server reads JWT_SECRET from .env; load the same file so signatures match.
 // (Read at call time: lib/auth-constants was already evaluated before this line ran.)
 loadDotenv({ quiet: true })
 const sign = (payload: Record<string, unknown>) => jwt.sign(payload, process.env.JWT_SECRET || JWT_SECRET)
@@ -40,6 +40,7 @@ test.describe('Unauthenticated requests are refused', () => {
     ['GET',    '/api/academic-year/current?school_id=1'],
     ['POST',   '/api/usage/heartbeat', { usageSessionId: 1 }],
     ['GET',    '/api/internal/feature-denials'],
+    ['GET',    '/api/internal/feature-entitlement?school_id=1&feature=expenses'],
   ]
   for (const [method, path, body] of cases) {
     test(`${method} ${path}`, async ({ request }) => {
@@ -63,10 +64,10 @@ test.describe('Unauthenticated requests are refused', () => {
 
 test.describe('Students and parents cannot read school directories', () => {
   for (const [who, cookie] of [['student', studentCookie()], ['parent', parentCookie()]] as const) {
-    test(`${who}: /api/students and /api/teachers → 403`, async ({ request }) => {
+    test(`${who}: /api/students and /api/teachers are refused`, async ({ request }) => {
       for (const path of ['/api/students', '/api/students?school_id=1', '/api/teachers', '/api/teachers?school_id=1']) {
         const res = await request.get(path, { headers: { Cookie: cookie } })
-        expect(res.status(), path).toBe(403)
+        expect([401, 403], path).toContain(res.status())
       }
     })
   }
@@ -88,27 +89,27 @@ test.describe('Lower-privilege sessions cannot use staff operations', () => {
   })
 
   test('a student cannot write textbooks, and a teacher cannot delete them', async ({ request }) => {
-    expect((await request.get('/api/textbooks', { headers: { Cookie: studentCookie() } })).status()).toBe(401)
-    expect((await request.delete('/api/textbooks/1', { headers: { Cookie: teacherCookie() } })).status()).toBe(401)
+    expect([401, 403]).toContain((await request.get('/api/textbooks', { headers: { Cookie: studentCookie() } })).status())
+    expect([401, 403]).toContain((await request.delete('/api/textbooks/1', { headers: { Cookie: teacherCookie() } })).status())
   })
 
   test("a teacher cannot change another teacher's password", async ({ request }) => {
     const res = await request.post('/api/teachers/2/change-password', {
       headers: { Cookie: teacherCookie(1, 1) }, data: { current_password: 'x', new_password: 'yyyyyyyy' },
     })
-    expect(res.status()).toBe(403)
+    expect([401, 403]).toContain(res.status())
   })
 
   test("a student cannot change another student's password", async ({ request }) => {
     const res = await request.post('/api/students/2/change-password', {
       headers: { Cookie: studentCookie(1, 1) }, data: { current_password: 'x', new_password: 'yyyyyyyy' },
     })
-    expect(res.status()).toBe(403)
+    expect([401, 403]).toContain(res.status())
   })
 
   test("the current academic year is only readable for the caller's own school", async ({ request }) => {
     const res = await request.get('/api/academic-year/current?school_id=2', { headers: { Cookie: studentCookie(1) } })
-    expect(res.status()).toBe(403)
+    expect([401, 403]).toContain(res.status())
   })
 })
 
@@ -134,7 +135,11 @@ test.describe('Feature gate in proxy.ts', () => {
   const realNow = Date.now
   test.beforeAll(() => {
     global.fetch = (async (input: RequestInfo | URL) => {
-      if (String(input).includes('/api/internal/feature-denials')) return new Response(JSON.stringify({ denials: { 7: ['expenses'] } }), { status: 200 })
+      if (String(input).includes('/api/internal/feature-entitlement')) {
+        const url = new URL(String(input))
+        const enabled = !(url.searchParams.get('school_id') === '7' && url.searchParams.get('feature') === 'expenses')
+        return new Response(JSON.stringify({ enabled }), { status: 200 })
+      }
       if (String(input).includes('/api/internal/plan-locked')) return new Response(JSON.stringify({ school_ids: [] }), { status: 200 })
       return new Response('{}', { status: 200 })
     }) as typeof fetch

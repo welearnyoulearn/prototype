@@ -97,7 +97,7 @@ export default function SchoolDetailPage() {
 
   // Reset password
   const [resetting, setResetting]   = useState(false)
-  const [resetCreds, setResetCreds] = useState<{ email: string; pass: string } | null>(null)
+  const [resetCreds, setResetCreds] = useState<{ email: string } | null>(null)
 
   // Portal access overrides (student-portal / parent-portal)
   const [portalOverrides, setPortalOverrides] = useState<Record<string, boolean>>({})
@@ -278,7 +278,7 @@ export default function SchoolDetailPage() {
   }
 
   async function handleResetPassword() {
-    const ok = await confirm('Generate a new temporary password for this school admin?', { title: 'Reset password?', confirmText: 'Generate', destructive: true })
+    const ok = await confirm('Revoke active sessions and email a secure password reset link to this school admin?', { title: 'Reset password?', confirmText: 'Send reset link', destructive: true })
     if (!ok) return
     setResetting(true); setError('')
     try {
@@ -289,7 +289,7 @@ export default function SchoolDetailPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
-      setResetCreds({ email: data.email, pass: data.temp_password })
+      setResetCreds({ email: data.email })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to reset password')
     } finally { setResetting(false) }
@@ -732,8 +732,8 @@ export default function SchoolDetailPage() {
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
             <div className="bg-amber-500 px-6 py-5 rounded-t-2xl">
-              <h3 className="text-white font-bold text-lg">New Credentials Generated</h3>
-              <p className="text-amber-100 text-sm mt-0.5">Share these with the school admin</p>
+              <h3 className="text-white font-bold text-lg">Reset Link Sent</h3>
+              <p className="text-amber-100 text-sm mt-0.5">Active sessions were revoked</p>
             </div>
             <div className="px-6 py-5">
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-3">
@@ -741,13 +741,9 @@ export default function SchoolDetailPage() {
                   <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">Admin Email (Login)</p>
                   <code className="text-sm font-mono text-amber-900 bg-white border border-amber-200 rounded px-3 py-2 block">{resetCreds.email}</code>
                 </div>
-                <div>
-                  <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">New Temporary Password</p>
-                  <code className="text-sm font-mono text-amber-900 bg-white border border-amber-200 rounded px-3 py-2 block">{resetCreds.pass}</code>
-                </div>
               </div>
               <p className="text-xs text-gray-400 mt-3 bg-gray-50 rounded-lg px-3 py-2">
-                ⚠️ School admin will be forced to set a new password on next login.
+                The one-time link expires in one hour and invalidates any older reset link.
               </p>
               <button onClick={() => setResetCreds(null)}
                 className="w-full mt-4 bg-gray-900 hover:bg-gray-800 text-white py-2.5 rounded-xl text-sm font-medium transition-colors">

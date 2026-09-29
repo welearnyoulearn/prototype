@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
-import { requirePlatformAdmin, hashPassword, generateTempPassword, revokeUserSessions } from '@/lib/auth'
+import { requirePlatformAdmin, revokeUserSessions } from '@/lib/auth'
+import { sendPasswordResetEmail } from '@/lib/email'
+import { issueResetToken } from '@/lib/passwordReset'
 
 // POST /api/platform/schools/reset-password
 // Body: { school_id: number }
@@ -20,18 +22,15 @@ export async function POST(req: NextRequest) {
       if (schoolRes.rows.length === 0) return NextResponse.json({ error: 'School not found' }, { status: 404 })
       const school = schoolRes.rows[0]
 
-      const tempPassword = generateTempPassword()
-      const passwordHash = await hashPassword(tempPassword)
-
       const updated = await pool.query(
         // status = 'active' too: this is the platform admin's recovery path for a school
         // that can't sign in. It used to reset the password but leave a deactivated
         // owner deactivated, so the school stayed locked out with no way back short of
         // editing the database.
-        `UPDATE users SET password_hash = $1, first_login = TRUE, status = 'active'
-         WHERE school_id = $2 AND role = 'school_admin' AND school_code IS NOT NULL
+        `UPDATE users SET first_login = TRUE, status = 'active'
+         WHERE school_id = $1 AND role = 'school_admin' AND school_code IS NOT NULL
          RETURNING id, email, school_code`,
-        [passwordHash, school_id]
+        [school_id]
       )
 
       if (updated.rowCount === 0) {
@@ -40,6 +39,13 @@ export async function POST(req: NextRequest) {
 
       // The old password is dead — end any session it opened.
       await revokeUserSessions(updated.rows[0].id)
+      if (!updated.rows[0].email) return NextResponse.json({ error: 'School owner has no recovery email' }, { status: 409 })
+      const token = await issueResetToken('user', updated.rows[0].id)
+      await sendPasswordResetEmail({
+        to: updated.rows[0].email,
+        name: school.name,
+        resetUrl: `${process.env.APP_URL || 'http://localhost:3000'}/reset-password?token=${token}`,
+      })
 
       // Audit log
       await pool.query(
@@ -51,7 +57,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: true,
         email: updated.rows[0].email,
-        temp_password: tempPassword,
+        emailSent: true,
       })
     } catch (error) {
       console.error('[platform/reset-password]', error)

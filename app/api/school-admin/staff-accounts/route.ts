@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { PoolClient } from 'pg'
 import pool, { ensureDB } from '@/lib/db'
-import { getSession, hashPassword, generateTempPassword, generateResetToken } from '@/lib/auth'
+import { getSession, hashPassword, generateTempPassword, generateResetToken, hashResetToken } from '@/lib/auth'
 import { sendStaffInviteEmail } from '@/lib/email'
 import { INVITE_LINK_HOURS } from '@/lib/staffInvite'
 import { STAFF_ROLES, lockStaffSeats, getStaffLimit, countActiveStaff, logStaffEvent } from '@/lib/staffAccounts'
@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
       await client.query(
         `INSERT INTO password_reset_tokens (user_id, token, expires_at)
          VALUES ($1, $2, NOW() + make_interval(hours => $3))`,
-        [user.id, token, INVITE_LINK_HOURS]
+        [user.id, hashResetToken(token), INVITE_LINK_HOURS]
       )
       await logStaffEvent(client, {
         schoolId, userId: user.id, action: 'created', actorUserId: session.userId,

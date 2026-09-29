@@ -85,7 +85,7 @@ export default function PlatformAdmin() {
   const [search, setSearch]               = useState('')
   const [filterTier, setFilterTier]       = useState<string>('all')
   const [highlightId, setHighlightId]     = useState<number | null>(null)
-  const [createdSchool, setCreatedSchool] = useState<{ id: number; name: string; email: string; pass: string } | null>(null)
+  const [createdSchool, setCreatedSchool] = useState<{ id: number; name: string; email: string; emailSent: boolean } | null>(null)
   const [copiedCode, setCopiedCode]       = useState<number | null>(null)
   const [changingPlanFor, setChangingPlanFor] = useState<number | null>(null)
   const [sort, setSort] = useState<{ col: SortCol; dir: 'asc' | 'desc' }>({ col: 'joined', dir: 'desc' })
@@ -96,7 +96,7 @@ export default function PlatformAdmin() {
   const [adminForm, setAdminForm]             = useState({ full_name: '', email: '' })
   const [adminSubmitting, setAdminSubmitting] = useState(false)
   const [adminError, setAdminError]           = useState('')
-  const [resetResult, setResetResult]         = useState<{ name: string; email: string; password: string; emailSent: boolean } | null>(null)
+  const [resetResult, setResetResult]         = useState<{ name: string; email: string; emailSent: boolean } | null>(null)
   const [resettingId, setResettingId]         = useState<number | null>(null)
 
   const [form, setForm] = useState<FormData>({
@@ -211,7 +211,7 @@ export default function PlatformAdmin() {
       const res  = await fetch(`/api/platform/admins/${adminId}/reset`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) { setAdminError(data.error || 'Reset failed'); return }
-      setResetResult({ name: data.name, email: data.email, password: data.tempPassword, emailSent: data.emailSent })
+      setResetResult({ name: data.name, email: data.email, emailSent: data.emailSent })
     } catch { setAdminError('Reset failed') }
     finally   { setResettingId(null) }
   }
@@ -229,7 +229,7 @@ export default function PlatformAdmin() {
       if (!res.ok) throw new Error(data.error)
       setShowModal(false)
       setForm({ name: '', type: 'Private', city: '', country: '', phone: '', email: '', address: '' })
-      setCreatedSchool({ id: data.id, name: data.name, email: data.email, pass: data.temp_password })
+      setCreatedSchool({ id: data.id, name: data.name, email: data.email, emailSent: data.setup_email_sent === true })
       setTab('active')
       fetchSchools('active')
       fetchStats()
@@ -1005,7 +1005,9 @@ export default function PlatformAdmin() {
             </div>
             <div className="px-6 py-5">
               <p className="text-sm text-gray-600 mb-4">
-                Copy these credentials and share with the school admin. They&apos;ll be prompted to set a new password on first login.
+                {createdSchool.emailSent
+                  ? 'A secure one-time password setup link was sent to the school admin email.'
+                  : 'The school was created, but the setup email failed. Use Reset Password on the school page to send a new link.'}
               </p>
               <div className="bg-amber-50 border border-amber-200 rounded-md p-4 space-y-3">
                 <div>
@@ -1025,12 +1027,6 @@ export default function PlatformAdmin() {
                       }
                     </button>
                   </div>
-                </div>
-                <div>
-                  <p className="text-xs text-amber-700 font-semibold uppercase tracking-wide mb-1">Temporary Password</p>
-                  <code className="text-sm font-mono text-amber-900 bg-white border border-amber-200 rounded px-3 py-2 block">
-                    {createdSchool.pass}
-                  </code>
                 </div>
               </div>
               <button
@@ -1060,18 +1056,10 @@ export default function PlatformAdmin() {
               {resetResult && (
                 <div className={`mb-4 rounded-md border p-4 ${resetResult.emailSent ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'}`}>
                   <p className={`text-xs font-bold uppercase tracking-wide mb-2 ${resetResult.emailSent ? 'text-green-700' : 'text-amber-700'}`}>
-                    {resetResult.emailSent ? '✓ Credentials reset & emailed' : '⚠ Credentials reset — email failed, copy manually'}
+                    {resetResult.emailSent ? '✓ Secure reset link emailed' : '⚠ Reset link email failed — retry the reset'}
                   </p>
                   <p className="text-xs text-gray-600 mb-1"><span className="font-medium">Name:</span> {resetResult.name}</p>
                   <p className="text-xs text-gray-600 mb-2"><span className="font-medium">Email:</span> {resetResult.email}</p>
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-gray-600"><span className="font-medium">New Password:</span></p>
-                    <code className="text-sm font-mono font-bold bg-white border border-amber-200 px-2 py-0.5 rounded text-amber-800">{resetResult.password}</code>
-                    <button
-                      onClick={() => { navigator.clipboard.writeText(resetResult.password).catch(() => {}) }}
-                      className="text-xs text-amber-700 underline hover:no-underline"
-                    >copy</button>
-                  </div>
                   <button onClick={() => setResetResult(null)} className="mt-2 text-xs text-muted-foreground hover:text-gray-600">dismiss ✕</button>
                 </div>
               )}

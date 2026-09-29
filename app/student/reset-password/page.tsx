@@ -12,7 +12,7 @@ function ResetForm() {
   const token = params.get('token') || ''
   const theme = THEMES.student
 
-  const [valid, setValid]     = useState<boolean | null>(null)
+  const [valid, setValid]     = useState<boolean | null>(token ? null : false)
   const [newPw, setNewPw]     = useState('')
   const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
@@ -20,7 +20,7 @@ function ResetForm() {
   const [done, setDone]       = useState(false)
 
   useEffect(() => {
-    if (!token) { setValid(false); return }
+    if (!token) return
     fetch(`/api/student/auth/reset-password?token=${token}`)
       .then(r => r.json()).then(d => setValid(d.valid)).catch(() => setValid(false))
   }, [token])
@@ -28,7 +28,7 @@ function ResetForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (newPw !== confirm) { setError('Passwords do not match'); return }
-    if (newPw.length < 6)  { setError('Password must be at least 6 characters'); return }
+    if (newPw.length < 8)  { setError('Password must be at least 8 characters'); return }
     setError(''); setLoading(true)
     try {
       const res = await fetch('/api/student/auth/reset-password', {
@@ -63,7 +63,7 @@ function ResetForm() {
     <>
       <AuthError message={error} />
       <form onSubmit={handleSubmit} className="space-y-4">
-        <PasswordField label="New Password" value={newPw} onChange={setNewPw} placeholder="At least 6 characters" ring={theme.ring} autoComplete="new-password" />
+        <PasswordField label="New Password" value={newPw} onChange={setNewPw} placeholder="At least 8 characters" ring={theme.ring} autoComplete="new-password" />
         <PasswordField label="Confirm Password" value={confirm} onChange={setConfirm} placeholder="Type it again" ring={theme.ring} autoComplete="new-password" />
         <button type="submit" disabled={loading}
           className="auth-submit">

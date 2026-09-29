@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { clearAuthCookie, clearPlatformAuthCookie, getSessionIdFromCookie, revokeSession } from '@/lib/auth'
+import { clearAuthCookie, clearPlatformAuthCookie, getSessionIdFromCookie, getPlatformSessionIdFromCookie, revokeSession } from '@/lib/auth'
 import { recordSessionEnd } from '@/lib/usageTracking'
 
 export async function POST(req: NextRequest) {
@@ -8,6 +8,8 @@ export async function POST(req: NextRequest) {
     // The server-side session is revoked first so a copied cookie stops working too.
     const sid = await getSessionIdFromCookie()
     if (sid) await revokeSession(sid)
+    const platformSid = await getPlatformSessionIdFromCookie()
+    if (platformSid) await revokeSession(platformSid)
     await clearAuthCookie()
     await clearPlatformAuthCookie()
 
