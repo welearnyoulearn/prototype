@@ -1,4 +1,5 @@
 import pool from './db'
+import type { Pool, PoolClient } from 'pg'
 import {
   getPlatformSession, getSession, getTeacherSession, getStudentSession, getParentSession,
 } from './auth'
@@ -129,6 +130,83 @@ export async function isTeacherLinkedToClass(teacherId: number, classId: number)
     LIMIT 1
   `, [classId, teacherId])
   return rows.length > 0
+}
+
+type ExamQueryClient = Pick<Pool | PoolClient, 'query'>
+
+// A teacher may open an exam only when they are the class teacher or are
+// assigned to at least one subject in that exam. This is intentionally tied
+// to the exam, rather than merely to another subject in the same class.
+export async function isTeacherLinkedToExam(
+  teacherId: number,
+  examId: number,
+  db: ExamQueryClient = pool,
+): Promise<boolean> {
+  const { rows } = await db.query(`
+    SELECT 1
+    FROM exam_records e
+    JOIN classes c ON c.id = e.class_id
+    WHERE e.id = $1
+      AND (
+        c.class_teacher_id = $2
+        OR EXISTS (
+          SELECT 1 FROM exam_subjects es
+          WHERE es.exam_id = e.id AND es.teacher_id = $2
+        )
+      )
+    LIMIT 1
+  `, [examId, teacherId])
+  return rows.length > 0
+}
+
+// Server-side source of truth for targeted exams. All result, entry,
+// acknowledgement and notification flows use this same predicate so a
+// "specific students" exam can never silently expand to the whole class.
+export async function examAppliesToStudent(
+  examId: number,
+  studentId: number,
+  schoolId: number,
+  db: ExamQueryClient = pool,
+): Promise<boolean> {
+  const { rows } = await db.query(`
+    SELECT 1
+    FROM exam_records e
+    JOIN classes c ON c.id = e.class_id
+    JOIN students s ON s.id = $2 AND s.school_id = e.school_id AND s.status = 'active'
+    WHERE e.id = $1 AND e.school_id = $3
+      AND (
+        (e.student_scope = 'all' AND s.grade = c.grade AND s.section = c.section)
+        OR (e.student_scope = 'specific' AND EXISTS (
+          SELECT 1 FROM exam_applicable_students eas
+          WHERE eas.exam_id = e.id AND eas.student_id = s.id
+        ))
+      )
+    LIMIT 1
+  `, [examId, studentId, schoolId])
+  return rows.length > 0
+}
+
+export async function getApplicableExamStudentIds(
+  examId: number,
+  schoolId: number,
+  db: ExamQueryClient = pool,
+): Promise<number[]> {
+  const { rows } = await db.query(`
+    SELECT s.id
+    FROM exam_records e
+    JOIN classes c ON c.id = e.class_id
+    JOIN students s ON s.school_id = e.school_id AND s.status = 'active'
+      AND (
+        (e.student_scope = 'all' AND s.grade = c.grade AND s.section = c.section)
+        OR (e.student_scope = 'specific' AND EXISTS (
+          SELECT 1 FROM exam_applicable_students eas
+          WHERE eas.exam_id = e.id AND eas.student_id = s.id
+        ))
+      )
+    WHERE e.id = $1 AND e.school_id = $2
+    ORDER BY s.id
+  `, [examId, schoolId])
+  return rows.map(row => Number(row.id))
 }
 
 // Resolves whether a parent session actually has a claim to this student —

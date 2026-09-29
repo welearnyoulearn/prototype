@@ -26,6 +26,32 @@ function examTypeLabel(t: string) {
   return EXAM_TYPES.find(e => e.key === t)?.label ?? t
 }
 
+function csvCell(value: string) {
+  const safe = /^[=+\-@]/.test(value) ? `'${value}` : value
+  return `"${safe.replace(/"/g, '""')}"`
+}
+
+function parseCSV(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let cell = ''
+  let quoted = false
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index]
+    if (quoted) {
+      if (char === '"' && text[index + 1] === '"') { cell += '"'; index++ }
+      else if (char === '"') quoted = false
+      else cell += char
+    } else if (char === '"') quoted = true
+    else if (char === ',') { row.push(cell); cell = '' }
+    else if (char === '\n') { row.push(cell.replace(/\r$/, '')); rows.push(row); row = []; cell = '' }
+    else cell += char
+  }
+  if (quoted) throw new Error('Unclosed quoted field')
+  if (cell.length > 0 || row.length > 0) { row.push(cell.replace(/\r$/, '')); rows.push(row) }
+  return rows
+}
+
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   scheduled:        { label: 'Scheduled',        color: 'bg-gray-100 text-gray-500' },
@@ -83,7 +109,11 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
   const [students, setStudents] = useState<Student[]>([])
   const [marksMap, setMarksMap] = useState<Record<number, Record<number, MarkEntry>>>({})
   const [enteringSubjects, setEnteringSubjects] = useState<ExamSubject[]>([])
-  const [autoSaveTimer, setAutoSaveTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const marksMapRef = useRef(marksMap)
+  const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
+  const editRevisionRef = useRef(0)
+  const dirtyRef = useRef(false)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
@@ -109,7 +139,10 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
     }
   }, [schoolId, classId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { loadExams() }, [loadExams])
+  useEffect(() => {
+    const initial = setTimeout(() => { void loadExams() }, 0)
+    return () => clearTimeout(initial)
+  }, [loadExams])
 
   async function loadExamDetail(examId: number) {
     const data = await fetch(`/api/exams/${examId}?school_id=${schoolId}`).then(r => r.json())
@@ -173,7 +206,14 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
       fetch(`/api/students?school_id=${schoolId}&grade=${grade}&section=${section}`).then(r => r.json()).catch(() => []),
       fetch(`/api/exams/${exam.id}/marks?school_id=${schoolId}`).then(r => r.json()).catch(() => null),
     ])
-    const stus: Student[] = Array.isArray(stuData) ? stuData.filter((s: Student & { status: string }) => s.status === 'active') : []
+    if (!marksData || marksData.error) {
+      setErrMsg(marksData?.error || 'Unable to load marks. Check your connection and retry.')
+      return
+    }
+    const applicableIds = new Set<number>((marksData.students ?? []).map((student: ReviewStudent) => student.student_id))
+    const stus: Student[] = Array.isArray(stuData)
+      ? stuData.filter((student: Student & { status: string }) => student.status === 'active' && applicableIds.has(student.id))
+      : []
     setStudents(stus)
     setEnteringSubjects(mySubjects)
 
@@ -199,6 +239,8 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
       })
     }
     setMarksMap(init)
+    marksMapRef.current = init
+    dirtyRef.current = false
     setSaveState('idle')
     setView('enter')
   }
@@ -241,9 +283,10 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
 
   const saveMarks = useCallback(async (submitIds?: number[]) => {
     if (!selectedExam) return
-    setSaveState('saving')
+    const snapshot = marksMapRef.current
+    const revision = editRevisionRef.current
     const entries: { exam_subject_id: number; student_id: number; marks_obtained: number | null; is_absent: boolean }[] = []
-    for (const [studentId, subjectMarks] of Object.entries(marksMap)) {
+    for (const [studentId, subjectMarks] of Object.entries(snapshot)) {
       for (const [subId, entry] of Object.entries(subjectMarks)) {
         // A cell that's blank and not marked Absent has no real data to
         // save — sending it anyway would write a row that looks "entered"
@@ -256,7 +299,9 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
         })
       }
     }
-    try {
+    const request = async () => {
+      setSaveState('saving')
+      try {
       const res = await fetch(`/api/exams/${selectedExam.id}/marks`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ school_id: schoolId, entries, submit_subject_ids: submitIds ?? [] }),
@@ -265,21 +310,43 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
       if (!res.ok) { setSaveState('error'); return data }
       setLastSaved(new Date())
       setSaveState('saved')
+      if (editRevisionRef.current === revision) dirtyRef.current = false
       return data
-    } catch {
-      setSaveState('error')
-      return null
+      } catch {
+        setSaveState('error')
+        return null
+      }
     }
-  }, [selectedExam, marksMap, schoolId])
+    const queued = saveQueueRef.current.then(request, request)
+    saveQueueRef.current = queued.then(() => undefined, () => undefined)
+    return queued
+  }, [selectedExam, schoolId])
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', warnBeforeUnload)
+      if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
+    }
+  }, [])
 
   function updateMark(studentId: number, subjectId: number, field: 'marks' | 'absent', value: string | boolean) {
-    setMarksMap(prev => ({
-      ...prev,
-      [studentId]: { ...(prev[studentId] || {}), [subjectId]: { ...(prev[studentId]?.[subjectId] || { marks: '', absent: false }), [field]: value } }
-    }))
-    if (autoSaveTimer) clearTimeout(autoSaveTimer)
-    const t = setTimeout(() => saveMarks(), 3000)
-    setAutoSaveTimer(t)
+    setMarksMap(prev => {
+      const next = {
+        ...prev,
+        [studentId]: { ...(prev[studentId] || {}), [subjectId]: { ...(prev[studentId]?.[subjectId] || { marks: '', absent: false }), [field]: value } },
+      }
+      marksMapRef.current = next
+      return next
+    })
+    editRevisionRef.current++
+    dirtyRef.current = true
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
+    autoSaveTimer.current = setTimeout(() => { void saveMarks() }, 3000)
   }
 
   function overMax(subjectId: number, marks: string): boolean {
@@ -357,7 +424,7 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
   function downloadTemplate() {
     if (!selectedExam || students.length === 0 || enteringSubjects.length === 0) return
     const subjectCols = enteringSubjects.flatMap(s => [`${s.subject_name} (/${s.max_marks})`, `${s.subject_name} Absent (Y/N)`])
-    const header = ['Roll Number', 'Student Name', ...subjectCols].join(',')
+    const header = ['Roll Number', 'Student Name', ...subjectCols].map(csvCell).join(',')
     const rows = students.map(st => {
       const cols = enteringSubjects.flatMap(sub => {
         const entry = marksMap[st.id]?.[sub.id]
@@ -365,7 +432,7 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
         const marks = entry?.absent ? '' : (entry?.marks ?? '')
         return [marks, absent]
       })
-      return [`"${st.roll_number}"`, `"${st.name}"`, ...cols].join(',')
+      return [st.roll_number, st.name, ...cols].map(csvCell).join(',')
     })
     const csv = [header, ...rows].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
@@ -385,9 +452,9 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
     reader.onload = (ev) => {
       try {
         const text = ev.target?.result as string
-        const lines = text.trim().split(/\r?\n/)
-        if (lines.length < 2) { setCsvError('CSV is empty or missing data rows'); return }
-        const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g, '').trim())
+        const rows = parseCSV(text.trim())
+        if (rows.length < 2) { setCsvError('CSV is empty or missing data rows'); return }
+        const headers = rows[0].map(h => h.trim())
 
         const subjectColMap: Array<{ subjectId: number; type: 'marks' | 'absent' } | null> = headers.map(h => {
           for (const sub of enteringSubjects) {
@@ -403,13 +470,8 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
         let matchedRows = 0
         let skippedRows = 0
         const newMap = { ...marksMap }
-        for (let i = 1; i < lines.length; i++) {
-          // Naive split — a comma inside a quoted student name will misalign
-          // columns. Matching is by roll number only (column 0), so a
-          // misaligned name column doesn't corrupt marks, but a comma inside
-          // the roll number itself would. Acceptable given roll numbers are
-          // school-assigned short codes, not free text.
-          const cells = lines[i].split(',').map(c => c.replace(/^"|"$/g, '').trim())
+        for (let i = 1; i < rows.length; i++) {
+          const cells = rows[i].map(cell => cell.trim())
           const roll = cells[0]
           const studentId = rollMap.get(roll)
           if (!studentId) { skippedRows++; continue }
@@ -428,6 +490,9 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
           })
         }
         setMarksMap(newMap)
+        marksMapRef.current = newMap
+        editRevisionRef.current++
+        dirtyRef.current = true
         setMsg(skippedRows > 0
           ? `Imported ${matchedRows} student(s). ${skippedRows} row(s) skipped — roll number not found.`
           : `Imported ${matchedRows} student(s). Review and submit when ready.`)
@@ -722,15 +787,15 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
                   <div key={sub.id} className="flex items-center gap-3 flex-wrap border border-gray-100 rounded-lg p-3">
                     <p className="text-sm font-semibold text-gray-700 w-32 flex-shrink-0">{sub.subject_name}</p>
                     <div>
-                      <label className="block text-[10px] font-semibold text-gray-500 mb-0.5">Max Marks</label>
-                      <input type="number" min={1} step={1} value={v.max}
+                      <label htmlFor={`config-max-${sub.id}`} className="block text-[10px] font-semibold text-gray-500 mb-0.5">Max Marks</label>
+                      <input id={`config-max-${sub.id}`} type="number" min={1} step={1} value={v.max}
                         onChange={e => setConfigValues(prev => ({ ...prev, [sub.id]: { ...v, max: e.target.value } }))}
                         data-testid={`config-max-${sub.id}`}
                         className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-300" />
                     </div>
                     <div>
-                      <label className="block text-[10px] font-semibold text-gray-500 mb-0.5">Pass Marks</label>
-                      <input type="number" min={0} step={1} value={v.pass}
+                      <label htmlFor={`config-pass-${sub.id}`} className="block text-[10px] font-semibold text-gray-500 mb-0.5">Pass Marks</label>
+                      <input id={`config-pass-${sub.id}`} type="number" min={0} step={1} value={v.pass}
                         onChange={e => setConfigValues(prev => ({ ...prev, [sub.id]: { ...v, pass: e.target.value } }))}
                         data-testid={`config-pass-${sub.id}`}
                         className="w-24 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-300" />
@@ -752,7 +817,11 @@ export default function ExamMarks({ classId, schoolId, grade, section, teacher, 
       {view === 'enter' && selectedExam && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <button onClick={() => { saveMarks(); setView('detail') }} className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
+            <button onClick={async () => {
+              if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current)
+              const result = await saveMarks()
+              if (result && !('error' in result)) setView('detail')
+            }} className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1">
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
               Back
             </button>

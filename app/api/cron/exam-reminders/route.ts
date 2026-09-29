@@ -36,11 +36,13 @@ const REMINDERS: { type: string; offsetDays: number; settingCol: string }[] = [
 
 async function run(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET
-  if (cronSecret) {
-    const auth = req.headers.get('authorization') ?? ''
-    if (auth.replace('Bearer ', '') !== cronSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+  if (!cronSecret) {
+    console.error('[cron/exam-reminders] CRON_SECRET is not configured')
+    return NextResponse.json({ error: 'Cron is not configured' }, { status: 503 })
+  }
+  const auth = req.headers.get('authorization') ?? ''
+  if (auth !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
@@ -107,7 +109,9 @@ async function run(req: NextRequest) {
         if (studentIds.length > 0) {
           try {
             const { rows: parentLinks } = await pool.query(
-              `SELECT DISTINCT parent_id FROM student_parents WHERE student_id = ANY($1::int[])`, [studentIds]
+              `SELECT DISTINCT sp.parent_id FROM student_parents sp
+               JOIN parents p ON p.id = sp.parent_id
+               WHERE sp.student_id = ANY($1::int[]) AND p.school_id = $2`, [studentIds, exam.school_id]
             )
             for (const link of parentLinks) {
               await pool.query(

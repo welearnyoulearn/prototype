@@ -14,6 +14,10 @@ export async function GET(req: NextRequest) {
     const to = searchParams.get('to')
     const actor = await requireExamsAccess(school_id)
     if (!actor) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const validDate = (value: string | null) => value === null || (/^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)))
+    if (!validDate(from) || !validDate(to) || (from && to && from > to)) {
+      return NextResponse.json({ error: 'Invalid calendar date range' }, { status: 400 })
+    }
 
     // Role-scoped access — a session can only ever ask for its own calendar:
     // a student for themself, a parent for a linked child, a teacher for
@@ -120,7 +124,12 @@ export async function GET(req: NextRequest) {
       // rather than at the SQL level so admin/teacher/student keep full detail
       // from the same query.
       const out = actor.kind === 'parent'
-        ? rows.map(({ syllabus: _syllabus, instructions: _instructions, ...rest }) => rest)
+        ? rows.map(row => {
+            const safe = { ...row }
+            delete safe.syllabus
+            delete safe.instructions
+            return safe
+          })
         : rows
       return NextResponse.json(out)
     } catch (err) {

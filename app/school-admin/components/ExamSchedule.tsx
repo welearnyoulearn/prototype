@@ -300,20 +300,26 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
   // selected — spans across sections aren't a supported combination since
   // exam_applicable_students is per-exam-row and each class is its own row.
   useEffect(() => {
-    if (studentScope !== 'specific' || selectedClasses.length !== 1) { setClassRoster(null); return }
-    setClassRoster('loading')
-    const cls = classes.find(c => c.id === selectedClasses[0])
-    if (!cls) return
-    fetch(`/api/students?school_id=${schoolId}&grade=${encodeURIComponent(cls.grade)}&section=${encodeURIComponent(cls.section)}`)
-      .then(r => r.json())
-      .then(data => setClassRoster(Array.isArray(data) ? data : (Array.isArray(data?.students) ? data.students : [])))
-      .catch(() => setClassRoster([]))
+    const initial = setTimeout(() => {
+      if (studentScope !== 'specific' || selectedClasses.length !== 1) { setClassRoster(null); return }
+      setClassRoster('loading')
+      const cls = classes.find(c => c.id === selectedClasses[0])
+      if (!cls) return
+      fetch(`/api/students?school_id=${schoolId}&grade=${encodeURIComponent(cls.grade)}&section=${encodeURIComponent(cls.section)}`)
+        .then(r => r.json())
+        .then(data => setClassRoster(Array.isArray(data) ? data : (Array.isArray(data?.students) ? data.students : [])))
+        .catch(() => setClassRoster([]))
+    }, 0)
+    return () => clearTimeout(initial)
   }, [studentScope, selectedClasses, classes, schoolId])
 
   useEffect(() => {
-    if (selectedClasses.length !== 1 && studentScope === 'specific') {
-      setStudentScope('all'); setSelectedStudentIds([])
-    }
+    const initial = setTimeout(() => {
+      if (selectedClasses.length !== 1 && studentScope === 'specific') {
+        setStudentScope('all'); setSelectedStudentIds([])
+      }
+    }, 0)
+    return () => clearTimeout(initial)
   }, [selectedClasses, studentScope])
 
   const byGrade = classes.reduce<Record<string, ClassOption[]>>((acc, c) => {
@@ -505,7 +511,7 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
         setSaving(false)
         return
       }
-      setSaveSuccess(`${data.exams_created} exam(s) created across ${selectedClasses.length} class(es), ${data.notified} students/parents notified.`)
+      setSaveSuccess(`${data.exams_created} exam(s) created across ${selectedClasses.length} class(es), ${data.notified} student, parent, and teacher notification(s) sent.`)
       setTimeout(onDone, 1400)
     } catch {
       setSaveError('Connection error')
@@ -550,15 +556,15 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
       {step === 1 && (
         <div className="bg-white rounded-lg border border-gray-200 p-6 space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Exam Name *</label>
-            <input type="text" placeholder="e.g. Half Yearly Examination 2025" value={form.exam_name}
+            <label htmlFor="exam-name" className="block text-xs font-semibold text-gray-600 mb-1">Exam Name *</label>
+            <input id="exam-name" type="text" placeholder="e.g. Half Yearly Examination 2025" value={form.exam_name}
               onChange={e => setForm(f => ({ ...f, exam_name: e.target.value }))}
               data-testid="exam-name-input"
               className="w-full border border-gray-200 rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Exam Type *</label>
-            <select value={form.exam_type} onChange={e => setForm(f => ({ ...f, exam_type: e.target.value }))}
+            <label htmlFor="exam-type" className="block text-xs font-semibold text-gray-600 mb-1">Exam Type *</label>
+            <select id="exam-type" value={form.exam_type} onChange={e => setForm(f => ({ ...f, exam_type: e.target.value }))}
               className="w-full max-w-xs border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
               {EXAM_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
@@ -574,29 +580,29 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
               ] as const).map(({ key, label }) => (
                 <label key={key} data-testid={`exam-span-${key}`}
                   className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border cursor-pointer ${examSpan === key ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'}`}>
-                  <input type="checkbox" checked={examSpan === key} onChange={() => setExamSpan(key)} className="accent-indigo-600" />
+                  <input type="radio" name="exam-span" value={key} checked={examSpan === key} onChange={() => setExamSpan(key)} className="accent-indigo-600" />
                   {label}
                 </label>
               ))}
             </div>
             {examSpan === 'single' ? (
               <div className="max-w-xs">
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Exam Date *</label>
-                <input type="date" value={examDate} onChange={e => setExamDate(e.target.value)}
+                <label htmlFor="exam-date" className="block text-xs font-semibold text-gray-600 mb-1">Exam Date *</label>
+                <input id="exam-date" type="date" value={examDate} onChange={e => setExamDate(e.target.value)}
                   data-testid="exam-date-input"
                   className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-4 max-w-md">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">Start Date *</label>
-                  <input type="date" value={rangeStart} onChange={e => setRangeStart(e.target.value)}
+                  <label htmlFor="exam-range-start" className="block text-xs font-semibold text-gray-600 mb-1">Start Date *</label>
+                  <input id="exam-range-start" type="date" value={rangeStart} onChange={e => setRangeStart(e.target.value)}
                     data-testid="exam-range-start-input"
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">End Date *</label>
-                  <input type="date" value={rangeEnd} onChange={e => setRangeEnd(e.target.value)} min={rangeStart || undefined}
+                  <label htmlFor="exam-range-end" className="block text-xs font-semibold text-gray-600 mb-1">End Date *</label>
+                  <input id="exam-range-end" type="date" value={rangeEnd} onChange={e => setRangeEnd(e.target.value)} min={rangeStart || undefined}
                     data-testid="exam-range-end-input"
                     className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" />
                 </div>
@@ -620,7 +626,7 @@ function CreateExamWizard({ schoolId, classes, onDone }: { schoolId: number; cla
               ] as const).map(({ key, label }) => (
                 <label key={key} data-testid={`exam-daily-sessions-${key}`}
                   className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border cursor-pointer ${dailySessions === key ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'}`}>
-                  <input type="checkbox" checked={dailySessions === key} onChange={() => setDailySessionsMode(key)} className="accent-indigo-600" />
+                  <input type="radio" name="daily-sessions" value={key} checked={dailySessions === key} onChange={() => setDailySessionsMode(key)} className="accent-indigo-600" />
                   {label}
                 </label>
               ))}
@@ -1055,7 +1061,10 @@ function ManageExams({ schoolId }: { schoolId: number }) {
       setExams(Array.isArray(data) ? data : [])
     } finally { setLoading(false) }
   }
-  useEffect(() => { load() }, [schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const initial = setTimeout(() => { void load() }, 0)
+    return () => clearTimeout(initial)
+  }, [schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const grades = Array.from(new Set(exams.map(e => e.grade))).sort()
   const sections = Array.from(new Set(exams.filter(e => !filterGrade || e.grade === filterGrade).map(e => e.section))).sort()
@@ -1420,8 +1429,8 @@ function ResultsAndRelease({ schoolId }: { schoolId: number }) {
   }
 
   return (
-    <div className="flex gap-5">
-      <div className="w-60 flex-shrink-0">
+    <div className="flex flex-col gap-5 lg:flex-row">
+      <div className="w-full flex-shrink-0 lg:w-60">
         {examsLoading ? (
           <div className="py-12 text-center text-muted-foreground text-sm">Loading exams...</div>
         ) : examList.length === 0 ? (
@@ -1522,7 +1531,10 @@ function AckTracker({ examId, schoolId }: { examId: number; schoolId: number }) 
     } finally { setLoading(false) }
   }
 
-  useEffect(() => { load() }, [examId]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const initial = setTimeout(() => { void load() }, 0)
+    return () => clearTimeout(initial)
+  }, [examId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function nudge(studentId: number) {
     setNudging(studentId)

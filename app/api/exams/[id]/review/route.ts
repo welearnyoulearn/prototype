@@ -49,11 +49,15 @@ export async function POST(
       }, { status: 400 })
     }
 
-    await pool.query(`
+    const reviewed = await pool.query(`
       UPDATE exam_records
       SET status = 'teacher_reviewed', teacher_reviewed_at = NOW(), teacher_reviewed_by = $2, updated_at = NOW()
-      WHERE id = $1
+      WHERE id = $1 AND status = 'collecting'
+      RETURNING id
     `, [exam_id, actor.teacherId])
+    if (reviewed.rows.length === 0) {
+      return NextResponse.json({ error: 'Exam status changed while you were reviewing it. Refresh and try again.' }, { status: 409 })
+    }
 
     // Notify every school-admin-role user so the release queue doesn't rely
     // on someone remembering to check it — recipient_school_id already

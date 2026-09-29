@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { Bell, CalendarDays, Check, ClipboardList, Clock, Megaphone, RefreshCw, UserRound, XCircle, type LucideIcon } from 'lucide-react'
 
@@ -90,6 +90,20 @@ const TYPE_NAV: Record<string, string> = {
   exam_reminder_today: 'my-marks',
 }
 
+function notificationDestination(
+  type: string,
+  portal: 'teacher' | 'admin' | 'student' | 'parent',
+): string | undefined {
+  const scheduleTypes = new Set(['exam_scheduled', 'exam_updated', 'exam_cancelled', 'exam_reminder_7day', 'exam_reminder_1day', 'exam_reminder_today'])
+  if (scheduleTypes.has(type)) {
+    if (portal === 'parent') return 'exams'
+    if (portal === 'teacher' || portal === 'admin') return 'exam-schedule'
+    return 'my-marks'
+  }
+  if (type === 'marks_released') return portal === 'parent' ? 'results' : 'my-marks'
+  return TYPE_NAV[type]
+}
+
 function timeAgo(dateStr: string) {
   const diff = Date.now() - new Date(dateStr).getTime()
   const mins = Math.floor(diff / 60000)
@@ -116,19 +130,20 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
         ? `/api/notifications?parent_id=${parentId}`
         : `/api/notifications?recipient_school_id=${schoolId}`
 
-  async function fetchNotifications() {
+  const fetchNotifications = useCallback(async () => {
     try {
       const res = await fetch(apiUrl)
+      if (!res.ok) throw new Error(`Notifications request failed (${res.status})`)
       const data = await res.json()
       setNotifications(Array.isArray(data) ? data : [])
-    } catch { /* silent */ }
-  }
+    } catch (error) { console.error(error) }
+  }, [apiUrl])
 
   useEffect(() => {
-    fetchNotifications()
+    const initial = setTimeout(() => { void fetchNotifications() }, 0)
     const timer = setInterval(fetchNotifications, 30000)
-    return () => clearInterval(timer)
-  }, [teacherId, schoolId, studentId, parentId])
+    return () => { clearTimeout(initial); clearInterval(timer) }
+  }, [fetchNotifications])
 
 
   async function markAllRead() {
@@ -161,7 +176,8 @@ export default function NotificationBell({ teacherId, schoolId, studentId, paren
 
   function handleClick(n: Notification) {
     markOneRead(n.id)
-    const navKey = TYPE_NAV[n.type]
+    const portal = parentId ? 'parent' : teacherId ? 'teacher' : studentId ? 'student' : 'admin'
+    const navKey = notificationDestination(n.type, portal)
     if (navKey && onNavigate) {
       let payload: NavPayload | undefined
       if (n.data) {
