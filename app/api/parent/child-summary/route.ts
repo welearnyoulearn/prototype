@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     const class_id = searchParams.get('class_id')
 
     const actor = await requireExamsAccess(school_id)
-    if (!actor) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!actor || actor.kind !== 'parent') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     if (!student_id || !class_id) {
       return NextResponse.json({ error: 'student_id, class_id required' }, { status: 400 })
@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
     // claim to this specific student. Any parent (or teacher/student, since
     // getAnySession admits any role) could read any other family's summary
     // by changing student_id in the URL.
-    if (actor.kind === 'parent' && !await parentOwnsStudent(actor.parentId, Number(student_id))) {
+    if (!await parentOwnsStudent(actor.parentId, Number(student_id))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
@@ -42,17 +42,26 @@ export async function GET(req: NextRequest) {
     )
     const student = studentRows[0]
     if (!student) return NextResponse.json({ error: 'Student not found' }, { status: 404 })
+    const { rows: matchingClasses } = await pool.query(
+      `SELECT 1 FROM classes WHERE id = $1 AND school_id = $2 AND grade = $3 AND section = $4`,
+      [cid, scid, student.grade, student.section],
+    )
+    if (matchingClasses.length === 0) {
+      return NextResponse.json({ error: 'class_id does not match this student' }, { status: 400 })
+    }
 
-    try {
-      const today = new Date().toISOString().slice(0, 10)
-      const cutoff = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+      const localDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+      const todayDate = new Date()
+      const cutoffDate = new Date(todayDate); cutoffDate.setDate(cutoffDate.getDate() + 60)
+      const today = localDate(todayDate)
+      const cutoff = localDate(cutoffDate)
       // status != 'scheduled' previously excluded almost every real upcoming
       // exam — 'scheduled' is the status every future exam sits in right up
       // until the day after it happens (see /api/cron/exam-status-sweep), so
       // this silently emptied "Upcoming Exams" for parents. Only 'cancelled'
       // is excluded now. Also matches student_scope='specific' exams
       // targeted at this exact student, not just whole-class exams.
-      const { rows } = await pool.query(`
+      const { rows: upcomingRows } = await pool.query(`
         SELECT
           e.id,
           e.exam_name,
@@ -82,12 +91,8 @@ export async function GET(req: NextRequest) {
         ORDER BY e.exam_date ASC
         LIMIT 10
       `, [student.grade, student.section, scid, today, cutoff, sid])
-      upcoming_exams = rows
-    } catch (_) {
-      upcoming_exams = []
-    }
+      upcoming_exams = upcomingRows
 
-    try {
       // total_max is now computed from exam_subjects directly (every real
       // subject for this exam), not by joining through the student's own
       // exam_marks rows — the old join silently dropped any subject the
@@ -95,7 +100,7 @@ export async function GET(req: NextRequest) {
       // inflating the shown percentage relative to what the student's own
       // portal (GET /api/students/[id]/exams, which sums max over all
       // subjects) reports for the identical exam.
-      const { rows } = await pool.query(`
+      const { rows: resultRows } = await pool.query(`
         SELECT
           e.id,
           e.exam_name,
@@ -114,38 +119,33 @@ export async function GET(req: NextRequest) {
         JOIN (SELECT exam_id, SUM(max_marks) AS total_max FROM exam_subjects GROUP BY exam_id) subj ON subj.exam_id = e.id
         LEFT JOIN exam_marks em ON em.exam_id = e.id AND em.student_id = $1
         WHERE e.class_id = $2 AND e.school_id = $3 AND e.status = 'released'
+          AND (e.student_scope = 'all' OR EXISTS (
+            SELECT 1 FROM exam_applicable_students eas WHERE eas.exam_id = e.id AND eas.student_id = $1
+          ))
         GROUP BY e.id, subj.total_max
         ORDER BY e.released_at DESC
         LIMIT 5
       `, [sid, cid, scid])
-      released_results = rows
-    } catch (_) {
-      released_results = []
-    }
+      released_results = resultRows
 
-    try {
-      const { rows } = await pool.query(`
+      const { rows: acknowledgementRows } = await pool.query(`
         SELECT COUNT(*)::int AS cnt
         FROM exam_records e
         WHERE e.class_id = $1 AND e.school_id = $2 AND e.status = 'released'
+          AND (e.student_scope = 'all' OR EXISTS (
+            SELECT 1 FROM exam_applicable_students eas WHERE eas.exam_id = e.id AND eas.student_id = $3
+          ))
           AND NOT EXISTS (
             SELECT 1 FROM parent_mark_acks pma
             WHERE pma.exam_id = e.id AND pma.student_id = $3
           )
       `, [cid, scid, sid])
-      unacknowledged_count = rows[0]?.cnt ?? 0
-    } catch (_) {
-      unacknowledged_count = 0
-    }
+      unacknowledged_count = acknowledgementRows[0]?.cnt ?? 0
 
-    try {
       // This month's attendance from the same builder the Attendance tab uses — one formula
       // (present + late ÷ marked sessions, holidays excluded), so the two screens always agree.
       const view = await buildStudentAttendanceView(scid, sid)
       attendance_pct = view?.month.summary.pct ?? null
-    } catch (_) {
-      attendance_pct = null
-    }
 
     return NextResponse.json({
       upcoming_exams,

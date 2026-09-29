@@ -29,6 +29,7 @@ const poolConfig = (process.env.PGHOST)
       user:     process.env.PGUSER,
       password: process.env.PGPASSWORD,
       ssl: { rejectUnauthorized: false },
+      options: '-c timezone=Asia/Kolkata',
       max: isVercel ? 1 : 10,
       idleTimeoutMillis: 10000,
       connectionTimeoutMillis: 10000,
@@ -39,6 +40,7 @@ const poolConfig = (process.env.PGHOST)
       idleTimeoutMillis: isVercel ? 10000 : 30000,
       connectionTimeoutMillis: isVercel ? 10000 : 5000,
       ssl: isLocalDb ? false : { rejectUnauthorized: false },
+      options: '-c timezone=Asia/Kolkata',
     }
 
 const pool = new Pool(poolConfig)
@@ -53,8 +55,9 @@ const pool = new Pool(poolConfig)
 // the DATE-column half of this exact IST/UTC mismatch once (see the
 // setTypeParser comment above) — this closes the other half, at the
 // connection level, so every existing and future CURRENT_DATE/NOW() query is
-// correct without having to patch each one individually.
-pool.on('connect', client => { client.query(`SET TIME ZONE 'Asia/Kolkata'`).catch(() => {}) })
+// correct without having to patch each one individually. Supplying it in the
+// startup options also avoids racing a connect-event query with the first
+// application query on that client.
 
 export default pool
 
@@ -84,7 +87,7 @@ const BOOTSTRAP_MARKER_KEY   = 'initial_schema_bootstrap'
 // silently never runs anywhere, and you will chase a "column does not exist" 500
 // that reproduces on production but never locally against a fresh DB.
 // Adding a migration statement and bumping this number is ONE change, not two.
-const SCHEMA_VERSION = 47
+const SCHEMA_VERSION = 49
 
 // Records the schema level this build finished applying, on the same row as the
 // bootstrap marker (no extra row, no extra round-trip to read it back).
@@ -3660,6 +3663,60 @@ async function runIncrementalMigrations() {
   // and callers fall back to exam_records.passing_pct (the old exam-wide
   // percentage) so existing exams keep working unchanged.
   await pool.query(`ALTER TABLE exam_subjects ADD COLUMN IF NOT EXISTS pass_marks INTEGER`)
+  await pool.query(`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_records_status_chk') THEN
+        ALTER TABLE exam_records ADD CONSTRAINT exam_records_status_chk
+          CHECK (status IN ('scheduled', 'collecting', 'teacher_reviewed', 'released', 'cancelled')) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_records_passing_pct_chk') THEN
+        ALTER TABLE exam_records ADD CONSTRAINT exam_records_passing_pct_chk
+          CHECK (passing_pct BETWEEN 0 AND 100) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_records_student_scope_chk') THEN
+        ALTER TABLE exam_records ADD CONSTRAINT exam_records_student_scope_chk
+          CHECK (student_scope IN ('all', 'specific')) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_records_duration_chk') THEN
+        ALTER TABLE exam_records ADD CONSTRAINT exam_records_duration_chk
+          CHECK (duration_minutes IS NULL OR duration_minutes BETWEEN 1 AND 1440) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_records_time_range_chk') THEN
+        ALTER TABLE exam_records ADD CONSTRAINT exam_records_time_range_chk
+          CHECK (start_time IS NULL OR end_time IS NULL OR end_time > start_time) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_subjects_marks_chk') THEN
+        ALTER TABLE exam_subjects ADD CONSTRAINT exam_subjects_marks_chk
+          CHECK (max_marks > 0 AND (pass_marks IS NULL OR pass_marks BETWEEN 0 AND max_marks)) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_subjects_status_chk') THEN
+        ALTER TABLE exam_subjects ADD CONSTRAINT exam_subjects_status_chk
+          CHECK (status IN ('pending', 'submitted')) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_marks_value_chk') THEN
+        ALTER TABLE exam_marks ADD CONSTRAINT exam_marks_value_chk
+          CHECK (marks_obtained IS NULL OR marks_obtained >= 0) NOT VALID;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_marks_absence_chk') THEN
+        ALTER TABLE exam_marks ADD CONSTRAINT exam_marks_absence_chk
+          CHECK (NOT is_absent OR marks_obtained IS NULL) NOT VALID;
+      END IF;
+    END $$
+  `)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_applicable_students_student_exam ON exam_applicable_students(student_id, exam_id)`)
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_marks_exam_student ON exam_marks(exam_id, student_id)`)
+  // A school or staff account must remain deletable after marks have been
+  // entered. The original FK used the implicit NO ACTION policy, leaving
+  // exam_marks as an unexpected blocker even though entered_by is nullable.
+  await pool.query(`
+    DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'exam_marks_entered_by_fkey') THEN
+        ALTER TABLE exam_marks DROP CONSTRAINT exam_marks_entered_by_fkey;
+      END IF;
+      ALTER TABLE exam_marks ADD CONSTRAINT exam_marks_entered_by_fkey
+        FOREIGN KEY (entered_by) REFERENCES teachers(id) ON DELETE SET NULL;
+    END $$
+  `)
 
   // Syllabus integrity hardening: reject invalid future progress values and
   // retain the same chapter-weighted percentage in historical snapshots that

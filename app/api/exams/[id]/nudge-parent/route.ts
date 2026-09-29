@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { requireExamsAccess, isClassTeacherOf } from '@/lib/examsAuth'
+import { requireExamsAccess, isClassTeacherOf, examAppliesToStudent } from '@/lib/examsAuth'
 
 // POST /api/exams/[id]/nudge-parent
 // The class teacher's (or admin's) "remind this parent to acknowledge"
@@ -36,6 +36,9 @@ export async function POST(
     if (exam.status !== 'released') {
       return NextResponse.json({ error: 'This exam has not been released yet' }, { status: 400 })
     }
+    if (!await examAppliesToStudent(Number(exam_id), Number(student_id), actor.schoolId)) {
+      return NextResponse.json({ error: 'Student is not included in this exam' }, { status: 403 })
+    }
 
     const { rows: [ack] } = await pool.query(
       'SELECT id FROM parent_mark_acks WHERE exam_id = $1 AND student_id = $2', [exam_id, student_id]
@@ -46,28 +49,44 @@ export async function POST(
     if (!student) return NextResponse.json({ error: 'Student not found' }, { status: 404 })
 
     const nudgedByTeacherId = actor.kind === 'teacher' ? actor.teacherId : null
-    await pool.query(
-      'INSERT INTO parent_mark_ack_nudges (exam_id, student_id, nudged_by) VALUES ($1, $2, $3)',
-      [exam_id, student_id, nudgedByTeacherId]
-    )
-
-    const { rows: parentLinks } = await pool.query(
-      'SELECT parent_id FROM student_parents WHERE student_id = $1', [student_id]
-    )
+    const client = await pool.connect()
     let notified = 0
-    for (const link of parentLinks) {
-      try {
-        await pool.query(`
+    try {
+      await client.query('BEGIN')
+      await client.query('SELECT pg_advisory_xact_lock($1, $2)', [Number(exam_id), Number(student_id)])
+      const nudge = await client.query(`
+        INSERT INTO parent_mark_ack_nudges (exam_id, student_id, nudged_by)
+        SELECT $1, $2, $3
+        WHERE NOT EXISTS (
+          SELECT 1 FROM parent_mark_ack_nudges
+          WHERE exam_id = $1 AND student_id = $2 AND nudged_at > NOW() - INTERVAL '24 hours'
+        )
+        RETURNING id
+      `, [exam_id, student_id, nudgedByTeacherId])
+      if (nudge.rows.length === 0) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'A reminder was already sent in the last 24 hours' }, { status: 429 })
+      }
+      const { rows: parentLinks } = await client.query(
+        `SELECT sp.parent_id FROM student_parents sp JOIN parents p ON p.id = sp.parent_id
+         WHERE sp.student_id = $1 AND p.school_id = $2`, [student_id, actor.schoolId]
+      )
+      for (const link of parentLinks) {
+        await client.query(`
           INSERT INTO notifications (school_id, recipient_parent_id, sender_teacher_id, type, title, message, data)
           VALUES ($1, $2, $3, 'ack_nudge', $4, $5, $6)
-        `, [
-          actor.schoolId, link.parent_id, nudgedByTeacherId,
+        `, [actor.schoolId, link.parent_id, nudgedByTeacherId,
           `Please acknowledge — ${exam.exam_name}`,
           `${student.name}'s result for ${exam.exam_name} is waiting for your acknowledgement.`,
-          JSON.stringify({ exam_id: Number(exam_id), student_id: Number(student_id) }),
-        ])
+          JSON.stringify({ exam_id: Number(exam_id), student_id: Number(student_id) })])
         notified++
-      } catch { /* non-critical */ }
+      }
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined)
+      throw error
+    } finally {
+      client.release()
     }
 
     return NextResponse.json({ success: true, notified })

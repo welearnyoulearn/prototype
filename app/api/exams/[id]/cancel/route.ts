@@ -37,9 +37,10 @@ export async function POST(
 
     const { rows: [updated] } = await pool.query(`
       UPDATE exam_records SET status = 'cancelled', cancelled_at = NOW(), cancelled_by_admin_id = $2, cancellation_reason = $3, updated_at = NOW()
-      WHERE id = $1
+      WHERE id = $1 AND status NOT IN ('cancelled', 'released')
       RETURNING *, TO_CHAR(exam_date, 'YYYY-MM-DD') AS exam_date
     `, [id, actor.kind === 'admin' ? actor.userId : null, reason])
+    if (!updated) return NextResponse.json({ error: 'Exam was already cancelled or released' }, { status: 409 })
 
     const studentIds = exam.student_scope === 'specific'
       ? (await pool.query(`SELECT student_id FROM exam_applicable_students WHERE exam_id = $1`, [id])).rows.map(r => r.student_id)
@@ -69,7 +70,9 @@ export async function POST(
     if (studentIds.length > 0) {
       try {
         const { rows: parentLinks } = await pool.query(
-          `SELECT DISTINCT parent_id FROM student_parents WHERE student_id = ANY($1::int[])`, [studentIds]
+          `SELECT DISTINCT sp.parent_id FROM student_parents sp
+           JOIN parents p ON p.id = sp.parent_id
+           WHERE sp.student_id = ANY($1::int[]) AND p.school_id = $2`, [studentIds, actor.schoolId]
         )
         for (const link of parentLinks) {
           await pool.query(

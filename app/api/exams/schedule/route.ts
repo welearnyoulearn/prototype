@@ -78,10 +78,27 @@ export async function POST(req: NextRequest) {
 
     const actor = await requireExamsAdmin(school_id)
     if (!actor) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    const classIds = Array.isArray(class_ids) ? class_ids.map(Number) : []
+    const studentIdsRequested = Array.isArray(student_ids) ? student_ids.map(Number) : []
 
     if (!Array.isArray(class_ids) || class_ids.length === 0 || !exam_name?.trim()) {
       return NextResponse.json({ error: 'school_id, class_ids, exam_name required' }, { status: 400 })
     }
+    if (class_ids.length > 100 || new Set(classIds).size !== class_ids.length || classIds.some(id => !Number.isInteger(id))) {
+      return NextResponse.json({ error: 'class_ids must contain 1–100 unique valid IDs' }, { status: 400 })
+    }
+    if (typeof exam_name !== 'string' || exam_name.trim().length > 200) {
+      return NextResponse.json({ error: 'exam_name must be at most 200 characters' }, { status: 400 })
+    }
+    if (academic_year !== null && (typeof academic_year !== 'string' || academic_year.length > 20)) {
+      return NextResponse.json({ error: 'academic_year must be at most 20 characters' }, { status: 400 })
+    }
+    if (duration_minutes !== null && (!Number.isInteger(Number(duration_minutes)) || Number(duration_minutes) <= 0 || Number(duration_minutes) > 1440)) {
+      return NextResponse.json({ error: 'duration_minutes must be an integer from 1 to 1440' }, { status: 400 })
+    }
+    if (room !== null && (typeof room !== 'string' || room.length > 100)) return NextResponse.json({ error: 'room must be at most 100 characters' }, { status: 400 })
+    if (syllabus !== null && (typeof syllabus !== 'string' || syllabus.length > 10000)) return NextResponse.json({ error: 'syllabus is too long' }, { status: 400 })
+    if (instructions !== null && (typeof instructions !== 'string' || instructions.length > 10000)) return NextResponse.json({ error: 'instructions are too long' }, { status: 400 })
     if (!['unit_test', 'mid_term', 'final_exam', 'practical'].includes(exam_type)) {
       return NextResponse.json({ error: 'Invalid exam_type' }, { status: 400 })
     }
@@ -93,6 +110,9 @@ export async function POST(req: NextRequest) {
     }
     if (student_scope === 'specific' && (!Array.isArray(student_ids) || student_ids.length === 0)) {
       return NextResponse.json({ error: 'student_ids required when student_scope is specific' }, { status: 400 })
+    }
+    if (!Array.isArray(student_ids) || student_ids.length > 500 || new Set(studentIdsRequested).size !== student_ids.length || studentIdsRequested.some(id => !Number.isInteger(id))) {
+      return NextResponse.json({ error: 'student_ids must contain no more than 500 unique valid IDs' }, { status: 400 })
     }
 
     // sessions[] is the source of truth going forward — a single legacy
@@ -108,8 +128,11 @@ export async function POST(req: NextRequest) {
     } else {
       sessions = [{ exam_date: exam_date ?? '', start_time: start_time ?? null, end_time: end_time ?? null }]
     }
-    if (sessions.some(s => !s.exam_date)) {
-      return NextResponse.json({ error: 'Every session needs a date' }, { status: 400 })
+    if (sessions.length > 100) return NextResponse.json({ error: 'A schedule can contain at most 100 sessions' }, { status: 400 })
+    const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`))
+    const validTime = (value: string | null) => value === null || /^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value)
+    if (sessions.some(s => !validDate(s.exam_date) || !validTime(s.start_time) || !validTime(s.end_time))) {
+      return NextResponse.json({ error: 'Every session needs a valid date and valid 24-hour times' }, { status: 400 })
     }
     for (const s of sessions) {
       if (s.start_time && s.end_time && s.start_time >= s.end_time) {
@@ -141,10 +164,18 @@ export async function POST(req: NextRequest) {
     const sessionKey = (date: string, startTime: string | null) => `${date}|${startTime ?? ''}`
     const subjectsBySession = new Map<number, Map<string, Set<number>>>()
     if (Array.isArray(rawSubjectAssignments)) {
+      if (rawSubjectAssignments.length > 10000) return NextResponse.json({ error: 'Too many subject assignments' }, { status: 413 })
       for (const a of rawSubjectAssignments as SubjectAssignment[]) {
-        if (!a || !a.class_id || !a.exam_date || !Array.isArray(a.class_subject_ids)) continue
-        if (!subjectsBySession.has(a.class_id)) subjectsBySession.set(a.class_id, new Map())
-        subjectsBySession.get(a.class_id)!.set(sessionKey(a.exam_date, a.start_time ?? null), new Set(a.class_subject_ids))
+        if (!a || !Number.isInteger(Number(a.class_id)) || !validDate(a.exam_date) || !validTime(a.start_time ?? null) || !Array.isArray(a.class_subject_ids) || a.class_subject_ids.length === 0) {
+          return NextResponse.json({ error: 'Every subject assignment must identify a selected class, session, and at least one subject' }, { status: 400 })
+        }
+        const assignmentClassId = Number(a.class_id)
+        if (!subjectsBySession.has(assignmentClassId)) subjectsBySession.set(assignmentClassId, new Map())
+        const key = sessionKey(a.exam_date, a.start_time ?? null)
+        if (subjectsBySession.get(assignmentClassId)!.has(key)) {
+          return NextResponse.json({ error: 'Duplicate subject assignment for the same class and session' }, { status: 400 })
+        }
+        subjectsBySession.get(assignmentClassId)!.set(key, new Set(a.class_subject_ids.map(Number)))
       }
     }
 
@@ -153,17 +184,43 @@ export async function POST(req: NextRequest) {
     // that route to nowhere real (and previously nothing checked this at all).
     const { rows: classRows } = await pool.query(
       `SELECT id, grade, section, class_teacher_id FROM classes WHERE school_id = $1 AND id = ANY($2::int[]) AND deleted_at IS NULL`,
-      [actor.schoolId, class_ids]
+      [actor.schoolId, classIds]
     )
-    if (classRows.length !== class_ids.length) {
+    if (classRows.length !== classIds.length) {
       return NextResponse.json({ error: 'One or more classes not found in this school' }, { status: 400 })
     }
 
     if (assigned_teacher_id) {
       const { rows: [teacher] } = await pool.query(
-        `SELECT id FROM teachers WHERE id = $1 AND school_id = $2`, [assigned_teacher_id, actor.schoolId]
+        `SELECT id FROM teachers WHERE id = $1 AND school_id = $2 AND status = 'active'`, [assigned_teacher_id, actor.schoolId]
       )
       if (!teacher) return NextResponse.json({ error: 'Assigned teacher not found in this school' }, { status: 400 })
+    }
+
+    const { rows: allClassSubjects } = await pool.query(
+      `SELECT id, class_id FROM class_subjects WHERE class_id = ANY($1::int[])`, [classIds],
+    )
+    const subjectClassById = new Map(allClassSubjects.map(subject => [Number(subject.id), Number(subject.class_id)]))
+    for (const classId of classIds) {
+      if (!allClassSubjects.some(subject => Number(subject.class_id) === classId)) {
+        return NextResponse.json({ error: `Class ${classId} has no subjects configured` }, { status: 400 })
+      }
+    }
+    for (const [classId, assignments] of subjectsBySession) {
+      if (!classIds.includes(Number(classId))) return NextResponse.json({ error: 'Subject assignment references an unselected class' }, { status: 400 })
+      for (const [key, subjectIds] of assignments) {
+        if (!sessions.some(session => sessionKey(session.exam_date, session.start_time) === key)) {
+          return NextResponse.json({ error: 'Subject assignment references an unknown session' }, { status: 400 })
+        }
+        if ([...subjectIds].some(subjectId => subjectClassById.get(Number(subjectId)) !== Number(classId))) {
+          return NextResponse.json({ error: 'Subject assignment contains a subject outside its class' }, { status: 400 })
+        }
+      }
+      for (const session of sessions) {
+        if (!assignments.has(sessionKey(session.exam_date, session.start_time))) {
+          return NextResponse.json({ error: `Every session needs at least one subject for class ${classId}` }, { status: 400 })
+        }
+      }
     }
 
     // Resolve the affected student roster per class up front — whole class
@@ -178,7 +235,7 @@ export async function POST(req: NextRequest) {
       )
       const rosterIds = roster.map(r => r.id)
       const ids = student_scope === 'specific'
-        ? rosterIds.filter(id => student_ids.includes(id))
+        ? rosterIds.filter(id => studentIdsRequested.includes(id))
         : rosterIds
       perClassStudents.set(cls.id, ids)
     }
@@ -186,7 +243,7 @@ export async function POST(req: NextRequest) {
     if (student_scope === 'specific') {
       const matched = new Set<number>()
       for (const ids of perClassStudents.values()) ids.forEach(id => matched.add(id))
-      const unmatched = student_ids.filter((id: number) => !matched.has(id))
+      const unmatched = studentIdsRequested.filter(id => !matched.has(id))
       if (unmatched.length > 0) {
         return NextResponse.json({ error: 'Some selected students do not belong to the selected classes', unmatched_student_ids: unmatched }, { status: 400 })
       }
@@ -213,6 +270,25 @@ export async function POST(req: NextRequest) {
     const client = await pool.connect()
     try {
       await client.query('BEGIN')
+      // Serialize schedule writes per school, then repeat the conflict check
+      // inside the transaction. Two admins scheduling simultaneously can no
+      // longer both pass an earlier read and create overlapping exams.
+      await client.query('SELECT pg_advisory_xact_lock($1)', [actor.schoolId])
+      const lockedConflictSet = new Map<number, { exam_id: number; exam_name: string; exam_date: string; start_time: string | null; end_time: string | null; grade: string; section: string }>()
+      for (const cls of classRows) {
+        const ids = perClassStudents.get(cls.id) ?? []
+        for (const session of sessions) {
+          const conflicts = await findExamConflicts(client, actor.schoolId, ids, session.exam_date, session.start_time, session.end_time)
+          conflicts.forEach(conflict => lockedConflictSet.set(conflict.exam_id, conflict))
+        }
+      }
+      if (lockedConflictSet.size > 0) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({
+          error: '⚠️ Exam Schedule Conflict – Selected students already have an exam at this time.',
+          conflicts: Array.from(lockedConflictSet.values()),
+        }, { status: 409 })
+      }
 
       const { rows: [{ id: examGroupId }] } = await client.query(`SELECT gen_random_uuid() AS id`)
 
@@ -244,11 +320,13 @@ export async function POST(req: NextRequest) {
         // unassigned, and the class teacher can fill that one gap in later
         // via the exam's subject list — not a wholesale reassignment screen.
         const { rows: subjects } = await client.query(
-          `SELECT cs.id, cs.subject_name, cs.teacher_id, t.name AS teacher_name
+          `SELECT cs.id, cs.subject_name,
+             CASE WHEN t.school_id = $2 AND t.status = 'active' THEN cs.teacher_id ELSE NULL END AS teacher_id,
+             CASE WHEN t.school_id = $2 AND t.status = 'active' THEN t.name ELSE NULL END AS teacher_name
            FROM class_subjects cs
            LEFT JOIN teachers t ON t.id = cs.teacher_id
            WHERE cs.class_id = $1 ORDER BY cs.subject_name`,
-          [cls.id]
+          [cls.id, actor.schoolId]
         )
 
         const studentIds = perClassStudents.get(cls.id) ?? []
@@ -307,71 +385,68 @@ export async function POST(req: NextRequest) {
         const data = JSON.stringify({ exam_id: firstExamId, exam_group_id: examGroupId, class_id: cls.id })
 
         for (const student of studentIds) {
-          try {
-            await client.query(`
-              INSERT INTO notifications (school_id, recipient_student_id, type, title, message, data)
-              VALUES ($1, $2, 'exam_scheduled', $3, $4, $5)
-            `, [
-              actor.schoolId, student,
-              `${exam_name} scheduled`,
-              `${exam_name} is scheduled — ${scheduleLabel}${roomLabel}. Prepare well!`,
-              data,
-            ])
-            notified++
-          } catch { /* non-critical */ }
+          await client.query(`
+            INSERT INTO notifications (school_id, recipient_student_id, type, title, message, data)
+            VALUES ($1, $2, 'exam_scheduled', $3, $4, $5)
+          `, [
+            actor.schoolId, student,
+            `${exam_name} scheduled`,
+            `${exam_name} is scheduled — ${scheduleLabel}${roomLabel}. Prepare well!`,
+            data,
+          ])
+          notified++
         }
 
         // Notify each student's linked parent(s), same message tone.
         if (studentIds.length > 0) {
           const { rows: parentLinks } = await client.query(
-            `SELECT DISTINCT sp.parent_id, sp.student_id FROM student_parents sp WHERE sp.student_id = ANY($1::int[])`,
-            [studentIds]
+            `SELECT DISTINCT sp.parent_id, sp.student_id
+             FROM student_parents sp JOIN parents p ON p.id = sp.parent_id
+             WHERE sp.student_id = ANY($1::int[]) AND p.school_id = $2`,
+            [studentIds, actor.schoolId]
           )
           for (const link of parentLinks) {
-            try {
-              await client.query(`
-                INSERT INTO notifications (school_id, recipient_parent_id, type, title, message, data)
-                VALUES ($1, $2, 'exam_scheduled', $3, $4, $5)
-              `, [
-                actor.schoolId, link.parent_id,
-                `${exam_name} scheduled`,
-                `${exam_name} is scheduled — ${scheduleLabel}${roomLabel}.`,
-                JSON.stringify({ exam_id: firstExamId, exam_group_id: examGroupId, class_id: cls.id, student_id: link.student_id }),
-              ])
-            } catch { /* non-critical */ }
+            await client.query(`
+              INSERT INTO notifications (school_id, recipient_parent_id, type, title, message, data)
+              VALUES ($1, $2, 'exam_scheduled', $3, $4, $5)
+            `, [
+              actor.schoolId, link.parent_id,
+              `${exam_name} scheduled`,
+              `${exam_name} is scheduled — ${scheduleLabel}${roomLabel}.`,
+              JSON.stringify({ exam_id: firstExamId, exam_group_id: examGroupId, class_id: cls.id, student_id: link.student_id }),
+            ])
+            notified++
           }
         }
 
         // Notify the class teacher — they'll assign subject teachers once
         // marks entry opens, not immediately.
         if (cls.class_teacher_id) {
-          try {
-            await client.query(`
-              INSERT INTO notifications (school_id, recipient_teacher_id, type, title, message, data)
-              VALUES ($1, $2, 'exam_scheduled', $3, $4, $5)
-            `, [
-              actor.schoolId, cls.class_teacher_id,
-              `${exam_name} scheduled — Grade ${cls.grade}-${cls.section}`,
-              `${exam_name} is scheduled — ${scheduleLabel}${roomLabel}. You'll be able to assign subject teachers once marks entry opens.`,
-              data,
-            ])
-          } catch { /* non-critical */ }
+          await client.query(`
+            INSERT INTO notifications (school_id, recipient_teacher_id, type, title, message, data)
+            VALUES ($1, $2, 'exam_scheduled', $3, $4, $5)
+          `, [
+            actor.schoolId, cls.class_teacher_id,
+            `${exam_name} scheduled — Grade ${cls.grade}-${cls.section}`,
+            `${exam_name} is scheduled — ${scheduleLabel}${roomLabel}. You'll be able to assign subject teachers once marks entry opens.`,
+            data,
+          ])
+          notified++
         }
 
         // Notify the assigned (invigilating) teacher, if any and distinct
         // from the class teacher notification above.
         if (assigned_teacher_id && assigned_teacher_id !== cls.class_teacher_id) {
-          try {
-            await client.query(`
-              INSERT INTO notifications (school_id, recipient_teacher_id, type, title, message, data)
-              VALUES ($1, $2, 'exam_scheduled', $3, $4, $5)
-            `, [
-              actor.schoolId, assigned_teacher_id,
-              `${exam_name} — Grade ${cls.grade}-${cls.section}`,
-              `You've been assigned to ${exam_name} — ${scheduleLabel}${roomLabel}.`,
-              data,
-            ])
-          } catch { /* non-critical */ }
+          await client.query(`
+            INSERT INTO notifications (school_id, recipient_teacher_id, type, title, message, data)
+            VALUES ($1, $2, 'exam_scheduled', $3, $4, $5)
+          `, [
+            actor.schoolId, assigned_teacher_id,
+            `${exam_name} — Grade ${cls.grade}-${cls.section}`,
+            `You've been assigned to ${exam_name} — ${scheduleLabel}${roomLabel}.`,
+            data,
+          ])
+          notified++
         }
       }
 

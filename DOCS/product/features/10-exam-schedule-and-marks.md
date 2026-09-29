@@ -57,10 +57,11 @@ stateDiagram-v2
 | Rule | Detail |
 |---|---|
 | Grade ladder (`lib/examGrading.ts`) | **A1** ≥91 · **A2** ≥81 · **B1** ≥71 · **B2** ≥61 · **C1** ≥51 · **C2** ≥41 · **D** ≥33 · **E** <33 (on percentage) |
-| Pass / fail | Separate from grade: `percentage ≥ exam.passing_pct`. A 33 % score is grade **D** yet a **fail** on an exam with a 50 % pass mark |
+| Pass / fail | Separate from grade: overall result uses `percentage ≥ exam.passing_pct`; each subject uses its configured `exam_subjects.pass_marks` (falling back to the exam percentage only for legacy rows). |
 | Visibility | Students/parents may read **only `released`** exams and only **their own** marks |
+| Specific-student exams | Entry completeness, release, results, acknowledgement and notifications use only `exam_applicable_students`; other classmates cannot receive or discover the result |
 | Permissions | Subject teacher → own subject; class teacher → any subject in their class (and reopen/review); admin → schedule and release |
-| Release | Admin-only, irreversible; no edits accepted at release |
+| Release | Admin-only, irreversible and transactional; completeness, status transition and notifications commit once under a row lock |
 | Subject lock | Submitting a subject locks it; only the **class teacher** can reopen it, and only while the exam is still `collecting` |
 | Subjects per class | Taken from that class's `class_subjects` — never a shared typed list |
 | Notifications | Review notifies school admins; nudge notifies parents |
@@ -90,9 +91,9 @@ stateDiagram-v2
 
 **Libraries:** `lib/examGrading.ts` (single grade source, used by five places that previously drifted), `lib/examsAuth.ts` (`requireExamsAdmin/Teacher/Access`), `lib/rewards.ts` (legacy), `lib/email.ts`.
 
-**Security:** marks route checks *which* student the caller may see (a former gap where any logged-in user could pass any `student_id` was closed); results gated on `status === 'released'`.
+**Security:** operational exam detail is staff-only; teachers must be the class teacher or an assigned exam-subject teacher. Marks entry validates every student against the exam's server-derived applicable roster and saves/submits atomically. Student/parent results require self/linked-child identity, `released` status, and exam applicability. Cron jobs fail closed when `CRON_SECRET` is absent.
 
-**Tests:** covered by `workflow-portals.spec.ts` and `workflow-full-platform.spec.ts`; **no dedicated exam-marks spec** — worth adding before scale.
+**Tests:** `e2e/exams-results-hardening.spec.ts` covers record-level authorization, targeted rosters, out-of-scope mark rejection, atomic rollback, release, subject pass marks, parent acknowledgement, and parent-summary isolation. Broader portal coverage remains in `workflow-portals.spec.ts` and `workflow-full-platform.spec.ts`.
 
 ## 5. Pitch kit
 

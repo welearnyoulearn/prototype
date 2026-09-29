@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, Inbox } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -93,26 +93,46 @@ function daysUntil(dateStr: string) {
   return Math.round((d.getTime() - today.getTime()) / 86400000)
 }
 
+function localDateString(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
 export default function TestCalendar({ schoolId, classId, studentId, teacherId, mode }: Props) {
   const today = new Date()
   const [year, setYear] = useState(today.getFullYear())
   const [month, setMonth] = useState(today.getMonth())
   const [exams, setExams] = useState<ExamItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
 
-  useEffect(() => {
+  const loadCalendar = useCallback(async () => {
     setLoading(true)
+    setError(null)
     const params = new URLSearchParams({ school_id: String(schoolId) })
     if (classId)   params.set('class_id',   String(classId))
     if (studentId) params.set('student_id', String(studentId))
     if (teacherId) params.set('teacher_id', String(teacherId))
+    params.set('from', `${year}-01-01`)
+    params.set('to', `${year}-12-31`)
+    try {
+      const response = await fetch(`/api/exams/calendar?${params}`)
+      if (!response.ok) throw new Error(`Calendar request failed (${response.status})`)
+      const data = await response.json()
+      if (!Array.isArray(data)) throw new Error('Calendar returned an invalid response')
+      setExams(data)
+    } catch (loadError) {
+      setExams([])
+      setError(loadError instanceof Error ? loadError.message : 'Unable to load the exam calendar')
+    } finally {
+      setLoading(false)
+    }
+  }, [schoolId, classId, studentId, teacherId, year])
 
-    fetch(`/api/exams/calendar?${params}`)
-      .then(r => r.json())
-      .then(data => { setExams(Array.isArray(data) ? data : []); setLoading(false) })
-      .catch(() => setLoading(false))
-  }, [schoolId, classId, studentId, teacherId, mode])
+  useEffect(() => {
+    const initial = setTimeout(() => { void loadCalendar() }, 0)
+    return () => clearTimeout(initial)
+  }, [loadCalendar])
 
   const byDate = new Map<string, ExamItem[]>()
   for (const e of exams) {
@@ -142,9 +162,9 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
     return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   }
 
-  const todayStr = today.toISOString().slice(0, 10)
+  const todayStr = localDateString(today)
   const in60 = new Date(today); in60.setDate(in60.getDate() + 60)
-  const in60Str = in60.toISOString().slice(0, 10)
+  const in60Str = localDateString(in60)
 
   const upcoming = exams
     .filter(e => e.exam_date >= todayStr && e.exam_date <= in60Str)
@@ -163,7 +183,7 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
   }
 
   const ago60 = new Date(today); ago60.setDate(ago60.getDate() - 60)
-  const ago60Str = ago60.toISOString().slice(0, 10)
+  const ago60Str = localDateString(ago60)
   const todaysExams = exams.filter(e => e.exam_date === todayStr)
   const completed = exams
     .filter(e => e.exam_date < todayStr && e.exam_date >= ago60Str)
@@ -172,6 +192,14 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
 
   return (
     <div className="space-y-5">
+      {error && (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <span>{error}</span>
+          <button type="button" onClick={() => void loadCalendar()} className="min-h-10 rounded-md border border-red-300 px-3 font-medium hover:bg-red-100">
+            Retry
+          </button>
+        </div>
+      )}
       {/* Today's Exams — spec's "📝 Maths Exam – Starts in 45 Minutes" banner */}
       {todaysExams.length > 0 && (mode === 'student' || mode === 'parent') && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-2">
