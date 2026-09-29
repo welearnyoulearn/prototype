@@ -15,6 +15,7 @@ import { useSectionNav } from '@/lib/useSectionNav'
 import { getUsageSessionId, clearUsageSessionId } from '@/lib/usageSession'
 import { PORTAL_NAV_KEY_ALIASES } from '@/lib/features'
 import NotificationBell from '../components/NotificationBell'
+import TestCalendar from '../components/TestCalendar'
 import AttendanceCalendar from '../components/AttendanceCalendar'
 import SchoolCalendarView from '../components/SchoolCalendarView'
 import PortalSidebar from '@/components/portal/PortalSidebar'
@@ -1289,6 +1290,7 @@ function ParentDashboard() {
           {visited.has('exams') && (
           <div hidden={activeNav !== 'exams'} className="max-w-3xl space-y-4">
             <h2 className="text-base font-bold text-gray-800">{T.examCalendar}</h2>
+            <TestCalendar mode="parent" schoolId={student.school_id} studentId={student.id} />
             {summary?.upcoming_exams && summary.upcoming_exams.length > 0 ? (
               <div className="space-y-3">
                 {summary.upcoming_exams.map(e => {

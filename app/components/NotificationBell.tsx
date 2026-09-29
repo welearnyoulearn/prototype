@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { Bell, CalendarDays, Check, ClipboardList, Clock, RefreshCw, UserRound, type LucideIcon } from 'lucide-react'
+import { Bell, CalendarDays, Check, ClipboardList, Clock, RefreshCw, UserRound, XCircle, type LucideIcon } from 'lucide-react'
 
 type Notification = {
   id: number
@@ -36,6 +36,11 @@ const TYPE_ICONS: Record<string, LucideIcon> = {
   marks_released: ClipboardList,
   ack_nudge: Bell,
   ack_completed: Check,
+  exam_updated: RefreshCw,
+  exam_cancelled: XCircle,
+  exam_reminder_7day: CalendarDays,
+  exam_reminder_1day: Bell,
+  exam_reminder_today: Clock,
 }
 
 function NotificationTypeIcon({ type }: { type: string }) {
@@ -56,18 +61,28 @@ const TYPE_COLORS: Record<string, string> = {
   marks_released: 'text-blue-700 bg-blue-50',
   ack_nudge: 'text-amber-700 bg-amber-50',
   ack_completed: 'text-green-700 bg-green-50',
+  exam_updated: 'text-amber-700 bg-amber-50',
+  exam_cancelled: 'text-red-700 bg-red-50',
+  exam_reminder_7day: 'text-indigo-700 bg-indigo-50',
+  exam_reminder_1day: 'text-amber-700 bg-amber-50',
+  exam_reminder_today: 'text-red-700 bg-red-50',
 }
 
 const TYPE_NAV: Record<string, string> = {
   marks_entry_required: 'class-view',  // teacher: open class's marks tab
   marks_submitted: 'class-view',        // class teacher: see marks submission
   marks_published: 'my-marks',          // student: go to marks page
-  exam_scheduled: 'weekly-test',        // student: go to test calendar
+  exam_scheduled: 'my-marks',           // student: go to Upcoming Exams tab (was 'weekly-test', a dead nav key)
   exam_entry_open: 'class-view',        // subject teacher: marks entry now open
   exam_reviewed: 'exam-schedule',       // school admin: exam awaiting release
   marks_released: 'my-marks',           // student: results are visible
   ack_nudge: 'results',                 // parent: acknowledge a result
   ack_completed: 'class-view',          // class teacher: a parent signed off
+  exam_updated: 'my-marks',             // student: see the updated schedule (parent/teacher use their own exam-calendar nav keys, 'exams'/'exam-schedule', not this shared map)
+  exam_cancelled: 'my-marks',
+  exam_reminder_7day: 'my-marks',
+  exam_reminder_1day: 'my-marks',
+  exam_reminder_today: 'my-marks',
 }
 
 function timeAgo(dateStr: string) {

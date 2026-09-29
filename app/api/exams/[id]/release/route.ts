@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
-import { requireExamsAdmin } from '@/lib/examsAuth'
+import { requireExamsAdmin, examNotificationEnabled } from '@/lib/examsAuth'
 import { calcGrade, isPassing } from '@/lib/examGrading'
 import { awardPoints } from '@/lib/rewards'
 
@@ -52,6 +52,7 @@ export async function POST(
     `, [actor.schoolId, exam.grade, exam.section])
 
     let notified = 0
+    const marksNotifsOn = await examNotificationEnabled(actor.schoolId, 'notify_marks_published')
     for (const student of students) {
       const { rows: [{ total: totalRaw }] } = await pool.query(
         `SELECT SUM(marks_obtained) AS total FROM exam_marks
@@ -63,36 +64,38 @@ export async function POST(
       const grade = calcGrade(pct)
       const pass = isPassing(pct, exam.passing_pct)
 
-      try {
-        await pool.query(`
-          INSERT INTO notifications (school_id, recipient_student_id, type, title, message, data)
-          VALUES ($1, $2, 'marks_released', $3, $4, $5)
-        `, [
-          actor.schoolId, student.id,
-          `${exam.exam_name} results released`,
-          pass
-            ? `Your results for ${exam.exam_name} are available — ${pct.toFixed(1)}% (${grade}).`
-            : `Your results for ${exam.exam_name} are available — ${pct.toFixed(1)}%.`,
-          JSON.stringify({ exam_id: Number(exam_id), percentage: pct.toFixed(1), grade, pass }),
-        ])
-        notified++
-      } catch { /* non-critical */ }
-
-      const { rows: parentLinks } = await pool.query(
-        'SELECT parent_id FROM student_parents WHERE student_id = $1', [student.id]
-      )
-      for (const link of parentLinks) {
+      if (marksNotifsOn) {
         try {
           await pool.query(`
-            INSERT INTO notifications (school_id, recipient_parent_id, type, title, message, data)
+            INSERT INTO notifications (school_id, recipient_student_id, type, title, message, data)
             VALUES ($1, $2, 'marks_released', $3, $4, $5)
           `, [
-            actor.schoolId, link.parent_id,
+            actor.schoolId, student.id,
             `${exam.exam_name} results released`,
-            `${student.name}'s results for ${exam.exam_name} are available. Please review and acknowledge.`,
-            JSON.stringify({ exam_id: Number(exam_id), student_id: student.id }),
+            pass
+              ? `Your results for ${exam.exam_name} are available — ${pct.toFixed(1)}% (${grade}).`
+              : `Your results for ${exam.exam_name} are available — ${pct.toFixed(1)}%.`,
+            JSON.stringify({ exam_id: Number(exam_id), percentage: pct.toFixed(1), grade, pass }),
           ])
+          notified++
         } catch { /* non-critical */ }
+
+        const { rows: parentLinks } = await pool.query(
+          'SELECT parent_id FROM student_parents WHERE student_id = $1', [student.id]
+        )
+        for (const link of parentLinks) {
+          try {
+            await pool.query(`
+              INSERT INTO notifications (school_id, recipient_parent_id, type, title, message, data)
+              VALUES ($1, $2, 'marks_released', $3, $4, $5)
+            `, [
+              actor.schoolId, link.parent_id,
+              `${exam.exam_name} results released`,
+              `${student.name}'s results for ${exam.exam_name} are available. Please review and acknowledge.`,
+              JSON.stringify({ exam_id: Number(exam_id), student_id: student.id }),
+            ])
+          } catch { /* non-critical */ }
+        }
       }
 
       if (pct >= 80) {

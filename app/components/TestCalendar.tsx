@@ -9,6 +9,12 @@ type ExamItem = {
   exam_name: string
   exam_type: string
   exam_date: string   // YYYY-MM-DD
+  start_time: string | null
+  end_time: string | null
+  duration_minutes: number | null
+  room: string | null
+  syllabus?: string | null
+  instructions?: string | null
   status: string
   grade: string
   section: string
@@ -16,6 +22,46 @@ type ExamItem = {
   total_subjects: number
   submitted_subjects: number
   class_id: number
+}
+
+function timeLabel(t: string | null) {
+  if (!t) return null
+  const [h, m] = t.split(':').map(Number)
+  const period = h >= 12 ? 'PM' : 'AM'
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`
+}
+
+function durationLabel(startTime: string | null, endTime: string | null, minutes: number | null) {
+  if (startTime && endTime) {
+    const [sh, sm] = startTime.split(':').map(Number)
+    const [eh, em] = endTime.split(':').map(Number)
+    const mins = (eh * 60 + em) - (sh * 60 + sm)
+    if (mins > 0) return mins % 60 === 0 ? `${mins / 60} Hour${mins / 60 !== 1 ? 's' : ''}` : `${mins} min`
+  }
+  if (minutes) return minutes % 60 === 0 ? `${minutes / 60} Hour${minutes / 60 !== 1 ? 's' : ''}` : `${minutes} min`
+  return null
+}
+
+// "2 Days Left" / "Starts in 45 Minutes" — the spec's exam countdown, sharp
+// down to the minute once the exam is today and has a start_time.
+function countdownLabel(exam: ExamItem): string | null {
+  const days = daysUntil(exam.exam_date)
+  if (days > 0) return `${days} Day${days !== 1 ? 's' : ''} Left`
+  if (days < 0) return null
+  if (!exam.start_time) return 'Today'
+  const [h, m] = exam.start_time.split(':').map(Number)
+  const start = new Date(); start.setHours(h, m, 0, 0)
+  const diffMin = Math.round((start.getTime() - Date.now()) / 60000)
+  if (diffMin > 60) return `Starts in ${Math.round(diffMin / 60)} Hours`
+  if (diffMin > 0) return `Starts in ${diffMin} Minutes`
+  const endMin = exam.end_time ? (() => {
+    const [eh, em] = exam.end_time!.split(':').map(Number)
+    const end = new Date(); end.setHours(eh, em, 0, 0)
+    return Math.round((end.getTime() - Date.now()) / 60000)
+  })() : null
+  if (endMin !== null && endMin > 0) return 'In Progress'
+  return 'Today'
 }
 
 type Props = {
@@ -61,7 +107,6 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
     if (classId)   params.set('class_id',   String(classId))
     if (studentId) params.set('student_id', String(studentId))
     if (teacherId) params.set('teacher_id', String(teacherId))
-    if (mode === 'teacher' || mode === 'admin') params.set('include_draft', 'true')
 
     fetch(`/api/exams/calendar?${params}`)
       .then(r => r.json())
@@ -117,8 +162,32 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
     )
   }
 
+  const ago60 = new Date(today); ago60.setDate(ago60.getDate() - 60)
+  const ago60Str = ago60.toISOString().slice(0, 10)
+  const todaysExams = exams.filter(e => e.exam_date === todayStr)
+  const completed = exams
+    .filter(e => e.exam_date < todayStr && e.exam_date >= ago60Str)
+    .sort((a, b) => b.exam_date.localeCompare(a.exam_date))
+    .slice(0, 10)
+
   return (
     <div className="space-y-5">
+      {/* Today's Exams — spec's "📝 Maths Exam – Starts in 45 Minutes" banner */}
+      {todaysExams.length > 0 && (mode === 'student' || mode === 'parent') && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-2">
+          {todaysExams.map(e => (
+            <div key={e.id} className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-red-800">📝 {e.exam_name} — {countdownLabel(e)}</p>
+                <p className="text-xs text-red-600 mt-0.5">
+                  {timeLabel(e.start_time) ?? ''}{e.end_time ? `–${timeLabel(e.end_time)}` : ''}{e.room ? ` · Room ${e.room}` : ''}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Upcoming strip */}
       {upcoming.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -136,7 +205,7 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
                   type="button"
                   key={e.id}
                   onClick={() => { setYear(d.getFullYear()); setMonth(d.getMonth()); setSelected(e.exam_date) }}
-                  className={`w-40 flex-shrink-0 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 ${
+                  className={`w-44 flex-shrink-0 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 ${
                     isToday ? 'border-red-300 bg-red-50' : days <= 3 ? 'border-orange-200 bg-orange-50' : 'border-gray-200 bg-white hover:border-blue-200'
                   }`}
                 >
@@ -156,6 +225,11 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
                   <p className="mt-0.5 truncate text-xs text-gray-500">
                     {e.subjects.slice(0, 2).join(', ')}{e.subjects.length > 2 ? ` +${e.subjects.length - 2}` : ''}
                   </p>
+                  {(timeLabel(e.start_time) || e.room) && (
+                    <p className="text-[10px] text-gray-500 mt-0.5 truncate">
+                      {timeLabel(e.start_time) ?? ''}{e.room ? `${timeLabel(e.start_time) ? ' · ' : ''}Room ${e.room}` : ''}
+                    </p>
+                  )}
                   <span className={`mt-1.5 inline-block rounded border px-1.5 py-0.5 text-xs font-semibold ${m.color}`}>
                     {m.label}
                   </span>
@@ -271,6 +345,14 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
                         )}
                       </div>
 
+                      {(timeLabel(e.start_time) || e.room || durationLabel(e.start_time, e.end_time, e.duration_minutes)) && (
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-medium opacity-80 mb-2">
+                          {timeLabel(e.start_time) && <span>🕐 {timeLabel(e.start_time)}{e.end_time ? `–${timeLabel(e.end_time)}` : ''}</span>}
+                          {durationLabel(e.start_time, e.end_time, e.duration_minutes) && <span>⏱ {durationLabel(e.start_time, e.end_time, e.duration_minutes)}</span>}
+                          {e.room && <span>📍 Room {e.room}</span>}
+                        </div>
+                      )}
+
                       {e.subjects.length > 0 && (
                         <div className="mb-2">
                           <p className="mb-1 text-xs font-semibold uppercase opacity-60">Subjects</p>
@@ -282,11 +364,28 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
                         </div>
                       )}
 
+                      {/* Syllabus/instructions only ever arrive from the API for
+                          student/admin/teacher callers — the parent response
+                          strips both server-side, so this simply renders nothing
+                          for a parent session. */}
+                      {e.syllabus && (
+                        <div className="mb-2">
+                          <p className="text-[10px] font-semibold opacity-60 uppercase mb-1">Syllabus</p>
+                          <p className="text-[11px] opacity-80 whitespace-pre-wrap">{e.syllabus}</p>
+                        </div>
+                      )}
+                      {e.instructions && (
+                        <div className="mb-2">
+                          <p className="text-[10px] font-semibold opacity-60 uppercase mb-1">Instructions</p>
+                          <p className="text-[11px] opacity-80 whitespace-pre-wrap">{e.instructions}</p>
+                        </div>
+                      )}
+
                       {days >= 0 && (
                         <div className={`text-xs font-semibold mt-1 ${
                           days === 0 ? 'text-red-700' : days <= 3 ? 'text-orange-700' : 'opacity-70'
                         }`}>
-                          {days === 0 ? 'Today!' : days === 1 ? 'Tomorrow!' : `${days} days to go`}
+                          {countdownLabel(e)}
                         </div>
                       )}
 
@@ -345,6 +444,32 @@ export default function TestCalendar({ schoolId, classId, studentId, teacherId, 
           })()}
         </div>
       </div>
+
+      {/* Completed Exams — student/parent only, spec's "Completed Exams" list */}
+      {(mode === 'student' || mode === 'parent') && completed.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Completed Exams</p>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {completed.map(e => {
+              const m = meta(e.exam_type)
+              return (
+                <div key={e.id} className="px-5 py-2.5 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-gray-700 truncate">{e.exam_name}</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      {new Date(e.exam_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      {e.subjects.length > 0 ? ` · ${e.subjects.slice(0, 2).join(', ')}${e.subjects.length > 2 ? ` +${e.subjects.length - 2}` : ''}` : ''}
+                    </p>
+                  </div>
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase flex-shrink-0 ${m.color}`}>{m.label}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -3188,6 +3188,72 @@ async function runIncrementalMigrations() {
     )
   `).catch(() => {})
 
+  // ── Exam Management v3 — schedule detail, targeting, cancellation, reminders ──
+  // Extends exam_records with the fields the v2 schema never carried (time,
+  // room, syllabus, instructions, an invigilator distinct from the marks-entry
+  // subject teacher, academic year) and adds a real 'cancelled' terminal
+  // status alongside hard DELETE (cancel keeps history + notifies; delete
+  // removes the row outright and stays restricted to pre-review exams).
+  // student_scope + exam_applicable_students let an exam target specific
+  // students instead of always "every active student in the class" — default
+  // 'all' preserves every existing exam's behavior unchanged.
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS academic_year VARCHAR(20)`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS start_time TIME`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS end_time TIME`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS duration_minutes INTEGER`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS room VARCHAR(100)`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS syllabus TEXT`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS instructions TEXT`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS assigned_teacher_id INTEGER REFERENCES teachers(id) ON DELETE SET NULL`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS student_scope VARCHAR(20) NOT NULL DEFAULT 'all'`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS cancelled_by_admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL`).catch(() => {})
+  await pool.query(`ALTER TABLE exam_records ADD COLUMN IF NOT EXISTS cancellation_reason TEXT`).catch(() => {})
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS exam_applicable_students (
+      id SERIAL PRIMARY KEY,
+      exam_id INTEGER NOT NULL REFERENCES exam_records(id) ON DELETE CASCADE,
+      student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
+      UNIQUE(exam_id, student_id)
+    )
+  `).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_applicable_students_exam ON exam_applicable_students(exam_id)`).catch(() => {})
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_applicable_students_student ON exam_applicable_students(student_id)`).catch(() => {})
+
+  // Dedup log for the 7-day / 1-day / exam-day reminder cron — without this,
+  // a cron re-run on the same day (a manual trigger, a retry after a
+  // transient failure) would re-send the same reminder to every recipient.
+  // One row per (exam_id, reminder_type); the cron INSERTs before it sends
+  // and skips any exam already logged for that reminder type.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS exam_reminders_sent (
+      id SERIAL PRIMARY KEY,
+      exam_id INTEGER NOT NULL REFERENCES exam_records(id) ON DELETE CASCADE,
+      reminder_type VARCHAR(20) NOT NULL,
+      sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(exam_id, reminder_type)
+    )
+  `).catch(() => {})
+
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_exam_records_date_time ON exam_records(school_id, exam_date, start_time, end_time) WHERE status != 'cancelled'`).catch(() => {})
+
+  // Per-school reminder toggles (spec section 11) — one row per school,
+  // defaults all-on so existing schools keep getting every reminder they
+  // already implicitly got, until an admin turns one off.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS exam_notification_settings (
+      school_id INTEGER PRIMARY KEY REFERENCES schools(id) ON DELETE CASCADE,
+      remind_7_day BOOLEAN NOT NULL DEFAULT TRUE,
+      remind_1_day BOOLEAN NOT NULL DEFAULT TRUE,
+      remind_exam_day BOOLEAN NOT NULL DEFAULT TRUE,
+      notify_schedule_change BOOLEAN NOT NULL DEFAULT TRUE,
+      notify_cancelled BOOLEAN NOT NULL DEFAULT TRUE,
+      notify_marks_published BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `).catch(() => {})
+
   // ── Fee tables that were previously only self-healed inline in their own
   // route files (categories/PUT, day-close, payments/cancel, structures/POST),
   // each hit lazily via its own local `CREATE TABLE IF NOT EXISTS` with no

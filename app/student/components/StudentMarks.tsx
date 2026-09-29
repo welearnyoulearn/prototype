@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import TestCalendar from '../../components/TestCalendar'
 import { motion, useMotionValue, useTransform, animate, useReducedMotion } from 'framer-motion'
 import { ChevronDown, Printer } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -90,6 +91,7 @@ const EXAM_TYPE_LABELS: Record<string, string> = {
 }
 
 export default function StudentMarks({ studentId, schoolId, classId }: Props) {
+  const [tab, setTab] = useState<'schedule' | 'results'>('schedule')
   const [exams, setExams] = useState<ExamResult[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -116,41 +118,47 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="space-y-6" role="status" aria-live="polite" aria-busy="true">
-        <span className="sr-only">Preparing your released results…</span>
-        <Skeleton className="h-28 rounded-[22px]" />
-        <Skeleton className="h-56 rounded-[22px]" />
-        {[1, 2].map(i => <Skeleton key={i} className="h-20 rounded-[14px]" />)}
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="space-y-6">
-        <StudentPageIntro {...PAGE_INTRO} />
-        <StudentAlert onRetry={fetchExams}>We couldn’t load your released results. {error}</StudentAlert>
-      </div>
-    )
-  }
-
-  if (exams.length === 0) {
-    return (
-      <div className="space-y-6">
-        <StudentPageIntro {...PAGE_INTRO} />
-        <StudentEmptyState sticker="hourglass" tone="yellow" title="No released results yet" description="Your exam results will appear here after your school releases them." />
-      </div>
-    )
-  }
-
-  const latestExam = exams[0]
-  const latestTone: Tone = latestExam.pass === true ? 'mint' : latestExam.pass === false ? 'orange' : 'paper'
-
   return (
-    <div className="space-y-10">
-      <StudentPageIntro {...PAGE_INTRO} />
+    <div className="space-y-6">
+      <div className="flex gap-2" data-testid="student-exams-tabs">
+        {([
+          { key: 'schedule', label: 'Upcoming Exams' },
+          { key: 'results',  label: 'Results' },
+        ] as const).map(({ key, label }) => (
+          <button key={key} onClick={() => setTab(key)} data-testid={`student-exam-tab-${key}`}
+            className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${tab === key ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'schedule' && (
+        <TestCalendar mode="student" schoolId={schoolId} studentId={studentId} />
+      )}
+
+      {tab === 'results' && (loading ? (
+        <div className="space-y-6" role="status" aria-live="polite" aria-busy="true">
+          <span className="sr-only">Preparing your released results…</span>
+          <Skeleton className="h-28 rounded-[22px]" />
+          <Skeleton className="h-56 rounded-[22px]" />
+          {[1, 2].map(i => <Skeleton key={i} className="h-20 rounded-[14px]" />)}
+        </div>
+      ) : error ? (
+        <div className="space-y-6">
+          <StudentPageIntro {...PAGE_INTRO} />
+          <StudentAlert onRetry={fetchExams}>We couldn’t load your released results. {error}</StudentAlert>
+        </div>
+      ) : exams.length === 0 ? (
+        <div className="space-y-6">
+          <StudentPageIntro {...PAGE_INTRO} />
+          <StudentEmptyState sticker="hourglass" tone="yellow" title="No released results yet" description="Your exam results will appear here after your school releases them." />
+        </div>
+      ) : (() => {
+        const latestExam = exams[0]
+        const latestTone: Tone = latestExam.pass === true ? 'mint' : latestExam.pass === false ? 'orange' : 'paper'
+        return (
+        <div className="space-y-10">
+          <StudentPageIntro {...PAGE_INTRO} />
 
       {latestExam.percentage !== null && (
         <motion.section
@@ -268,6 +276,9 @@ export default function StudentMarks({ studentId, schoolId, classId }: Props) {
       </section>
 
       {scoreCardExam && <ScoreCardModal exam={scoreCardExam} onClose={() => setScoreCardExam(null)} />}
+        </div>
+        )
+      })())}
     </div>
   )
 }
