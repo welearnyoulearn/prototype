@@ -5,6 +5,7 @@
 // Imported by proxy.ts (Edge runtime): keep this file free of imports.
 // Keys must be feature keys from ALL_FEATURES in lib/features.ts.
 export const FEATURE_API_PREFIXES: ReadonlyArray<readonly [prefix: string, featureKey: string]> = [
+  ['/api/classes',         'class-management'],
   ['/api/attendance',      'attendance'],
   ['/api/fees',            'fee-management'],
   ['/api/expenses',        'expenses'],

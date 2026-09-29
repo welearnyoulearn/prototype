@@ -1,4 +1,6 @@
 import { isValidName, NAME_INVALID_MESSAGE } from './nameValidation'
+import { CLASS_SECTION_RE, normalizeClassIdentity } from './classValidation'
+import { GRADE_SEQUENCE } from './grades'
 
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 export const INDIAN_MOBILE_RE = /^[6-9]\d{9}$/
@@ -48,8 +50,9 @@ export function normalizeStudentInput(input: StudentInput): { data?: NormalizedS
   const errors: string[] = []
   const name = requiredText(input.name)
   const email = optionalText(input.email)
-  const grade = requiredText(input.grade)
-  const section = requiredText(input.section).toUpperCase()
+  const classIdentity = normalizeClassIdentity(input.grade, input.section)
+  const grade = classIdentity.data?.grade ?? requiredText(input.grade)
+  const section = classIdentity.data?.section ?? requiredText(input.section).toUpperCase()
   const phone = optionalText(input.phone)
   const parentName = requiredText(input.parent_name)
   const parentPhone = requiredText(input.parent_phone)
@@ -58,8 +61,7 @@ export function normalizeStudentInput(input: StudentInput): { data?: NormalizedS
 
   if (!name) errors.push('Name is required')
   else if (!isValidName(name)) errors.push(`Name: ${NAME_INVALID_MESSAGE}`)
-  if (!grade) errors.push('Grade is required')
-  if (!section) errors.push('Section is required')
+  errors.push(...classIdentity.errors)
   if (!parentName) errors.push('Parent name is required')
   else if (!isValidName(parentName)) errors.push(`Parent Name: ${NAME_INVALID_MESSAGE}`)
   if (!parentPhone) errors.push('Parent phone is required')
@@ -93,8 +95,16 @@ export function validateOptionalStudentUpdate(input: Record<string, unknown>): s
     if (!name) errors.push('Student name is required')
     else if (!isValidName(name)) errors.push(`Name: ${NAME_INVALID_MESSAGE}`)
   }
-  if ('grade' in input && !requiredText(input.grade)) errors.push('Grade is required')
-  if ('section' in input && !requiredText(input.section)) errors.push('Section is required')
+  if ('grade' in input) {
+    const grade = requiredText(input.grade)
+    if (!grade) errors.push('Grade is required')
+    else if (!GRADE_SEQUENCE.includes(grade)) errors.push(`Grade must be one of: ${GRADE_SEQUENCE.join(', ')}`)
+  }
+  if ('section' in input) {
+    const section = requiredText(input.section).toUpperCase()
+    if (!section) errors.push('Section is required')
+    else if (!CLASS_SECTION_RE.test(section)) errors.push('Section must be a single letter A–Z')
+  }
   if ('parent_name' in input) {
     const name = requiredText(input.parent_name)
     if (!name) errors.push('Parent name is required')
@@ -123,4 +133,3 @@ export function validateOptionalStudentUpdate(input: Record<string, unknown>): s
   }
   return errors
 }
-

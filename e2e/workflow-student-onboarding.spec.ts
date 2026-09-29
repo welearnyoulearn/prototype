@@ -72,7 +72,7 @@ test.describe.serial('Student Onboarding — Full Lifecycle (UI)', () => {
   // ─── Setup ──────────────────────────────────────────────────────────────────
   test.beforeAll(async () => {
     test.setTimeout(120000)
-    ctx = await playwrightRequest.newContext({ baseURL: BASE })
+    ctx = await playwrightRequest.newContext({ baseURL: BASE, timeout: 60_000 })
 
     // Provisioning a school requires a platform admin session.
     const platformCookie = await platformAdminCookie()

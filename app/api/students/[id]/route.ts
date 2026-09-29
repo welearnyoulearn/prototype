@@ -5,6 +5,7 @@ import { sendStudentRemovedEmail, sendParentStudentRemovedEmail } from '@/lib/em
 import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { parsePositiveInteger, validateOptionalStudentUpdate } from '@/lib/studentValidation'
 import { invalidateCache } from '@/lib/responseCache'
+import { ClassWorkflowError, ensureClassWithSetup } from '@/lib/classManagement'
 
 const SAFE_STUDENT_COLUMNS = `id, school_id, name, email, grade, section, roll_number,
   school_roll_number, parent_name, parent_phone, parent_email, phone, status,
@@ -94,11 +95,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const nextGrade = body.grade !== undefined ? String(body.grade).trim() : existing.grade
     const nextSection = body.section !== undefined ? String(body.section).trim().toUpperCase() : existing.section
     if (nextGrade && nextSection && (nextGrade !== existing.grade || nextSection !== existing.section)) {
-      await client.query(
-        `INSERT INTO classes (school_id, grade, section) VALUES ($1, $2, $3)
-         ON CONFLICT (school_id, grade, section) DO NOTHING`,
-        [admin.schoolId, nextGrade, nextSection],
-      )
+      await ensureClassWithSetup(client, {
+        schoolId: Number(admin.schoolId), grade: nextGrade, section: nextSection, restoreDeleted: false,
+      })
     }
 
     const parentFields = entries.filter(([field]) => ['parent_name', 'parent_phone', 'parent_email'].includes(field))
@@ -134,6 +133,9 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   } catch (error) {
     await client.query('ROLLBACK')
     console.error('[students/:id PUT]', error)
+    if (error instanceof ClassWorkflowError) {
+      return NextResponse.json({ error: error.message }, { status: error.status })
+    }
     if ((error as { code?: string }).code === '23505') {
       return NextResponse.json({ error: 'That roll number, email, or phone is already in use' }, { status: 409 })
     }

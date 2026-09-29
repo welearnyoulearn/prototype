@@ -6,6 +6,7 @@ import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsTo
 import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/studentOnboarding'
 import { normalizeStudentInput, type NormalizedStudentInput } from '@/lib/studentValidation'
+import { ClassWorkflowError, ensureClassWithSetup } from '@/lib/classManagement'
 
 const MAX_BULK_STUDENTS = 500
 const SAFE_RETURNING_COLUMNS = `id, school_id, name, email, grade, section, roll_number,
@@ -168,12 +169,10 @@ export async function POST(req: NextRequest) {
         toInsert.filter(s => s.grade?.trim() && s.section?.trim()).map(s => `${s.grade.trim()}|${s.section.trim()}`)
       )].map(k => k.split('|'))
 
-      if (uniqueClasses.length > 0) {
-        const classValues = uniqueClasses.map((_, i) => `($1,$${i * 2 + 2},$${i * 2 + 3})`).join(',')
-        await client.query(
-          `INSERT INTO classes (school_id, grade, section) VALUES ${classValues} ON CONFLICT (school_id, grade, section) DO NOTHING`,
-          [school_id, ...uniqueClasses.flat()]
-        )
+      for (const [grade, section] of uniqueClasses) {
+        await ensureClassWithSetup(client, {
+          schoolId: Number(school_id), grade, section, restoreDeleted: false,
+        })
       }
 
       const studentValues = toInsert.map((s, i) => {
@@ -369,6 +368,9 @@ export async function POST(req: NextRequest) {
     }
   } catch (error) {
     console.error('[bulk]', error)
+    if (error instanceof ClassWorkflowError) {
+      return NextResponse.json({ error: error.message, inserted: 0 }, { status: error.status })
+    }
     if ((error as { code?: string }).code === '23505') {
       return NextResponse.json({ error: 'A duplicate student was created by another request. Refresh and try again.' }, { status: 409 })
     }

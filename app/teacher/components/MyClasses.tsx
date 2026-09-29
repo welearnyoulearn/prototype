@@ -38,8 +38,8 @@ type ClassEntry = {
 type Props = {
   teacher: Teacher
   schoolId: number
-  onViewClass: (cls: { id: number; grade: string; section: string; class_teacher_name: string | null }) => void
-  onGoToSyllabus: (cls: { id: number; grade: string; section: string; class_teacher_name: string | null }) => void
+  onViewClass: (cls: ClassOption) => void
+  onGoToSyllabus: (cls: ClassOption) => void
 }
 
 export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllabus }: Props) {
@@ -47,10 +47,6 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const teacherId = teacher.id
-  const classTeacherGrade = teacher.class_teacher_grade
-  const classTeacherSection = teacher.class_teacher_section
-
-
   useEffect(() => {
     Promise.all([
       fetch(`/api/teachers/${teacherId}/class-subjects`).then(async r => {
@@ -66,11 +62,10 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
     ]).then(([classSubjects, allClasses]: [ClassSubjectAssignment[], ClassOption[]]) => {
       const classMap = new Map<string, ClassEntry>()
 
-      // Own class first
-      if (classTeacherGrade && classTeacherSection) {
-        const cls = allClasses.find(c => c.grade === classTeacherGrade && c.section === classTeacherSection)
-        if (cls) classMap.set(`${cls.grade}-${cls.section}`, { cls, subjects: [], isOwn: true })
-      }
+      // A teacher may be class teacher for more than one class.
+      allClasses.filter(c => c.class_teacher_id === teacherId).forEach(cls => {
+        classMap.set(`${cls.grade}-${cls.section}`, { cls, subjects: [], isOwn: true })
+      })
 
       // Subject teacher classes — from Class Management's class_subjects
       // assignment (a class is "theirs" the moment school-admin assigns it).
@@ -92,7 +87,7 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
       setEntries([])
       setError(err instanceof Error ? err.message : 'Could not load your classes')
     }).finally(() => setLoading(false))
-  }, [teacherId, classTeacherGrade, classTeacherSection, schoolId])
+  }, [teacherId, schoolId])
 
   if (loading) {
     return (
@@ -157,7 +152,7 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
 
                 <div className="flex gap-2 mt-auto">
                   <button
-                    onClick={() => onViewClass({ id: cls.id, grade: cls.grade, section: cls.section, class_teacher_name: cls.class_teacher_name })}
+                    onClick={() => onViewClass(cls)}
                     className="flex-1 bg-primary hover:bg-primary/90 text-white text-sm font-semibold py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -167,7 +162,7 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
                     Open Full Class View
                   </button>
                   <button
-                    onClick={() => onGoToSyllabus({ id: cls.id, grade: cls.grade, section: cls.section, class_teacher_name: cls.class_teacher_name })}
+                    onClick={() => onGoToSyllabus(cls)}
                     title="Open Syllabus"
                     className="px-3 py-2.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors flex items-center justify-center"
                   >
@@ -208,7 +203,7 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
                   {/* Action buttons */}
                   <div className="flex gap-2 mt-4">
                     <button
-                      onClick={() => onViewClass({ id: cls.id, grade: cls.grade, section: cls.section, class_teacher_name: cls.class_teacher_name })}
+                      onClick={() => onViewClass(cls)}
                       className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold py-2 rounded-lg transition-colors flex items-center justify-center gap-1.5"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -218,7 +213,7 @@ export default function MyClasses({ teacher, schoolId, onViewClass, onGoToSyllab
                       Open Class View
                     </button>
                     <button
-                      onClick={() => onGoToSyllabus({ id: cls.id, grade: cls.grade, section: cls.section, class_teacher_name: cls.class_teacher_name })}
+                      onClick={() => onGoToSyllabus(cls)}
                       title="Open Syllabus"
                       className="px-3 py-2 border border-indigo-200 text-indigo-600 text-xs font-medium rounded-lg hover:bg-indigo-50 transition-colors flex items-center gap-1"
                     >

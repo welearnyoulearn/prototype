@@ -11,6 +11,7 @@ import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/
 import { gradeOrderSql } from '@/lib/grades'
 import { normalizeStudentInput } from '@/lib/studentValidation'
 import { withWatchline } from '@/lib/logger'
+import { ClassWorkflowError, ensureClassWithSetup } from '@/lib/classManagement'
 
 // Never `SELECT *`: students carries password_hash, which would otherwise be
 // serialised straight to the browser. Enumerate every safe column instead.
@@ -193,14 +194,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Auto-create class if it doesn't exist
-    if (grade && section) {
-      await pool.query(
-        `INSERT INTO classes (school_id, grade, section) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-        [school_id, grade, section]
-      )
-    }
-
     const [studentPortalEnabled, parentPortalEnabled] = await Promise.all([
       schoolHasFeature(school_id, 'student-portal'),
       schoolHasFeature(school_id, 'parent-portal'),
@@ -225,15 +218,30 @@ export async function POST(req: NextRequest) {
     // the student-portal feature was enabled and a password was generated.
     const effectiveRollNumber: string = roll_number?.trim() || generateStudentId(await getSchoolName())
 
-    const result = await pool.query(
-      `INSERT INTO students
-         (school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email,
-          roll_number, school_roll_number, status, password_hash, password_changed)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',$12,FALSE)
-       RETURNING ${STUDENT_COLUMNS}`,
-      [school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email,
-       effectiveRollNumber, school_roll_number ?? null, passwordHash]
-    )
+    const client = await pool.connect()
+    let result
+    try {
+      await client.query('BEGIN')
+      await ensureClassWithSetup(client, { schoolId: school_id, grade, section, restoreDeleted: false })
+      result = await client.query(
+        `INSERT INTO students
+           (school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email,
+            roll_number, school_roll_number, status, password_hash, password_changed)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'active',$12,FALSE)
+         RETURNING ${STUDENT_COLUMNS}`,
+        [school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email,
+         effectiveRollNumber, school_roll_number ?? null, passwordHash]
+      )
+      await client.query('COMMIT')
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {})
+      if (error instanceof ClassWorkflowError) {
+        return NextResponse.json({ error: error.message, code: error.code }, { status: error.status })
+      }
+      throw error
+    } finally {
+      client.release()
+    }
 
     const student = result.rows[0]
     const appUrl = process.env.APP_URL || 'http://localhost:3000'

@@ -47,10 +47,7 @@ export default function TeacherSyllabus({
       const list = Array.isArray(allClasses) ? allClasses : []
       const picked = new Map<number, ClassOption>()
 
-      if (teacher.class_teacher_grade && teacher.class_teacher_section) {
-        const own = list.find(c => c.grade === teacher.class_teacher_grade && c.section === teacher.class_teacher_section)
-        if (own) picked.set(own.id, own)
-      }
+      list.filter(c => c.class_teacher_id === teacher.id).forEach(c => picked.set(c.id, c))
       const assigned = Array.isArray(classSubjects) ? classSubjects : []
       assigned.forEach(a => {
         const cls = list.find(c => c.id === a.class_id)
@@ -67,7 +64,7 @@ export default function TeacherSyllabus({
       // class-pill selection back to the first class every time.
       setActiveKey(prev => prev || (found.length > 0 ? `${found[0].grade}-${found[0].section}` : prev))
     }).finally(() => setLoading(false))
-  }, [teacher.id, teacher.class_teacher_grade, teacher.class_teacher_section, schoolId])
+  }, [teacher.id, schoolId])
 
   if (loading) return (
     <div className="space-y-4" role="status" aria-live="polite" aria-busy="true">
