@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import { Users } from 'lucide-react'
 import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { EMAIL_RE, INDIAN_MOBILE_RE, parsePositiveInteger } from '@/lib/studentValidation'
 import { EmptyState } from '@/components/ui/empty-state'
 import { useConfirm } from '@/components/ui/use-confirm'
 
@@ -172,7 +173,7 @@ function DuplicatesPanel({
 
       {!dupLoading && dupGroups.length === 0 && dupTotalCount === 0 && (
         <div className="bg-white rounded-md border border-gray-200 py-12 text-center">
-          <p className="text-muted-foreground text-sm">Click "Scan for Duplicates" to check for duplicate students</p>
+          <p className="text-muted-foreground text-sm">Click &quot;Scan for Duplicates&quot; to check for duplicate students</p>
         </div>
       )}
 
@@ -306,7 +307,6 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   }, [])
 
   useEffect(() => {
-    setLoading(true)
     fetch(`/api/students?school_id=${schoolId}`).then(r => r.json()).then(stu => {
       // Normalise section to uppercase so "a" and "A" are the same class
       const normStu = Array.isArray(stu) ? stu.map((s: Student) => ({ ...s, section: s.section?.toUpperCase() ?? s.section })) : []
@@ -376,12 +376,21 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
     const phone = (editForm.phone ?? selected?.phone ?? '').trim()
     const parentPhone = (editForm.parent_phone ?? selected?.parent_phone ?? '').trim()
     const email = (editForm.email ?? selected?.email ?? '').trim()
+    const parentEmail = (editForm.parent_email ?? selected?.parent_email ?? '').trim()
+    const grade = (editForm.grade ?? selected?.grade ?? '').trim()
+    const section = (editForm.section ?? selected?.section ?? '').trim()
+    const roll = editForm.school_roll_number ?? selected?.school_roll_number
     if (!name) return 'Student name is required'
     if (!isValidName(name)) return `Student Name: ${NAME_INVALID_MESSAGE}`
-    if (parentName && !isValidName(parentName)) return `Parent Name: ${NAME_INVALID_MESSAGE}`
-    if (phone && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(phone)) return 'Phone must be 7–15 digits'
-    if (parentPhone && !/^\+?[\d\s\-()\[\]]{7,15}$/.test(parentPhone)) return "Parent's phone must be 7–15 digits"
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Enter a valid email address'
+    if (!grade) return 'Grade is required'
+    if (!section) return 'Section is required'
+    if (!parentName) return 'Parent name is required'
+    if (!isValidName(parentName)) return `Parent Name: ${NAME_INVALID_MESSAGE}`
+    if (phone && !INDIAN_MOBILE_RE.test(phone)) return 'Student phone must be a valid 10-digit Indian mobile number'
+    if (!INDIAN_MOBILE_RE.test(parentPhone)) return "Parent's phone must be a valid 10-digit Indian mobile number"
+    if (email && !EMAIL_RE.test(email)) return 'Enter a valid student email address'
+    if (parentEmail && !EMAIL_RE.test(parentEmail)) return 'Enter a valid parent email address'
+    if (parsePositiveInteger(roll) === null) return 'Roll No must be a positive integer'
     return null
   }
 
@@ -400,6 +409,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
       if (!res.ok) throw new Error(data.error)
       setStudents(prev => prev.map(s => s.id === selected.id ? { ...s, ...data } : s))
       setSelected({ ...selected, ...data })
+      setSearch('')
       setEditing(false)
       setEditForm({})
     } catch (err: unknown) {
@@ -496,14 +506,14 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
   if (loading) return <div className="py-12 text-center text-muted-foreground">Loading students...</div>
 
   return (
-    <div className="flex gap-6">
+    <div className="flex flex-col xl:flex-row gap-6">
       {ConfirmDialog}
       {profileId !== null && <StudentProfile studentId={profileId} onClose={() => setProfileId(null)} />}
       {/* Left: List */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-bold text-gray-900">Students</h2>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap justify-end">
             <span className="text-sm text-muted-foreground">{students.length} total · {activeStudents.length} active · {inactiveStudents.length} removed</span>
             <button onClick={reloadStudents} disabled={loading}
               title="Refresh student list"
@@ -542,7 +552,7 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
         </div>
 
         {error && (
-          <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
+          <div role="alert" aria-live="assertive" className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex justify-between text-sm">
             <span>{error}</span>
             <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 ml-4">✕</button>
           </div>
@@ -688,8 +698,8 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
 
       {/* Right: Detail panel */}
       {selected && (
-        <div className="w-72 flex-shrink-0">
-          <div className="bg-white rounded-md border border-gray-200 sticky top-6 flex flex-col max-h-[calc(100vh-6rem)] overflow-hidden">
+        <div className="w-full xl:w-72 flex-shrink-0">
+          <div className="bg-white rounded-md border border-gray-200 xl:sticky xl:top-6 flex flex-col max-h-[calc(100vh-6rem)] overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
               <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Student</span>
               <button onClick={() => setSelected(null)} className="text-muted-foreground hover:text-gray-600 text-lg leading-none">×</button>
@@ -730,12 +740,13 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
                 <div className="space-y-3">
                   {[
                     { field: 'name', label: 'Name *', type: 'text', placeholder: 'Full name' },
+                    { field: 'school_roll_number', label: 'Roll No *', type: 'number', placeholder: 'e.g. 12' },
                     { field: 'email', label: 'Email', type: 'email', placeholder: 'student@email.com' },
-                    { field: 'grade', label: 'Grade', type: 'text', placeholder: 'e.g. 8' },
-                    { field: 'section', label: 'Section', type: 'text', placeholder: 'e.g. A' },
+                    { field: 'grade', label: 'Grade *', type: 'text', placeholder: 'e.g. 8' },
+                    { field: 'section', label: 'Section *', type: 'text', placeholder: 'e.g. A' },
                     { field: 'phone', label: 'Phone', type: 'tel', placeholder: '10-digit number' },
-                    { field: 'parent_name', label: 'Parent Name', type: 'text', placeholder: 'Parent full name' },
-                    { field: 'parent_phone', label: 'Parent Phone', type: 'tel', placeholder: '10-digit number' },
+                    { field: 'parent_name', label: 'Parent Name *', type: 'text', placeholder: 'Parent full name' },
+                    { field: 'parent_phone', label: 'Parent Phone *', type: 'tel', placeholder: '10-digit number' },
                     { field: 'parent_email', label: 'Parent Email', type: 'email', placeholder: 'parent@email.com' },
                   ].map(({ field, label, type, placeholder }) => (
                     <div key={field}>
@@ -789,8 +800,6 @@ export default function StudentsManagement({ schoolId, refreshKey }: Props) {
     </div>
   )
 }
-
-
 
 
 

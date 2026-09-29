@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool from '@/lib/db'
 import { invalidateCache } from '@/lib/responseCache'
-import { hashPassword, generateTempPassword, getAnySession, requireSchoolAdmin, schoolHasFeature } from '@/lib/auth'
+import {
+  hashPortalPassword, generateTempPassword, getPlatformSession, getSession, getTeacherSession,
+  requireSchoolAdmin, schoolHasFeature,
+} from '@/lib/auth'
 import { sendStudentWelcomeEmail, sendParentWelcomeEmail, sendChildCredentialsToParentEmail } from '@/lib/email'
 import { sendWhatsappMessage } from '@/lib/whatsapp'
 import { findOrCreateParent, linkStudentParent, generateStudentId } from '@/lib/studentOnboarding'
 import { gradeOrderSql } from '@/lib/grades'
-import { isValidName, NAME_INVALID_MESSAGE } from '@/lib/nameValidation'
+import { normalizeStudentInput } from '@/lib/studentValidation'
 import { withWatchline } from '@/lib/logger'
 
 // Never `SELECT *`: students carries password_hash, which would otherwise be
@@ -31,13 +34,10 @@ function parseCount(raw: string | null, fallback: number): number {
 // its cost matters just as much for diagnosing slow fee-tab loads as theirs.
 async function handleGET(req: NextRequest) {
   try {
-    const session = await getAnySession()
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    // A school directory is for staff. getAnySession() also admits student and parent logins,
-    // which could otherwise list every classmate's (or every teacher's) contact details.
-    if (session.role === 'student' || session.role === 'parent') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
+    const platform = await getPlatformSession()
+    const admin = platform ? null : await getSession()
+    const teacher = platform || admin ? null : await getTeacherSession()
+    if (!platform && !admin && !teacher) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
     try {
       const { searchParams } = new URL(req.url)
@@ -45,27 +45,44 @@ async function handleGET(req: NextRequest) {
       const grade = searchParams.get('grade')
       const section = searchParams.get('section')
 
-      if (session.role !== 'platform_admin' && school_id && Number(school_id) !== Number(session.schoolId)) {
+      const scopedSchoolId = platform?.role === 'platform_admin'
+        ? Number(school_id)
+        : Number(admin?.schoolId ?? teacher?.schoolId)
+      if (!Number.isInteger(scopedSchoolId)) {
+        return NextResponse.json({ error: 'Invalid school_id' }, { status: 400 })
+      }
+      if (!platform && school_id && Number(school_id) !== scopedSchoolId) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
 
-      // The tenant scope comes from the SESSION, never from the presence of a param.
-      // getAnySession() admits student/parent logins, so when school_id was simply
-      // omitted the guard above never fired and the WHERE clause came out empty —
-      // any logged-in student could dump every school's roster. Only platform_admin
-      // may retarget the scope, and even then it falls back to their own school
-      // (getAnySession never returns a session without a schoolId).
-      const scopedSchoolId = session.role === 'platform_admin' && school_id
-        ? Number(school_id)
-        : session.schoolId
-      if (!Number.isInteger(scopedSchoolId)) {
-        return NextResponse.json({ error: 'Invalid school_id' }, { status: 400 })
+      if (admin && !(await schoolHasFeature(scopedSchoolId, 'students'))) {
+        return NextResponse.json({ error: 'Feature not enabled' }, { status: 403 })
+      }
+
+      // Teachers receive only a roster for a class they are explicitly assigned
+      // to as class teacher or subject teacher. Student and parent sessions never
+      // reach this route; their self/child endpoints derive identity from cookies.
+      if (teacher) {
+        if (!grade || !section) {
+          return NextResponse.json({ error: 'grade and section are required for teacher access' }, { status: 400 })
+        }
+        const assigned = await pool.query(
+          `SELECT 1
+           FROM classes c
+           LEFT JOIN class_subjects cs ON cs.class_id = c.id AND cs.teacher_id = $1
+           WHERE c.school_id = $2 AND c.grade = $3 AND c.section = $4
+             AND (c.class_teacher_id = $1 OR cs.teacher_id = $1)
+           LIMIT 1`,
+          [teacher.teacherId, scopedSchoolId, grade, section],
+        )
+        if (assigned.rowCount === 0) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
       }
 
       // Lightweight mode: just the distinct grades with active students, for screens
       // that need to know which grades are actually in use (e.g. fee setup validation)
       // without paying for a full roster fetch.
       if (searchParams.get('grades_only') === '1') {
+        if (teacher) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
         const { rows } = await pool.query(
           `SELECT DISTINCT grade FROM students WHERE school_id = $1 AND (status IS NULL OR status = 'active')`,
           [scopedSchoolId]
@@ -134,15 +151,14 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { school_id, name, email, grade, section, phone, parent_name, parent_phone, parent_email, roll_number, school_roll_number } = body
-    if (!school_id || !name) return NextResponse.json({ error: 'school_id and name are required' }, { status: 400 })
-    if (!isValidName(name)) return NextResponse.json({ error: `Name: ${NAME_INVALID_MESSAGE}` }, { status: 400 })
+    const school_id = Number(body.school_id)
+    const roll_number = typeof body.roll_number === 'string' ? body.roll_number : ''
+    if (!Number.isInteger(school_id)) return NextResponse.json({ error: 'Valid school_id is required' }, { status: 400 })
     if (admin.schoolId !== school_id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    if (!section?.trim()) return NextResponse.json({ error: 'Section is required' }, { status: 400 })
-    if (!parent_name?.trim()) return NextResponse.json({ error: 'Parent name is required' }, { status: 400 })
-    if (!isValidName(parent_name)) return NextResponse.json({ error: `Parent Name: ${NAME_INVALID_MESSAGE}` }, { status: 400 })
-    if (!parent_phone?.trim()) return NextResponse.json({ error: 'Parent phone is required' }, { status: 400 })
-    if (school_roll_number == null || school_roll_number === '') return NextResponse.json({ error: 'Roll number is required' }, { status: 400 })
+    if (!await schoolHasFeature(school_id, 'students')) return NextResponse.json({ error: 'Feature not enabled' }, { status: 403 })
+    const validated = normalizeStudentInput(body)
+    if (!validated.data) return NextResponse.json({ error: validated.errors.join(' · '), errors: validated.errors }, { status: 422 })
+    const { name, email, grade, section, phone, parent_name, parent_phone, parent_email, school_roll_number } = validated.data
 
     if (phone?.trim()) {
       const dupPhone = await pool.query(
@@ -200,7 +216,7 @@ export async function POST(req: NextRequest) {
 
     // Generate student temp password (only if the portal is enabled for this school)
     const tempPassword = studentPortalEnabled ? generateTempPassword(8) : null
-    const passwordHash = tempPassword ? await hashPassword(tempPassword) : null
+    const passwordHash = tempPassword ? await hashPortalPassword(tempPassword) : null
 
     // roll_number is the system login id — auto-generate it the same way
     // bulk import does (via generateStudentId) whenever the caller doesn't
@@ -304,6 +320,9 @@ export async function POST(req: NextRequest) {
     )
   } catch (error) {
     console.error(error)
+    if ((error as { code?: string }).code === '23505') {
+      return NextResponse.json({ error: 'A student with this roll number, email, or phone already exists' }, { status: 409 })
+    }
     return NextResponse.json({ error: 'Failed to create student' }, { status: 500 })
   }
 }
@@ -328,7 +347,7 @@ async function provisionParentAccount({
     let tempPassword: string | null = null
     if (allowCreate) {
       tempPassword = generateTempPassword(10)
-      parentHash = await hashPassword(tempPassword)
+      parentHash = await hashPortalPassword(tempPassword)
     }
 
     const client = await pool.connect()
