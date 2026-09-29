@@ -29,7 +29,7 @@ async function uiLogin(page: Page, identifier: string, password: string): Promis
   // present (Overview) as the concrete signal the sidebar has actually
   // painted. Generous timeout — dev-mode (webpack) cold compiles of this
   // route have been observed taking well over 30s under load.
-  await page.getByRole('button', { name: 'Overview' }).waitFor({ state: 'visible', timeout: 60000 })
+  await page.getByRole('button', { name: 'Overview', exact: true }).waitFor({ state: 'visible', timeout: 60000 })
   return current
 }
 
@@ -59,8 +59,8 @@ async function goToStaffOnboarding(page: Page) {
   await expect(page.getByRole('heading', { name: 'Staff' })).toBeVisible({ timeout: 10000 })
   await page.getByRole('button', { name: 'Onboard Staff' }).click()
   // StaffOnboarding is a next/dynamic lazy-loaded chunk (see school-admin/page.tsx)
-  // — its first mount fetches the chunk plus /api/school/subjects and
-  // /api/platform/subjects, which can be slow under DB pool contention. 10s
+  // — its first mount fetches the chunk plus the canonical subject catalog,
+  // which can be slow under DB pool contention. 10s
   // wasn't enough and left the page on its loading skeleton.
   await expect(page.getByRole('heading', { name: 'Staff Onboarding' })).toBeVisible({ timeout: 30000 })
 }
@@ -107,14 +107,8 @@ async function fillStaffRow(page: Page, row: {
     await cells.nth(6).locator('input').fill(row.qualification)
   }
   if (row.subject !== undefined) {
-    // Subject cell is either a <select> (subscribed subjects present) or an
-    // <input> (free text). School creation on the premium tier appears to
-    // auto-provision a subscribed subject list, so this can be either —
-    // handle both rather than assuming free text.
     const cells = page.locator('table tbody tr').nth(rowIndex).locator('td').nth(3)
-    const input = cells.locator('input')
-    if (await input.count() > 0) await input.fill(row.subject)
-    else await cells.locator('select').selectOption({ label: row.subject })
+    await cells.locator('select').selectOption({ label: row.subject })
   }
 }
 
@@ -135,6 +129,15 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
     const res = await ctx.get(`/api/teachers?school_id=${schoolId}`, { headers: { Cookie: adminCookie } })
     const list = await res.json()
     return list.filter((t: { name: string }) => names.includes(t.name))
+  }
+
+  async function refreshApiSession(password: string) {
+    const loginRes = await ctx.post('/api/auth/login', { data: { email: adminEmail, password } })
+    if (!loginRes.ok()) throw new Error(`API session refresh failed — status ${loginRes.status()}`)
+    const state = await ctx.storageState()
+    const auth = state.cookies.find(c => c.name === 'wlyl-auth')
+    if (!auth) throw new Error('No wlyl-auth cookie after API session refresh')
+    adminCookie = `wlyl-auth=${auth.value}`
   }
 
   test.beforeAll(async () => {
@@ -179,17 +182,20 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
   test('1. Onboard single teacher — required fields only', async ({ page }) => {
     test.setTimeout(240000)
     uiPass = await uiLogin(page, adminEmail, schoolPass)
+    await refreshApiSession(uiPass)
     await goToStaffOnboarding(page)
+    await expect(page.getByRole('columnheader', { name: /Phone \*/i })).toBeVisible()
+    await expect(page.getByTestId('staff-row-phone-0')).toHaveAttribute('required', '')
 
     await fillStaffRow(page, {
-      name: 'Priya Sharma', email: `priya${ts}@staffschool.com`, subject: 'Mathematics',
+      name: 'Priya Sharma', email: `priya${ts}@staffschool.com`, subject: 'Mathematics', phone: phone(1),
     })
     await submitAndExpect(page, 'staff-onboard-submit', /staff member.*onboarded/i)
     // The success banner (and the new employee ID) must stay visible until
     // the admin dismisses it, not vanish the instant it appears — see the
     // fix in StaffOnboarding.tsx/page.tsx moving onRefresh (which switches
     // the visible sub-tab) off handleSubmit and onto this Dismiss click.
-    await expect(page.getByText(/First ID:/)).toBeVisible()
+    await expect(page.getByText(/wlyl-tea-/).first()).toBeVisible()
     await page.getByTestId('staff-onboard-dismiss-result').click()
     // First navigation to the Directory sub-tab compiles the TeachersManagement
     // lazy chunk in dev mode (visible as "Compiling…" in the corner) — slower
@@ -208,7 +214,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
     await uiLogin(page, adminEmail, uiPass)
     await goToStaffOnboarding(page)
 
-    await fillStaffRow(page, { name: 'Suresh Patel', email: `suresh${ts}@staffschool.com` }, 0)
+    await fillStaffRow(page, { name: 'Suresh Patel', email: `suresh${ts}@staffschool.com`, phone: phone(2) }, 0)
     const staffTypeSelect = page.locator('table tbody tr').nth(0).locator('td').nth(8).locator('select')
     await staffTypeSelect.selectOption('non_teaching')
     await submitAndExpect(page, 'staff-onboard-submit', /staff member.*onboarded/i)
@@ -225,9 +231,9 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
     await uiLogin(page, adminEmail, uiPass)
     await goToStaffOnboarding(page)
 
-    await fillStaffRow(page, { name: 'Raj Kumar', email: `raj${ts}@staffschool.com`, subject: 'Physics' }, 0)
+    await fillStaffRow(page, { name: 'Raj Kumar', email: `raj${ts}@staffschool.com`, subject: 'Physics', phone: phone(3) }, 0)
     await page.getByTestId('staff-add-row').click()
-    await fillStaffRow(page, { name: 'Anita Nair', email: `anita${ts}@staffschool.com`, subject: 'Chemistry' }, 1)
+    await fillStaffRow(page, { name: 'Anita Nair', email: `anita${ts}@staffschool.com`, subject: 'Economics', phone: phone(4) }, 1)
 
     await submitAndExpect(page, 'staff-onboard-submit', /2 staff members onboarded/i)
 
@@ -245,10 +251,10 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
     // excluded (StaffOnboarding filters rows.filter(r => r.name.trim())
     // before validating), so with only this one nameless row the "at least
     // one staff member with a name" error fires.
-    await fillStaffRow(page, { email: `noname${ts}@staffschool.com`, subject: 'Biology' })
+    await fillStaffRow(page, { email: `noname${ts}@staffschool.com`, subject: 'English', phone: phone(5) })
     await page.getByTestId('staff-onboard-submit').click()
 
-    await expect(page.getByText(/at least one staff member with a name is required/i)).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText(/name is required/i)).toBeVisible({ timeout: 5000 })
 
     const found = await teachersByNames(['']) // sanity: nothing with an empty name should ever exist
     expect(found).toHaveLength(0)
@@ -260,10 +266,10 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
     await uiLogin(page, adminEmail, uiPass)
     await goToStaffOnboarding(page)
 
-    await fillStaffRow(page, { name: 'Bad Email Test', email: 'not-an-email', subject: 'History' })
+    await fillStaffRow(page, { name: 'Bad Email Test', email: 'not-an-email', subject: 'History', phone: phone(6) })
     await page.getByTestId('staff-onboard-submit').click()
 
-    await expect(page.getByText(/invalid email/i)).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText(/valid email address/i)).toBeVisible({ timeout: 5000 })
 
     const found = await teachersByNames(['Bad Email Test'])
     expect(found).toHaveLength(0)
@@ -275,10 +281,10 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
     await uiLogin(page, adminEmail, uiPass)
     await goToStaffOnboarding(page)
 
-    await fillStaffRow(page, { name: 'No Subject Test', email: `nosubject${ts}@staffschool.com` })
+    await fillStaffRow(page, { name: 'No Subject Test', email: `nosubject${ts}@staffschool.com`, phone: phone(7) })
     await page.getByTestId('staff-onboard-submit').click()
 
-    await expect(page.getByText(/subject required for teaching staff/i)).toBeVisible({ timeout: 5000 })
+    await expect(page.getByText(/subject is required for teaching staff/i)).toBeVisible({ timeout: 5000 })
 
     const found = await teachersByNames(['No Subject Test'])
     expect(found).toHaveLength(0)
@@ -291,19 +297,15 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
     await goToStaffOnboarding(page)
 
     const dupEmail = `batchdup${ts}@staffschool.com`
-    await fillStaffRow(page, { name: 'Batch Dup One', email: dupEmail, subject: 'Geography' }, 0)
+    await fillStaffRow(page, { name: 'Batch Dup One', email: dupEmail, subject: 'Geography', phone: phone(8) }, 0)
     await page.getByTestId('staff-add-row').click()
-    await fillStaffRow(page, { name: 'Batch Dup Two', email: dupEmail, subject: 'Geography' }, 1)
+    await fillStaffRow(page, { name: 'Batch Dup Two', email: dupEmail, subject: 'Geography', phone: phone(9) }, 1)
 
-    // Partial success: first row inserted, second row rejected as an
-    // in-batch duplicate — result banner shows both the success count and
-    // the per-row error.
-    await submitAndExpect(page, 'staff-onboard-submit', /1 staff member.*onboarded/i)
-    await expect(page.getByText(/duplicated earlier in this same upload/i)).toBeVisible()
+    await page.getByTestId('staff-onboard-submit').click()
+    await expect(page.getByText(/duplicate values found/i)).toBeVisible()
 
     const found = await teachersByNames(['Batch Dup One', 'Batch Dup Two'])
-    expect(found).toHaveLength(1)
-    expect(found[0].name).toBe('Batch Dup One')
+    expect(found).toHaveLength(0)
   })
 
   // ─── 8. Failed rows are retained in the grid for correction ───────────────
@@ -314,20 +316,19 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
 
     // Row 0 succeeds; row 1 reuses an email already onboarded in test 1
     // (cross-batch duplicate, checked server-side against the DB).
-    await fillStaffRow(page, { name: 'Retain Success', email: `retainok${ts}@staffschool.com`, subject: 'Art' }, 0)
+    await fillStaffRow(page, { name: 'Retain Success', email: `retainok${ts}@staffschool.com`, subject: 'History', phone: phone(10) }, 0)
     await page.getByTestId('staff-add-row').click()
-    await fillStaffRow(page, { name: 'Retain Fail', email: `priya${ts}@staffschool.com`, subject: 'Art' }, 1)
+    await fillStaffRow(page, { name: 'Retain Fail', email: `priya${ts}@staffschool.com`, subject: 'History', phone: phone(11) }, 1)
 
-    await submitAndExpect(page, 'staff-onboard-submit', /1 staff member.*onboarded/i)
+    await page.getByTestId('staff-onboard-submit').click()
     await expect(page.getByText(/already registered/i)).toBeVisible()
 
-    // The failed row's data should still be sitting in the grid — not wiped.
-    await expect(page.getByTestId('staff-row-name-0')).toHaveValue('Retain Fail')
-    await expect(page.getByTestId('staff-row-email-0')).toHaveValue(`priya${ts}@staffschool.com`)
+    // Atomic failure keeps the full draft for correction.
+    await expect(page.getByTestId('staff-row-name-0')).toHaveValue('Retain Success')
+    await expect(page.getByTestId('staff-row-name-1')).toHaveValue('Retain Fail')
 
     const found = await teachersByNames(['Retain Success', 'Retain Fail'])
-    expect(found).toHaveLength(1)
-    expect(found[0].name).toBe('Retain Success')
+    expect(found).toHaveLength(0)
   })
 
   // ─── 9. Cross-school email conflict shows the owning school in the error ──
@@ -342,8 +343,9 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
     // second school. This test only confirms the message includes a school
     // attribution, which the same-school path also produces via the DB dup
     // check (school_name is always joined in).
-    await fillStaffRow(page, { name: 'Cross Dup', email: `priya${ts}@staffschool.com`, subject: 'Art' })
-    await submitAndExpect(page, 'staff-onboard-submit', new RegExp(`already registered to Priya Sharma at .*Staff Onboarding Test School ${ts}`, 'i'))
+    await fillStaffRow(page, { name: 'Cross Dup', email: `priya${ts}@staffschool.com`, subject: 'History', phone: phone(12) })
+    await page.getByTestId('staff-onboard-submit').click()
+    await expect(page.getByText(new RegExp(`already registered to Priya Sharma at .*Staff Onboarding Test School ${ts}`, 'i'))).toBeVisible()
   })
 
   // ─── 10. Staff Directory shows onboarded staff, filterable by type ────────
@@ -399,12 +401,14 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
     await page.getByTestId('staff-search-input').fill('Anita Nair')
     await page.getByText('Anita Nair').click()
     await page.getByTestId('staff-toggle-status').click()
+    await expect(page.getByTestId('staff-toggle-status')).toHaveText(/Reactivate/i)
 
     let found = await teachersByNames(['Anita Nair'])
     expect(found[0].status).toBe('inactive')
 
     // Reopen — reactivate
     await page.getByTestId('staff-toggle-status').click()
+    await expect(page.getByRole('heading', { name: /Temporary teacher login/i })).toBeVisible()
     found = await teachersByNames(['Anita Nair'])
     expect(found[0].status).toBe('active')
   })
@@ -437,7 +441,7 @@ test.describe.serial('Staff Onboarding — Full Lifecycle (UI)', () => {
 
     // Anita Nair (removed in test 14) freed up her email — the partial
     // unique index is scoped WHERE removed_at IS NULL, so this must succeed.
-    await fillStaffRow(page, { name: 'New Hire Reused Email', email: `anita${ts}@staffschool.com`, subject: 'Chemistry' })
+    await fillStaffRow(page, { name: 'New Hire Reused Email', email: `anita${ts}@staffschool.com`, subject: 'Economics', phone: phone(13) })
     await submitAndExpect(page, 'staff-onboard-submit', /1 staff member.*onboarded/i)
     const found = await teachersByNames(['New Hire Reused Email'])
     expect(found).toHaveLength(1)

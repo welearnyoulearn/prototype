@@ -19,16 +19,16 @@
 
 | Capability | Detail |
 |---|---|
-| Add a teacher | Form, or upload a CSV/Excel (a template is downloadable) |
+| Add a teacher | Form, or upload the controlled Excel `.xlsx` template; Excel is intentional because Subject, Staff Type and Grades use dropdown validation |
 | Bulk import preview | The file is parsed and checked **before** anything is saved |
-| Identity | Auto **employee id**; the teacher signs in with employee id + password |
+| Identity | Auto **employee id** for the school directory; the teacher signs in with email + password |
 | First login | Must change the temporary password |
 | Directory | Search, filter by department and staff type, edit profile fields |
 | Remove | **Soft delete** — the teacher immediately can no longer mark attendance; history is kept |
-| Plan limits | `staff_limit` per plan is enforced when accounts are created |
+| Plan limits | `staff_limit` applies to school-portal administrator/principal/vice-principal seats in Settings; it does not cap teacher-directory records |
 
 **Two kinds of staff — do not confuse them**
-- **Teachers** (this feature) sign in to the **Teacher portal** with an employee id.
+- **Teachers** (this feature) sign in to the **Teacher portal** with their email address.
 - **School-admin-level staff** (principal, vice principal, extra admins) are invited from **School Settings → Staff accounts** with a one-time set-password link — see [18 · School Settings](18-school-settings.md).
 
 **Value.** Onboarding an entire staff room in minutes instead of days; no password sheets; instant offboarding.
@@ -55,7 +55,7 @@ flowchart TD
 1. Open **Staff** → *Add teacher*.
 2. Enter name, email, subject, phone, department, qualification, date of joining, staff type and the grades they teach — or upload the filled template.
 3. Review the import preview; rows with problems are listed, not silently dropped.
-4. Confirm. Each teacher gets an employee id of the form `<school prefix>-<random 5 digits>`; a collision is retried automatically.
+4. Confirm. The whole batch is validated first and saved in one transaction: either every row is onboarded or none are. Each teacher gets an employee id of the form `wlyl-tea-<school slug>-<random 5 digits>`; a collision is retried automatically.
 5. The teacher receives their id and temporary password by email.
 6. On first sign-in the teacher is sent to *change password*.
 7. To offboard: open the teacher → delete (soft). Their session can no longer mark attendance.
@@ -65,11 +65,11 @@ flowchart TD
 | Rule | Detail |
 |---|---|
 | Uniqueness | Employee id is unique **per school** (`idx_teachers_school_employee_id_unique`); the insert loops to a new suffix on collision |
-| Password | Random temporary password, stored hashed; teacher must change it (`password_changed` flag) |
-| Plan cap | `staff_limit` from `plan_pricing` is checked at creation |
+| Password | Random temporary password, stored with scrypt; teacher must change it (`password_changed` flag). The admin sees one-time credentials after onboarding or reset in case email delivery is delayed |
+| Plan cap | Teacher records are not capped by `staff_limit`; that setting controls school-portal staff-account seats |
 | Soft delete | Deactivated teachers cannot mark attendance; records they created remain |
 | Tenant | Every query filtered by the admin's `school_id` |
-| Subjects | Subject choices come from the school's subject list (`/api/school/subjects`) and the platform catalog |
+| Subjects | One canonical list drives UI, Excel and API validation: every master-syllabus subject plus custom subjects owned by this school only. Names are matched case-insensitively and stored with canonical spelling; arbitrary or another school's custom values are rejected |
 | Notifications | Welcome email fire-and-forget (never blocks the response). WhatsApp call is a **logging scaffold only** |
 
 ## 4. Technical reference (developers)
@@ -84,19 +84,18 @@ flowchart TD
 | Method | Route | Purpose |
 |---|---|---|
 | GET | `/api/teachers` | List/search teachers for the school |
+| GET | `/api/teachers/subject-options` | Master subjects plus this school's custom subjects |
 | GET | `/api/teachers/template` | Download the Excel template |
 | POST | `/api/teachers/parse-import` | Parse an uploaded file and return a validated preview |
 | POST | `/api/teachers/bulk` | Create teachers (used for **both** single and bulk add) |
 | GET/PUT/DELETE | `/api/teachers/{id}` | Read, update, soft-delete |
-| GET | `/api/school/subjects` | School subjects for the picker |
-| GET/POST/DELETE | `/api/platform/subjects` | Platform subject catalog (Platform Admin) |
 | GET | `/api/admin/overview` | Counts for the header |
 
 The single-add `POST /api/teachers` was dead code and was removed; onboarding always goes through `/bulk`.
 
 **Tables:** `teachers` (with `employee_id`, `department`, `qualification`, `date_of_joining`, `staff_type`, `teaches_grades`, `password_hash`, `password_changed`), plus reads/cleanups touching `classes`, `class_subjects`, `attendance*`, `notifications`.
 
-**Libraries:** `lib/auth.ts` (`hashPassword`, `generateTempPassword`, `generateEmployeeId`), `lib/email.ts`, `lib/matchTeacher.ts` (teacher ↔ class/subject matching), `lib/nameValidation.ts`, `lib/whatsapp.ts` (scaffold).
+**Libraries:** `lib/auth.ts` (`hashPortalPassword`, `generateTempPassword`), `lib/staffValidation.ts`, `lib/staffSubjectOptions.ts` (tenant-safe canonical subject union), `lib/email.ts`, `lib/matchTeacher.ts` (teacher ↔ class/subject matching), `lib/nameValidation.ts`, `lib/whatsapp.ts` (scaffold).
 
 **Security:** admin-only routes use `requireSchoolAdmin` / `requireFeeAccess`; a platform-admin path exists for support. The teacher session cookie is `wlyl-teacher` (JWT, 7 days).
 
@@ -109,7 +108,7 @@ The single-add `POST /api/teachers` was dead code and was removed; onboarding al
 **School one-liner** — "Upload your staff list once. Every teacher gets their own login — and when someone leaves, their access ends the same minute."
 
 **Slide bullets**
-- Excel/CSV bulk import with preview and error report.
+- Excel-only bulk import with validated dropdowns, preview and error report.
 - Auto employee id + temporary password; forced first-login change.
 - Instant offboarding (soft delete keeps history).
 - Plan-aware staff limits.
