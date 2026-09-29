@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import pool, { ensureDB } from '@/lib/db'
 import { resolveAcademicYear } from '@/lib/academicYear'
-import { requireSyllabusWriteAccess, getTeacherSession } from '@/lib/auth'
+import { canWriteSyllabusClass, requireSyllabusWriteAccess, getTeacherSession } from '@/lib/auth'
 
 // POST /api/syllabus/setup/apply
 // Body: { school_id, class_id, subject, academic_year?,
@@ -35,7 +35,9 @@ export async function POST(req: NextRequest) {
     }
 
     const writeSession = await requireSyllabusWriteAccess(school_id)
-    if (!writeSession) return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    if (!writeSession || !await canWriteSyllabusClass(writeSession, class_id, subject)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     // setup_by is a teachers.id — only meaningful when the actor actually is
     // a teacher. A school-admin/principal/VP/platform_admin applying setup
