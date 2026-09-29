@@ -34,7 +34,7 @@ type AcademicYear = {
 
 type StaffAccount = {
   id: number; full_name: string; email: string; role: string
-  status: string; first_login: boolean; created_at: string
+  status: string; first_login: boolean; created_at: string; is_primary_admin: boolean
 }
 
 type Subscription = {
@@ -1255,6 +1255,9 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                         {s.status === 'inactive' && (
                           <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Deactivated</span>
                         )}
+                        {s.is_primary_admin && (
+                          <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full font-medium">Setup account</span>
+                        )}
 
                       </div>
                       <p className="text-xs text-muted-foreground truncate mt-0.5">{s.email}</p>
@@ -1266,9 +1269,10 @@ export default function SchoolSettings({ schoolId }: { schoolId: number }) {
                             className="text-xs border border-indigo-200 text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-lg disabled:opacity-50 transition-colors">
                             {resendingId === s.id ? 'Sending…' : 'Resend Invite Link'}
                           </button>
-                          {/* You can never deactivate yourself — the server refuses it too, but showing a button
-                              that always fails is just confusing (issue: it appeared even with a single account). */}
-                          {canManageStaff && s.id !== myStaffId && (
+                          {/* You can never deactivate yourself, and nobody can deactivate the setup account
+                              (the school's recovery login) — the server refuses both, but showing a button
+                              that always fails is just confusing. */}
+                          {canManageStaff && s.id !== myStaffId && !s.is_primary_admin && (
                             <button onClick={() => deactivateStaff(s.id)}
                               className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-2.5 py-1.5 rounded-lg transition-colors">
                               Deactivate

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
 import { JWT_SECRET as JWT_SECRET_RAW, INGEST_SECRET, COOKIE_ADMIN, COOKIE_PLATFORM, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT } from '@/lib/auth-constants'
+import { featureForApiPath } from '@/lib/featureRoutes'
 
 // Combined middleware: auth routing (formerly proxy.ts) + Watchline observability logging.
 // Edge runtime only — cannot use pg, jsonwebtoken, or lib/auth / lib/db.
@@ -58,6 +59,7 @@ const SKIP_ROUTES   = new Set([
   '/api/internal/log-ingest',
   '/api/internal/log-cleanup',
   '/api/internal/watchline-flags',
+  '/api/internal/feature-denials',
 ])
 
 const monitored: Set<number> = new Set()
@@ -137,6 +139,56 @@ async function isLockedRequest(req: NextRequest, pathname: string, origin: strin
   return false
 }
 
+// ── Feature entitlements (#253) ──────────────────────────────────────────────
+// A school-side request to a feature's API area (lib/featureRoutes.ts) is answered 403
+// FEATURE_DISABLED when the school's plan (or a per-school override) does not include that
+// feature — the same answer schoolHasFeature() gives, so an API is refused exactly when its
+// tab is hidden. Requests with no school-side session pass through: those routes do their own
+// auth (the public feedback routes check the feature themselves). Platform Admin is never gated.
+//
+// The denials come from /api/internal/feature-denials, cached for DENIALS_TTL. If a refresh
+// fails the previous copy is kept (fail-open on a cold start, like the plan lock), and a plan
+// or override change takes effect within DENIALS_TTL.
+const DENIALS_TTL = 15_000
+let featureDenials = new Map<number, Set<string>>()
+let denialsFetchedAt = 0
+let denialsInflight: Promise<void> | null = null
+
+function refreshDenials(origin: string): Promise<void> {
+  if (Date.now() - denialsFetchedAt < DENIALS_TTL) return Promise.resolve()
+  if (!denialsInflight) {
+    denialsInflight = (async () => {
+      try {
+        const res = await fetch(`${origin}/api/internal/feature-denials`, { headers: { 'x-ingest-secret': INGEST_SECRET } })
+        if (res.ok) {
+          const { denials } = await res.json() as { denials: Record<string, string[]> }
+          featureDenials = new Map(Object.entries(denials).map(([id, keys]) => [Number(id), new Set(keys)]))
+        }
+      } catch { /* keep the previous copy */ }
+      denialsFetchedAt = Date.now()
+      denialsInflight = null
+    })()
+  }
+  return denialsInflight
+}
+
+async function deniedFeature(req: NextRequest, pathname: string, origin: string): Promise<string | null> {
+  const feature = featureForApiPath(pathname)
+  if (!feature) return null
+  if (req.cookies.get(COOKIE_PLATFORM)) return null
+  const tokens = [COOKIE_ADMIN, COOKIE_TEACHER, COOKIE_STUDENT, COOKIE_PARENT]
+    .map(name => req.cookies.get(name)?.value).filter((t): t is string => !!t)
+  if (tokens.length === 0) return null
+  await refreshDenials(origin)
+  if (featureDenials.size === 0) return null
+  for (const token of tokens) {
+    const payload = await getTokenPayload(token)
+    const schoolId = Number(payload?.schoolId)
+    if (Number.isInteger(schoolId) && featureDenials.get(schoolId)?.has(feature)) return feature
+  }
+  return null
+}
+
 function extractSchoolId(req: NextRequest): number | null {
   const sid = req.nextUrl.searchParams.get('school_id')
   const n = Number(sid)
@@ -195,6 +247,15 @@ export async function proxy(req: NextRequest) {
     return NextResponse.json({
       error: "Your school's plan has ended, so access is paused. School administrators can still export their data and request a renewal.",
       code: 'PLAN_EXPIRED',
+    }, { status: 403 })
+  }
+
+  const disabled = await deniedFeature(req, pathname, origin)
+  if (disabled) {
+    return NextResponse.json({
+      error: "This feature is not included in your school's plan.",
+      code: 'FEATURE_DISABLED',
+      feature: disabled,
     }, { status: 403 })
   }
 

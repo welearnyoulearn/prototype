@@ -28,7 +28,7 @@ async function ownerClient(email: string, tempPass: string): Promise<APIRequestC
   expect((await ctx.put('/api/auth/profile', { data: { full_name: 'Owner', phone: '9000000011' } })).status()).toBe(200)
   return ctx
 }
-type Staff = { id: number; email: string; status: string; role: string }
+type Staff = { id: number; email: string; status: string; role: string; is_primary_admin: boolean }
 async function listStaff(ctx: APIRequestContext, schoolId: number): Promise<Staff[]> {
   return (await ctx.get(`/api/school-admin/staff-accounts?school_id=${schoolId}`)).json()
 }
@@ -249,17 +249,21 @@ test.describe.serial('Staff accounts — plan security, seat limits, deactivatio
       await anon.dispose()
     })
 
-    test('13. Platform reset gets a deactivated owner back in', async () => {
+    test('13. Nobody can deactivate the setup account (the school\'s recovery path) — issue #247', async () => {
       const adminEmail = `admin2${ts}@hardening.test`
       expect((await addStaff(ownerC, adminEmail, 'school_admin')).status()).toBe(201)
       const admin2 = await acceptInvite(adminEmail)
 
       const owner = (await listStaff(admin2, c.id)).find(s => s.email === c.email)!
-      expect((await admin2.delete('/api/school-admin/staff-accounts', { data: { id: owner.id } })).status()).toBe(200)
-      const stale = await newClient()
-      expect((await login(stale, c.email, OWNER_PASS)).status()).toBe(403)
-      await stale.dispose()
+      expect(owner.is_primary_admin).toBe(true)
+      const res = await admin2.delete('/api/school-admin/staff-accounts', { data: { id: owner.id } })
+      expect(res.status()).toBe(403)                          // used to succeed — the bug this test now guards
+      const stillActive = (await listStaff(admin2, c.id)).find(s => s.id === owner.id)!
+      expect(stillActive.status).toBe('active')
+      await admin2.dispose()
+    })
 
+    test('14. Platform reset works on an active owner too', async () => {
       const reset = await fetch(`${BASE}/api/platform/schools/reset-password`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: platformCookie },
         body: JSON.stringify({ school_id: c.id }),
@@ -267,8 +271,8 @@ test.describe.serial('Staff accounts — plan security, seat limits, deactivatio
       expect(reset.status).toBe(200)
       const { temp_password } = await reset.json()
       const back = await newClient()
-      expect((await login(back, c.email, temp_password)).status()).toBe(200)   // reactivated and can sign in
-      await back.dispose(); await admin2.dispose()
+      expect((await login(back, c.email, temp_password)).status()).toBe(200)
+      await back.dispose()
     })
   })
 })

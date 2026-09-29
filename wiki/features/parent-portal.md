@@ -17,7 +17,7 @@ Parents (own children only).
 
 ## How it works
 
-- Child summary, **Attendance** (colour calendar, month/year %, days absent, full-days-in-a-row streak, trend, upcoming holidays), Fees (ledger, waivers, payment history, report a UPI payment), Exam calendar and Results (with acknowledgement), School Calendar, Syllabus, Digital Library.
+- Child summary with a **Contact & Support** card — tap-to-call the class teacher and the school administration, plus the school's address (`GET /api/parent/subjects`, refetched whenever the selected child changes). Syllabus shows each subject's "Taught by …" from the same endpoint. **Attendance** (colour calendar, month/year %, days absent, full-days-in-a-row streak, trend, upcoming holidays), Fees (ledger, waivers, payment history, report a UPI payment), Exam calendar and Results (with acknowledgement), School Calendar, Digital Library.
 - Several children per parent; English and Telugu interface.
 - Sign-in by phone/email + password. Forgot-password by WhatsApp OTP is a **draft PR (#155)** and not part of dev.
 
@@ -46,6 +46,7 @@ API routes these screens call (all exist):
 - `GET` /api/parent/auth/me
 - `GET` /api/parent/child-summary
 - `GET/POST` /api/parent/fees
+- `GET` /api/parent/subjects
 - `GET` /api/school/enabled-features
 - `GET` /api/school/library
 - `DELETE/GET/POST` /api/syllabus

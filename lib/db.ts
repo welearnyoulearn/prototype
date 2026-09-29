@@ -3578,4 +3578,14 @@ async function runIncrementalMigrations() {
   `)
   // 0 = Sunday … 6 = Saturday. Weekly-off days are not working days (no marking, not counted).
   await pool.query(`ALTER TABLE schools ADD COLUMN IF NOT EXISTS weekly_off_days SMALLINT[] NOT NULL DEFAULT '{0}'`)
+
+  // The onboarding admin (school_code IS NOT NULL) is the school's recovery path — the
+  // only account /api/platform/schools/reset-password recovers. Marked explicitly so it
+  // can never be deactivated, even by another school_admin, regardless of what happens
+  // to school_code later.
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_primary_admin BOOLEAN NOT NULL DEFAULT FALSE`)
+  await pool.query(`
+    UPDATE users SET is_primary_admin = TRUE
+    WHERE role = 'school_admin' AND school_code IS NOT NULL AND is_primary_admin = FALSE
+  `)
 }

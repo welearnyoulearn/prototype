@@ -139,8 +139,15 @@ test.describe('Portal Access Verification', () => {
       expect(Array.isArray(schools)).toBe(true)
     })
 
-    test('platform stats API returns data', async ({ request }) => {
+    test('platform stats API refuses a request with no platform-admin session', async ({ request }) => {
       const res = await request.get('/api/platform/stats')
+      expect(res.status()).toBe(403)
+    })
+
+    test('platform stats API returns data for a platform admin', async ({ request }) => {
+      const res = await request.get('/api/platform/stats', {
+        headers: { Cookie: await platformAdminCookie() },
+      })
       expect(res.ok()).toBeTruthy()
       const stats = await res.json()
       expect(stats).toHaveProperty('schools')

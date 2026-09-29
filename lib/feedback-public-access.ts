@@ -1,5 +1,5 @@
 import { Pool, PoolClient } from 'pg'
-import { generateFeedbackCode } from './auth'
+import { generateFeedbackCode, schoolHasFeature } from './auth'
 import type { FeedbackRole, QrPointFormType, QrPointKind } from './feedback-defaults'
 
 // Public view of a QR point — everything the wizard needs to scope itself
@@ -30,6 +30,11 @@ export type FeedbackCodeResolution =
 // feedback_qr_points.code; both require the school itself to still be
 // active/not deleted. Without the schools join, a soft-deleted or suspended
 // school would keep accepting public submissions and voice uploads.
+//
+// The school's plan must also include Feedback Management — a public form is not a way
+// around a feature the school does not have (#253). A school that lacks the feature is
+// treated as `not_found`, not `closed`, so a public code reveals nothing about whether
+// it would otherwise be valid.
 export async function resolveFeedbackCode(db: Pool | PoolClient, code: string): Promise<FeedbackCodeResolution> {
   const { rows: [general] } = await db.query(
     `SELECT fs.school_id, s.name AS school_name
@@ -38,17 +43,23 @@ export async function resolveFeedbackCode(db: Pool | PoolClient, code: string): 
      WHERE fs.public_code = $1 AND fs.is_active = TRUE`,
     [code]
   )
-  if (general) return { status: 'ok', schoolId: general.school_id, schoolName: general.school_name, qrPoint: null }
+  if (general) {
+    if (!await schoolHasFeature(general.school_id, 'feedback-management', db)) return { status: 'not_found' }
+    return { status: 'ok', schoolId: general.school_id, schoolName: general.school_name, qrPoint: null }
+  }
 
   // School-wide code that exists but is switched off → "paused", not "not found"
   const { rows: [pausedGeneral] } = await db.query(
-    `SELECT s.name AS school_name
+    `SELECT fs.school_id, s.name AS school_name
      FROM feedback_settings fs
      JOIN schools s ON s.id = fs.school_id AND s.deleted_at IS NULL AND s.status = 'active'
      WHERE fs.public_code = $1 AND fs.is_active = FALSE`,
     [code]
   )
-  if (pausedGeneral) return { status: 'closed', schoolName: pausedGeneral.school_name, title: pausedGeneral.school_name, paused: true }
+  if (pausedGeneral) {
+    if (!await schoolHasFeature(pausedGeneral.school_id, 'feedback-management', db)) return { status: 'not_found' }
+    return { status: 'closed', schoolName: pausedGeneral.school_name, title: pausedGeneral.school_name, paused: true }
+  }
 
   const { rows: [point] } = await db.query(
     `SELECT p.id, p.school_id, s.name AS school_name, p.kind, p.title, p.venue, p.details,
@@ -61,6 +72,7 @@ export async function resolveFeedbackCode(db: Pool | PoolClient, code: string): 
     [code]
   )
   if (!point) return { status: 'not_found' }
+  if (!await schoolHasFeature(point.school_id, 'feedback-management', db)) return { status: 'not_found' }
   if (!point.is_open) return { status: 'closed', schoolName: point.school_name, title: point.title }
 
   return {

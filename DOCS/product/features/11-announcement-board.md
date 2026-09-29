@@ -76,7 +76,7 @@ flowchart LR
 | PATCH | `/api/announcements/{id}` | Edit (COALESCE update by id) | ⚠ **none** |
 | DELETE | `/api/announcements/{id}` | Delete by id | ⚠ **none** |
 
-**⚠ Known security gap (INTERNAL):** the three write routes perform **no authentication and no school check**; PATCH/DELETE address rows by `id` alone, so anyone who can reach the API could create, edit or delete another school's notices. Fix is a `requireSchoolAdmin()` + `school_id === session.schoolId` (and `WHERE id = $ AND school_id = $`). Tracked in the follow-up task; see [architecture §12.1](00-platform-architecture.md).
+**Security:** the write routes require a school-admin session and are scoped to the session's school (fixed in #203; see [architecture §12.1](00-platform-architecture.md)).
 
 **Table:** `announcements` (`school_id`, `title`, `content`, `announcement_type`, `target_audience`, `priority`, `created_by_name`, `expires_at`, `created_at`).
 

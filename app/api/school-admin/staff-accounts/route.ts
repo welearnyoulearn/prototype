@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
 
     const result = await pool.query(
       `SELECT u.id, u.full_name, u.email, u.role, COALESCE(u.status, 'active') AS status,
-              u.first_login, u.created_at, up.phone, up.designation
+              u.first_login, u.created_at, u.is_primary_admin, up.phone, up.designation
        FROM users u
        LEFT JOIN user_profiles up ON up.user_id = u.id
        WHERE u.school_id = $1 AND u.role = ANY($2)
@@ -184,8 +184,8 @@ export async function POST(req: NextRequest) {
 // Finds a staff account of this school and locks the row. Scoped to the staff roles so
 // this route can never be used to change any other kind of user.
 async function lockStaffRow(client: PoolClient, id: number, schoolId: number) {
-  const { rows: [row] } = await client.query<{ id: number; role: string; status: string }>(
-    `SELECT id, role, COALESCE(status, 'active') AS status
+  const { rows: [row] } = await client.query<{ id: number; role: string; status: string; is_primary_admin: boolean }>(
+    `SELECT id, role, COALESCE(status, 'active') AS status, is_primary_admin
      FROM users WHERE id = $1 AND school_id = $2 AND role = ANY($3) FOR UPDATE`,
     [id, schoolId, STAFF_ROLES]
   )
@@ -291,6 +291,14 @@ export async function DELETE(req: NextRequest) {
       if (target.status === 'inactive') {
         await client.query('ROLLBACK')
         return NextResponse.json({ success: true })
+      }
+
+      // The onboarding admin is the school's recovery path — the only account
+      // /api/platform/schools/reset-password recovers. Nobody, including another
+      // school_admin, can deactivate it from here.
+      if (target.is_primary_admin) {
+        await client.query('ROLLBACK')
+        return NextResponse.json({ error: 'This is the school’s setup account and cannot be deactivated.' }, { status: 403 })
       }
 
       // Never leave a school with nobody able to sign in as administrator. With the
